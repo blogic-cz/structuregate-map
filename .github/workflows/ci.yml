@@ -1,0 +1,49 @@
+# THE CASES ONLY WINDOWS CAN RUN: Windows PowerShell 5.1's grammar and the .NET Framework exist nowhere
+# else, so on any other machine those cases are named and not run (`Test-WindowsCase`). Every other case runs
+# on the machine the gate is developed on, so this runs those few and nothing more - a full suite on a hosted
+# Windows runner costs half an hour of minutes per push.
+#
+# A fresh clone has no `buildtools/` for the build to import, so the targets file is put there and the
+# gate's own check is skipped: the cases run against the built dll, never against a published exe.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-only:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/fbtcore
+
+      - name: build the gate
+        run: |
+          New-Item -ItemType Directory -Force buildtools | Out-Null
+          Copy-Item StructureGate.targets buildtools/
+          dotnet build src/StructureGate.csproj -p:SkipTests=true -p:SkipStructureGate=true
+
+      # Windows PowerShell, not pwsh: 5.1 is the host these cases are about.
+      - name: the Windows-only cases
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests\Run-Tests.ps1 -WindowsOnly

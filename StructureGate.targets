@@ -1,0 +1,90 @@
+<Project>
+
+  <!--
+    Import this from a .csproj to make the three structure rules part of its build. This file is DEPLOYED
+    next to structuregate.dll inside each consuming project, so the import is a relative path and the
+    consumer depends on nothing outside its own tree:
+
+      <PropertyGroup>
+        <StructureGateRoot>$(MSBuildProjectDirectory)\..</StructureGateRoot>
+      </PropertyGroup>
+      <Import Project="..\buildtools\StructureGate.targets" />
+
+    The import is deliberately UNCONDITIONAL: a gate that silently disappears when its path is wrong is not a
+    gate, and MSBuild's own "imported project was not found" names the missing file better than any warning
+    written here would.
+
+    Knobs, all overridable by the importing project:
+      StructureGateRoot        the tree to check          (default: the importing project's directory)
+      StructureGateArgs        extra structuregate flags  (see structuregate.dll -h)
+      SkipStructureGate=true   turn it off for one build  (an escape hatch that leaves a trace in the log)
+      StructureGateTrace       a file each run appends where its time went to, one OTLP/JSON line per run
+                               (read back with the gate's trace-report flag, see rust/fbtcore/src/trace/CLAUDE.md). The environment's own
+                               STRUCTUREGATE_TRACE does the same and is what is used when this is empty.
+  -->
+
+  <PropertyGroup>
+    <StructureGateDir>$(MSBuildThisFileDirectory)</StructureGateDir>
+    <!-- The exe is named and published for the OS the build runs on: a consumer on Windows gets exactly
+         what it always had, and a Linux or macOS box gets its own native `structuregate`. -->
+    <StructureGateExe Condition="'$(OS)' == 'Windows_NT'">$(StructureGateDir)structuregate.exe</StructureGateExe>
+    <StructureGateExe Condition="'$(OS)' != 'Windows_NT'">$(StructureGateDir)structuregate</StructureGateExe>
+    <StructureGateRid Condition="'$(OS)' == 'Windows_NT'">win-x64</StructureGateRid>
+    <StructureGateRid Condition="'$(OS)' != 'Windows_NT'">$(NETCoreSdkRuntimeIdentifier)</StructureGateRid>
+    <StructureGateProject>$(StructureGateDir)src\StructureGate.csproj</StructureGateProject>
+    <StructureGateRoot Condition="'$(StructureGateRoot)' == ''">$(MSBuildProjectDirectory)</StructureGateRoot>
+    <!-- Only when it is set: an empty STRUCTUREGATE_TRACE= here would switch off the one the environment holds. -->
+    <_StructureGateEnv Condition="'$(StructureGateTrace)' != ''">STRUCTUREGATE_TRACE=$(StructureGateTrace)</_StructureGateEnv>
+  </PropertyGroup>
+
+  <!--
+    In the gate's OWN folder the source sits beside the targets, so a missing dll is buildable. In a deployed
+    copy it does not, and the honest failure is to say the copy is incomplete rather than to skip the check —
+    a gate that quietly does nothing when a file is missing is the failure mode this whole arrangement exists
+    to avoid.
+  -->
+  <Target Name="StructureGateBuild"
+          BeforeTargets="StructureGateCheck"
+          Condition="!Exists('$(StructureGateExe)') And '$(SkipStructureGate)' != 'true'">
+    <Error Condition="!Exists('$(StructureGateProject)')"
+           Text="structuregate: $(StructureGateExe) is missing and there is no source beside it. Rebuild the gate (`dotnet publish -c Release -r win-x64 -p:PublishAot=true`, which deploys a fresh copy here) or set SkipStructureGate=true for this build." />
+    <Message Importance="high" Text="structuregate: publishing $(StructureGateProject) (first run)" />
+    <Exec Command="dotnet publish &quot;$(StructureGateProject)&quot; -c Release -r $(StructureGateRid) -p:PublishAot=true -v q --nologo" />
+  </Target>
+
+  <!--
+    BEFORE CoreCompile, so a violation stops the build with no binary produced. Exit 1 from the gate is an
+    Exec failure, and each violation is already printed as an `error:` line.
+  -->
+  <Target Name="StructureGateCheck"
+          BeforeTargets="CoreCompile"
+          Condition="'$(SkipStructureGate)' != 'true'">
+    <Exec Command="&quot;$(StructureGateExe)&quot; --root &quot;$(StructureGateRoot)&quot; $(StructureGateArgs)"
+          EnvironmentVariables="$(_StructureGateEnv)"
+          StandardOutputImportance="high" />
+  </Target>
+
+  <!--
+    WHAT THE COMPILER WAS GIVEN, recorded for the deep C# map. The map builds its own compilation without
+    MSBuild, and without this it RECONSTRUCTS the references, the `#if` symbols and the file list from what a
+    restore and a build leave on disk - rules that each exist because a guess once went wrong. Here the build
+    says what it did: `obj/<config>/<tfm>/structuregate.inputs.tsv`, read by `rust/fbtcore/src/csproj/`.
+
+    AFTER CoreCompile, so it runs whether or not the compile was up to date, and costs one small file per
+    project and build - written only when it changed. `StructureGateRecordInputs=false` turns it off.
+  -->
+  <Target Name="StructureGateRecordInputs"
+          AfterTargets="CoreCompile"
+          Condition="'$(StructureGateRecordInputs)' != 'false' And '$(Language)' == 'C#'">
+    <ItemGroup>
+      <_StructureGateInput Include="tfm%09$(TargetFramework)" />
+      <_StructureGateInput Include="lang%09$(LangVersion)" />
+      <_StructureGateInput Include="define%09$([MSBuild]::Escape('$(DefineConstants)'))" />
+      <_StructureGateInput Include="@(ReferencePathWithRefAssemblies->'ref%09%(FullPath)')" />
+      <_StructureGateInput Include="@(Compile->'compile%09%(FullPath)')" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(ProjectDir)$(IntermediateOutputPath)structuregate.inputs.tsv"
+                      Lines="@(_StructureGateInput)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+
+</Project>

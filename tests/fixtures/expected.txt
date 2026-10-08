@@ -1,0 +1,21 @@
+PSGATE-LINES|tests/fixtures/violations.ps1|48
+PSGATE-LINES|tests/fixtures/clean.ps1|57
+PSGATE|error|tests/fixtures/violations.ps1|10|assigns the automatic variable $host - rename it - the engine owns this name and the damage shows up somewhere else (`$host`)
+PSGATE|error|tests/fixtures/violations.ps1|11|declares a parameter named $null, an automatic variable - rename it - the engine owns this name and the damage shows up somewhere else (`$null`)
+PSGATE|error|tests/fixtures/violations.ps1|12|loops over the automatic variable $_ - rename it - the engine owns this name and the damage shows up somewhere else (`$_`)
+PSGATE|error|tests/fixtures/violations.ps1|15|wraps ConvertFrom-Json in @(), which yields ONE element holding the whole array - assign the result first, then iterate it - 5.1 does not enumerate a JSON array (`@(Get-Content c:\x.json -Raw | ConvertFrom-Json)`)
+PSGATE|error|tests/fixtures/violations.ps1|19|$ctx is used with keys that differ only by case (Ticked, ticked), which is ONE key - pick one spelling - a hashtable key is case-insensitive, so the second write destroys the first value (`Ticked`)
+PSGATE|error|tests/fixtures/violations.ps1|22|compares against $null on the RIGHT - put $null on the left - with an array on the left, -eq filters instead of comparing (`$cfg -eq $null`)
+PSGATE|error|tests/fixtures/violations.ps1|27|ignores the result of TryDequeue(), so the [ref] variable keeps its PREVIOUS value on failure - test it: if ($x.TryDequeue([ref]$out)) { ... } - and a bare call leaks its boolean into the output stream (`$q.TryDequeue([ref]$msg)`)
+PSGATE|error|tests/fixtures/violations.ps1|33|Add_Click handler reads the enclosing scope's $lbl without .GetNewClosure() - append .GetNewClosure() to the scriptblock, or keep the state in $script: - the locals are gone when it fires (`$btn.Add_Click({ $lbl.Text = 'clicked' })`)
+PSGATE|error|tests/fixtures/violations.ps1|39|Show-Thing opens a modal dialog and declares the generic $name - prefix it ($dlgName) - a handler firing while ShowDialog blocks resolves against these locals (`$name`)
+PSGATE|error|tests/fixtures/violations.ps1|41|Show-Thing opens a modal dialog and assigns the generic $path - prefix it ($dlgName) - a handler firing while ShowDialog blocks resolves against these locals (`$path`)
+PSGATE|error|tests/fixtures/violations.ps1|51|returns the collection $set, which the caller receives UNROLLED - return ,$set - a one-element set arrives as a bare string and .Contains becomes substring matching (`return $set`)
+PSGATE|error|tests/fixtures/violations.ps1|58|wraps the List[object] $items in @(), which throws ArgumentException on 5.1 - use $items.ToArray(), or iterate it directly (`@($items)`)
+PSGATE|error|tests/fixtures/violations.ps1|65|invokes `param` as a COMMAND, so this is not a parameter declaration - move param(...) to the FIRST statement of the function or scriptblock - the block currently takes no parameters (`param($jobName)`)
+PSGATE|error|tests/fixtures/violations.ps1|69|passes the member .Length as an ARGUMENT - the space made it a bareword, so the member never runs - attach it to its target with no space (`$x.Member`), or wrap the target in parentheses (`.Length`)
+PSGATE|error|tests/fixtures/violations.ps1|72|compiles a -MemberDefinition on the STARTUP path - a csc run (~250 ms) before the first window - move it into a function or a scriptblock the first caller runs (Register-NativeType), so it is paid on use (`Add-Type -MemberDefinition 'public static int X;' -Name 'Win ...`)
+PSGATE|error|tests/fixtures/violations.ps1|78|sets CheckBoxes on $lvFiles, which is also VirtualMode - a virtual list draws no check box - drop VirtualMode, or draw and track the check yourself (Enable-VirtualCheck) - the column is empty as written (`$lvFiles.CheckBoxes`)
+PSGATE|error|tests/fixtures/violations.ps1|79|adds an ItemCheck handler to $lvFiles, which is VirtualMode - the event is never raised - handle the click on the check area yourself, or drop VirtualMode - this handler is dead code (`$lvFiles.Add_ItemCheck({ 'checked' })`)
+PSGATE|error|tests/fixtures/violations.ps1|80|reads .Items on $lvFiles, which is VirtualMode - the list keeps no items - answer from your own backing list - .Items is empty and .CheckedItems counts out of it (`$lvFiles.Items`)
+PSGATE-DONE|2

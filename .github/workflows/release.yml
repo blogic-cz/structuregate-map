@@ -1,0 +1,123 @@
+# A RELEASE IS A TAG: `git tag v1.2.3 && git push origin v1.2.3`. No tests run here: the suite is the
+# developer's `dotnet build` before tagging, and ci.yml already ran on the push of the tagged commit. Each OS
+# publishes its NativeAOT exe, and one archive per OS carries what a consumer receives.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            exe: structuregate.exe
+          - os: ubuntu-latest
+            rid: linux-x64
+            exe: structuregate
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/fbtcore
+
+      # A NativeAOT publish links with clang against zlib on linux, and needs vswhere.exe on PATH on Windows.
+      - name: linker prerequisites
+        run: |
+          if ($IsWindows) { 'C:\Program Files (x86)\Microsoft Visual Studio\Installer' >> $env:GITHUB_PATH }
+          else { sudo apt-get update -q; sudo apt-get install -y -q clang zlib1g-dev }
+
+      # Deploy off: a runner has none of the consumers. The gate's own check is skipped because there is no
+      # published gate in buildtools/ yet to run it - this publish is that gate.
+      - name: publish
+        run: |
+          New-Item -ItemType Directory -Force buildtools | Out-Null
+          Copy-Item StructureGate.targets buildtools/
+          dotnet publish src/StructureGate.csproj -c Release -r ${{ matrix.rid }} -p:PublishAot=true `
+            -p:SkipStructureGate=true -p:SkipTests=true -p:SkipGateDeploy=true
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item out/${{ matrix.rid }}/publish/${{ matrix.exe }}, StructureGate.targets dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: structuregate-${{ matrix.rid }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      # The skills and agents ride in the archive too: a consumer's junctions and agent links point at the
+      # unpacked release on its machine, so no clone of this repo has to stay on disk for them to resolve.
+      # EVERY TAG AND COMMIT: the notes are the commits since the tag before this one.
+      - uses: actions/checkout@v4
+        with:
+          path: repo
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: package
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          for rid in win-x64 linux-x64; do cp -r repo/skills repo/agents "dist/structuregate-${rid}/"; done
+          for rid in win-x64 linux-x64; do cp repo/scripts/Update-Gate.ps1 "dist/structuregate-${rid}/"; done
+          # The wiring (gate-connect runs it from here): Connect-Gate.ps1 and the helpers it dot-sources.
+          for rid in win-x64 linux-x64; do
+            mkdir -p "dist/structuregate-${rid}/scripts"
+            cp repo/scripts/Connect-Gate.ps1 repo/scripts/GateWiring.ps1 repo/scripts/GateTemplates.ps1                repo/scripts/GatePlatform.ps1 "dist/structuregate-${rid}/scripts/"
+          done
+          cd dist
+          (cd structuregate-win-x64 && zip -qr "../structuregate-${tag}-win-x64.zip" structuregate.exe StructureGate.targets skills agents scripts Update-Gate.ps1)
+          chmod +x structuregate-linux-x64/structuregate
+          tar -czf "structuregate-${tag}-linux-x64.tar.gz" -C structuregate-linux-x64 structuregate StructureGate.targets skills agents scripts Update-Gate.ps1
+          sha256sum structuregate-*.zip structuregate-*.tar.gz > SHA256SUMS
+
+      # THE NOTES ARE THE COMMITS SINCE THE PREVIOUS TAG - each subject, and the body that says why. `--generate-notes`
+      # reads PULL REQUESTS, and this repo releases straight from pushes, so it wrote nothing but a changelog link: a
+      # consumer could not see what a release changed.
+      # SINCE THE LAST RELEASE PUBLISHED, not the last tag: a tag whose release never published (v1.5.1, a GitHub runner
+      # outage) would otherwise drop its changes from every note.
+      - name: write the notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd repo
+          previous="$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName -q .tagName 2>/dev/null || true)"
+          [ -n "${previous}" ] || previous="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          range="${previous:+${previous}..}${GITHUB_REF_NAME}"
+          {
+            echo "Changes since ${previous:-the first commit}:"
+            echo
+            git log --no-merges --format='### %s%n%n%b' "${range}" | grep -v '^Co-Authored-By:'
+          } > ../notes.md
+
+      - name: create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --title "structuregate ${GITHUB_REF_NAME}" \
+            --notes-file notes.md \
+            dist/structuregate-*.zip dist/structuregate-*.tar.gz dist/SHA256SUMS

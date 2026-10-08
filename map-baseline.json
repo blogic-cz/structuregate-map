@@ -1,0 +1,24 @@
+{
+  "_comment": "What the map cannot resolve, as it stood when the ratchet was introduced. BOTH lists may only SHRINK. \u0060computed\u0060: imports whose target is built at RUN TIME \u2014 resolve the name at build time rather than adding an entry, because every one removed turns a blind spot into a proven edge. \u0060unread\u0060: files nothing in the tree imports \u2014 each is either dead or reached in a way no parse tree can see (a route, a shell script, a registry).",
+  "computed": {
+    "tests/Run-Tests.ps1: a path built at run time: $suite.FullName": 1
+  },
+  "unread": {
+    "src/Map/CsRows/CsRows.cs": 1,
+    "src/Map/CsRows/CsRowsBody.cs": 1,
+    "src/Map/CsRows/CsRowsObjects.cs": 1,
+    "src/Map/PsMap.ps1": 1,
+    "src/Map/Views/PyDeps.py": 1,
+    "tests/Connect.Tests.ps1": 1,
+    "tests/Fbt.Tests.ps1": 1,
+    "tests/Map.Tests.ps1": 1,
+    "tests/Modes.Tests.ps1": 1,
+    "tests/Walk.Tests.ps1": 1,
+    "tests/deep/CsRows.Tests.ps1": 1,
+    "tests/deep/PyRows.Tests.ps1": 1,
+    "tests/deep/TsRows.Tests.ps1": 1,
+    "tests/fixtures/clean.ps1": 1,
+    "tests/fixtures/violations.ps1": 1,
+    "tests/rules/Ratchet.Tests.ps1": 1
+  }
+}

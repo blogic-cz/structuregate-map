@@ -1,0 +1,278 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>structuregate</AssemblyName>
+    <RootNamespace>StructureGate</RootNamespace>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!--
+      IL2104 is "this third-party assembly produced trim warnings", and the assembly is Roslyn: the SEMANTIC
+      half of the map builds a Compilation, and the binder reaches code the trimmer cannot prove safe
+      (Roslyn's own pooled delegates, its lazy initializer, its UI-culture reflection). None of it is
+      reachable from this tool in a way that can fail — the last of those falls back when reflection finds
+      nothing — and the published exe is exercised against a bound tree before it ships.
+
+      SUPPRESSED HERE, NOT BLANKET. `TrimmerSingleWarn` (on by default) folds every warning of a dependency
+      into this one code, so silencing it says nothing about OUR code: IL2026 and IL3050 still fail the
+      build here, which is what keeps `JsonSerializer` unreachable in this project.
+    -->
+    <NoWarn>$(NoWarn);IL2104</NoWarn>
+    <!--
+      ONE FOLDER FOR EVERY BUILD OUTPUT: `out\` beside the sources. A consumer never sees it - the deploy
+      copies the PUBLISHED exe from `out\win-x64\publish` into each consumer's own `buildtools\`. The build
+      wrote into the repo root before, which left ~200 runtime files among the sources. No configuration or
+      framework is appended, so the tests and scripts find the dll at one fixed path.
+    -->
+    <OutputPath>$(MSBuildThisFileDirectory)..\out\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The PARSER only. Workspaces would drag MSBuild in, and a gate that loads MSBuild inside an MSBuild
+         target is both slow and circular; syntax is all three rules need. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+    <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="180.37.3" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Razor.Extensions" Version="6.0.0" />
+  </ItemGroup>
+
+  <!--
+    THE SCRIPTS THE HOSTS RUN (PsGate\, TsGate\, Map\*.ps1, Map\Py\, TsRows\) are not resources of this
+    assembly: rust compiles them INTO fbtcore with `include_bytes!` (rust/fbtcore/src/embedded/), so the exe
+    still carries every half, and a script missing from a set fails the BUILD instead of a consumer's run.
+  -->
+
+  <!--
+    NO REGEX IN THE GATE. Every question this tool asks is answered from a parse tree — Roslyn for C#, the
+    PowerShell AST for scripts. A pattern over source text is a second, worse parser, and it fails the way
+    the README warns about: it error-recovers into a wrong answer instead of stopping. Measured, before this
+    target existed: `List` matched `$lstBox` and `ListBox` and reported collections that were plain
+    hashtables; `@\{` matched the literals inside an assigned worker scriptblock and invented
+    key collisions in a file with no hashtable in it. Both disappeared when the same question was put to
+    the tree.
+
+    findstr /L is a LITERAL search on purpose — a regex here would be the joke that writes itself. It exits
+    0 when it finds something, so a hit is the failure.
+
+    EVERY SEARCH IS WRITTEN TWICE: findstr on Windows, `grep -F` (fixed strings, the same literal search,
+    the same exit 0 on a hit) everywhere else. A folder added to one line has to be added to its twin, or
+    the ban covers it on one OS only.
+  -->
+  <Target Name="BanRegex" BeforeTargets="CoreCompile">
+    <Exec Condition="'$(OS)' == 'Windows_NT'" Command="findstr /L /I /C:&quot; -match &quot; /C:&quot; -notmatch &quot; /C:&quot; -replace &quot; /C:&quot; -split &quot; /C:&quot;[regex]&quot; /C:&quot;Select-String&quot; &quot;$(MSBuildThisFileDirectory)PsGate\*.ps1&quot; &quot;$(MSBuildThisFileDirectory)Map\*.ps1&quot; &quot;$(MSBuildThisFileDirectory)..\scripts\*.ps1&quot;"
+          IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" ItemName="RegexHit" />
+      <Output TaskParameter="ExitCode" PropertyName="RegexFound" />
+    </Exec>
+    <Exec Condition="'$(OS)' != 'Windows_NT'" Command="grep -F -i -s -e ' -match ' -e ' -notmatch ' -e ' -replace ' -e ' -split ' -e '[regex]' -e 'Select-String' &quot;$(MSBuildThisFileDirectory)&quot;PsGate/*.ps1 &quot;$(MSBuildThisFileDirectory)&quot;Map/*.ps1 &quot;$(MSBuildThisFileDirectory)&quot;../scripts/*.ps1"
+          IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" ItemName="RegexHit" />
+      <Output TaskParameter="ExitCode" PropertyName="RegexFound" />
+    </Exec>
+    <Error Condition="'$(RegexFound)' == '0'"
+           Text="structuregate: regex in the PowerShell gate — decide it on the AST instead (Get-ValueExpression / Get-ConstructedTypeName / node types). Found:%0A@(RegexHit, '%0A')" />
+    <Exec Condition="'$(OS)' == 'Windows_NT'" Command="findstr /L /I /C:&quot;RegularExpressions&quot; /C:&quot;new Regex&quot; /C:&quot;Regex.&quot; &quot;$(MSBuildThisFileDirectory)*.cs&quot; &quot;$(MSBuildThisFileDirectory)Map\*.cs&quot; &quot;$(MSBuildThisFileDirectory)Map\CsRows\*.cs&quot; &quot;$(MSBuildThisFileDirectory)Map\CsRows\CsInputs\*.cs&quot; &quot;$(MSBuildThisFileDirectory)Map\CsRows\CsBody\*.cs&quot; &quot;$(MSBuildThisFileDirectory)Map\Sql\*.cs&quot; &quot;$(MSBuildThisFileDirectory)Map\Fbt\*.cs&quot;"
+          IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" ItemName="CsRegexHit" />
+      <Output TaskParameter="ExitCode" PropertyName="CsRegexFound" />
+    </Exec>
+    <Exec Condition="'$(OS)' != 'Windows_NT'" Command="grep -F -i -s -e 'RegularExpressions' -e 'new Regex' -e 'Regex.' &quot;$(MSBuildThisFileDirectory)&quot;*.cs &quot;$(MSBuildThisFileDirectory)&quot;Map/*.cs &quot;$(MSBuildThisFileDirectory)&quot;Map/CsRows/*.cs &quot;$(MSBuildThisFileDirectory)&quot;Map/CsRows/CsInputs/*.cs &quot;$(MSBuildThisFileDirectory)&quot;Map/CsRows/CsBody/*.cs &quot;$(MSBuildThisFileDirectory)&quot;Map/Sql/*.cs &quot;$(MSBuildThisFileDirectory)&quot;Map/Fbt/*.cs"
+          IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" ItemName="CsRegexHit" />
+      <Output TaskParameter="ExitCode" PropertyName="CsRegexFound" />
+    </Exec>
+    <Error Condition="'$(CsRegexFound)' == '0'"
+           Text="structuregate: regex in the C# gate — decide it on the syntax tree instead. Found:%0A@(CsRegexHit, '%0A')" />
+    <!-- Each needle carries the SPACE in front of it: a bare `re.search` is a substring of `core.search`,
+         and `import re` is a substring of `import resolves`, which is how the first version of this ban
+         failed the build over its own rationale comment. -->
+    <Exec Condition="'$(OS)' == 'Windows_NT'" Command="findstr /L /I /C:&quot; re.compile(&quot; /C:&quot; re.search(&quot; /C:&quot; re.match(&quot; /C:&quot; re.sub(&quot; /C:&quot; re.findall(&quot; /C:&quot; re.fullmatch(&quot; /C:&quot; re.split(&quot; /C:&quot; re.finditer(&quot; &quot;$(MSBuildThisFileDirectory)Map\Py\*.py&quot;"
+          IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" ItemName="PyRegexHit" />
+      <Output TaskParameter="ExitCode" PropertyName="PyRegexFound" />
+    </Exec>
+    <Exec Condition="'$(OS)' != 'Windows_NT'" Command="grep -F -i -s -e ' re.compile(' -e ' re.search(' -e ' re.match(' -e ' re.sub(' -e ' re.findall(' -e ' re.fullmatch(' -e ' re.split(' -e ' re.finditer(' &quot;$(MSBuildThisFileDirectory)&quot;Map/Py/*.py"
+          IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" ItemName="PyRegexHit" />
+      <Output TaskParameter="ExitCode" PropertyName="PyRegexFound" />
+    </Exec>
+    <Error Condition="'$(PyRegexFound)' == '0'"
+           Text="structuregate: a pattern over source text in the python map half — decide it on the `ast` instead (node types, ast.walk). Found:%0A@(PyRegexHit, '%0A')" />
+    <Exec Condition="'$(OS)' == 'Windows_NT'" Command="findstr /L /C:&quot;RegExp(&quot; /C:&quot;.match(&quot; /C:&quot;.matchAll(&quot; /C:&quot;.search(&quot; /C:&quot;.replace(&quot; &quot;$(MSBuildThisFileDirectory)TsGate\*.mjs&quot; &quot;$(MSBuildThisFileDirectory)TsRows\*.mjs&quot; &quot;$(MSBuildThisFileDirectory)TsRows\TsDecls\*.mjs&quot; &quot;$(MSBuildThisFileDirectory)TsRows\TsTpl\*.mjs&quot; &quot;$(MSBuildThisFileDirectory)TsRows\TsDerive\*.mjs&quot; &quot;$(MSBuildThisFileDirectory)TsRows\TsPlain\*.mjs&quot; &quot;$(MSBuildThisFileDirectory)TsRows\TsSetup\*.mjs&quot; &quot;$(MSBuildThisFileDirectory)TsRows\TsDecls\TsExpr\*.mjs&quot;"
+          IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" ItemName="TsRegexHit" />
+      <Output TaskParameter="ExitCode" PropertyName="TsRegexFound" />
+    </Exec>
+    <Exec Condition="'$(OS)' != 'Windows_NT'" Command="grep -F -s -e 'RegExp(' -e '.match(' -e '.matchAll(' -e '.search(' -e '.replace(' &quot;$(MSBuildThisFileDirectory)&quot;TsGate/*.mjs &quot;$(MSBuildThisFileDirectory)&quot;TsRows/*.mjs &quot;$(MSBuildThisFileDirectory)&quot;TsRows/TsDecls/*.mjs &quot;$(MSBuildThisFileDirectory)&quot;TsRows/TsTpl/*.mjs &quot;$(MSBuildThisFileDirectory)&quot;TsRows/TsDerive/*.mjs &quot;$(MSBuildThisFileDirectory)&quot;TsRows/TsPlain/*.mjs &quot;$(MSBuildThisFileDirectory)&quot;TsRows/TsSetup/*.mjs &quot;$(MSBuildThisFileDirectory)&quot;TsRows/TsDecls/TsExpr/*.mjs"
+          IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" ItemName="TsRegexHit" />
+      <Output TaskParameter="ExitCode" PropertyName="TsRegexFound" />
+    </Exec>
+    <Error Condition="'$(TsRegexFound)' == '0'"
+           Text="structuregate: regex in the TypeScript gate — decide it on the AST instead (SyntaxKind, modifiers, comment ranges). A pattern would match `any` inside `company`, inside a string and inside a comment. Found:%0A@(TsRegexHit, '%0A')" />
+    <!-- RUST IS SEARCHED RECURSIVELY (`/S`), unlike the globs above: a module folder is added every time
+         a file crosses the ceiling, and a ban that has to be told about each one is a ban that silently
+         stops covering the next. Rooted at each crate's `src`, so `target\` build output is never read. -->
+    <Exec Condition="'$(OS)' == 'Windows_NT'" Command="findstr /S /L /I /C:&quot;regex::&quot; /C:&quot;Regex::new&quot; /C:&quot;RegexBuilder&quot; &quot;$(MSBuildThisFileDirectory)..\rust\fbtcore\src\*.rs&quot; &quot;$(MSBuildThisFileDirectory)..\rust\fbt\src\*.rs&quot;"
+          IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" ItemName="RsRegexHit" />
+      <Output TaskParameter="ExitCode" PropertyName="RsRegexFound" />
+    </Exec>
+    <Exec Condition="'$(OS)' != 'Windows_NT'" Command="grep -F -i -s -r --include=*.rs -e 'regex::' -e 'Regex::new' -e 'RegexBuilder' &quot;$(MSBuildThisFileDirectory)&quot;../rust/fbtcore/src &quot;$(MSBuildThisFileDirectory)&quot;../rust/fbt/src"
+          IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" ItemName="RsRegexHit" />
+      <Output TaskParameter="ExitCode" PropertyName="RsRegexFound" />
+    </Exec>
+    <Error Condition="'$(RsRegexFound)' == '0'"
+           Text="structuregate: regex in the rust half — decide it on the syntax tree (`syn`) or the token stream instead. Found:%0A@(RsRegexHit, '%0A')" />
+  </Target>
+
+  <!-- NO CONSUMER'S NAMES IN THIS REPO. Every half was measured on private trees, and their names, domain words
+       and figures leaked into comments and fixtures more than once. `leak-deny.txt` at the root lists the terms
+       that may never appear - one per line, matched literally and case-sensitively - and is gitignored, because
+       it holds exactly those terms. `git grep` reads tracked AND untracked files on both platforms, so a new file
+       is caught before it is added. No list (a clone, CI) or no git: nothing to check. -->
+  <PropertyGroup>
+    <LeakDenyFile Condition="'$(LeakDenyFile)' == ''">$(MSBuildThisFileDirectory)..\leak-deny.txt</LeakDenyFile>
+  </PropertyGroup>
+  <Target Name="LeakGuard" BeforeTargets="CoreCompile"
+          Condition="'$(SkipLeakGuard)' != 'true' And Exists('$(LeakDenyFile)') And Exists('$(MSBuildThisFileDirectory)..\.git')">
+    <Exec Command="git -C &quot;$(MSBuildThisFileDirectory)..&quot; grep -n -I -F --untracked -f &quot;$(LeakDenyFile)&quot; -- ."
+          IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" ItemName="LeakHit" />
+      <Output TaskParameter="ExitCode" PropertyName="LeakFound" />
+    </Exec>
+    <Error Condition="'$(LeakFound)' == '0'"
+           Text="structuregate: a term from leak-deny.txt is in the repo - restate it with invented names (Demo.*, Order, Alpha) and relative figures. Found:%0A@(LeakHit, '%0A')" />
+  </Target>
+
+  <!--
+    THE TESTS RUN ON EVERY BUILD. The black-box cases over the built binary (tests\Run-Tests.ps1): the CLI
+    is what every consumer calls - from MSBuild, from a Claude Code Stop hook, from a node launcher - so the
+    CLI is what is asserted on. They cost minutes, which is cheaper than one wrong verdict shipped to every
+    consumer below. `-p:SkipTests=true` skips them.
+
+    AfterTargets="Build", not before: the cases run the binary this build just produced. Before it, they
+    would test the previous one and pass while the change under test was broken.
+  -->
+  <PropertyGroup>
+    <!-- Windows PowerShell 5.1 on Windows, where every consumer runs it; PowerShell 7 (`pwsh`) elsewhere. -->
+    <GatePowerShell Condition="'$(OS)' == 'Windows_NT'">powershell.exe</GatePowerShell>
+    <GatePowerShell Condition="'$(OS)' != 'Windows_NT'">pwsh</GatePowerShell>
+  </PropertyGroup>
+  <Target Name="RunGateTests" AfterTargets="Build" Condition="'$(SkipTests)' != 'true'">
+    <Exec Command="$(GatePowerShell) -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)../tests/Run-Tests.ps1&quot;"
+          WorkingDirectory="$(MSBuildThisFileDirectory).." StandardOutputImportance="high" />
+  </Target>
+
+  <!--
+    WHO GETS A COPY. Building the gate DEPLOYS it into each consuming project, so a consumer imports the
+    targets file by a RELATIVE path and needs nothing on the machine outside its own tree — no absolute path
+    to this folder, and a checkout that has the copy can build with the gate even if this project is absent.
+    Add a line here when a new project adopts the gate; the deploy is the only step that knows about them.
+    `-p:SkipGateDeploy=true` publishes without touching any consumer — for testing a change to the exe
+    before every repository below gets it.
+  -->
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
+    <!-- THIS REPO ITSELF: its own buildtools\ IS the release, so Link-Gate leaves it alone - but the entry
+         keeps the list non-empty, and `DeployGate` (which also writes the release) runs only when it is. -->
+    <GateConsumer Include="$(MSBuildThisFileDirectory)..\buildtools" />
+  </ItemGroup>
+  <!-- THE TREES ON THIS MACHINE are not this repo's to publish: they live in `GateConsumers.local.props` beside this
+       file, gitignored, one `<GateConsumer Include="C:\src\app\buildtools" />` per tree in an ItemGroup. -->
+  <Import Project="GateConsumers.local.props" Condition="Exists('$(MSBuildThisFileDirectory)GateConsumers.local.props')" />
+  <!-- OFF WINDOWS A PUBLISH DEPLOYS NOTHING. Every consumer there - this repo's own buildtools/ included - is
+       a hard link to the GitHub release that the updater (`scripts/Update-Gate.ps1`) downloaded, so
+       a local publish writing into one would put an untested exe into all of them. It builds into
+       out/<rid>/publish and stops; a consumer changes only through a release. -->
+
+  <!--
+    THE DELIVERABLE IS A NATIVE EXE. `dotnet publish -c Release -r win-x64 -p:PublishAot=true` produces one
+    `structuregate.exe` with no runtime, no Roslyn assemblies beside it and no `dotnet` on the
+    consumer's machine — a gate that requires a runtime to be installed first is a gate that will not be.
+    Two things this cost, both worth knowing before editing:
+      * `JsonSerializer.Serialize` is unreachable under AOT (IL2026/IL3050). Both writers use Utf8JsonWriter.
+      * The link step shells out to MSVC and needs `vswhere.exe` on PATH
+        ("C:\Program Files (x86)\Microsoft Visual Studio\Installer"), or it fails with exit 123.
+  -->
+  <!--
+    ONE RELEASE PER MACHINE, AND EVERY CONSUMER LINKS TO IT. The payload is written into this repo's own
+    gitignored `buildtools\`, and each `GateConsumer` folder gets HARD LINKS to those two files
+    (scripts\Link-Gate.ps1) - never a copy, and nothing a consumer's git has to carry. Written IN PLACE, so
+    the links a previous run made see the new bytes; the link run only repairs a link a tool replaced.
+  -->
+  <PropertyGroup>
+    <GateRelease>$(MSBuildThisFileDirectory)../buildtools/</GateRelease>
+    <GateExeName Condition="'$(OS)' == 'Windows_NT'">structuregate.exe</GateExeName>
+    <GateExeName Condition="'$(OS)' != 'Windows_NT'">structuregate</GateExeName>
+  </PropertyGroup>
+  <Target Name="DeployGate" AfterTargets="Publish"
+          Condition="'$(OS)' == 'Windows_NT' And '@(GateConsumer)' != '' And '$(SkipGateDeploy)' != 'true'">
+    <ItemGroup>
+      <GatePayload Include="$(PublishDir)$(GateExeName);$(MSBuildThisFileDirectory)..\StructureGate.targets" />
+    </ItemGroup>
+    <!-- NOT the Copy task: it replaces its destination, and every consumer would keep the old file. -->
+    <Exec Command="$(GatePowerShell) -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)../scripts/Link-Gate.ps1&quot; -Release &quot;$(GateRelease.TrimEnd('/'))&quot; -Source &quot;@(GatePayload)&quot; -Consumer &quot;@(GateConsumer)&quot;" />
+  </Target>
+
+  <!--
+    FBTCORE - the change detector, in rust, linked INTO this exe.
+
+    TWO SHAPES OF ONE CRATE, because a publish and a build need different things. NativeAOT links
+    `fbtcore.lib` straight into the binary (`DirectPInvoke` stops the P/Invoke going through a lookup at
+    all), so the deliverable is still ONE file and a consumer still receives two. A plain `dotnet build` -
+    which is what the tests run against - cannot see a static library, so the same crate also emits
+    `fbtcore.dll` and that is copied beside the managed output. THE DLL IS NEVER DEPLOYED: only the
+    published exe goes to a consumer, and it carries the code inside itself.
+
+    `cargo` must be on PATH. It is a BUILD-box dependency only; a consumer needs nothing.
+  -->
+  <PropertyGroup>
+    <FbtCoreDir>$(MSBuildThisFileDirectory)../rust/fbtcore</FbtCoreDir>
+    <FbtCoreOut>$(FbtCoreDir)/target/release</FbtCoreOut>
+    <!-- What cargo names the two shapes: fbtcore.lib/.dll on Windows, libfbtcore.a/.so on Linux,
+         libfbtcore.a/.dylib on macOS. .NET probes `fbtcore` under each OS's own name. -->
+    <FbtCoreStatic Condition="'$(OS)' == 'Windows_NT'">fbtcore.lib</FbtCoreStatic>
+    <FbtCoreShared Condition="'$(OS)' == 'Windows_NT'">fbtcore.dll</FbtCoreShared>
+    <FbtCoreStatic Condition="'$(OS)' != 'Windows_NT'">libfbtcore.a</FbtCoreStatic>
+    <FbtCoreShared Condition="'$(OS)' != 'Windows_NT' And $([MSBuild]::IsOSPlatform('OSX'))">libfbtcore.dylib</FbtCoreShared>
+    <FbtCoreShared Condition="'$(OS)' != 'Windows_NT' And !$([MSBuild]::IsOSPlatform('OSX'))">libfbtcore.so</FbtCoreShared>
+  </PropertyGroup>
+
+  <Target Name="BuildFbtCore" BeforeTargets="BeforeCompile">
+    <Exec Command="cargo build --release --manifest-path &quot;$(FbtCoreDir)/Cargo.toml&quot;"
+          WorkingDirectory="$(FbtCoreDir)" />
+    <Error Condition="!Exists('$(FbtCoreOut)/$(FbtCoreStatic)')"
+           Text="structuregate: $(FbtCoreStatic) was not produced - is the rust toolchain installed and on PATH?" />
+  </Target>
+
+  <ItemGroup Condition="'$(PublishAot)' == 'true'">
+    <DirectPInvoke Include="fbtcore" />
+    <NativeLibrary Include="$(FbtCoreOut)/$(FbtCoreStatic)" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(PublishAot)' == 'true' And '$(OS)' == 'Windows_NT'">
+    <!-- What rust's standard library itself needs from Windows. Without these the link step fails with
+         unresolved externals that name no source file, which is a long way from the cause. -->
+    <NativeLibrary Include="ntdll.lib" />
+    <NativeLibrary Include="bcrypt.lib" />
+    <NativeLibrary Include="userenv.lib" />
+    <NativeLibrary Include="ws2_32.lib" />
+    <NativeLibrary Include="advapi32.lib" />
+  </ItemGroup>
+
+  <Target Name="CopyFbtCoreDll" AfterTargets="BuildFbtCore" Condition="'$(PublishAot)' != 'true'">
+    <Copy SourceFiles="$(FbtCoreOut)/$(FbtCoreShared)" DestinationFolder="$(OutputPath)"
+          SkipUnchangedFiles="true" Condition="Exists('$(FbtCoreOut)/$(FbtCoreShared)')" />
+  </Target>
+
+
+  <!-- structuregate: the structure limits are part of this build. Connect-Gate.ps1 wrote this. -->
+  <PropertyGroup>
+    <StructureGateRoot>$(MSBuildProjectDirectory)\..</StructureGateRoot>
+    <StructureGateArgs>--ext .cs,.mjs,.ps1,.py,.rs --baseline "$(MSBuildProjectDirectory)\..\structure-baseline.json"</StructureGateArgs>
+  </PropertyGroup>
+  <Import Project="..\buildtools\StructureGate.targets" />
+</Project>

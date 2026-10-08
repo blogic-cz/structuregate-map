@@ -1,0 +1,10 @@
+# MATCH THE HOST'S C RUNTIME.
+#
+# NativeAOT links the STATIC CRT; a rust staticlib links the DYNAMIC one by default.
+# Mixing them is LNK4098 ("defaultlib 'MSVCRT' conflicts with use of other libs") and
+# leaves a binary with two C runtimes in it — two heaps, two sets of file handles, two
+# copies of errno. This library never hands an allocation to the host to free, so the
+# usual crash never fires, but a warning like that in a shipped exe is a fault waiting
+# for the first person who does.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
