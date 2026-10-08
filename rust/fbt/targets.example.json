@@ -1,0 +1,24 @@
+{
+  "targets": [
+    {
+      "name": "core",
+      "inputs": ["src/entry.rs", "src/hash.rs", "src/db.rs"],
+      "deps": []
+    },
+    {
+      "name": "scanner",
+      "inputs": ["src/scan.rs", "src/walk/**", "src/usn.rs", "src/incremental.rs"],
+      "deps": ["core"]
+    },
+    {
+      "name": "engine",
+      "inputs": ["src/pipeline.rs", "src/diff.rs", "src/targets.rs"],
+      "deps": ["core", "scanner"]
+    },
+    {
+      "name": "cli",
+      "inputs": ["src/main.rs", "src/lib.rs", "Cargo.toml"],
+      "deps": ["engine"]
+    }
+  ]
+}

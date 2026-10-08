@@ -1,0 +1,242 @@
+structuregate — structure rules, enforced where they cannot be skipped.
+
+  dotnet structuregate.dll --root <dir> [flags]
+
+  --root <dir>          a tree to check. Repeatable. Default: the current directory.
+  --max-lines <n>       source lines per file (default 500). C# is counted BY ROSLYN: a source line
+                        is a line a token sits on. Python drops blank and `#` lines (docstrings
+                        count); `//` languages track `/* */` across lines.
+  --max-files <n>       source files per folder (default 15).
+  --max-doc-lines <n>   non-blank lines per doc (default 200).
+                        EVERY limit stops at 90 % of itself: 450 of 500 source lines, 14 of 15
+                        files, 180 of 200 doc lines. The last tenth was a `NEAR LIMIT` warning
+                        under a headline that said OK, so the file reached its limit anyway.
+  --ext <list>          comma-separated source extensions (default .cs,.mjs,.js,.ts).
+                        --ps-discipline adds .ps1,.psm1,.psd1 by itself.
+  --skip <list>         comma-separated directory names to skip, at any depth. It REPLACES the
+                        default list (out, bin, obj, dist, node_modules, .git, ...).
+  --skip-file <glob>    leave ONE file out of the gate, by its path from the root: `**` any folders,
+                        `*` any run inside a name, `?` one character, case ignored - e.g.
+                        `**/schema.d.ts` for a generated client. Repeatable, and added to --skip
+                        rather than replacing it. Every file it leaves out is named, and a pattern
+                        that matches nothing is named as one to remove. The gate only: a map keeps
+                        the file, since other files import it.
+  --doc-scope <which>   `context` = CLAUDE.md, AGENTS.md and .claude/agents, skills, rules and
+                        commands only (what is loaded without being asked for); `all` = every .md.
+                        Default: all.
+  --doc-skip <glob>     a .md that is DATA, not a doc - a corpus the code reads, a vendored model
+                        card: the gate does not measure it and the map does not map it, so it is
+                        never DOC-ORPHAN or DOC-MISSING. Globbed like --skip-file. Repeatable.
+  --doc-root <dir>      with --map: map the docs from <dir> instead of from the code roots - for a
+                        project whose code is mapped from several --root trees and whose docs sit
+                        above them. Each .md under it is mapped once, keyed by its path from <dir>,
+                        and a path a doc names under a code root joins that root's file.
+  --async-discipline    C# only: inside an async body, nothing may block (.Result, .Wait(),
+                        .GetAwaiter().GetResult(), Task.WaitAll/WaitAny, Thread.Sleep) and no sync API
+                        with an awaitable twin may be called (File.ReadAllText, ReadToEnd,
+                        WaitForExit(), …); `async void` is allowed only for an (object sender,
+                        EventArgs e) handler. A line carrying `// async-ok` is waived, so the call
+                        that genuinely cannot be awaited keeps its reason beside it.
+  --ps-discipline       PowerShell, through the REAL parser (`[Parser]::ParseFile` inside
+                        --ps-host): `.ps1`/`.psm1`/`.psd1` are added to --ext and counted BY TOKEN
+                        like C#, a file that does not PARSE is a violation (which is also the
+                        version floor — PS7-only `??`, `?:`, `&&` fail under 5.1), and fifteen
+                        rules run: no assignment to an automatic variable; no
+                        `@(… | ConvertFrom-Json)`; no two spellings of one hashtable key; no
+                        `$x -eq $null`; no `Try…([ref]$x)` whose result is dropped; no `Add_*`
+                        handler capturing a function local without `.GetNewClosure()`; no generic
+                        local ($name, $path, $key …) in a scope that opens a modal dialog; no
+                        HashSet/List returned unrolled; no `@($listOfObject)`; no `param` used as a
+                        COMMAND; no member access stranded in ARGUMENT mode; no
+                        `Add-Type -MemberDefinition` at file scope; and on a VirtualMode ListView
+                        no `CheckBoxes`, no `Add_ItemCheck` and no `.Items`. Every one FAILS the
+                        build; a line carrying `# psgate-ok` is waived.
+  --ps-host <exe>       the PowerShell that parses (default `powershell.exe`, i.e. Windows
+                        PowerShell 5.1 — the host these apps are launched with, and a grammar
+                        SUBSET of pwsh, so it cannot pass syntax the target machine will reject;
+                        `pwsh` off Windows, where 5.1 does not exist).
+  --ts-discipline       TypeScript, through the compiler THE REPO BUILDS WITH (`typescript`
+                        resolved from the nearest folder with a package.json at or under the
+                        root that holds the file - so `web/node_modules` serves `web/` - and up
+                        from there; run inside --ts-host):
+                        `.ts`/`.tsx`/`.mts`/`.cts` are added to --ext and counted BY TOKEN like C#,
+                        a file that does not PARSE is a violation, and twelve rules run: no `any`;
+                        no double assertion (`as unknown as T`); no non-null `!`; no `@ts-ignore`
+                        (use `@ts-expect-error <reason>`); no untyped parameter on a declared
+                        function; no empty `catch`; no `==` (except against null); no `var`; no
+                        exported function without a return type; no `{}`/`Object`/`Function` as a
+                        type; no `namespace`/`require`; and no call to a file-local `async`
+                        function left un-awaited. `.d.ts` is DECLARATIONS: counted, never
+                        rule-checked. Every finding FAILS the build; a line carrying `// tsgate-ok`
+                        is waived. A tree with no `typescript` installed is reported, not skipped.
+  --ts-host <exe>       what runs the TypeScript half (default `node`).
+  --ts-node-modules <dir>
+                        where the DEEP TypeScript map may borrow `typescript` and
+                        `@angular/compiler` from, when the workspace has none installed (a git
+                        worktree, a sparse checkout). Repeatable, and tried AFTER the workspace's
+                        own and its ancestors'. The map is parsed by the compiler the project
+                        builds with: a pinned one does not fail on a newer grammar, it
+                        error-recovers into a wrong map.
+  --ts-config <file>    `structuregate.ts.json` for the deep TypeScript map — the application
+                        knowledge it cannot derive (locale directories, the pipe that carries a
+                        translation key, the properties that count as visibility). Found beside
+                        the workspace or above it when not given; absent is fine.
+  --sql-config <file>   `structuregate.sql.json` for the deep SQL map: which .sqlproj is which
+                        database, and which DbContext, connection name and method reaches it.
+                        Found beside the exe when not given; absent links only unique names.
+  --facts-config <file> `structuregate.facts.json`: documents outside the tree (a Google Doc, a
+                        Markdown file), the table under a heading of each that lists facts, and
+                        the code each list is checked against - a seeded table's column, an enum,
+                        a class's constants, the classes deriving from a type. The deep map reads
+                        the saved snapshots into doc_facts and doc_links (bound / missing in code /
+                        missing in doc). Found beside the exe when not given; absent is fine.
+  --facts-pull          save each document of the facts config as its Markdown snapshot - only
+                        when its version moved - and do nothing else. The map never fetches.
+                        Exit 1: a document failed (named); 2: the config is wrong.
+  --map-reread <halves> with --map-sqlite: comma list of csharp, sql, typescript - those halves read
+                        every file again this run, whatever the database recorded, and replace their
+                        rows file by file. For measuring a full re-read without deleting the database.
+  --map-exclude <glob>  a C# file the deep map LISTS and never walks: it is still compiled, so other
+                        files bind against it, but it has no rows of its own and its `files` row says
+                        `excluded`. Repeatable; matched against the map path, `**` across folders,
+                        `*` and `?` inside one - `--map-exclude "**/Migrations/*.cs"` keeps EF seed
+                        migrations (the costliest rows of a real map) out. Adding or removing one
+                        re-reads exactly the files it matches.
+  --map-row-fts         also build a full-text index over every row of the deep map (`row_fts` +
+                        `row_map`), for "which row anywhere mentions this word". Off by default:
+                        close to a million rows on a large map, and nothing in a build reads it.
+  --map-atlas <dir>     also write one navigable overview of the finished map into <dir> —
+                        atlas.json (ids, so it joins back) and atlas.md (the reading). Projects,
+                        NgModule areas, every route with what it can reach, and the boundaries
+                        the map cannot cross. Off by default.
+  --ts-html <dir>       also write the readable mirror of every parsed template under
+                        <dir>/html/, with html_index.json beside it — the same node ids as the
+                        rows, so the two views join. Off by default: thousands of files on a
+                        large workspace, and nothing in a build reads them.
+  --tracked             measure what `git ls-files` reports instead of walking the disk — what a
+                        COMMIT will contain. A tracked file deleted in the tree is named, not
+                        counted.
+  --include-untracked   with --tracked, also measure files written but not staged yet, so a
+                        violation is caught when it is authored.
+  --baseline <file>     ratchet against recorded debt: new files must be under the ceiling (90 % of
+                        the limit), baseline files may only shrink, and a baseline file now under
+                        the ceiling must be REMOVED from the list (the gate says so).
+  --update-baseline     rewrite the baseline from the current counts - every file and folder at or
+                        over the ceiling, since that is where the gate stops. Review the diff.
+  --strict              ignore the baseline: a flat limit for every file.
+  --no-gate-cache       walk even when nothing under the root has moved since the last run that
+                        PASSED. The cache is on by default and keyed on the tree's merkle root
+                        together with these arguments verbatim, so it is the walk it skips, never
+                        a rule; this is for proving that.
+  --worst               print the 15 closest to their limit and exit 0. Never fails.
+  --dump                print every measured count as JSON and exit 0. For comparing gates.
+  --map                 build the GRAPH over the tree instead of checking its limits, and write it
+                        as JSON: what each file is for, what it declares, what imports what, which
+                        names are too ambiguous to resolve, which imports are cycles, and which
+                        function bodies and expressions are written more than once. Every row comes
+                        from a parse tree — Roslyn for C#, the repo's own TypeScript compiler for
+                        .ts/.js (under --ts-host), the `ast` of --py-host for .py, and
+                        [Parser]::ParseFile inside --ps-host for .ps1/.psm1/.psd1. A PowerShell file
+                        declares BOTH its path (what a dot-source names) and its functions (what
+                        every other file names); a python import under `except ImportError` is
+                        OPTIONAL and is kept in its own section; a TypeScript `paths` alias is
+                        resolved through the whole `extends` chain and through every `references`
+                        project rather than reported as a package; a C# `Type.GetType("N.T")` names
+                        a real edge; and an import whose target is built at RUN TIME is COUNTED,
+                        never guessed at, so the dead-file finding can be qualified by it. A
+                        duplicate is sized in SOURCE CHARACTERS, the one unit every half shares.
+                        A language with no parser here
+                        is LISTED as unmapped, never dropped. Same file set as the check: --ext,
+                        --skip, --tracked and --root all apply, so `--ext .py` is what puts python
+                        in the map.
+  --map-out <file>      where the map goes (default: buildmap.json in the first --root).
+  --map-check           print the map's findings and exit 1 if any is a state that cannot be
+                        legitimate: a file that does not PARSE, a language half that would not run,
+                        and an import naming a file that is not there. A file nothing imports, a
+                        cycle, an ambiguous name and a duplicated body are printed as notes — each
+                        can be legitimate, and a gate that fails on them gets switched off.
+  --map-if-stale        do nothing when every mapped file is older than the map and none was added or
+                        removed (a move keeps its mtime), the gate and the --map-baseline are not
+                        newer either. Makes `--map` cheap enough for a Claude Code Stop hook: the
+                        walk runs, the parsers do not. With --map-check the map it keeps is still
+                        CHECKED - its recorded findings decide the exit, so a red map stays red.
+  --py-host <exe>       what maps python (default `python`; `python3` off Windows).
+  --map-plugin "<cmd>"  fold a project's OWN map rows in. Repeatable, quote-aware, runs in the first
+                        --root. For what no parser can derive because it does not exist until the
+                        project's code runs - a build's artifact registry, its step order, which
+                        script produces which output. The script prints the MAP-* protocol
+                        (MAP-ARTIFACT / MAP-STEP / MAP-PRODUCES / MAP-READS / MAP-FINDING, then
+                        MAP-DONE) and gets STRUCTUREGATE_MAP_ROOT and STRUCTUREGATE_MAP_LIST in its
+                        environment. A plugin that cannot be launched, or that stops half way, is a
+                        FINDING that fails --map-check: it was named on the command line, so a map
+                        silently missing half its rows is worse than one that never ran.
+  --map-query <db> ...  QUERY a SQLite map instead of building one. Everything after the database
+                        path goes to the lens: --tables, --schema T, --find NAME, --id ROW,
+                        --file FRAGMENT, --cat FRAGMENT [--lines a-b], --text FTS,
+                        --grep TEXT [--table T], --magic [FRAGMENT] (numbers, strings and
+                        split/join separators nothing names), --sql QUERY, --limit N.
+  --map-sqlite <file>   the DEEP map, as SQLite - WITH --map, or on its own, which writes the rows
+                        and skips the whole-tree re-parse the graph needs (what a per-turn hook
+                        runs; it exits 1 by itself if a half could not run). The JSON map is
+                        about files and carries no code; this is about EXPRESSIONS - every call,
+                        branch, assignment, decorator and expression as a row, with its source text
+                        beside the facts read off it (what it reads, what it calls, what strings it
+                        holds), every join column indexed, and the source itself FTS5-indexed in
+                        `file_text`. EVERY HALF INTO ONE DATABASE - python, C# and TypeScript: each
+                        `files` row says which half wrote it and no half touches another's rows. The C# rows are
+                        BOUND where a compilation can be built from what restore and build left on
+                        disk - a call carries the symbol and the overload it resolved to, an
+                        argument carries the parameter name the callee declares, a const carries
+                        the value the compiler folded, an expression carries its type. No MSBuild
+                        is loaded; `files.semantic` says which files were bound. It is a CACHE of
+                        the tree: a file whose sha has not moved is not re-read, a file that has
+                        gone leaves, and `_meta` records the root and file count it was built from.
+                        Needs --py-host: the database is written by python's own `sqlite3`.
+  --map-baseline <file> RATCHET WHAT THE MAP CANNOT RESOLVE. Two lists, both of which may only
+                        SHRINK, and the same three rules as --baseline: a new entry fails, a
+                        recorded one may not grow, and one that is GONE must be removed.
+                        `unread` is every file nothing in the tree imports - dead, or reached in a
+                        way no parse tree can see (an HTTP route, a shell script, a registry keyed
+                        by string). Recording them is what stops a new one appearing unnoticed.
+                        `computed` is the DYNAMIC CODE. An import whose target is built at run time -
+                        `importlib.import_module(name)`, `import(expr)`, `. $lib`,
+                        `Type.GetType(name)` - is the one thing the map cannot resolve, so each one
+                        is a blind spot every dead-file finding has to be qualified by. This records
+                        the ones already there, per file and per shape (never per line, so an edit
+                        above one does not move it): a NEW one fails, an existing one may not grow,
+                        and one that is GONE must be removed from the list. Every entry removed
+                        turns a blind spot into a proven edge.
+  --update-map-baseline rewrite the map baseline from the current counts. Review the diff.
+  --plugin "<command>"  run a project's own checker as part of this gate and fold its verdict in.
+                        Repeatable. Quote-aware; runs in the first --root. Non-zero exit is a
+                        violation, and a command that cannot be launched is one too. Use it for a
+                        rule that needs a parser this tool does not have, e.g.
+                        --plugin "python scripts/check_rules.py"
+
+  --trace <file>        TRACE THIS RUN into <file> - what STRUCTUREGATE_TRACE=<file> does, on the
+                        command line.
+  --trace-detail        a DETAILED trace, to find where a slow run's time went: a span per C#
+                        batch with what the host spent in it, every C# project, the 1000 slowest
+                        files. Needs --trace or STRUCTUREGATE_TRACE; STRUCTUREGATE_TRACE_DETAIL=1
+                        asks for it without the flag.
+  --trace-report <file> READ A TRACE BACK: per tree, which stage every run's time went to (runs,
+                        median, max, total), each span's (untraced) time - what none of its
+                        children covers - the last run as a tree, and the slowest single files.
+                        The trace is written by any run with --trace or STRUCTUREGATE_TRACE=<file>
+                        - one line per run, appended, nothing written without it. Each line is an OTLP/JSON
+                        ExportTraceServiceRequest, so an OpenTelemetry Collector's `otlpjsonfile`
+                        receiver ships the same file to any tracing backend. OTEL_RESOURCE_ATTRIBUTES
+                        and OTEL_SERVICE_NAME are honoured as the OpenTelemetry SDKs read them.
+  --map-view <db>       DRAW THE DEEP MAP: one self-contained HTML page (data and scripts inside it,
+                        nothing fetched) beside the database as <db>.html, or at --map-view-out <file>.
+                        Four views of one graph of files, functions and the edges the halves
+                        resolved (calls, imports, C# type references, Angular renders): the
+                        STRUCTURE (folders as nodes, double-click to open, WebGL), a file's or
+                        function's NEIGHBOURHOOD N hops out, the DEPENDENCY MATRIX (a red cell
+                        above the diagonal closes a cycle) and a TREEMAP by lines, coloured by
+                        language, by what nothing reaches or by compile errors. The file-level
+                        map adds the import edges of every language (rust `mod`, PowerShell
+                        dot-sources, TypeScript): a buildmap.json beside the database is read, or
+                        --map-view-graph <file>.
+
+Exit 1 on a violation, 0 otherwise. Wire it into a build with StructureGate.targets.

@@ -1,0 +1,88 @@
+[package]
+name = "fbtcore"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+# TWO shapes of the same code, for two different builds.
+#
+# `staticlib` is the DELIVERABLE: NativeAOT links the .lib into the exe through
+# <NativeLibrary> + <DirectPInvoke>, so a consumer still receives two files and one of
+# them is a single binary.
+#
+# `cdylib` exists only so a plain `dotnet build` can run. DirectPInvoke is a PUBLISH
+# concept; a managed test run resolves `fbtcore` as an ordinary library at load time
+# and would fail without a .dll. That .dll is copied beside the test binaries and is
+# NEVER deployed to a consumer.
+crate-type = ["staticlib", "cdylib"]
+name = "fbtcore"
+
+[dependencies]
+# The tree map beside this one: it answers "has this tree changed" from the NTFS journal
+# where it can, which is what lets the gate skip a tree it has already passed.
+fbt = { path = "../fbt" }
+rusqlite = { version = "0.40", features = ["bundled"] }
+blake3 = { version = "1.8", features = ["mmap"] }
+rayon = "1.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
+anyhow = "1.0.104"
+indexmap = { version = "2.14.2", features = ["serde"] }
+# THE SHA the C# and SQL halves stamp each file with. SHA-256, not blake3, because it is the hash those rows
+# were always stamped with: a different one would re-read every consumer's whole tree once for nothing.
+sha2 = { version = "0.10", default-features = false }
+# THE PROJECT FILES the C# half compiles against (`src/csproj/`): `.csproj`, `Directory.Build.props` and a
+# package's own `build/*.targets`, READ as XML - never evaluated, MSBuild is never run. Read-only, pure rust.
+roxmltree = "0.20"
+# THE RUST HALF (`src/rsmap/`). `syn` is the parser rustc's own proc macros are written against, so a
+# file is read the way the compiler's grammar reads it rather than by a scanner written here. It is
+# pure rust and compiled INTO this library: no host to launch and nothing new reaches a consumer.
+# `span-locations` is what gives a token its line - without it every span answers line 0.
+syn = { version = "2.0.119", default-features = false, features = ["full", "parsing", "printing", "visit"] }
+proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }
+quote = { version = "1.0.47", default-features = false }
+# THE MARKDOWN HALF (`src/mdmap/`). Markdown has no host of its own, so its parser lives here: CommonMark
+# as `rustdoc` and mdBook read it, with the GFM tables every doc in these trees uses switched on per call.
+# No default features: they are the HTML renderer and a CLI, and this half renders nothing.
+pulldown-cmark = { version = "0.13.4", default-features = false }
+# THE GO HALF (`src/gomap/`). `gosyn` parses Go by the language specification, in pure rust, compiled INTO this
+# library like `syn`: no `go` toolchain has to be installed wherever the gate runs. Measured against Go 1.25's
+# own tree before it was taken: every one of its 7 287 non-testdata files parsed.
+gosyn = { version = "0.2.15", default-features = false }
+# THE STYLESHEETS of an Angular workspace (`src/cssmap/`): CSS, SCSS, Sass and Less, read by a parser and never
+# by a pattern. Here and not in node because node has no stylesheet parser to BORROW - `postcss-scss` is no Angular
+# dependency, and `sass` exposes no syntax tree, only a compile that needs every `@use` resolved first. Pure rust,
+# no default features (they are serde), and its only dependency beside a proc macro is `smallvec`.
+raffia = { version = "0.13", default-features = false }
+# A skill's or an agent's FRONTMATTER is YAML, and its `name` is what the doc DECLARES. Parsed, not split on
+# `:` - a description routinely holds colons, quotes and line folds.
+yaml-rust2 = { version = "0.13.0", default-features = false }
+# THE PAYLOAD IS PARSED FROM A MAPPING (`rows/calls.rs`): a slice parses several times faster than a reader, and
+# mapped pages are the file's own, not memory held beside it. Already built for `blake3`'s `mmap`.
+memmap2 = "0.9"
+# THE ALLOCATOR. The map allocates and frees millions of small cells, and on a large Angular workspace the system heap was a
+# quarter of the exe's CPU. Compiled C, linked in statically like SQLite - nothing beside the exe.
+mimalloc = { version = "0.1", default-features = false }
+# `--facts-pull` (`src/facts/pull.rs`), the one thing this tool fetches: a document's version and its Markdown export
+# from the Drive API. rustls with `ring` and the webpki roots compiled in, so nothing beside the exe and no system TLS.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+  "Win32_System_IO",
+  "Win32_Security",
+] }
+
+[profile.release]
+# The exe is deployed to every consumer, so size is a real cost.
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+# NO `panic = "abort"`. This library is linked into somebody else's process. A panic
+# must unwind to the ABI boundary, where `catch_unwind` turns it into an error code
+# the caller can report. Aborting would take the whole build down with it, and a
+# panic crossing the boundary unwound would be undefined behaviour.

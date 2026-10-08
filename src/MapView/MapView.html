@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Source map</title>
+<style>/*STYLE*/</style>
+</head>
+<body>
+<header>
+  <div class="brand"><strong id="title">map</strong><span id="summary" class="muted"></span></div>
+  <nav class="tabs">
+    <button id="tab-graph" class="tab">Graph</button>
+    <button id="tab-matrix" class="tab">Matrix</button>
+    <button id="tab-treemap" class="tab">Treemap</button>
+  </nav>
+  <div class="search">
+    <input id="search" type="search" placeholder="Find a file, folder or function…" autocomplete="off">
+    <div id="results" class="results" hidden></div>
+  </div>
+</header>
+<main>
+  <aside id="tree" class="panel"></aside>
+  <section class="stage">
+    <div id="graph-pane" class="pane">
+      <div class="toolbar">
+        <button id="back" hidden>← Structure</button>
+        <button id="reset">Reset</button>
+        <label>Colour <select id="colour">
+          <option value="language">language</option><option value="cycles">cycles</option>
+          <option value="community">community</option><option value="distance">distance</option>
+        </select></label>
+        <label>Hops <select id="hops"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+        <label>Direction <select id="direction">
+          <option value="both">both</option><option value="out">calls</option><option value="in">called by</option>
+        </select></label>
+        <span id="legend" class="legend"></span>
+      </div>
+      <div id="graph" class="canvas"></div>
+    </div>
+    <div id="matrix-pane" class="pane" hidden>
+      <div class="toolbar"><span class="muted">Rows depend on columns. A dependency sits below what uses it, so a red cell above the diagonal closes a cycle. The rows are the folders open in the graph.</span></div>
+      <canvas id="matrix" class="canvas"></canvas>
+    </div>
+    <div id="treemap-pane" class="pane" hidden>
+      <div class="toolbar">
+        <span id="crumbs" class="crumbs"></span>
+        <label>Colour <select id="treemap-colour">
+          <option value="language">language</option><option value="unreached">nothing reaches it</option>
+          <option value="errors">compile errors</option><option value="fanin">used by many</option>
+        </select></label>
+      </div>
+      <canvas id="treemap" class="canvas"></canvas>
+    </div>
+    <div id="status" class="status"></div>
+  </section>
+  <aside id="details" class="panel details"></aside>
+</main>
+<div id="tip" class="tip" hidden></div>
+<script type="application/json" id="map-data"><!--DATA--></script>
+<!--SCRIPTS-->
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "_comment": "Files/folders ALREADY over the limit when the gate was introduced. This list may only SHRINK. Do not add an entry to silence the gate on a new file \u2014 split it instead.",
+  "max_source_lines": 500,
+  "max_files_per_dir": 15,
+  "files": {},
+  "dirs": {}
+}

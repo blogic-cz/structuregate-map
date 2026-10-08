@@ -1,0 +1,43 @@
+# BUILD OUTPUT. Every build and publish writes into out/ (`OutputPath` in src/StructureGate.csproj): the
+# framework-dependent dll with the Roslyn and .NET runtime files beside it, and the NativeAOT exe under
+# out/win-x64/publish. None of it belongs in history; a clone rebuilds it with
+#   dotnet build src/StructureGate.csproj
+out/
+# The compiler's intermediate files stay in src/obj (moving them needs a Directory.Build.props).
+bin/
+obj/
+
+# python's own build output, dropped beside the harness and the map's python halves
+__pycache__/
+*.pyc
+
+# rust build output for fbtcore (the .lib/.dll are produced by the build, never committed)
+rust/*/target/
+
+# THIS REPO IS ITS OWN CONSUMER. Connect-Gate.ps1 wired the gate into this build, and everything it
+# writes here is derived from the tree it just walked:
+#   buildtools/  the deployed exe and a COPY of StructureGate.targets (the source is at the root)
+#   buildmap.*   the graph and the deep map, rebuilt by any --map run
+#   .fbt/        the merkle snapshot that lets an unchanged tree skip the walk
+#   .claude/*    junctions to skills/, made by the connect step - but NOT .claude/rules/ and NOT
+#                .claude/skills/dotnet-trace/ (a skill for working on THIS repo, never shared); .claude/rules/ is the
+#                path-scoped session notes CLAUDE.md hands its deep detail to; those are source
+# The two RATCHETS are committed on purpose - structure-baseline.json and map-baseline.json record
+# debt that may only shrink, so they have to travel with the history that shrinks it.
+buildtools/
+buildmap.json
+buildmap.sqlite
+.fbt/
+.claude/*
+!.claude/rules/
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/dotnet-trace/
+!.claude/agents/
+
+# A machine's own consumer trees - see src/StructureGate.csproj.
+src/GateConsumers.local.props
+
+# THE LEAK DENY LIST: client names and terms that must never reach this public repo. It holds exactly those
+# terms, so it is never committed - the LeakGuard target in src/StructureGate.csproj reads it when present.
+leak-deny.txt
