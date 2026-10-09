@@ -42,7 +42,7 @@ rebuild (the consumer's Stop hook builds both) - never yours.
 
 1. **Rows, with the command that re-prints them.** Every factual claim carries its `file:line` and the exact
    `--map-query` call that shows it. A claim with no command is an opinion; mark it as one.
-2. **Values verbatim.** Quote `pkg/cache.py::Cache.get` as the map spells it;
+2. **Values verbatim.** Quote `<pkg>/cache.py::Cache.get` as the map spells it;
    "the store's get method" is a paraphrase that has lost the file.
 3. **Counts as counts**, from `--sql`. If you capped output, say what the cap was.
 4. **Absence proved, not assumed.** "The map does not carry X" needs `--schema` evidence. An empty target is

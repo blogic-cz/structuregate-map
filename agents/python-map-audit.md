@@ -18,7 +18,7 @@ $G --map-query $DB --tables                          # _meta: root, file count, 
 ```
 
 **A TREE IS NOT ONE ROOT.** With several `--root`s every `files.path` carries the root's folder as a prefix
-(`app/util/x.py` lives under `pkg/app/`), and `_meta.root` names only the first root. Take the
+(`<app>/util/x.py` lives under `<pkg>/<app>/`), and `_meta.root` names only the first root. Take the
 roots and the prefixes from the command the consumer's hook runs, never from your cwd. A path joined onto the
 wrong root finds a different file, or none, and reads as a missing row.
 
