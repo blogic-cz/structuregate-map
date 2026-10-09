@@ -254,6 +254,16 @@ function Resolve-Import([string]$Rel, $Expression, [string]$Root, [hashtable]$Kn
     }
 }
 
+# THE SCRIPTBLOCK LITERAL A NODE SITS IN, or $null. A `{ ... }` assigned and run elsewhere (a runspace,
+# `Start-Job`, `Invoke-Command`) is its own scope: a function declared in it is that block's, and a runspace
+# body MUST redeclare its helpers because it cannot see the caller's.
+function Get-LiteralScope([Ast]$Node) {
+    for ($at = $Node.Parent; $at; $at = $at.Parent) {
+        if ($at -is [ScriptBlockExpressionAst]) { return $at }
+    }
+    return $null
+}
+
 function Read-File([string]$Rel, [string]$AbsolutePath, [string]$Root, [hashtable]$Known) {
     $tokens = $null
     $errors = $null
@@ -286,9 +296,21 @@ function Read-File([string]$Rel, [string]$AbsolutePath, [string]$Root, [hashtabl
     # per question is O(nodes x questions) with a scriptblock call on every visit, and a few dozen files took
     # minutes.
     $all = $ast.FindAll($script:EveryNode, $true)
+    # Scriptblock literal -> the function names declared in it: a call inside binds THERE, not to the file.
+    $local = [System.Collections.Generic.Dictionary[Ast, System.Collections.Generic.HashSet[string]]]::new()
+    foreach ($node in $all) {
+        if ($node -isnot [FunctionDefinitionAst]) { continue }
+        $scope = Get-LiteralScope $node
+        if (-not $scope) { continue }
+        if (-not $local.ContainsKey($scope)) { $local[$scope] = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase) }
+        [void]$local[$scope].Add($node.Name)
+    }
     $functions = 0
     foreach ($node in $all) {
         if ($node -is [FunctionDefinitionAst]) {
+            # A BLOCK'S OWN FUNCTION is no declaration of the file and no duplicate of another block's: two
+            # runspace bodies cannot share a helper, so neither copy is one to extract.
+            if ($local.Count -gt 0 -and (Get-LiteralScope $node)) { continue }
             $functions++
             Write-Record 'MAP-DECL' $Rel $node.Name
             $body = $node.Body
@@ -316,6 +338,13 @@ function Read-File([string]$Rel, [string]$AbsolutePath, [string]$Root, [hashtabl
             }
             $name = $node.GetCommandName()
             if (-not $name) { continue }
+            if ($local.Count -gt 0) {
+                $bound = $false
+                for ($scope = Get-LiteralScope $node; $scope; $scope = Get-LiteralScope $scope) {
+                    if ($local.ContainsKey($scope) -and $local[$scope].Contains($name)) { $bound = $true; break }
+                }
+                if ($bound) { continue }
+            }
             if ($name.EndsWith('.ps1') -or $name.Contains('\') -or $name.Contains('/')) {
                 Resolve-Import $Rel $node.CommandElements[0] $Root $Known $directory $AbsolutePath
                 continue

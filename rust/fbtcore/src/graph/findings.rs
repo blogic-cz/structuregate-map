@@ -15,6 +15,23 @@ pub fn is_error(text: &str) -> bool {
     ERRORS.iter().any(|p| text.starts_with(p))
 }
 
+/// A NAME THE FILE CALLS ITSELF IS NOT UNREAD, and listing it reads as dead code that is not: a script run by
+/// path from outside the tree uses its own functions. So only what nothing calls is listed, and a file whose
+/// every name it calls itself is said to be what it is - a file nothing in the tree RUNS.
+fn no_reader(rel: &str, file: &super::File, computed: usize) -> String {
+    let idle: Vec<&str> = file.declares.iter().filter(|d| *d != rel && !file.uses.contains(*d)).map(String::as_str).collect();
+    let caveat = format!(
+        "Before calling it dead: a caller OUTSIDE this tree is invisible here, and {computed} import(s) in this tree \
+         name their target at run time (see computed_imports)"
+    );
+    if idle.is_empty() && file.declares.iter().any(|d| d != rel) {
+        return format!("NO READER {rel}: nothing in the mapped tree runs or imports this file, and it uses every \
+                        function it declares itself. {caveat}");
+    }
+    let listed: Vec<&str> = if idle.is_empty() { vec![rel] } else { idle.into_iter().take(4).collect() };
+    format!("NO READER {rel}: declares {} and nothing in the mapped tree names any of them. {caveat}", listed.join(", "))
+}
+
 pub struct Finding {
     pub text: String,
     pub error: bool,
@@ -55,14 +72,7 @@ pub fn all(input: &Input, graph: &Graph) -> Vec<Finding> {
     // invisible to this graph: something outside the mapped tree, and something that names its target at
     // run time.
     for rel in &graph.unread {
-        let declares: Vec<&str> = graph.files[rel].declares.iter().take(4).map(String::as_str).collect();
-        found.push(format!(
-            "NO READER {rel}: declares {} and nothing in the mapped tree names any of them. Before calling it \
-             dead: a caller OUTSIDE this tree is invisible here, and {} import(s) in this tree name their \
-             target at run time (see computed_imports)",
-            declares.join(", "),
-            input.computed.len()
-        ));
+        found.push(no_reader(rel, &graph.files[rel], input.computed.len()));
     }
     if !input.computed.is_empty() {
         let first: Vec<String> = input.computed.iter().take(3).map(|c| c.place()).collect();
