@@ -1,0 +1,11 @@
+{
+  "name": "structuregate",
+  "owner": { "name": "blogic-cz" },
+  "plugins": [
+    {
+      "name": "structuregate",
+      "source": "./",
+      "description": "The structuregate map skills and agents, and the hooks that point a session at the map instead of grep."
+    }
+  ]
+}

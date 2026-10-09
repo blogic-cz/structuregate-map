@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          { "type": "command", "command": "e=\"$CLAUDE_PROJECT_DIR/buildtools/structuregate\"; [ -x \"$e\" ] || e=\"$e.exe\"; [ -x \"$e\" ] && \"$e\" --claude-hook session-start 2>/dev/null || true", "timeout": 10 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Grep|Bash",
+        "hooks": [
+          { "type": "command", "command": "e=\"$CLAUDE_PROJECT_DIR/buildtools/structuregate\"; [ -x \"$e\" ] || e=\"$e.exe\"; [ -x \"$e\" ] && \"$e\" --claude-hook pre-tool-use 2>/dev/null || true", "timeout": 5 }
+        ]
+      }
+    ]
+  }
+}

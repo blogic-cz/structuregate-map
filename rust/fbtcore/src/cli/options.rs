@@ -61,6 +61,8 @@ pub struct Options {
     pub trace_detail: bool,
     /// `--trace-report`: the trace file `STRUCTUREGATE_TRACE` wrote, read back.
     pub trace_report: Option<String>,
+    /// `--claude-hook <event>`: answer a Claude Code hook (`session-start`, `pre-tool-use`) from stdin.
+    pub claude_hook: Option<String>,
     /// `--map-view`: the deep map's database, drawn as one HTML page; `--map-view-out` names the page.
     pub map_view: Option<String>,
     pub map_view_out: Option<String>,
@@ -223,6 +225,7 @@ pub fn parse(args: &[String]) -> Result<Parsed, String> {
                 i = args.len();
             }
             "--trace-report" => o.trace_report = Some(full(&next()?)),
+            "--claude-hook" => o.claude_hook = Some(next()?),
             "--trace" => o.trace = Some(full(&next()?)),
             "--trace-detail" => o.trace_detail = true,
             "--map-view" => o.map_view = Some(full(&next()?)),

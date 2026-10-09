@@ -121,6 +121,9 @@ move it in that order. `scripts/` holds the consumer wiring (`Connect-Gate.ps1` 
 Every build output goes to `out\` (gitignored): the dll the tests run is `out\structuregate.dll`, the native
 exe a publish deploys is `out\win-x64\publish\structuregate.exe` (`out/linux-x64/publish/structuregate` on linux). Nothing is built into the repo root.
 
+The repo is also a Claude Code PLUGIN and its marketplace (`.claude-plugin/`): `skills/` and `agents/` as they are, plus
+`hooks/hooks.json`, which runs the tree's own `buildtools/structuregate --claude-hook` (`rust/fbtcore/src/cli/hook.rs`).
+
 `skills/` is the ORIGIN of each skill. A consumer holds a JUNCTION to it, never a copy — see the README
 section on wiring. Junctions are not walked by the gate, so a junctioned skill is never counted against a
 consumer's limits. `agents/` is the same for the map agents (`python-map-audit`, `python-map-reader`, `angular-map-audit`, `dry-guard`); an

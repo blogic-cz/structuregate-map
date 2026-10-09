@@ -7,6 +7,7 @@
 //! log with its em dashes mangled. A diagnostic or a lens asks for UTF-8 instead (`utf8`), because what it
 //! prints is a path or a translation key a person or a script reads back.
 
+mod hook;
 mod lens;
 mod options;
 mod probe;
@@ -111,6 +112,11 @@ fn asked(call: &Call, callbacks: Callbacks) -> Value {
             return answer(out, 2, false);
         }
     };
+    // A HOOK'S STDOUT IS JSON Claude Code parses, and nothing else may be written there.
+    if let Some(event) = &o.claude_hook {
+        let exit = hook::run(event, &mut out);
+        return answer(out, exit, true);
+    }
     if let Some(file) = &o.trace_report {
         let exit = crate::trace::report::run(file, &mut out);
         return answer(out, exit, true);

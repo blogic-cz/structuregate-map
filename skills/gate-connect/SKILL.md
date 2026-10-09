@@ -17,10 +17,10 @@ From the release it registers the tree in `consumers.txt` beside the release - t
 reads; from a clone (`scripts/Connect-Gate.ps1`) it registers a `GateConsumer` in the gitignored
 `src/GateConsumers.local.props`, which `src/StructureGate.csproj` imports.
 
-`-DryRun` first if the tree is not yours: it prints the six steps and writes nothing. What each wiring
+`-DryRun` first if the tree is not yours: it prints the seven steps and writes nothing. What each wiring
 looks like by hand, and why the skills are junctions: [wiring.md](wiring.md).
 
-## The six steps, and why none is optional
+## The seven steps, and why none is optional
 
 | step | why |
 |---|---|
@@ -28,6 +28,7 @@ looks like by hand, and why the skills are junctions: [wiring.md](wiring.md).
 | HARD-LINK `structuregate.exe` + `StructureGate.targets` into `<tree>/buildtools` | one release on the machine, never a copy, nothing in the tree's git. Across drives a hard link cannot exist, so it is copied and the line says so: that tree then needs a re-run per release |
 | write the entry point | everything above only puts an exe on disk; this is what runs it without being asked |
 | probe the hosts | a missing host is not a skipped check - every file that half owned is reported `UNMAPPED` |
+| enable the `structuregate` plugin in `<tree>/.claude/settings.json` | every teammate who opens the tree is offered its hooks, which point a session at the map before it greps for a symbol; an entry already there is kept |
 | junction the skills into `<tree>/.claude/skills` | a junction is not walked, so the skill costs the consumer no file budget |
 | first map + `--update-map-baseline`, and `structure-baseline.json` for files already over a limit (written once, never re-frozen) | a gate that is red on arrival gets switched off |
 
@@ -70,6 +71,6 @@ restores the pin). A tree that borrows `typescript` from elsewhere has none, as 
 | `-Entry none` | the owner calls the gate from their own script |
 | `-Project <file>` | the `.csproj` to import into when there are several |
 | `-GateDir <dir>` | where the two files land (default `buildtools`) |
-| `-SkipMap` / `-SkipSkill` / `-SkipPrereq` / `-SkipRegister` | one step off, for a re-run |
+| `-SkipMap` / `-SkipSkill` / `-SkipPlugin` / `-SkipPrereq` / `-SkipRegister` | one step off, for a re-run |
 | `-Registry <file>` | a different consumer list (the tests use this) |
 | `-TypeScriptSpec <spec>` | what step 4 installs (default `typescript@^5`) |
