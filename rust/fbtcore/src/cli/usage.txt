@@ -220,7 +220,8 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         files. Needs --trace or STRUCTUREGATE_TRACE; STRUCTUREGATE_TRACE_DETAIL=1
                         asks for it without the flag.
   --claude-hook <event> answer a Claude Code hook from its stdin, for the plugin's hooks/hooks.json:
-                        `session-start` notes the map in a tree that has buildmap.sqlite, and
+                        `session-start` notes the deep maps the tree holds - found by their
+                        _meta under any name or folder - and
                         `pre-tool-use` adds the --map-query that answers a Grep or grep/rg for a
                         word spelled like a code symbol - a nudge, never a permission decision
                         (STRUCTUREGATE_HOOK=deny refuses the search instead). Silent with no map.
