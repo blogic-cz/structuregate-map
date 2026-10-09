@@ -22,8 +22,16 @@ function Invoke-ClaudeHookGate([string]$Event, [string]$Project, [hashtable]$Std
     return [pscustomobject]@{ Exit = $exit; Text = $joined; Json = if ($joined) { $joined | ConvertFrom-Json } else { $null } }
 }
 
+# A REAL deep map at `$Rel` under the tree: the hook knows a map by its `_meta`, not by a file name.
+function New-ClaudeHookMap([string]$Tree, [string]$Rel) {
+    $db = Join-Path $Tree $Rel
+    [void](New-Item -ItemType Directory -Force -Path (Split-Path $db -Parent))
+    Assert-Exit (Invoke-Gate --root $Tree --ext .py --map-sqlite $db) 0
+}
+
 Test-Case 'claudehook: a mapped tree gets a session note, and a symbol search a nudge that decides nothing' {
-    $tree = Use-Tree @{ 'buildmap.sqlite' = 'x'; 'app.py' = "X = 1`n" }
+    $tree = Use-Tree @{ 'app.py' = "X = 1`n" }
+    New-ClaudeHookMap $tree 'buildmap.sqlite'
     $start = Invoke-ClaudeHookGate 'session-start' $tree @{ hook_event_name = 'SessionStart' }
     Assert-Equal $start.Exit 0 'exit'
     Assert-Equal $start.Json.hookSpecificOutput.hookEventName 'SessionStart' 'event'
@@ -39,15 +47,30 @@ Test-Case 'claudehook: a mapped tree gets a session note, and a symbol search a 
 }
 
 Test-Case 'claudehook: deny only when asked, and silence with no map or no symbol' {
-    $tree = Use-Tree @{ 'buildmap.sqlite' = 'x' }
+    $tree = Use-Tree @{ 'app.py' = "X = 1`n" }
+    New-ClaudeHookMap $tree 'buildmap.sqlite'
     $denied = Invoke-ClaudeHookGate 'pre-tool-use' $tree @{ tool_name = 'Grep'; tool_input = @{ pattern = 'OrderService' } } 'deny'
     Assert-Equal $denied.Json.hookSpecificOutput.permissionDecision 'deny' 'STRUCTUREGATE_HOOK=deny'
 
     $prose = Invoke-ClaudeHookGate 'pre-tool-use' $tree @{ tool_name = 'Grep'; tool_input = @{ pattern = 'connection refused' } }
     Assert-Equal $prose.Text '' 'prose is grep''s'
 
-    $bare = Use-Tree @{ 'app.py' = "X = 1`n" }
+    # ...and a .sqlite that is not a map is no map.
+    $bare = Use-Tree @{ 'app.py' = "X = 1`n"; 'cache.sqlite' = 'not a map' }
     $none = Invoke-ClaudeHookGate 'pre-tool-use' $bare @{ tool_name = 'Grep'; tool_input = @{ pattern = 'OrderService' } }
     Assert-Equal $none.Exit 0 'exit'
     Assert-Equal $none.Text '' 'no map, nothing to point at'
+}
+
+# A MAP IS FOUND WHEREVER THE WIRING WROTE IT, and every map is named: a tree that runs `--map-sqlite data/build/...`
+# and keeps a second map elsewhere was silent, because only `buildmap.sqlite` was looked for.
+Test-Case 'claudehook: maps under any name and folder are found, the nearest named first' {
+    $tree = Use-Tree @{ 'app.py' = "X = 1`n" }
+    New-ClaudeHookMap $tree 'data/build/demo.sqlite'
+    New-ClaudeHookMap $tree 'web/.map/front.sqlite'
+    $start = Invoke-ClaudeHookGate 'session-start' $tree @{ hook_event_name = 'SessionStart' }
+    $note = $start.Json.hookSpecificOutput.additionalContext
+    if (-not $note.Contains('data/build/demo.sqlite') -or -not $note.Contains('web/.map/front.sqlite')) { throw "not both maps: $note" }
+    $grep = Invoke-ClaudeHookGate 'pre-tool-use' $tree @{ tool_name = 'Grep'; tool_input = @{ pattern = 'computeTotals' } }
+    if ($grep.Json.hookSpecificOutput.additionalContext -notlike '*--map-query data/build/demo.sqlite --find computeTotals*') { throw "no query on the found map: $($grep.Text)" }
 }
