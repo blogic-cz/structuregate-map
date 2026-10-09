@@ -121,4 +121,30 @@ Test-Case 'tsrows: a dimension no way permits anything for is in nothing, never 
     Assert-Line $r '"values": ["Blue"], "domain": 6}] | 0 -'
 }
 
+# A LITERAL `false` IS NO WAY IN. It names no member, so no `gate_values` row can say what it permits, and folded as
+# an ordinary gate the keys behind it - its own and a child component's - read as rendered for everyone. The ways
+# through it are dropped: no way left is `n_paths 0`, while a way past a real condition stays.
+Test-Case 'tsrows: a key behind a literal false renders on no way' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/off.component.html' = "<i *ngIf=`"false`">{{ 'dk.off' | money }}</i>`n" +
+            "<i *ngIf=`"shown`">{{ 'dk.on' | money }}</i>`n@if (false) { <b>{{ 'dk.block' | money }}</b> }`n" +
+            "<app-off-child *ngIf=`"false`"></app-off-child>`n"
+        'apps/shop/src/off-child.component.html' = "<i>{{ 'dk.child' | money }}</i>`n"
+        'apps/shop/src/off.component.ts' = "import { Component } from '@angular/core';`n" +
+            "@Component({ selector: 'app-off-child', templateUrl: './off-child.component.html', standalone: true })`n" +
+            "export class OffChildComponent {}`n" +
+            "@Component({ selector: 'app-off', templateUrl: './off.component.html', standalone: true, imports: [OffChildComponent] })`n" +
+            "export class OffComponent {`n  shown = true;`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},' +
+            '"dk":{"off":"a","on":"b","block":"c","child":"d"}}'
+    }
+    $made = New-TsRowsDb $tree
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT key || ' | ' || n_paths AS reach FROM key_reach WHERE key LIKE 'dk.%'"
+    Assert-Exit $r 0
+    Assert-Line $r 'dk.off | 0'
+    Assert-Line $r 'dk.block | 0'
+    Assert-Line $r 'dk.child | 0'
+    Assert-Line $r 'dk.on | 1'
+}
+
 }
