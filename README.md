@@ -46,6 +46,29 @@ too. Later releases are one command, for every connected repository at once:
 pwsh -NoProfile -File scripts/Update-Gate.ps1
 ```
 
+### For an AI agent wiring a repository
+
+Given only this page, an agent connects a repository like this:
+
+1. Install PowerShell 7 (`pwsh`) if the machine lacks it. Download the newest release archive for the
+   platform, unpack it, and run `scripts/Connect-Gate.ps1 -Path <repo> -DryRun`, then without `-DryRun`.
+2. **Several `.csproj` files** stop the script with AMBIGUOUS: pass `-Project <file>` to import into one of
+   them, or `-Entry hook` for a Claude Code Stop hook that touches no project file.
+3. **TypeScript with no `package.json` at the root** (the workspace sits in a subfolder) reports
+   `typescript: NO package.json here`: set `NODE_PATH` to that workspace's `node_modules`, in the hook
+   too, and connect again - otherwise every `.ts` file is `UNMAPPED`.
+4. **Red on arrival.** The size baseline freezes source files only. Two things it cannot freeze still fail:
+   - docs over the limit: documents have no baseline, by design. `-GateArgs '--doc-scope context'` limits
+     only what is loaded every session (`CLAUDE.md`, `AGENTS.md`, `.claude/`), or split the doc;
+   - `BROKEN` imports, from `--map-check`: fix them, or keep dead or vendored folders out of every check
+     with `--skip`. It REPLACES the default list, so restate it:
+     `--skip out,bin,obj,dist,node_modules,.git,.vs,.venv,__pycache__,<folder>`.
+     `--skip-file <glob>` is the gate only - the map keeps the file.
+
+   `-GateArgs` is written into the wiring on the FIRST connect only - an existing wiring file is never
+   rewritten, so after that the flags are edited in it (`$GateArgs` in the hook). Run the entry point once by hand (the hook is `buildtools/StructureGate.Hook.ps1`) and read its exit
+   code before calling the repository connected.
+
 ## Quick start
 
 ```bash
