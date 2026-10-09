@@ -192,15 +192,15 @@ Test-Case 'tsrows: an arrow-function property returns like a method and its call
             "<i *ngIf=`"!isEu(planID)`">not eu</i>`n" +
             "<u *ngIf=`"isMethod(planID)`">method</u>`n"
         'apps/shop/src/cedar.component.ts' = "import { Component } from '@angular/core';`n" +
-            "export enum redacted { UsA = 1, UsB = 2, EuA = 3, Other = 4 }`n" +
-            "export const isOther = (id: redacted) => id === redacted.Other;`n" +
+            "export enum PlanIDs { UsA = 1, UsB = 2, EuA = 3, Other = 4 }`n" +
+            "export const isOther = (id: PlanIDs) => id === PlanIDs.Other;`n" +
             "@Component({ selector: 'app-cedar', templateUrl: './cedar.component.html', standalone: true })`n" +
             "export class CedarComponent {`n" +
-            "  planID: redacted = redacted.UsA;`n" +
-            "  isUs = (planID: redacted) => [redacted.UsA, redacted.UsB].some((x) => x === planID);`n" +
-            "  isEu = (planID: redacted): boolean => {`n    return [redacted.EuA].includes(planID);`n  };`n" +
-            "  isMethod(planID: redacted) {`n" +
-            "    return [redacted.UsA, redacted.UsB].some((x) => x === planID);`n  }`n" +
+            "  planID: PlanIDs = PlanIDs.UsA;`n" +
+            "  isUs = (planID: PlanIDs) => [PlanIDs.UsA, PlanIDs.UsB].some((x) => x === planID);`n" +
+            "  isEu = (planID: PlanIDs): boolean => {`n    return [PlanIDs.EuA].includes(planID);`n  };`n" +
+            "  isMethod(planID: PlanIDs) {`n" +
+            "    return [PlanIDs.UsA, PlanIDs.UsB].some((x) => x === planID);`n  }`n" +
             "}`n"
     }
     $made = New-TsRowsDb $tree
@@ -209,16 +209,16 @@ Test-Case 'tsrows: an arrow-function property returns like a method and its call
         "json_array_length(m.params) AS ret FROM returns r JOIN members m ON m.id = r.member " +
         "WHERE m.name IN ('isUs', 'isEu', 'isMethod')")
     Assert-Exit $r 0
-    Assert-Line $r 'isUs | 1 | some | [{"$enum":"redacted.UsA","value":1},{"$enum":"redacted.UsB","value":2}] | 1'
-    Assert-Line $r 'isEu | 0 | includes | [{"$enum":"redacted.EuA","value":3}] | 1'
-    Assert-Line $r 'isMethod | 0 | some | [{"$enum":"redacted.UsA","value":1},{"$enum":"redacted.UsB","value":2}] | 1'
+    Assert-Line $r 'isUs | 1 | some | [{"$enum":"PlanIDs.UsA","value":1},{"$enum":"PlanIDs.UsB","value":2}] | 1'
+    Assert-Line $r 'isEu | 0 | includes | [{"$enum":"PlanIDs.EuA","value":3}] | 1'
+    Assert-Line $r 'isMethod | 0 | some | [{"$enum":"PlanIDs.UsA","value":1},{"$enum":"PlanIDs.UsB","value":2}] | 1'
     # ...a function-valued `const` with a concise body is the same shape, under its `functions` row.
     $fn = Invoke-TsRowsQ $made.Db ("SELECT f.name || ' returns ' || r.source AS ret FROM returns r " +
         "JOIN functions f ON f.id = r.member WHERE f.name = 'isOther'")
-    Assert-Line $fn 'isOther returns id === redacted.Other'
+    Assert-Line $fn 'isOther returns id === PlanIDs.Other'
     # ...and the call to it is the restriction its body proves, exactly as the method's is.
     $g = Invoke-TsRowsQ $made.Db ("SELECT g.source || ' => ' || v.dimension || ' ' || v.op || ' ' || " +
-        "v.values_json AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'redacted'")
+        "v.values_json AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'PlanIDs'")
     Assert-Line $g 'isUs(planID) => planID in ["UsA","UsB"]'
     Assert-Line $g '!isEu(planID) => planID not_in ["EuA"]'
     Assert-Line $g 'isMethod(planID) => planID in ["UsA","UsB"]'
