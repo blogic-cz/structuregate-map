@@ -3,8 +3,9 @@
 //!
 //! The factory is found by DECLARATION: the call's evaluated `$target` names a `const` (or a key of
 //! a `const` object) whose `$fn` arrow is a `functions` row of one enum-typed parameter. Its one
-//! return is `createSelector(..., (items) => items.some((i) => i.F === p))`, and only that projector
-//! proves anything: true means an item whose `F` is the member is in the store. So the row is a SET
+//! return is `createSelector(..., (items) => items.some((i) => i.F === p))` - or a projector handing
+//! `items.filter((i) => i.F === p)` to a helper that only tests that list with `some` - and only those
+//! prove anything: true means an item whose `F` is the member is in the store. So the row is a SET
 //! row, `in` the member, dimension `<factory>.<F>`.
 //!
 //! TRUE ONLY. `async` is null until the first emit, so `!(alpha$ | async)` holds before anything was
@@ -118,9 +119,9 @@ impl<'s> Decls<'s> {
     }
 }
 
-/// `items.some((i) => i.F === p)` over the projector's own `items`, as `F`.
-fn tested_field(n: &Value, param: &str, inner: &IndexSet<String>) -> Option<String> {
-    let (receiver, callback) = method_call(n, "some")?;
+/// `items.<method>((i) => i.F === p)` over the projector's own `items`, as `F`.
+fn tested_field(n: &Value, method: &str, param: &str, inner: &IndexSet<String>) -> Option<String> {
+    let (receiver, callback) = method_call(n, method)?;
     let test = only_return(callback)?;
     let bound = |v: &Value| local(v).is_some_and(|name| name != param && inner.contains(name));
     if !bound(receiver) {
@@ -132,6 +133,37 @@ fn tested_field(n: &Value, param: &str, inner: &IndexSet<String>) -> Option<Stri
     let (left, right) = (test.get("left")?, test.get("right")?);
     let field = if local(right) == Some(param) { left } else if local(left) == Some(param) { right } else { return None };
     (kind(field) == Some("Read") && bound(field.get("receiver")?)).then(|| text(field, "name").map(str::to_string))?
+}
+
+/// The one return of function `f`, its tree unwrapped.
+fn only_returned<'a>(f: &Row, decls: &'a Decls<'_>, returned: &IndexMap<String, Vec<String>>) -> Option<&'a Value> {
+    let Some([x]) = returned.get(&cell(f, "id")?).map(|r| r.as_slice()) else { return None };
+    Some(super::astreads::unwrap(decls.asts.get(x)?.get("ast")?))
+}
+
+/// What a projector's return proves, as the tested field: `items.some((i) => i.F === p)`, or
+/// `helper(items.filter((i) => i.F === p), ...)` where the helper's one return is `list.some(...)`
+/// (or `list?.some(...) ?? false`) over THAT parameter - true only when the filtered list is not empty.
+fn projected(n: &Value, param: &str, inner: &IndexSet<String>, decls: &Decls<'_>, returned: &IndexMap<String, Vec<String>>) -> Option<String> {
+    if let Some(field) = tested_field(n, "some", param, inner) {
+        return Some(field);
+    }
+    let callee = n.get("receiver").filter(|_| kind(n) == Some("Call"))?;
+    let helper = decls.factory(callee.get("target")?)?;
+    let args = n.get("args")?.as_array()?;
+    let mut found = args.iter().enumerate().filter_map(|(k, a)| Some((k, tested_field(a, "filter", param, inner)?)));
+    let (Some((k, field)), None) = (found.next(), found.next()) else { return None };
+    let params = helper.get("params")?.as_array()?;
+    let list = params.get(k).filter(|_| params.len() == args.len()).and_then(|p| text(p, "name"))?;
+    let mut ret = only_returned(helper, decls, returned)?;
+    if kind(ret) == Some("Binary") && text(ret, "op") == Some("??")
+        && ret.get("right").is_some_and(|r| kind(r) == Some("Literal") && r.get("v") == Some(&Value::Bool(false)))
+    {
+        ret = ret.get("left")?;
+    }
+    let (receiver, _) = method_call(ret, "some")?;
+    let shadowed = cell(helper, "id").and_then(|h| decls.inner.get(&h)).is_some_and(|names| names.contains(list));
+    (local(receiver) == Some(list) && !shadowed).then_some(field)
 }
 
 /// Property row id -> the SET row its observable proves when true.
@@ -179,14 +211,13 @@ impl Selectors {
         let (enum_id, false) = param_enum(p, idx)? else { return None };
         let param = text(p, "name")?;
         let inner = decls.inner.get(&id)?;
-        let Some([x]) = returned.get(&id).map(|r| r.as_slice()) else { return None };
-        let call = super::astreads::unwrap(decls.asts.get(x)?.get("ast")?);
+        let call = only_returned(f, decls, returned)?;
         let callee = call.get("receiver")?;
         if kind(call) != Some("Call") || text(callee, "name") != Some("createSelector") || inner.contains(param) {
             return None;
         }
         let projector = call.get("args")?.as_array()?.last()?;
-        Some((enum_id, tested_field(only_return(projector)?, param, inner)?))
+        Some((enum_id, projected(only_return(projector)?, param, inner, decls, returned)?))
     }
 
     /// The row an `X | async` proves, for a property read here; nothing when negated.
@@ -279,6 +310,33 @@ mod tests {
         let mut t = tables(same_tone(), "Alpha");
         t["members"][0]["value"]["$target"]["file"] = json!("/ws/app/my-store.ts");
         assert_eq!(selectors(t).restriction(&piped(), false), None, "only the ngrx store's select");
+    }
+
+    /// The projector hands `items.filter((i) => i.tone === tone)` to `anyOf(first, second)`, whose one
+    /// return is `<tested>?.some(...) ?? false`.
+    fn through_helper(tested: &str) -> Value {
+        let filtered = json!({"k": "Call", "receiver": {"k": "SafeRead", "name": "filter", "receiver": bare("items")},
+                              "args": [{"k": "Fn", "returns": [same_tone()]}]});
+        let call = json!({"k": "Call", "receiver": {"k": "Read", "name": "anyOf", "receiver": {"k": "Implicit"},
+                          "target": {"name": "anyOf", "file": "/ws/app/sel.ts", "line": 2}}, "args": [filtered, bare("other")]});
+        let mut t = tables(json!(null), "Alpha");
+        t["expressions"][1]["ast"]["args"][1]["returns"] = json!([call]);
+        let some = json!({"k": "Call", "receiver": {"k": "SafeRead", "name": "some", "receiver": bare(tested)},
+                          "args": [{"k": "Fn", "returns": [{"k": "Literal", "v": true}]}]});
+        t["functions"].as_array_mut().unwrap().push(json!({"id": "fn:h", "file": "f:1", "line": 2, "col": 6, "name": "anyOf",
+                                                           "params": [{"name": "first"}, {"name": "second"}]}));
+        t["returns"].as_array_mut().unwrap().push(json!({"member": "fn:h", "expression": "x:h"}));
+        t["expressions"].as_array_mut().unwrap().push(json!({"id": "x:h", "file": "f:1", "line": 2, "col": 30,
+            "ast": {"k": "Binary", "op": "??", "left": some, "right": {"k": "Literal", "v": false}}}));
+        t
+    }
+
+    #[test]
+    fn a_helper_testing_the_filtered_items_it_is_handed_proves_what_the_filter_does() {
+        let row = selectors(through_helper("first")).restriction(&piped(), false).expect("read");
+        assert_eq!(row["dim"], json!("hasTone.tone"));
+        // `some` over the OTHER parameter says nothing about the filtered list.
+        assert_eq!(selectors(through_helper("second")).restriction(&piped(), false), None);
     }
 
     #[test]

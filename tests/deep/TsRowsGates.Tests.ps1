@@ -254,7 +254,8 @@ Test-Case 'tsrows: a getter whose only true return sits under an enum test restr
 # AN OBSERVABLE OF A SELECTOR FACTORY handed one enum member: `*ngIf="alpha$ | async"` over
 # `alpha$ = this.store.select(hasItemOfTone(Tone.Alpha))`, the factory's projector testing its items for that member.
 # True means an item of that member is in the store - a SET row, the true side only: `async` is null before the first
-# emit, so a negated one proves nothing. A projector that tests anything else, and a property written again, stay unread.
+# emit, so a negated one proves nothing. A projector may hand `items.filter(...)` to a helper whose one return is
+# `list.some(...)`. A projector that tests anything else, and a property written again, stay unread.
 Test-Case 'tsrows: an async selector built for one enum member restricts the set it tests' {
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/moss.selectors.ts' = "import { createSelector } from '@ngrx/store';`n" +
@@ -262,19 +263,26 @@ Test-Case 'tsrows: an async selector built for one enum member restricts the set
             "const selectAll = (s: { items: { tone: Tone; on: boolean }[] }) => s.items;`n" +
             "export const hasItemOfTone = (tone: Tone) => createSelector(selectAll, (items) => items.some((i) => i.tone === tone));`n" +
             "export const anyItemOn = (tone: Tone) => createSelector(selectAll, (items) => items.some((i) => i.on));`n" +
+            "const anyOn = (list: { on: boolean }[] | undefined, strict: boolean) => list?.some((i) => i.on || !strict) ?? false;`n" +
+            "const noneIn = (list: { on: boolean }[] | undefined) => !list?.length;`n" +
+            "export const hasOnOfTone = (tone: Tone) => createSelector(selectAll, (items) => anyOn(items?.filter((i) => i.tone === tone), true));`n" +
+            "export const noneOfTone = (tone: Tone) => createSelector(selectAll, (items) => noneIn(items.filter((i) => i.tone === tone)));`n" +
             "export const itemSelectors = {`n" +
             "  hasItem: (tone: Tone) => createSelector(selectAll, (items) => items.some((i) => i.tone === tone)),`n};`n"
         'apps/shop/src/moss.component.html' = "<b *ngIf=`"alpha$ | async`">a</b>`n<i *ngIf=`"beta$ | async`">b</i>`n" +
-            "<u *ngIf=`"!(alpha$ | async)`">c</u>`n<s *ngIf=`"on$ | async`">d</s>`n<q *ngIf=`"moved$ | async`">e</q>`n"
+            "<u *ngIf=`"!(alpha$ | async)`">c</u>`n<s *ngIf=`"on$ | async`">d</s>`n<q *ngIf=`"moved$ | async`">e</q>`n" +
+            "<em *ngIf=`"gamma$ | async`">f</em>`n<del *ngIf=`"none$ | async`">g</del>`n"
         'apps/shop/src/moss.component.ts' = "import { Component } from '@angular/core';`n" +
             "import { Store } from '@ngrx/store';`n" +
-            "import { Tone, hasItemOfTone, anyItemOn, itemSelectors } from './moss.selectors';`n" +
+            "import { Tone, hasItemOfTone, anyItemOn, itemSelectors, hasOnOfTone, noneOfTone } from './moss.selectors';`n" +
             "@Component({ selector: 'app-moss', templateUrl: './moss.component.html', standalone: true })`n" +
             "export class MossComponent {`n" +
             "  alpha$ = this.store.select(hasItemOfTone(Tone.Alpha));`n" +
             "  beta$ = this.store.select(itemSelectors.hasItem(Tone.Beta));`n" +
             "  on$ = this.store.select(anyItemOn(Tone.Gamma));`n" +
             "  moved$ = this.store.select(hasItemOfTone(Tone.Gamma));`n" +
+            "  gamma$ = this.store.select(hasOnOfTone(Tone.Gamma));`n" +
+            "  none$ = this.store.select(noneOfTone(Tone.Alpha));`n" +
             "  constructor(private store: Store<{ items: { tone: Tone; on: boolean }[] }>) {}`n" +
             "  move(): void {`n    this.moved$ = this.store.select(hasItemOfTone(Tone.Beta));`n  }`n" +
             "}`n"
@@ -287,6 +295,9 @@ Test-Case 'tsrows: an async selector built for one enum member restricts the set
     Assert-NoLine $g '!('
     Assert-NoLine $g 'on$'
     Assert-NoLine $g 'moved$'
+    # ...and a projector handing its filtered items to a helper that only tests them with `some`.
+    Assert-Line $g 'gamma$ | async => hasOnOfTone.tone in ["Gamma"]'
+    Assert-NoLine $g 'none$'
 }
 
 # A DIRECTIVE WHOSE CONSTANT ARRIVES FROM THE TEMPLATE: `*whenMode="Modes.A"`
