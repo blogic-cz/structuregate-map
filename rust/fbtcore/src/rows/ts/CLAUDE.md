@@ -89,7 +89,8 @@ requires and which enum members it still permits.
   only two `in`s, and `gate_features` reads nothing from an OR.
 - **A STRUCTURAL DIRECTIVE THE TEMPLATE HANDS A CONSTANT** (#9, `gate/ts/gate_directive_inputs.rs`):
   `*whenMode="Modes.A"` over an `@Input` (or a setter copying its one parameter into a field) compared with a
-  member of the same enum is a row on THAT member. The `op` is what every `createEmbeddedView` in the class
+  member of the same enum - or with a field declared a bare `number`/`string` the member can equal, an injected
+  config value - is a row on THAT member. The `op` is what every `createEmbeddedView` in the class
   chain requires - its branches, a one-level `return` before it, what every `this.` call into its method
   requires - so a render under the `else` of `===` is `not_in`. `unknown`: a field written by anything but
   the copy, a copy under an `if`, two comparisons, an unguarded render, a value that is not the enum's constant.

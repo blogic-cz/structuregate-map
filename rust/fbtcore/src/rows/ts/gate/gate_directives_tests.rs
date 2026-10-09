@@ -283,7 +283,7 @@ fn only_a_STRUCTURAL_gate_is_read_this_way() {
 
 #[test]
 fn a_target_with_a_row_but_no_FILE_resolves_to_nothing_because_the_guard_comes_first() {
-    let idx = MemberIdx { by_line_name: IndexMap::new(), name_of: IndexMap::new() };
+    let idx = MemberIdx { by_line_name: IndexMap::new(), name_of: IndexMap::new(), plain: IndexSet::new() };
     assert_eq!(member_at(&idx, Some(&json!({"name": "x", "row": "m:1"}))), None);
     assert_eq!(
         member_at(&idx, Some(&json!({"name": "x", "file": "a.ts", "row": "m:1"}))),

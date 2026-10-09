@@ -63,6 +63,8 @@ pub(super) struct Decl {
 pub(super) struct MemberIdx {
     pub(super) by_line_name: IndexMap<String, Vec<Decl>>,
     pub(super) name_of: IndexMap<String, String>,
+    /// Members declared a bare `number` or `string` - a value an enum's member can EQUAL, though no enum names it.
+    pub(super) plain: IndexSet<String>,
 }
 
 pub(super) fn member_index(store: &Store<'_>) -> MemberIdx {
@@ -73,7 +75,7 @@ pub(super) fn member_index(store: &Store<'_>) -> MemberIdx {
         }
     }
     let mut idx =
-        MemberIdx { by_line_name: IndexMap::new(), name_of: IndexMap::new() };
+        MemberIdx { by_line_name: IndexMap::new(), name_of: IndexMap::new(), plain: IndexSet::new() };
     for m in store.table("members").iter() {
         let line = m.get("line").map(|v| v.to_string()).unwrap_or_else(|| "null".into());
         let name = str_of(m.get("name")).unwrap_or_default();
@@ -86,6 +88,9 @@ pub(super) fn member_index(store: &Store<'_>) -> MemberIdx {
                 .entry(key)
                 .or_default()
                 .push(Decl { path: slash_str(path.as_deref()), id: id.clone() });
+            if matches!(str_of(m.get("type")).as_deref(), Some("number" | "string")) {
+                idx.plain.insert(id.clone());
+            }
             if let Some(n) = str_of(m.get("name")) {
                 idx.name_of.insert(id, n);
             }
@@ -156,6 +161,7 @@ pub(super) fn comparisons_in(
     cls: &Class,
     field: &str,
     enum_id: &str,
+    plain: bool,
 ) -> Vec<Comparison> {
     let mut out: Vec<Comparison> = Vec::new();
     let mut seen: IndexSet<String> = IndexSet::new();
@@ -191,7 +197,10 @@ pub(super) fn comparisons_in(
                 None => continue,
             };
             let Some(other) = sides[1 - at].clone() else { continue };
-            if other == field || mem.typed.get(&other).map(String::as_str) != Some(enum_id) {
+            // `plain`: the other side may be a bare number or string the enum's member can equal - an injected config
+            // value declared `number` - when the constant comes from the template, which names the enum itself.
+            let typed = mem.typed.get(&other).map(String::as_str) == Some(enum_id);
+            if other == field || !(typed || (plain && idx.plain.contains(&other))) {
                 continue;
             }
             let key = format!("{op}|{other}");

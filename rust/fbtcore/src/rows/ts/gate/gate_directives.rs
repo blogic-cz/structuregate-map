@@ -224,6 +224,7 @@ fn facts_for(ctx: &Ctx<'_>, chain: &[Class]) -> Vec<Facts> {
                 declaring,
                 &field,
                 &enum_id,
+                false,
             ),
             input_keys: input_keys_of(
                 &ctx.members_by_class,
