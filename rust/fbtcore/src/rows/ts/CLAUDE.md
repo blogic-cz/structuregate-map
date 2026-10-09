@@ -106,13 +106,17 @@ requires and which enum members it still permits.
   a `createEmbeddedView` in a callback renders for the method around it, and every other call must hand the
   same thing - a call from the class chain only: a same-named method of an unrelated class is not this one.
   `unknown`: not the enum's constants, empty, two tests of the field, that other input bound anywhere.
+- **AN ASYNC SELECTOR BUILT FOR ONE MEMBER** (`gate/ts/gate_selectors.rs`): `x$ | async` over a property initialised
+  once as the ngrx `store.select(F(E.M))`, where `F` (a `const` arrow or a key of a `const` object) has one
+  enum-typed parameter and returns `createSelector(..., (items) => items.some((i) => i.F === p))`, is a SET row
+  `F.F in [M]`, true side only: `async` is null before the first emit, so a negated one is no row.
 - **AN `@Input` FLAG IS WHAT ITS PARENT BINDS** (#11, `gate/ts/gate_input_flags.rs`), both ways, when EVERY
   element the child renders at binds it to one tree and the child never writes it; else unread.
 - **A KEY CHOSEN IN A CONDITIONAL ARM takes the arm** (#11): the extractor stamps `choices` on each statement
   row inside an arm; the i18n ref joins it through `i18n_refs.call` and `key_reach` folds it like a branch.
 
 **Not read yet**: a curried predicate (`const isPicked = isA([...])`), a set held in a local
-(`active?.some(...)`), a property written more than once.
+(`active?.some(...)`), a property written more than once, a projector handing its filtered items to a helper.
 
 ## Divergences, and the rule that made them
 

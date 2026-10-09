@@ -36,6 +36,8 @@ pub mod gate_lookups;
 pub mod gate_predicates;
 #[path = "gate/ts/gate_props.rs"]
 pub mod gate_props;
+#[path = "gate/ts/gate_selectors.rs"]
+pub mod gate_selectors;
 #[path = "gate/ts/gate_input_flags.rs"]
 pub mod gate_input_flags;
 #[path = "gate/gate_switch.rs"]
