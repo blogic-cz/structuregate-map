@@ -51,6 +51,8 @@ pub mod key_branches;
 pub mod key_built;
 #[path = "key/key_fields.rs"]
 pub mod key_fields;
+#[path = "key/key_dead.rs"]
+pub mod key_dead;
 #[path = "key/keyreach.rs"]
 pub mod keyreach;
 #[path = "key/key_literals.rs"]

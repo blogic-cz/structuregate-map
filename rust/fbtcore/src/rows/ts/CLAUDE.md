@@ -23,6 +23,9 @@ requires and which enum members it still permits.
 - **NO PATH CAP** (signed-off divergence #1). A per-component cap hid real paths on one tree and most of the
   map on another. `truncated` stays because a consumer filters on it, and is always 0. `always_*` are
   intersections and only shrink as paths are added; the cap only under-reported the maybe side.
+- **A WAY THROUGH A LITERAL `false` IS NO WAY** (`key/key_dead.rs`): an `*ngIf` or `@if` whose condition is the
+  literal names no member, so no `gate_values` row can carry it. `ways_of` drops every (ref, path) through one
+  before anything folds: no live way left is `n_paths 0` - the key renders for nobody - and its roots go too.
 - **THE CLOSURE TABLES DECLARE UNIQUE KEYS**, so a pass that files a row twice fails the insert instead of
   publishing a plausible duplicate.
 - **NO REGEX: the dead-key trace is character walks** (`sourcescan.rs`, `sourcetrace.rs`). It decides whether
