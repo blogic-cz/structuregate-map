@@ -81,7 +81,8 @@ Test-Case 'tsrows: a list a directive hands to a method that tests it in a callb
 
 # THE SAME DIRECTIVE WITH AN ALIASED SETTER: an aliased setter, a `level` that defaults to null, a guard
 # around the callback body, and the render reached through `this.show()` called INSIDE the `subscribe` -
-# the case above calls `createEmbeddedView` there directly.
+# the case above calls `createEmbeddedView` there directly. `ProfileComponent` has an `evaluate` of its OWN and
+# fills its second parameter: another class's method, so it must not keep the directive's `level` alive.
 Test-Case 'tsrows: a directive that renders through a method called in its callback restricts the items' {
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/api.ts' = "export enum Kind { Amber = 1, Coral = 2, Jade = 3, Other = 4, More = 5 }`n" +
@@ -114,6 +115,12 @@ Test-Case 'tsrows: a directive that renders through a method called in its callb
             "  protected hide(): void {`n    this.viewContainer.clear();`n  }`n" +
             "  protected show(): void {`n    this.viewContainer.createEmbeddedView(this.templateRef);`n  }`n" +
             "}`n"
+        'apps/shop/src/profile.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { Levels } from './api';`n" +
+            "@Component({ selector: 'app-profile', template: '<p>p</p>', standalone: true })`n" +
+            "export class ProfileComponent {`n  private seen = 0;`n" +
+            "  open(): void {`n    this.evaluate(1, Levels.B);`n  }`n" +
+            "  private evaluate(count: number, level: Levels | null = null): void {`n    this.seen = count + (level ?? 0);`n  }`n}`n"
         'apps/shop/src/promo.component.html' = "<b *whenKind=`"[types.Amber]`">{{ 'promo.amber' | money }}</b>`n" +
             "<i *whenKind=`"[types.Coral, types.Jade]`">coral</i>`n"
         'apps/shop/src/promo.component.ts' = "import { Component } from '@angular/core';`n" +

@@ -100,7 +100,8 @@ requires and which enum members it still permits.
   when tested for a class member. A `const` local is its initializer; an `||` side needing truthy a field no
   template can set is its other side. **A LIST THE SETTER HANDS ON** (#11) is the method parameter it lands in,
   a `createEmbeddedView` in a callback renders for the method around it, and every other call must hand the
-  same thing. `unknown`: not the enum's constants, empty, two tests of the field, that other input bound anywhere.
+  same thing - a call from the class chain only: a same-named method of an unrelated class is not this one.
+  `unknown`: not the enum's constants, empty, two tests of the field, that other input bound anywhere.
 - **AN `@Input` FLAG IS WHAT ITS PARENT BINDS** (#11, `gate/ts/gate_input_flags.rs`), both ways, when EVERY
   element the child renders at binds it to one tree and the child never writes it; else unread.
 - **A KEY CHOSEN IN A CONDITIONAL ARM takes the arm** (#11): the extractor stamps `choices` on each statement

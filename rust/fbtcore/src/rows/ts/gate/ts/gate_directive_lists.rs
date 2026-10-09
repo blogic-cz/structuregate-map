@@ -310,9 +310,11 @@ pub(super) fn scopes(store: &Store<'_>) -> (IndexMap<String, String>, IndexMap<S
     (parent, params)
 }
 
-/// (method, parameter) pairs NO LIVE CALL FILLS: every `this.M(...)` anywhere - a same-named method
-/// of another class only adds calls, so it can only keep a parameter alive - sits in a setter no
-/// template binds, omits the argument, or hands it a field that is never set.
+/// (method, parameter) pairs NO LIVE CALL FILLS: every `this.M(...)` that can reach the method - written in
+/// its own class, an ancestor, or a class inheriting it - sits in a setter no template binds, omits the
+/// argument, or hands it a field that is never set. A same-named method of an UNRELATED class is another
+/// method: counting its calls kept a dead parameter alive wherever two classes shared a method name. A call
+/// whose class is not known is counted.
 pub(super) fn dead_params(store: &Store<'_>, mx: &Mirror<'_>) -> IndexSet<(String, String)> {
     let members = store.table("members");
     let mut class_of: IndexMap<String, String> = IndexMap::new();
@@ -341,9 +343,15 @@ pub(super) fn dead_params(store: &Store<'_>, mx: &Mirror<'_>) -> IndexSet<(Strin
             by_callee.entry(callee).or_default().push(c);
         }
     }
+    let cidx = class_index(store);
+    let related = |a: &str, b: &str| {
+        a == b || chain_of(&cidx, a).iter().any(|c| c.id == b) || chain_of(&cidx, b).iter().any(|c| c.id == a)
+    };
     let mut out = IndexSet::new();
-    for (id, _, name) in &methods {
-        let calls = by_callee.get(&format!("this.{name}")).map(Vec::as_slice).unwrap_or(&[]);
+    for (id, cls, name) in &methods {
+        let calls: Vec<&Row> = by_callee.get(&format!("this.{name}")).into_iter().flatten().copied()
+            .filter(|c| owner(id_of(c, "member").unwrap_or_default()).is_none_or(|o| related(&o, cls)))
+            .collect();
         for (at, param) in mx.params.get(id).into_iter().flatten().enumerate() {
             let unfilled = |c: &&Row| {
                 let member = id_of(c, "member").unwrap_or_default();
