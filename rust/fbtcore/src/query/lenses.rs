@@ -74,7 +74,9 @@ pub(super) fn lens_schema(db: &Connection, out: &mut String, table: &str, limit:
 pub(super) fn lens_find(db: &Connection, out: &mut String, needle: &str, limit: usize, width: usize) -> Result<()> {
     let known = tables_of(db);
     let like = format!("%{needle}%");
-    let mut rows = Vec::new();
+    // AN ALIAS IS FOLLOWED TO THE DEF IT BINDS - see `bound::aliased` - and that def comes FIRST: appended after
+    // every call and import spelling the alias, it was the last of dozens of rows and read as not there.
+    let mut rows = super::bound::aliased(db, &like)?;
     for (table, column) in NAME_COLUMNS {
         if !known.iter().any(|k| k == table) {
             continue;
@@ -103,8 +105,6 @@ pub(super) fn lens_find(db: &Connection, out: &mut String, needle: &str, limit: 
         let (_, found) = query(db, &sql, &[table, &like])?;
         rows.extend(found);
     }
-    // AN ALIAS IS FOLLOWED TO THE DEF IT BINDS - see `bound::aliased`.
-    rows.extend(super::bound::aliased(db, &like)?);
     show(out, &rows, &named(&["table", "name", "file", "line"]), limit, width);
     Ok(())
 }

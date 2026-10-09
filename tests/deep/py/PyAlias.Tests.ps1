@@ -46,12 +46,16 @@ Test-Case 'pyalias: --find follows an import ALIAS, and a re-import of it, to th
     $db = New-PyAliasDb @{
         'sets_a.py' = "def both(a, b):$nl    return a | b$nl"
         'ids_b.py'  = "from sets_a import both as _both$nl"
-        'chain.py'  = "from ids_b import _both$nl"
+        'chain.py'  = "from ids_b import _both$nl" + "def run(x):$nl    return _both(x, x)$nl"
         'plain.py'  = "from sets_a import both$nl"
     }
     $r = Invoke-PyAliasQ $db --find _both
     [void](Get-PyAliasRow $r @('functions', 'both (as _both)', 'sets_a.py', '1'))
     [void](Get-PyAliasRow $r @('imports', '_both', 'ids_b.py'))
+    # ...FIRST, before every call and import spelling the alias: appended after them, it was the last of dozens of
+    # rows on a real tree and read as not there.
+    $first = @($r.Lines | Where-Object { $_ -and -not $_.StartsWith('table') -and -not $_.StartsWith('---') })[0]
+    if (-not $first.Contains('both (as _both)')) { throw "the def is not the first row:`n$($r.Text)" }
     # An import under the def's OWN name adds no def row of its own: `--find both` finds the def by name.
     $plain = Invoke-PyAliasQ $db --find both
     if ($plain.Text.Contains('(as both)')) { throw "an import under the def's own name was followed:`n$($plain.Text)" }
