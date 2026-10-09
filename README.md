@@ -69,6 +69,19 @@ Given only this page, an agent connects a repository like this:
    rewritten, so after that the flags are edited in it (`$GateArgs` in the hook). Run the entry point once by hand (the hook is `buildtools/StructureGate.Hook.ps1`) and read its exit
    code before calling the repository connected.
 
+### The Claude Code plugin
+
+This repository is also a plugin, and its own marketplace. It carries the map skills and agents, and two hooks
+that make a session in a connected repository use the map: a note at session start that the map exists and how to
+ask it, and - on a `Grep` or `grep`/`rg` for a word spelled like a code symbol - the `--map-query` that answers it.
+The search still runs; set `STRUCTUREGATE_HOOK=deny` to refuse it instead. `Connect-Gate.ps1` enables the plugin
+in the repository's `.claude/settings.json`, so everyone who opens it is offered it. By hand:
+
+```
+/plugin marketplace add blogic-cz/structuregate-map
+/plugin install structuregate@structuregate
+```
+
 ## Quick start
 
 ```bash

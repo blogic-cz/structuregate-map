@@ -25,6 +25,8 @@ Set-StrictMode -Version 2.0
 . (Join-Path $PSScriptRoot 'GateTemplates.ps1')
 # What differs per OS - the exe's name, its runtime, the shell, the hard-link and folder-link checks.
 . (Join-Path $PSScriptRoot 'GatePlatform.ps1')
+# What the wiring writes into a consumer's `.claude/settings.json` - the Stop hook and the plugin.
+. (Join-Path $PSScriptRoot 'GateSettings.ps1')
 
 # The directory names the gate itself never walks (rust/fbtcore/src/cli/options.rs). A tree is scanned for its extensions
 # with the SAME blindness, or `node_modules` decides what languages a repo is written in.
@@ -301,40 +303,6 @@ function Invoke-Npm([string]$Path, [object[]]$NpmArgs) {
         $out = & npm @NpmArgs 2>&1
         if ($LASTEXITCODE -ne 0) { throw "npm $($NpmArgs -join ' ') failed in ${Path}:`n$out" }
     } finally { Pop-Location }
-}
-
-<#
-    STOP HOOK. For a tree with no build step, which is where a rule is otherwise only enforced when somebody
-    remembers to run it.
-
-    THE WRAPPER EXISTS FOR ONE REASON: EXIT 2. Claude Code treats exit 2 from a Stop hook as something to
-    fix and hands the output back; exit 1 only prints, and the turn ends anyway with the violation in the
-    tree. The gate exits 1, correctly, because from MSBuild that is a failed build. So the translation lives
-    here, next to the exe, and not in the exe.
-#>
-function Set-HookWiring([string]$Path, [string]$GateDir, [string]$GateArgs, [bool]$Deep) {
-    $wrapper = Join-Path $GateDir 'StructureGate.Hook.ps1'
-    $verb = 'present'
-    if (-not (Test-Path $wrapper)) {
-        [System.IO.File]::WriteAllText($wrapper, (Get-HookWrapperText $GateArgs $Deep))
-        $verb = 'added'
-    }
-    $settingsDir = Join-Path $Path '.claude'
-    if (-not (Test-Path $settingsDir)) { [void](New-Item -ItemType Directory -Path $settingsDir -Force) }
-    $settingsPath = Join-Path $settingsDir 'settings.json'
-    $settings = New-Object psobject
-    if (Test-Path $settingsPath) { $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json }
-    $command = $script:GateShell + ' -NoProfile -ExecutionPolicy Bypass -File "' + $wrapper + '"'
-    if ((ConvertTo-Json $settings -Depth 20).Contains('StructureGate.Hook.ps1')) { return $verb }
-    $entry = [pscustomobject]@{ matcher = ''
-                                hooks = @([pscustomobject]@{ type = 'command'; command = $command }) }
-    $hooks = $settings.PSObject.Properties | Where-Object { $_.Name -eq 'hooks' }
-    if (-not $hooks) { Add-Member -InputObject $settings -MemberType NoteProperty -Name 'hooks' -Value (New-Object psobject) }
-    $stop = $settings.hooks.PSObject.Properties | Where-Object { $_.Name -eq 'Stop' }
-    if ($stop) { $settings.hooks.Stop = @(@($stop.Value) + $entry) }
-    else { Add-Member -InputObject $settings.hooks -MemberType NoteProperty -Name 'Stop' -Value @($entry) }
-    [System.IO.File]::WriteAllText($settingsPath, (ConvertTo-Json $settings -Depth 20))
-    return 'added'
 }
 
 <#

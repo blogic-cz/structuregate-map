@@ -1,0 +1,7 @@
+{
+  "name": "structuregate",
+  "description": "Make a session in a structuregate-mapped repository ask the code map before grepping for a symbol: the map skills and agents, a session-start note on the map, and a nudge on every symbol search.",
+  "author": { "name": "blogic-cz" },
+  "homepage": "https://github.com/blogic-cz/structuregate-map",
+  "license": "MIT"
+}

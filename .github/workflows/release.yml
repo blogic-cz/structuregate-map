@@ -87,7 +87,7 @@ jobs:
           # The wiring (gate-connect runs it from here): Connect-Gate.ps1 and the helpers it dot-sources.
           for rid in win-x64 linux-x64; do
             mkdir -p "dist/structuregate-${rid}/scripts"
-            cp repo/scripts/Connect-Gate.ps1 repo/scripts/GateWiring.ps1 repo/scripts/GateTemplates.ps1                repo/scripts/GatePlatform.ps1 "dist/structuregate-${rid}/scripts/"
+            cp repo/scripts/Connect-Gate.ps1 repo/scripts/GateWiring.ps1 repo/scripts/GateTemplates.ps1                repo/scripts/GatePlatform.ps1 repo/scripts/GateSettings.ps1 "dist/structuregate-${rid}/scripts/"
           done
           cd dist
           (cd structuregate-win-x64 && zip -qr "../structuregate-${tag}-win-x64.zip" structuregate.exe StructureGate.targets skills agents scripts Update-Gate.ps1)

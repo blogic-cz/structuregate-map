@@ -217,6 +217,25 @@ Test-Case 'the Stop hook wrapper exits 0 on a clean tree' {
     Assert-Equal $hook.Exit 0 'the wrapper exit code on a clean tree'
 }
 
+# THE PLUGIN IS DECLARED BY THE TREE, so every teammate who opens it is offered the hooks that point a session at the
+# map - nobody has to know to install it. A plugin the tree already enables is kept, a second connect adds nothing,
+# and -SkipPlugin writes none.
+Test-Case 'connect enables the structuregate plugin beside what the tree already enables' {
+    $tree = Use-Tree @{ 'a.py' = "VALUE = 1"; '.claude/settings.json' = '{"enabledPlugins": {"other@team": true}}' }
+    $result = Invoke-Connect $tree @('-SkipMap', '-SkipSkill', '-SkipPrereq')
+    Assert-Line $result 'plugin structuregate in .claude/settings.json'
+    $settings = Get-Content (Join-Path $tree '.claude\settings.json') -Raw | ConvertFrom-Json
+    Assert-Equal $settings.enabledPlugins.'structuregate@structuregate' $true 'enabled'
+    Assert-Equal $settings.enabledPlugins.'other@team' $true 'the tree''s own plugin is kept'
+    Assert-Equal $settings.extraKnownMarketplaces.structuregate.source.repo 'blogic-cz/structuregate-map' 'marketplace'
+    $again = Invoke-Connect $tree @('-SkipMap', '-SkipSkill', '-SkipPrereq')
+    Assert-Line $again '[present]  plugin structuregate'
+    $skipped = Use-Tree @{ 'a.py' = "VALUE = 1" }
+    [void](Invoke-Connect $skipped @('-SkipMap', '-SkipSkill', '-SkipPrereq', '-SkipPlugin'))
+    $written = Get-Content (Join-Path $skipped '.claude\settings.json') -Raw
+    if ($written.Contains('structuregate@structuregate')) { throw "-SkipPlugin still enabled it:`n$written" }
+}
+
 # GREEN ON ARRIVAL, AND A RATCHET AFTER. A file already over the limit is frozen by the first connect, so the
 # wrapper passes; growing it fails, and a second connect does not re-freeze the grown file.
 Test-Case 'a file over the limit at connect time is frozen, and may only shrink' {
@@ -315,7 +334,7 @@ Test-Case 'run from a release it registers in consumers.txt and links to that re
     Register-Tree $side
     $unpacked = Join-Path $side 'structuregate\release'
     [void](New-Item -ItemType Directory -Path (Join-Path $unpacked 'scripts') -Force)
-    foreach ($name in @('Connect-Gate.ps1', 'GateWiring.ps1', 'GateTemplates.ps1', 'GatePlatform.ps1')) {
+    foreach ($name in @('Connect-Gate.ps1', 'GateWiring.ps1', 'GateTemplates.ps1', 'GatePlatform.ps1', 'GateSettings.ps1')) {
         Copy-Item (Join-Path $script:Root "scripts\$name") (Join-Path $unpacked 'scripts') -Force
     }
     Copy-Item (Join-Path $script:Out "$script:ConnectRid/publish/$script:ConnectExe") $unpacked -Force

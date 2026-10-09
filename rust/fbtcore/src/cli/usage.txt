@@ -219,6 +219,11 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         batch with what the host spent in it, every C# project, the 1000 slowest
                         files. Needs --trace or STRUCTUREGATE_TRACE; STRUCTUREGATE_TRACE_DETAIL=1
                         asks for it without the flag.
+  --claude-hook <event> answer a Claude Code hook from its stdin, for the plugin's hooks/hooks.json:
+                        `session-start` notes the map in a tree that has buildmap.sqlite, and
+                        `pre-tool-use` adds the --map-query that answers a Grep or grep/rg for a
+                        word spelled like a code symbol - a nudge, never a permission decision
+                        (STRUCTUREGATE_HOOK=deny refuses the search instead). Silent with no map.
   --trace-report <file> READ A TRACE BACK: per tree, which stage every run's time went to (runs,
                         median, max, total), each span's (untraced) time - what none of its
                         children covers - the last run as a tree, and the slowest single files.

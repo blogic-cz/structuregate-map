@@ -47,6 +47,7 @@ param(
     [string]$TypeScriptSpec = 'typescript@^5',
     [switch]$SkipRegister,
     [switch]$SkipSkill,
+    [switch]$SkipPlugin,
     [switch]$SkipPrereq,
     [switch]$SkipMap,
     [switch]$DryRun
@@ -109,7 +110,7 @@ if ($DryRun) {
     Write-Host "    hard-link $script:GateExeName + StructureGate.targets into $gateFolder (release: $release)"
     Write-Host "    write the $($point.Kind) entry point"
     Write-Host '    probe node/python/powershell, install typescript if the .ts/.js half needs it'
-    Write-Host '    junction the skills, then build the first map and freeze its baseline'
+    Write-Host '    enable the structuregate plugin in .claude/settings.json, junction the skills, then build the first map and freeze its baseline'
     exit 0
 }
 
@@ -147,6 +148,9 @@ if ($point.Kind -eq 'npm' -or $point.Kind -eq 'hook') { Write-Host "  [$(Add-Gat
 
 if ($SkipPrereq) { Write-Host '  [skipped]  host probe' }
 else { foreach ($note in Test-GatePrereq $tree $extensions $true $TypeScriptSpec) { Write-Host "  [host]     $note" } }
+
+if ($SkipPlugin) { Write-Host '  [skipped]  plugin' }
+else { Write-Host "  [$(Set-PluginWiring $tree)]  plugin structuregate in .claude/settings.json" }
 
 if ($SkipSkill) { Write-Host '  [skipped]  skills' }
 else { foreach ($note in New-GateSkillJunction $tree $SkillsRoot) { Write-Host "  [skill]    $note" } }
