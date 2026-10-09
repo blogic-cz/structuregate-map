@@ -76,7 +76,7 @@ buildtools/structuregate.exe --map-query buildmap.sqlite --tables
 |---|---|
 | what is in here, and from which tree | `--tables` |
 | what does a table record, and how filled | `--schema expressions` |
-| what is this thing CALLED that (an import alias also lists the def it binds: `both (as _both)`) | `--find STORE.get` |
+| what is this thing CALLED that (an import alias also lists the def it binds, FIRST: `both (as _both)`) | `--find STORE.get` |
 | what is this row, and what joins to it | `--id x:41` |
 | what does the map say about this file (a path is ROOT-RELATIVE) | `--file core/config.py` |
 | **what does the file actually SAY** | `--cat core/config.py --lines 40-60` |
