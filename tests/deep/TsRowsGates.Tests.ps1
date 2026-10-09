@@ -300,6 +300,51 @@ Test-Case 'tsrows: an async selector built for one enum member restricts the set
     Assert-NoLine $g 'none$'
 }
 
+# THE OTHER SIDE FROM INJECTED CONFIG: the directive compares its aliased `@Input` with a field initialised from
+# `inject(TOKEN)`, renders through `ngOnInit` -> a method -> a private render method, and the template hands the
+# constant in. `in` the member on `===`, `not_in` on `!==`, on the dimension the field's declaration names.
+Test-Case 'tsrows: a directive comparing its input with an injected config value restricts that value' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/tenant.ts' = "import { InjectionToken } from '@angular/core';`n" +
+            "export enum TenantIDs { Alpha = 1, Beta = 2, Gamma = 3 }`n" +
+            "export interface AppConfig { tenantID: number; }`n" +
+            "export const APP_CONFIG = new InjectionToken<AppConfig>('app.config');`n"
+        'apps/shop/src/for-tenant.directive.ts' = "import { Directive, Input, OnInit, TemplateRef, ViewContainerRef, inject } from '@angular/core';`n" +
+            "import { APP_CONFIG, AppConfig, TenantIDs } from './tenant';`n" +
+            "@Directive({ selector: '[forTenant]', standalone: true })`n" +
+            "export class ForTenantDirective implements OnInit {`n" +
+            "  private current = (inject(APP_CONFIG) as AppConfig).tenantID;`n" +
+            "  @Input('forTenant') tenantID!: TenantIDs;`n" +
+            "  constructor(private tpl: TemplateRef<any>, private vc: ViewContainerRef) {}`n" +
+            "  ngOnInit() {`n    this.check();`n  }`n" +
+            "  check() {`n    if (this.tenantID === this.current) {`n      this.render();`n    } else {`n      this.vc.clear();`n    }`n  }`n" +
+            "  private render(): void {`n    this.vc.createEmbeddedView(this.tpl);`n  }`n" +
+            "}`n" +
+            "@Directive({ selector: '[notForTenant]', standalone: true })`n" +
+            "export class NotForTenantDirective implements OnInit {`n" +
+            "  private current = (inject(APP_CONFIG) as AppConfig).tenantID;`n" +
+            "  @Input('notForTenant') tenantID!: TenantIDs;`n" +
+            "  constructor(private tpl: TemplateRef<any>, private vc: ViewContainerRef) {}`n" +
+            "  ngOnInit() {`n    if (this.tenantID !== this.current) {`n      this.vc.createEmbeddedView(this.tpl);`n    }`n  }`n" +
+            "}`n"
+        'apps/shop/src/tenant.component.html' = "<b *forTenant=`"ids.Alpha`">alpha</b>`n<i *notForTenant=`"ids.Beta`">not beta</i>`n"
+        'apps/shop/src/tenant.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { TenantIDs } from './tenant';`n" +
+            "import { ForTenantDirective, NotForTenantDirective } from './for-tenant.directive';`n" +
+            "@Component({ selector: 'app-tenant', templateUrl: './tenant.component.html', standalone: true, " +
+            "imports: [ForTenantDirective, NotForTenantDirective] })`n" +
+            "export class TenantComponent {`n  ids = TenantIDs;`n}`n"
+    }
+    $made = New-TsRowsDb $tree
+    $g = Invoke-TsRowsQ $made.Db ("SELECT g.name || ' | ' || coalesce(v.dimension, '-') || ' ' || coalesce(v.op, '-') || ' ' || " +
+        "coalesce(v.values_json, '-') AS restriction FROM gates g LEFT JOIN gate_values v ON v.gate = g.id " +
+        "WHERE g.name IN ('forTenant', 'notForTenant')")
+    Assert-Line $g 'forTenant | '
+    Assert-Line $g 'in ["Alpha"]'
+    Assert-Line $g 'notForTenant | '
+    Assert-Line $g 'not_in ["Beta"]'
+}
+
 # A DIRECTIVE WHOSE CONSTANT ARRIVES FROM THE TEMPLATE: `*whenMode="Modes.A"`
 # is a bare `Read`, and the class binds no constant - it compares the field its `@Input` filled against one of its
 # own. The polarity is what the RENDER requires: under the `===` here, under the `!==` there. A value that is not

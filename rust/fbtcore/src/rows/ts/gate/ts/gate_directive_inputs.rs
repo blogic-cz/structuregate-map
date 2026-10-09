@@ -396,7 +396,7 @@ pub(super) fn carried(cx: &Ctx<'_>, mx: &Mirror<'_>, chain: &[Class], gate: &str
         let Some(owner) = cx.class_of_member.get(&field) else { continue };
         let Some(declaring) = cx.cidx.by_id.get(owner) else { continue };
         let Some(en) = enum_id.as_deref() else { continue };
-        let comparisons = comparisons_in(&cx.expr_by_file, cx.mem, &cx.midx, declaring, &field, en);
+        let comparisons = comparisons_in(&cx.expr_by_file, cx.mem, &cx.midx, declaring, &field, en, true);
         if comparisons.is_empty() {
             continue;
         }
