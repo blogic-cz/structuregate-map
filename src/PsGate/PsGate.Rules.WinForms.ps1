@@ -9,29 +9,74 @@
     All three read the property assignments the single walk in PsGate.ps1 recorded, and all three FAIL the
     build. The flag is only decidable where it is a literal `$true` in the same file, so these rules are
     narrow by construction - a list configured somewhere else is invisible to them and stays that way.
-    Nothing here reaches across files to guess, and the one shape that is correct with the box on (the
-    helper that draws it) is looked for by name.
+    Nothing here reaches across files to guess. The one shape that is correct with the box on - a mouse
+    handler toggling the state image - is read off the tree; a helper named in $script:VirtualCheckHelpers
+    is still accepted by name.
 #>
 using namespace System.Management.Automation.Language
 
-# RULE 13 - `CheckBoxes = $true` on a list that is also `VirtualMode = $true`. A virtual list draws
-# NO check box: the property is accepted, the column is empty, and the user has nothing to click. The state
-# has to be drawn and tracked by hand, which is what the helper in $script:VirtualCheckHelpers does - so a
-# list that calls it is left alone.
+# RULE 13 - `CheckBoxes = $true` on a list that is also `VirtualMode = $true`. The box is drawn from the item
+# `RetrieveVirtualItem` returns, but a click on it raises no ItemCheck and toggles nothing: the user clicks and
+# the state stays. The toggle has to be done by hand - a mouse handler on the list that hit-tests the STATE
+# IMAGE, and that fix NEEDS `CheckBoxes = $true` - so a list that has one, or is handed to a function in this
+# file that attaches one, or calls a helper in $script:VirtualCheckHelpers, is left alone.
 function Test-VirtualCheckBoxes([string]$Rel, [hashtable]$Ix) {
+    $toggled = Get-StateImageOwners $Ix
     foreach ($owner in $Ix.TrueProps.psbase.Keys) {
         $props = $Ix.TrueProps[$owner]
         if (-not $props.ContainsKey('virtualmode')) { continue }
         if (-not $props.ContainsKey('checkboxes')) { continue }
-        if ($Ix.Helped[$owner]) { continue }
+        if ($Ix.Helped[$owner] -or $toggled.Contains($owner)) { continue }
 
         # Reported with the name AS WRITTEN, off the node: the index keys are lowercase so two spellings are
         # one list, and `$lvfiles` in a message about `$lvFiles` is a name the reader has to translate.
         $node = $props['checkboxes']
         Add-Finding -Rel $Rel -Node $node `
-            -What "sets CheckBoxes on `$$($node.Expression.VariablePath.UserPath), which is also VirtualMode - a virtual list draws no check box" `
-            -Remedy 'drop VirtualMode, or draw and track the check yourself (Enable-VirtualCheck) - the column is empty as written'
+            -What "sets CheckBoxes on `$$($node.Expression.VariablePath.UserPath), which is also VirtualMode - a click on a virtual list's check box toggles nothing" `
+            -Remedy 'toggle it in a MouseDown handler on the list that hit-tests ListViewHitTestLocations.StateImage, or drop VirtualMode'
     }
+}
+
+# Every list variable (lowercase) a mouse handler hit-testing the STATE IMAGE is attached to: `$lv.Add_MouseDown({
+# ... [ListViewHitTestLocations]::StateImage ... })` directly, or inside a function of this file the list is handed
+# to - the handler is then on the function's parameter, and every variable a call passes it counts.
+function Get-StateImageOwners([hashtable]$Ix) {
+    $owners = [System.Collections.Generic.HashSet[string]]::new()
+    $functions = [System.Collections.Generic.HashSet[string]]::new()
+    foreach ($i in $Ix.Invoke) {
+        if ($i.Member -isnot [StringConstantExpressionAst]) { continue }
+        if (@('add_mousedown', 'add_mouseclick', 'add_mouseup') -notcontains $i.Member.Value.ToLowerInvariant()) { continue }
+        if ($i.Expression -isnot [VariableExpressionAst] -or -not $i.Arguments) { continue }
+        $hits = foreach ($a in $i.Arguments) { $a.FindAll({ param($x) Test-StateImage $x }, $true) }
+        if (-not $hits) { continue }
+        $name = $i.Expression.VariablePath.UserPath.ToLowerInvariant()
+        [void]$owners.Add($name)
+        for ($at = $i.Parent; $at; $at = $at.Parent) {
+            if ($at -isnot [FunctionDefinitionAst]) { continue }
+            $params = @($at.Parameters) + @(if ($at.Body.ParamBlock) { $at.Body.ParamBlock.Parameters })
+            if ($params | Where-Object { $_ -and $_.Name.VariablePath.UserPath.ToLowerInvariant() -eq $name }) {
+                [void]$functions.Add($at.Name.ToLowerInvariant())
+            }
+            break
+        }
+    }
+    foreach ($c in $Ix.Command) {
+        $called = Get-CommandName $c
+        if (-not $called -or -not $functions.Contains($called.ToLowerInvariant())) { continue }
+        foreach ($element in $c.CommandElements) {
+            if ($element -is [VariableExpressionAst]) { [void]$owners.Add($element.VariablePath.UserPath.ToLowerInvariant()) }
+        }
+    }
+    return , $owners
+}
+
+# `[System.Windows.Forms.ListViewHitTestLocations]::StateImage`, by the type's name and the member read off it.
+function Test-StateImage([Ast]$Node) {
+    if ($Node -isnot [MemberExpressionAst] -or -not $Node.Static) { return $false }
+    if ($Node.Member -isnot [StringConstantExpressionAst] -or $Node.Member.Value -ne 'StateImage') { return $false }
+    if ($Node.Expression -isnot [TypeExpressionAst]) { return $false }
+    $type = $Node.Expression.TypeName.Name
+    return $type -eq 'ListViewHitTestLocations' -or $type.EndsWith('.ListViewHitTestLocations')
 }
 
 # RULE 14 - `Add_ItemCheck` on a virtual list. The event is raised by the control's own check-box

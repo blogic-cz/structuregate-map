@@ -94,3 +94,35 @@ function New-CheckedList {
     Enable-VirtualCheck $lvChecked
     return $lvChecked
 }
+
+# check boxes on a virtual list, toggled by a mouse handler that hit-tests the state image - which needs them on
+function New-ToggledList {
+    $lvToggled = New-Object System.Windows.Forms.ListView
+    $lvToggled.VirtualMode = $true
+    $lvToggled.CheckBoxes = $true
+    $lvToggled.Add_MouseDown({
+        param($s, $e)
+        $hit = $s.HitTest($e.Location)
+        if ($hit.Location -ne [System.Windows.Forms.ListViewHitTestLocations]::StateImage) { return }
+        $s.RedrawItems($hit.Item.Index, $hit.Item.Index, $true)
+    })
+    return $lvToggled
+}
+
+# ...and the same handler attached by a function the list is handed to
+function Enable-StateToggle([System.Windows.Forms.ListView]$list, [scriptblock]$onToggle) {
+    $list.Add_MouseDown({
+        param($s, $e)
+        $hit = $s.HitTest($e.Location)
+        if ($hit.Location -ne [System.Windows.Forms.ListViewHitTestLocations]::StateImage) { return }
+        & $onToggle $hit.Item.Index
+    }.GetNewClosure())
+}
+
+function New-HandedList {
+    $lvHanded = New-Object System.Windows.Forms.ListView
+    $lvHanded.VirtualMode = $true
+    $lvHanded.CheckBoxes = $true
+    Enable-StateToggle $lvHanded { param($i) $script:rows[$i].Checked = -not $script:rows[$i].Checked }
+    return $lvHanded
+}

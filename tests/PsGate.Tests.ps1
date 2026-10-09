@@ -377,7 +377,7 @@ function New-Checked {
     }
     $result = Invoke-Gate --root $tree --ps-discipline
     Assert-Exit $result 1
-    Assert-Line $result 'a virtual list draws no check box'
+    Assert-Line $result "a click on a virtual list's check box toggles nothing"
     Assert-Line $result 'dead.ps1'
     Assert-NoLine $result 'drawn.ps1'
 }
