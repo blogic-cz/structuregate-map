@@ -74,7 +74,8 @@ requires and which enum members it still permits.
   `tpl:<tree>=<holes>` link. A hole `Enum[x]` is the member's NAME, one typed by an enum its VALUE; text no
   member spells is a way that cannot happen. A `const` local of the member resolves in a condition.
 - **A BARE BOOLEAN PROPERTY** in truth position is what defines it (`gate/ts/gate_props.rs`): a getter of one
-  unconditional return is its expression both ways; a property written once, under no branch and after no
+  unconditional return is its expression both ways, and one of `if (C) { return E; } return false;` (one return
+  under a top-level `then`, every other the literal `false`) is `C && E` both ways; a property written once, under no branch and after no
   `return`, in its own class's constructor or `ngOnInit` (not an `@Input`) is read both ways; written once
   anywhere else it proves only the true side; INITIALISED with a decision and never written it is that
   expression. A read compared by value (`v === V.First`) is never replaced.

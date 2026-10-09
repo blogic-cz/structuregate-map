@@ -5,6 +5,7 @@
 //! THREE DEFINITIONS ARE READ, AND THEY ARE NOT EQUALLY STRONG:
 //!   * a GETTER whose one return sits in no branch IS its expression, in both polarities —
 //!     `get isX() { return this.a === A; }` is false exactly when the comparison is;
+//!     one returning `E` under a top-level `if (C)` and the literal `false` everywhere else is `C && E`;
 //!   * a PROPERTY with exactly one plain `=` write, no truthy initializer and no two-way
 //!     binding is true only because that write ran with its expression true. So `isX`
 //!     proves the expression, and `!isX` proves nothing: the write may never have run. It
@@ -147,6 +148,12 @@ impl<'a> Props<'a> {
                 writes.entry(t).or_default().push(a);
             }
         }
+        // A TOP-LEVEL `then` a getter's return may sit under - see the getter arm below.
+        let all_branches = store.table("branches");
+        let guards: IndexMap<String, &Row> = all_branches.iter()
+            .filter(|b| cell(b, "sense").as_deref() == Some("then") && cell(b, "parent").is_none())
+            .filter_map(|b| cell(b, "id").map(|id| (id, b)))
+            .collect();
         let written_by_template = template_written(store);
         let mut lifecycle: IndexMap<String, String> = IndexMap::new();
         for m in store.table("members").iter() {
@@ -170,10 +177,23 @@ impl<'a> Props<'a> {
                 .is_some_and(|(c, n)| written_by_template.contains(&format!("{c} {n}")));
             match cell(m, "kind").as_deref() {
                 Some("getter") => {
-                    let Some([r]) = returns.get(&id).map(|v| v.as_slice()) else { continue };
-                    let plain = ["branch", "case"].iter().all(|f| cell(r, f).is_none());
-                    if let Some(ast) = tree(cell(r, "expression"), Some(id.clone())).filter(|_| plain) {
-                        out.insert(id, (ast, true));
+                    let rs = returns.get(&id).map(|v| v.as_slice()).unwrap_or_default();
+                    let plain = |r: &Row| ["branch", "case"].iter().all(|f| cell(r, f).is_none());
+                    if let [r] = rs {
+                        if let Some(ast) = tree(cell(r, "expression"), Some(id.clone())).filter(|_| plain(r)) {
+                            out.insert(id, (ast, true));
+                        }
+                        continue;
+                    }
+                    // `if (C) { return E; } return false;` IS `C && E`, both ways: one return under one
+                    // top-level `then`, and every other return the literal `false`.
+                    let (falses, kept): (Vec<&&Row>, Vec<&&Row>) =
+                        rs.iter().partition(|r| plain(r) && cell(r, "source").as_deref() == Some("false"));
+                    let (Some(_), [r]) = (falses.first(), kept.as_slice()) else { continue };
+                    let Some(b) = cell(r, "branch").and_then(|b| guards.get(&b)).filter(|_| cell(r, "case").is_none()) else { continue };
+                    let cond = tree(cell(b, "condition_expr"), Some(id.clone()));
+                    if let (Some(c), Some(e)) = (cond, tree(cell(r, "expression"), Some(id.clone()))) {
+                        out.insert(id, (json!({"k": "Binary", "op": "&&", "left": c, "right": e}), true));
                     }
                 }
                 Some("property") if !two_way && falsy(m.get("value")) => {
@@ -315,6 +335,30 @@ mod tests {
             "expressions": [{"id": "x:1", "ast": cmp()}],
         }));
         assert_eq!(p.expand(&read("isX", "m:g")), cmp());
+    }
+
+    /// `get isX() { if (C) { return E; } return false; }`, the branch's sense and parent as given.
+    fn guarded(branch: Value, last: &str) -> Value {
+        json!({
+            "members": [{"id": "m:g", "class": "c:1", "name": "isX", "kind": "getter"}],
+            "branches": [branch],
+            "returns": [{"member": "m:g", "expression": "x:e", "branch": "br:1", "line": 3},
+                        {"member": "m:g", "source": last, "line": 5}],
+            "expressions": [{"id": "x:c", "ast": cmp()}, {"id": "x:e", "ast": read("e", "m:e")}],
+        })
+    }
+
+    #[test]
+    fn a_getter_returning_under_one_if_and_false_after_it_is_the_if_and_the_return() {
+        let then = json!({"id": "br:1", "sense": "then", "condition_expr": "x:c"});
+        let both = json!({"k": "Binary", "op": "&&", "left": cmp(), "right": read("e", "m:e")});
+        assert_eq!(props(guarded(then.clone(), "false")).expand(&read("isX", "m:g")), both);
+        // Anything else after the `if` may be true, and an `else` or a nested `if` is another condition.
+        assert_eq!(props(guarded(then, "true")).expand(&read("isX", "m:g")), read("isX", "m:g"));
+        let other = json!({"id": "br:1", "sense": "else", "condition_expr": "x:c"});
+        assert_eq!(props(guarded(other, "false")).expand(&read("isX", "m:g")), read("isX", "m:g"));
+        let nested = json!({"id": "br:1", "sense": "then", "condition_expr": "x:c", "parent": "br:0"});
+        assert_eq!(props(guarded(nested, "false")).expand(&read("isX", "m:g")), read("isX", "m:g"));
     }
 
     #[test]
