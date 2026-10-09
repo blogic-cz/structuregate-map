@@ -17,7 +17,7 @@ function Get-NpmLauncherText([string]$GateRelative, [string]$GateArgs, [bool]$De
 // violation. `npm run check:structure` runs it alone; extra flags are passed through (`-- --worst`).
 //
 // The RULES are not here. They are counted by __GATE__/structuregate.exe, the shared NativeAOT gate built
-// from github.com/blogic-cz/structuregate-map2 and deployed into this tree, so every project that enforces the
+// from github.com/blogic-cz/structuregate-map and deployed into this tree, so every project that enforces the
 // same limits shares ONE implementation instead of a per-repo script that drifts.
 //
 // Connect-Gate.ps1 wrote this file. It is yours to edit; a re-connect leaves an existing one alone.
@@ -33,7 +33,7 @@ const ARGS = '__ARGS__'.split(' ').filter(Boolean);
 
 if (!existsSync(GATE)) {
   console.error(`FAIL: structure gate missing at ${GATE}\n`
-    + '  -> rebuild it from a clone of github.com/blogic-cz/structuregate-map2:\n'
+    + '  -> rebuild it from a clone of github.com/blogic-cz/structuregate-map:\n'
     + '     dotnet publish src/StructureGate.csproj -c Release -r win-x64 -p:PublishAot=true (linux-x64 off Windows)');
   process.exit(1);
 }
@@ -86,7 +86,7 @@ $tree = Split-Path $PSScriptRoot -Parent
 $GateArgs = @(__ARGS__)
 
 if (-not (Test-Path $gate)) {
-    Write-Host "structure gate missing at $gate - rebuild it from a clone of github.com/blogic-cz/structuregate-map2:"
+    Write-Host "structure gate missing at $gate - rebuild it from a clone of github.com/blogic-cz/structuregate-map:"
     Write-Host '  dotnet publish src\StructureGate.csproj -c Release -r win-x64 -p:PublishAot=true (linux-x64 off Windows)'
     exit 2
 }
