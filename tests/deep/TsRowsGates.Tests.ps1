@@ -224,6 +224,33 @@ Test-Case 'tsrows: an arrow-function property returns like a method and its call
     Assert-Line $g 'isMethod(productID) => productID in ["UsA","UsB"]'
 }
 
+# A GETTER RETURNING UNDER ONE `if` AND `false` AFTER IT is `C && E`: only one return was ever inlined, so the
+# enum test guarding the only true return was lost. A getter that can return anything else after the `if` stays
+# unread - its true side does not need `C`.
+Test-Case 'tsrows: a getter whose only true return sits under an enum test restricts by that test' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/fern.component.html' = "<b *ngIf=`"isAlphaRemote`">a</b>`n<i *ngIf=`"isAlphaOrAny`">b</i>`n"
+        'apps/shop/src/fern.component.ts' = "import { Component } from '@angular/core';`n" +
+            "export enum Tone { Alpha = 1, Beta = 2, Gamma = 3, Delta = 4 }`n" +
+            "@Component({ selector: 'app-fern', templateUrl: './fern.component.html', standalone: true })`n" +
+            "export class FernComponent {`n" +
+            "  result: { item: { tone: Tone } } | null = null;`n  mode = '';`n" +
+            "  get isAlphaRemote(): boolean {`n" +
+            "    if (this.result != null && this.result?.item.tone === Tone.Alpha) {`n" +
+            "      return this.mode !== 'LOCAL';`n    }`n    return false;`n  }`n" +
+            "  get isAlphaOrAny(): boolean {`n" +
+            "    if (this.result?.item.tone === Tone.Alpha) {`n      return this.mode !== 'LOCAL';`n    }`n" +
+            "    return true;`n  }`n" +
+            "}`n"
+    }
+    $made = New-TsRowsDb $tree
+    $g = Invoke-TsRowsQ $made.Db ("SELECT g.source || ' => ' || v.dimension || ' ' || v.op || ' ' || " +
+        "v.values_json AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'Tone'")
+    Assert-Line $g 'isAlphaRemote => '
+    Assert-Line $g ' in ["Alpha"]'
+    Assert-NoLine $g 'isAlphaOrAny'
+}
+
 # A DIRECTIVE WHOSE CONSTANT ARRIVES FROM THE TEMPLATE: `*whenMode="Modes.A"`
 # is a bare `Read`, and the class binds no constant - it compares the field its `@Input` filled against one of its
 # own. The polarity is what the RENDER requires: under the `===` here, under the `!==` there. A value that is not
