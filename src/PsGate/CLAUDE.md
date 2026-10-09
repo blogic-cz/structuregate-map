@@ -44,7 +44,7 @@ than none.
 | 10 | no `param` used as a COMMAND | `param(...)` declares only as the FIRST statement; elsewhere it calls a command `param`, the block has NO parameters, and the parse is clean |
 | 11 | no member access stranded in ARGUMENT mode | `f $x {…} .GetNewClosure()` passes the bareword `.GetNewClosure` as an argument. Reported only after an EXPRESSION and for a PascalCase name, which leaves `.gitignore` and `.\src` alone |
 | 12 | no `Add-Type -MemberDefinition` at FILE scope | it COMPILES (csc, hundreds of ms) on every launch's startup path. Inside a function — or a scriptblock literal, which assigning does not run — it is paid on first use |
-| 13 | no `CheckBoxes = $true` on a `VirtualMode` list | a virtual list draws NO check box. A file calling the helper that draws it (`Enable-VirtualCheck`) is left alone |
+| 13 | no `CheckBoxes = $true` on a `VirtualMode` list | a click on a virtual list's box raises no ItemCheck and toggles nothing. A list with a mouse handler hit-testing `ListViewHitTestLocations.StateImage` - attached directly or by a function of the file it is handed to - or one passed to a helper in `$VirtualCheckHelpers` is left alone |
 | 14 | no `Add_ItemCheck` on a `VirtualMode` list | the event comes from check-box handling a virtual list does not have: dead code |
 | 15 | no `.Items` / `.CheckedItems` / `.CheckedIndices` on a `VirtualMode` list | the list holds no items: `.Items.Count` is 0 with rows on screen. Both LIE rather than throw |
 
