@@ -29,7 +29,7 @@ refuses one**: a pattern over source text is a second, worse parser that error-r
 
 ## Install
 
-Download the archive for your platform from [Releases](https://github.com/blogic-cz/structuregate-map2/releases)
+Download the archive for your platform from [Releases](https://github.com/blogic-cz/structuregate-map/releases)
 (`win-x64` zip or `linux-x64` tar.gz), unpack it, and wire a repository in one command:
 
 ```powershell

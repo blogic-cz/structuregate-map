@@ -35,7 +35,7 @@ from pathlib import Path
 
 from issue_files import FileStore, gh as _gh, resolve
 
-DEFAULT_REPO = "blogic-cz/structuregate-map2"
+DEFAULT_REPO = "blogic-cz/structuregate-map"
 DEFAULT_TAGS = ("map-gap", "tool-gap")
 DEFAULT_LABEL = "map-finding"
 DEFAULT_FILES_BRANCH = "findings-files"

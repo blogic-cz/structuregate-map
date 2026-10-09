@@ -1,6 +1,6 @@
 ---
 name: map-findings-issues
-description: File a project's source-map findings (what structuregate-map's Angular, python, C# or SQL map gets wrong or leaves out, tagged map-gap / tool-gap) as PUBLIC GitHub issues on the tool's repo, blogic-cz/structuregate-map2 by default - only a generic `public` title and body each finding carries, never the consumer's names, paths, ids, values or code. Edits an issue when its public text changes and closes it when the finding is resolved. Also files findings about a library a consumer depends on via --repo/--tags/--label. Use when the user says "push the findings to GitHub", "file the map gaps as issues", "report this map gap to structuregate", "sync findings with issues", "update the issue", or after recording a new map-gap finding that the map's owner should fix.
+description: File a project's source-map findings (what structuregate-map's Angular, python, C# or SQL map gets wrong or leaves out, tagged map-gap / tool-gap) as PUBLIC GitHub issues on the tool's repo, blogic-cz/structuregate-map by default - only a generic `public` title and body each finding carries, never the consumer's names, paths, ids, values or code. Edits an issue when its public text changes and closes it when the finding is resolved. Also files findings about a library a consumer depends on via --repo/--tags/--label. Use when the user says "push the findings to GitHub", "file the map gaps as issues", "report this map gap to structuregate", "sync findings with issues", "update the issue", or after recording a new map-gap finding that the map's owner should fix.
 ---
 
 # Map findings -> public GitHub issues
@@ -44,7 +44,7 @@ containing any of them, case-insensitively, is `REFUSE`d. Keep the list in the c
 
 | flag | default | meaning |
 | --- | --- | --- |
-| `--repo` | `blogic-cz/structuregate-map2` | the repo that owns the map |
+| `--repo` | `blogic-cz/structuregate-map` | the repo that owns the map |
 | `--tags` | `map-gap,tool-gap` | a finding carrying any of them is considered |
 | `--account` | the active gh account | the gh account whose token runs `gh` |
 | `--deny` | `public-deny.txt` beside the findings | terms a public part may not contain |

@@ -44,7 +44,7 @@
 #>
 param(
     [string]$Tag = 'latest',
-    [string]$Repo = 'blogic-cz/structuregate-map2',
+    [string]$Repo = 'blogic-cz/structuregate-map',
     [string]$Account = '',
     [string]$Zip = '',
     [string]$Root = '',
