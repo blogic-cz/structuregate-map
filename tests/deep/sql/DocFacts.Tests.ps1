@@ -22,8 +22,8 @@ function Get-DocFactsTree {
         'Main/Scripts/Products.sql' = "INSERT INTO Sales.Products (ProductID, Name) VALUES (101, N'Basic'), (102, N'Plus')$nl" +
             "INSERT INTO Sales.Products (Name, ProductID) VALUES (N'Old', 103)$nl"
         'App/App.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
-        'App/Ids.cs' = "namespace Demo.Models { public enum SalesType { Retail = 1, Bulk = 2 } public enum ProductIDs { Basic = 101, Plus = 102 } }$nl"
-        'App/Copy.cs' = "namespace Demo.Copy { public enum ProductIDs { Basic = 101 } }$nl"
+        'App/Ids.cs' = "namespace Demo.Models { public enum SalesType { Retail = 1, Bulk = 2 } public enum PlanIDs { Basic = 101, Plus = 102 } }$nl"
+        'App/Copy.cs' = "namespace Demo.Copy { public enum PlanIDs { Basic = 101 } }$nl"
         # A HAND-WRITTEN TABLE AS IT IS FOUND: an empty GFM header, the column named in the first body row, the emphasis
         # escaped, and one list split over two tables under bold paragraphs.
         'docs/guide.md' = "# Integration$nl$nl## **Item codes**$nl$nl**Hardware line**$nl$nl" +
@@ -73,7 +73,7 @@ Test-Case 'docfacts: a seeded table is a typed view, and a type declared twice i
     $tree = Use-Tree (Get-DocFactsTree)
     Assert-Exit (Invoke-DocFactsMap $tree) 0
     Assert-DocFactsRow $tree "SELECT 'v=' || ProductID || '|' || Name FROM seed_Sales_Products" '103|Old' 'a column read by name, not by position'
-    Assert-DocFactsRow $tree "SELECT 'v=' || name || '|' || places || '|' || members_differ || '|' || detail FROM duplicate_types" 'ProductIDs|2|1|{Basic=101, Plus=102} at App/Ids.cs:1; {Basic=101} at App/Copy.cs:1' 'two copies that disagree'
+    Assert-DocFactsRow $tree "SELECT 'v=' || name || '|' || places || '|' || members_differ || '|' || detail FROM duplicate_types" 'PlanIDs|2|1|{Basic=101, Plus=102} at App/Ids.cs:1; {Basic=101} at App/Copy.cs:1' 'two copies that disagree'
 }
 
 Test-Case 'docfacts: a document that moved is checked again on a tree that did not' {

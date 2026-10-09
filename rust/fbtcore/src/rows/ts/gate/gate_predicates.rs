@@ -270,10 +270,10 @@ mod tests {
     fn idx() -> EnumIndex {
         let mut idx = EnumIndex::default();
         idx.by_id.insert("e:p".into(), EnumInfo {
-            name: Some("ProductIDs".into()),
+            name: Some("PlanIDs".into()),
             domain: ["Gamma", "Delta", "Omega"].iter().map(|s| s.to_string()).collect(),
         });
-        idx.by_decl.insert("ProductIDs".into(), vec![("app/products.ts".into(), "e:p".into())]);
+        idx.by_decl.insert("PlanIDs".into(), vec![("app/products.ts".into(), "e:p".into())]);
         idx
     }
 
@@ -381,9 +381,9 @@ mod tests {
         mem
     }
 
-    /// `ProductIDs.<name>`, read off the component's alias member.
+    /// `PlanIDs.<name>`, read off the component's alias member.
     fn constant(name: &str) -> Value {
-        json!({"k": "Read", "name": name, "receiver": {"k": "Read", "name": "ProductIDs",
+        json!({"k": "Read", "name": name, "receiver": {"k": "Read", "name": "PlanIDs",
                "receiver": {"k": "Implicit"}, "target": {"row": "m:alias"}}})
     }
 
@@ -435,11 +435,11 @@ mod tests {
 
     #[test]
     fn the_method_is_found_by_its_rows_and_only_with_one_unconditional_return() {
-        let element = json!({"name": "ProductIDs", "file": "/repo/app/products.ts"});
+        let element = json!({"name": "PlanIDs", "file": "/repo/app/products.ts"});
         let tables = |returns: Value| -> Map<String, Value> {
             json!({
                 "members": [{"id": "m:is", "name": "isItemActive", "kind": "method",
-                             "params": [{"name": "ids", "type": "ProductIDs[]",
+                             "params": [{"name": "ids", "type": "PlanIDs[]",
                                          "type_ref": {"name": "Array", "element": element}}]}],
                 "functions": [{"id": "fn:1", "parent": "m:is", "params": [{"name": "i"}]},
                               {"id": "fn:2", "parent": "m:is", "params": [{"name": "e"}]}],

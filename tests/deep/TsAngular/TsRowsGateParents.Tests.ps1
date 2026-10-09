@@ -143,7 +143,7 @@ Test-Case 'tsrows: a directive that renders through a method called in its callb
 # is the parent's `isBasic`. The case after it is the control: two parents that disagree, or leave it unbound.
 Test-Case 'tsrows: an input flag every parent binds alike restricts what the parent compares' {
     $tree = New-TsRowsWorkspace @{
-        'apps/shop/src/pro.ts' = "export enum ProductIDs { Basic = 1, ProSolo = 2, ProTeam = 3, Tablet = 4, Desk = 5, Laptop = 6 }`n"
+        'apps/shop/src/pro.ts' = "export enum PlanIDs { Basic = 1, ProSolo = 2, ProTeam = 3, Tablet = 4, Desk = 5, Laptop = 6 }`n"
         'apps/shop/src/pro-panel.component.html' = "<b *ngIf=`"isBasic || isProPlan`">{{ 'pro.both' | money }}</b>`n" +
             "<i *ngIf=`"!isProPlan`">not pro</i>`n<u *ngIf=`"isLoose`">loose</u>`n"
         'apps/shop/src/pro-panel.component.ts' = "import { Component, Input } from '@angular/core';`n" +
@@ -152,23 +152,23 @@ Test-Case 'tsrows: an input flag every parent binds alike restricts what the par
             "  @Input() isBasic = false;`n  @Input() isProPlan = false;`n  @Input() isLoose = false;`n}`n"
         'apps/shop/src/order-detail.component.html' = "<app-pro-panel [isProPlan]=`"isProPlan`" [isBasic]=`"isBasic`" [isLoose]=`"isBasic`"></app-pro-panel>`n"
         'apps/shop/src/order-detail.component.ts' = "import { Component, OnInit } from '@angular/core';`n" +
-            "import { ProductIDs } from './pro';`n" +
+            "import { PlanIDs } from './pro';`n" +
             "import { ProPanelComponent } from './pro-panel.component';`n" +
             "@Component({ selector: 'app-order-detail', templateUrl: './order-detail.component.html', standalone: true, imports: [ProPanelComponent] })`n" +
             "export class OrderDetailComponent implements OnInit {`n" +
-            "  productID: ProductIDs = ProductIDs.Basic;`n  isBasic = false;`n  isProPlan = false;`n" +
+            "  productID: PlanIDs = PlanIDs.Basic;`n  isBasic = false;`n  isProPlan = false;`n" +
             "  ngOnInit(): void {`n" +
-            "    this.isBasic = this.productID === ProductIDs.Basic;`n" +
-            "    this.isProPlan = this.productID === ProductIDs.ProSolo || this.productID === ProductIDs.ProTeam;`n" +
+            "    this.isBasic = this.productID === PlanIDs.Basic;`n" +
+            "    this.isProPlan = this.productID === PlanIDs.ProSolo || this.productID === PlanIDs.ProTeam;`n" +
             "  }`n}`n"
         'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},"pro":{"both":"a"}}'
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsGateParentsSql
     Assert-Exit $r 0
-    Assert-Line $r 'isBasic || isProPlan => ProductIDs productID in ["Basic","ProSolo","ProTeam"]'
-    Assert-Line $r '!isProPlan => ProductIDs productID not_in ["ProSolo","ProTeam"]'
-    Assert-Line $r 'isLoose => ProductIDs productID in ["Basic"]'
+    Assert-Line $r 'isBasic || isProPlan => PlanIDs productID in ["Basic","ProSolo","ProTeam"]'
+    Assert-Line $r '!isProPlan => PlanIDs productID not_in ["ProSolo","ProTeam"]'
+    Assert-Line $r 'isLoose => PlanIDs productID in ["Basic"]'
     $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || json_extract(v.value, '$.op') || ' ' || " +
         "json_extract(v.value, '$.values') AS reach FROM key_reach k, json_each(k.always_values) v WHERE k.key = 'pro.both'")
     Assert-Line $k 'pro.both | in ["Basic","ProSolo","ProTeam"]'
@@ -176,7 +176,7 @@ Test-Case 'tsrows: an input flag every parent binds alike restricts what the par
 
 Test-Case 'tsrows: an input flag two parents bind differently, or one leaves unbound, restricts nothing' {
     $tree = New-TsRowsWorkspace @{
-        'apps/shop/src/pro.ts' = "export enum ProductIDs { Basic = 1, ProSolo = 2, ProTeam = 3, Tablet = 4 }`n"
+        'apps/shop/src/pro.ts' = "export enum PlanIDs { Basic = 1, ProSolo = 2, ProTeam = 3, Tablet = 4 }`n"
         'apps/shop/src/pro-panel.component.html' = "<i *ngIf=`"!isProPlan`">not pro</i>`n<u *ngIf=`"isBasic`">basic</u>`n"
         'apps/shop/src/pro-panel.component.ts' = "import { Component, Input } from '@angular/core';`n" +
             "@Component({ selector: 'app-pro-panel', templateUrl: './pro-panel.component.html', standalone: true })`n" +
@@ -184,18 +184,18 @@ Test-Case 'tsrows: an input flag two parents bind differently, or one leaves unb
         'apps/shop/src/a.component.html' = "<app-pro-panel [isProPlan]=`"isProPlan`" [isBasic]=`"isBasic`"></app-pro-panel>`n"
         'apps/shop/src/b.component.html' = "<app-pro-panel [isProPlan]=`"isProPlan`"></app-pro-panel>`n"
         'apps/shop/src/a.component.ts' = "import { Component, OnInit } from '@angular/core';`n" +
-            "import { ProductIDs } from './pro';`n" +
+            "import { PlanIDs } from './pro';`n" +
             "import { ProPanelComponent } from './pro-panel.component';`n" +
             "@Component({ selector: 'app-a', templateUrl: './a.component.html', standalone: true, imports: [ProPanelComponent] })`n" +
-            "export class AComponent implements OnInit {`n  productID: ProductIDs = ProductIDs.Basic;`n  isBasic = false;`n  isProPlan = false;`n" +
-            "  ngOnInit(): void {`n    this.isBasic = this.productID === ProductIDs.Basic;`n" +
-            "    this.isProPlan = this.productID === ProductIDs.ProSolo;`n  }`n}`n"
+            "export class AComponent implements OnInit {`n  productID: PlanIDs = PlanIDs.Basic;`n  isBasic = false;`n  isProPlan = false;`n" +
+            "  ngOnInit(): void {`n    this.isBasic = this.productID === PlanIDs.Basic;`n" +
+            "    this.isProPlan = this.productID === PlanIDs.ProSolo;`n  }`n}`n"
         'apps/shop/src/b.component.ts' = "import { Component, OnInit } from '@angular/core';`n" +
-            "import { ProductIDs } from './pro';`n" +
+            "import { PlanIDs } from './pro';`n" +
             "import { ProPanelComponent } from './pro-panel.component';`n" +
             "@Component({ selector: 'app-b', templateUrl: './b.component.html', standalone: true, imports: [ProPanelComponent] })`n" +
-            "export class BComponent implements OnInit {`n  productID: ProductIDs = ProductIDs.Basic;`n  isProPlan = false;`n" +
-            "  ngOnInit(): void {`n    this.isProPlan = this.productID === ProductIDs.ProTeam;`n  }`n}`n"
+            "export class BComponent implements OnInit {`n  productID: PlanIDs = PlanIDs.Basic;`n  isProPlan = false;`n" +
+            "  ngOnInit(): void {`n    this.isProPlan = this.productID === PlanIDs.ProTeam;`n  }`n}`n"
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsGateParentsSql

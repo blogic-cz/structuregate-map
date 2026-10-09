@@ -30,7 +30,7 @@ part is, and a finding without one is skipped (`SKIP`):
 Write the public part as if for a stranger:
 
 - **A minimal synthetic repro** the owner can paste into a fixture: made-up names (`Demo.*`,
-  `OrderService`, `Alpha`/`Beta`/`Gamma`, `KindIDs`), a few lines, the expected and the actual rows.
+  `OrderService`, `Alpha`/`Beta`/`Gamma`, `HueIDs`), a few lines, the expected and the actual rows.
 - **Never** the consumer's project, product, client, company or people names, its paths, file names,
   row or gate ids, enum members, business values, translation keys, SQL objects, log lines, screenshots
   or pasted code - not even "as the consumer writes it". Restate the SHAPE, not the instance.

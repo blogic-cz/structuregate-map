@@ -2,7 +2,7 @@
 //! resolved into a restriction over that enum's FINITE domain.
 //!
 //! `gate_features` answers "which capability must be granted". This answers a different
-//! question with the same walk: `categoryID === categoryIDs.Alpha` does not require anything
+//! question with the same walk: `shadeID === shadeIDs.Alpha` does not require anything
 //! to be switched on, it says the Alpha category is the only one that reaches this. Several
 //! times more gates compare against a resolved enum constant than name a feature.
 //!
@@ -134,9 +134,9 @@ pub fn enum_of_type_ref(idx: &EnumIndex, name: &str, type_ref: Option<&Value>) -
 
 #[derive(Debug, Default)]
 pub struct MemberEnums {
-    /// `categoryIDs: typeof GroupIDs` — the thing a template reads constants off.
+    /// `shadeIDs: typeof ShadeIDs` — the thing a template reads constants off.
     pub alias: IndexMap<String, String>,
-    /// `categoryID: GroupIDs` — the discriminator being compared.
+    /// `shadeID: ShadeIDs` — the discriminator being compared.
     pub typed: IndexMap<String, String>,
 }
 
@@ -185,7 +185,7 @@ fn target_row(n: &Value) -> Option<String> {
     }
 }
 
-/// A Read off an ALIAS member is an enum CONSTANT: `categoryIDs.Alpha`.
+/// A Read off an ALIAS member is an enum CONSTANT: `shadeIDs.Alpha`.
 ///
 /// So is a TypeScript read the resolver tied to the enum it DECLARES a member of
 /// (`target.enum`, see `gate_lists::ts_rows`): `TierIDs.Small` has no alias member to go
@@ -408,7 +408,7 @@ mod tests {
         idx.by_id.insert(
             "e:1".to_string(),
             EnumInfo {
-                name: Some("GroupIDs".to_string()),
+                name: Some("ShadeIDs".to_string()),
                 domain: domain.iter().map(|s| s.to_string()).collect(),
             },
         );
@@ -428,15 +428,15 @@ mod tests {
         mem
     }
 
-    /// `categoryIDs.Alpha`
+    /// `shadeIDs.Alpha`
     fn constant(name: &str) -> Value {
         json!({"k": "Read", "name": name,
-               "receiver": {"k": "Read", "name": "categoryIDs", "target": {"row": "m:alias"}}})
+               "receiver": {"k": "Read", "name": "shadeIDs", "target": {"row": "m:alias"}}})
     }
 
-    /// `categoryID`, declared with an enum type
+    /// `shadeID`, declared with an enum type
     fn discriminator() -> Value {
-        json!({"k": "Read", "name": "categoryID", "target": {"row": "m:typed"}})
+        json!({"k": "Read", "name": "shadeID", "target": {"row": "m:typed"}})
     }
 
     fn binary(op: &str, left: Value, right: Value) -> Value {
@@ -449,7 +449,7 @@ mod tests {
         let r = restriction_of(&node, false, &mem_of(), &idx_of(FIVE)).expect("a restriction");
         assert_eq!(r["op"], json!("in"));
         assert_eq!(r["value"], json!("Alpha"));
-        assert_eq!(r["dim"], json!("categoryID"));
+        assert_eq!(r["dim"], json!("shadeID"));
     }
 
     #[test]

@@ -3,14 +3,14 @@
 //!
 //! THE FORM: a structural directive whose input is a CONFIG OBJECT, each member of which
 //! narrows one dimension —
-//! `<x *showConfig="{categoryID: Category.Software, allowedIds: [A, …, B]}">`. No
+//! `<x *showConfig="{shadeID: Category.Software, allowedIds: [A, …, B]}">`. No
 //! `Binary` reaches the comparison reader for any of it, so without this rule every gate
 //! of the mechanism produces NO value row, and silence there reads as
 //! "unrestricted".
 //!
 //! THE DECLARED TYPE CANNOT GIVE THE POLARITY, AND THE NAME MUST NOT BE ASKED. One config
-//! declares `allowIDs: KindIDs[]` AND `blockIDs:
-//! KindIDs[]` — same enum, opposite meaning, and one of them does not hide the
+//! declares `allowIDs: HueIDs[]` AND `blockIDs:
+//! HueIDs[]` — same enum, opposite meaning, and one of them does not hide the
 //! element at all, it disables it. Reading the first as a restriction because of what it
 //! is CALLED is the pattern-matching this tool exists to replace.
 //!
@@ -221,7 +221,7 @@ fn member_use(
                                 }
                             }
                             // A READ OFF A RECEIVER, never a bare identifier:
-                            // `input.categoryID` is the config member, while a local of the
+                            // `input.shadeID` is the config member, while a local of the
                             // same name is not the thing the occurrence supplies.
                             if is_read(n)
                                 && object.get("receiver").map(is_read).unwrap_or(false)

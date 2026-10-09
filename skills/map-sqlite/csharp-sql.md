@@ -133,7 +133,7 @@ is applied. Without the file a name links only where exactly one database has it
 ```sql
 -- who calls a C# method, by what it BINDS to
 SELECT f.path, c.line FROM calls c JOIN files f ON f.id = c.file
-WHERE f.lang = 'csharp' AND c.symbol = 'Demo.Core.Services.OrderExporter.MapStatus';
+WHERE f.lang = 'csharp' AND c.symbol = 'Demo.Core.Services.OrderExporter.StatusOf';
 
 -- how well C# is bound (a count to report)
 SELECT count(*) calls, round(100.0 * sum(c.symbol <> '') / count(*), 2) bound

@@ -39,7 +39,7 @@ function Get-SqlMapTree {
             "    public class MainContext { }$nl    public class Entity { public int AccountID { get; set; } }$nl" +
             "    public class Account : Entity { public string Name { get; set; } }$nl" +
             "    public class Order { public int OrderID { get; set; } public int AccountID { get; set; } }$nl" +
-            "    [UsesContext(typeof(MainContext))]$nl    public class AccountMapping$nl    {$nl" +
+            "    [UsesContext(typeof(MainContext))]$nl    public class LedgerMapping$nl    {$nl" +
             "        public void Configure(EntityTypeBuilder<Account> builder) { builder.ToTable(`"Accounts`", `"App`"); }$nl    }$nl" +
             "    public class OrderMapping$nl    {$nl" +
             "        public void Configure(EntityTypeBuilder<Order> builder) { builder.ToTable(`"Orders`", `"App`"); }$nl    }$nl" +

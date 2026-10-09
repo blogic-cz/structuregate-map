@@ -1,10 +1,10 @@
 //! WHAT A KEY BUILT FROM AN ENUM'S MEMBER NAME REQUIRES — the `tpl:` links `key_branches`
 //! puts on a key a template literal spells.
 //!
-//! `` `labels.colors.${KindIDs[this.tier.KindID]}.Value` `` is
+//! `` `labels.colors.${HueIDs[this.tier.HueID]}.Value` `` is
 //! `labels.colors.Delta.Value` exactly when the id IS `Delta`: the enum's reverse
 //! lookup turns the value into its member's name, and the name is the hole. So the link says
-//! `tier.KindID in [Delta]`, read like any comparison.
+//! `tier.HueID in [Delta]`, read like any comparison.
 //!
 //! THE LOOKUP IS FOUND BY ITS TREE, never by the hole's text: a `KeyedRead` whose receiver
 //! resolves to an enum declaration. A hole text that is no member of that enum is a way the

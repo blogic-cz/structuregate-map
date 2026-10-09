@@ -182,7 +182,7 @@ mod tests {
         idx.by_id.insert(
             "e:1".to_string(),
             EnumInfo {
-                name: Some("GroupIDs".to_string()),
+                name: Some("ShadeIDs".to_string()),
                 domain: domain.iter().map(|s| s.to_string()).collect(),
             },
         );
@@ -190,11 +190,11 @@ mod tests {
     }
 
     fn one(op: &str, value: &str) -> Value {
-        json!({"enum": "e:1", "dim": "categoryID", "row": null, "op": op, "value": value})
+        json!({"enum": "e:1", "dim": "shadeID", "row": null, "op": op, "value": value})
     }
 
     fn many(op: &str, values: &[&str]) -> Value {
-        json!({"enum": "e:1", "dim": "categoryID", "row": null, "op": op, "values": values})
+        json!({"enum": "e:1", "dim": "shadeID", "row": null, "op": op, "values": values})
     }
 
     /// What a predicate call proves: the members tested against a collection.
@@ -248,7 +248,7 @@ mod tests {
         // A gate that restricts a dimension in a way the map cannot read restricts it, and
         // reporting the half it could read would understate the condition.
         let out = collapsed(
-            &[one("in", "Alpha"), json!({"enum": "e:1", "dim": "categoryID", "row": null,
+            &[one("in", "Alpha"), json!({"enum": "e:1", "dim": "shadeID", "row": null,
                                        "op": "unknown"})],
             FIVE,
         );
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn a_disjunction_with_an_unknown_side_or_a_set_it_cannot_union_is_unknown() {
-        let unread = json!({"enum": "e:1", "dim": "categoryID", "row": null, "op": "unknown"});
+        let unread = json!({"enum": "e:1", "dim": "shadeID", "row": null, "op": "unknown"});
         let out = either(&[unread], &[one("in", "Alpha")], &idx_of(FIVE));
         assert_eq!(out[0]["op"], json!("unknown"));
         // Two sets' `in`s union; a `not_in` on a set is "none of these", and two of those are no one set.

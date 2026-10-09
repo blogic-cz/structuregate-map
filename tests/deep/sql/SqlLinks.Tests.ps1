@@ -20,7 +20,7 @@ function Get-SqlLinksTree {
             'CREATE TABLE Sales.Drafts (DraftID INT NOT NULL PRIMARY KEY, DateCreated DATETIME NOT NULL)',
             'GO', 'CREATE TABLE Sales.Notes (NoteID INT NOT NULL PRIMARY KEY, DateCreated DATETIME NOT NULL)',
             'GO', 'CREATE TABLE Inventory.StockData (SKU NVARCHAR(20) NOT NULL PRIMARY KEY)',
-            'GO', 'CREATE TABLE Sales.Products (ProductID INT NOT NULL PRIMARY KEY, ProductTypeID INT NOT NULL)',
+            'GO', 'CREATE TABLE Sales.Products (ProductID INT NOT NULL PRIMARY KEY, GradeID INT NOT NULL)',
             'GO', 'CREATE TABLE Sales.PriceRules (ID INT NOT NULL PRIMARY KEY)',
             'GO', 'CREATE TABLE Sales.PriceArchive (TierID INT NOT NULL PRIMARY KEY)',
             'GO', 'CREATE TABLE App.Countries (CountryID INT NOT NULL PRIMARY KEY, Code NVARCHAR(2) NOT NULL)',
@@ -71,7 +71,7 @@ namespace Demo
     using Dapper;
     public static class Names { public const string Qualified = "Sales.Products"; public const string Rules = "PriceRules"; public const string Log = "OrderLogs"; }
     public static class Schemas { public const string Sales = "Sales"; }
-    public class Product { public int ProductID { get; set; } public int ProductTypeID { get; set; } }
+    public class Product { public int ProductID { get; set; } public int GradeID { get; set; } }
     public class Repository
     {
         private IDisposable Open(string name) => null;
@@ -84,9 +84,9 @@ namespace Demo
         }
         public void StockData(string condition) { var c = Open("main"); c.Execute($"SELECT SKU FROM Inventory.StockData {condition}"); }
         public void Anything(string table) { var c = Open("main"); c.Execute($"SELECT * FROM [App].[{table}]"); }
-        public void Folded() { var c = Open("main"); c.Execute($"SELECT {nameof(Product.ProductID)}, {nameof(Product.ProductTypeID)} FROM {Names.Qualified}"); }
+        public void Folded() { var c = Open("main"); c.Execute($"SELECT {nameof(Product.ProductID)}, {nameof(Product.GradeID)} FROM {Names.Qualified}"); }
         public void SchemaAndTable() { var c = Open("main"); c.Execute($"SELECT ID FROM {Schemas.Sales}.{Names.Rules}"); }
-        public void Country(int code) { var c = Open("main"); c.Execute($"SELECT {nameof(Product.ProductID)} FROM App.Countries WHERE {nameof(Product.ProductTypeID)} = {code}"); }
+        public void Country(int code) { var c = Open("main"); c.Execute($"SELECT {nameof(Product.ProductID)} FROM App.Countries WHERE {nameof(Product.GradeID)} = {code}"); }
         public void Logs(string name) { var c = Open("main"); c.Execute($"SELECT ID FROM [App].{Names.Log} UNION ALL SELECT ID FROM [dbo].[{name}_Log]"); }
         public void ClearArchive() { var c = Open("main"); c.Execute(string.Format(@"DELETE FROM [Sales].[PriceArchive]")); }
         public void ByTier(int id) { var c = Open("main"); c.Execute(string.Format("SELECT TierID FROM Sales.PriceArchive WHERE TierID = {0}", id)); }
@@ -120,7 +120,7 @@ namespace Demo
     public class Account { public int AccountID { get; set; } }
     public class Option { public string Name { get; set; } }
     public class OptionMapping { public void Configure(EntityTypeBuilder<Option> builder) { builder.ToTable("Options", "App"); } }
-    public class AccountMapping
+    public class LedgerMapping
     {
         public void Configure(EntityTypeBuilder<Account> builder) { builder.ToTable("Accounts", "App"); builder.HasTrigger("Track_Accounts"); builder.HasTrigger("Track_Customers"); }
     }

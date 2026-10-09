@@ -9,7 +9,7 @@ fn idx_of(domain: &[&str]) -> EnumIndex {
     idx.by_id.insert(
         "e:1".to_string(),
         EnumInfo {
-            name: Some("GroupIDs".to_string()),
+            name: Some("ShadeIDs".to_string()),
             domain: domain.iter().map(|s| s.to_string()).collect(),
         },
     );
@@ -19,7 +19,7 @@ fn idx_of(domain: &[&str]) -> EnumIndex {
 const FOUR: &[&str] = &["A", "B", "C", "D"];
 
 fn gate(op: &str, values: &[&str]) -> Vec<Value> {
-    vec![json!({"enum": "e:1", "dim": "categoryID", "row": null,
+    vec![json!({"enum": "e:1", "dim": "shadeID", "row": null,
                 "op": op, "values": values})]
 }
 
@@ -38,7 +38,7 @@ fn way(gates: &[&str]) -> Way {
 fn two_gates_on_one_way_intersect_because_both_must_hold() {
     let gates = map(&[("g:1", gate("in", &["A", "B"])), ("g:2", gate("in", &["B", "C"]))]);
     let per = per_way_allowed(&[way(&["g:1", "g:2"])], &gates, &idx_of(FOUR));
-    assert_eq!(per[0]["e:1#categoryID"], way(&["B"]));
+    assert_eq!(per[0]["e:1#shadeID"], way(&["B"]));
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn a_way_that_permits_NOTHING_is_not_a_way_that_permits_everything() {
     // The second way intersects to nothing: A,B then C share no member.
     let ways = [way(&["g:1"]), way(&["g:x", "g:y"])];
     let per = per_way_allowed(&ways, &gates, &idx_of(FOUR));
-    assert!(per[1]["e:1#categoryID"].is_empty(), "the way permits nothing");
+    assert!(per[1]["e:1#shadeID"].is_empty(), "the way permits nothing");
     let out = fold_values(&ways, &gates, &idx_of(FOUR), None);
     assert_eq!(out[0]["values"], json!(["A"]), "the empty way adds nothing");
 }
@@ -131,7 +131,7 @@ fn a_dimension_first_restricted_on_a_later_way_still_sees_the_earlier_ones() {
 fn an_unknown_is_the_whole_domain_because_that_is_the_honest_upper_bound() {
     let gates = map(&[("g:u", gate("unknown", &[]))]);
     let per = per_way_allowed(&[way(&["g:u"])], &gates, &idx_of(FOUR));
-    assert_eq!(per[0]["e:1#categoryID"].len(), 4);
+    assert_eq!(per[0]["e:1#shadeID"].len(), 4);
     assert!(fold_values(&[way(&["g:u"])], &gates, &idx_of(FOUR), None).is_empty());
 }
 
@@ -147,7 +147,7 @@ fn a_dimension_narrowed_on_every_way_whose_union_is_everything_is_unreadable() {
     assert!(fold_values(&ways, &gates, &idx_of(FOUR), None).is_empty(), "union is the domain");
     let out = unreadable_values(&ways, &gates, &idx_of(FOUR), None);
     assert_eq!(out.len(), 1);
-    assert_eq!(out[0]["dimension"], json!("categoryID"));
+    assert_eq!(out[0]["dimension"], json!("shadeID"));
 }
 
 #[test]
@@ -240,7 +240,7 @@ fn a_nameless_declaration_sorts_under_None_and_not_under_the_empty_string() {
     idx.by_id.get_mut("e:1").unwrap().name = None;
     let out = fold_values(&[way(&["g:1"])], &map(&[("g:1", gate("in", &["A"]))]), &idx, None);
     assert_eq!(out[0]["enum_name"], Value::Null);
-    assert_eq!(sort_key("NonecategoryID"), sort_key(&format!("None{}", "categoryID")));
+    assert_eq!(sort_key("NoneshadeID"), sort_key(&format!("None{}", "shadeID")));
 }
 
 #[test]

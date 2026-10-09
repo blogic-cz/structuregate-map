@@ -105,7 +105,7 @@ Test-Case 'tsrows: the source of every text file is carried beside the rows' {
 
 # ---- the closure: the four tables derived from all the others --------------------------------------
 
-# WHICH CAPABILITY A GATE REQUIRES. The FeatureCode is in neither the gate nor the property it reads: the
+# WHICH CAPABILITY A GATE REQUIRES. The CapabilityKey is in neither the gate nor the property it reads: the
 # gate reads a property, the property is assigned from a call to a DECLARED feature check, and the code is
 # an argument of that call. Three rows have to be joined before the gate means anything.
 Test-Case 'tsrows: a gate reading a feature-assigned property resolves to the feature code' {

@@ -61,7 +61,7 @@ impl Tables {
 
     /// The row as the table holds it after the INSERT: an INSERT with no column list names the writable
     /// columns in order, and a column it leaves out gets the table's constant DEFAULT - a row whose script
-    /// never writes `IsArchived` holds its `DEFAULT 0`.
+    /// never writes `IsRetired` holds its `DEFAULT 0`.
     pub fn completed(&self, row: &Pending, schema: &str, name: &str) -> Pending {
         let known = self.columns.get(&self.find(&row.database, &format!("{schema}.{name}")));
         let known: &[Column] = known.map(Vec::as_slice).unwrap_or_default();
