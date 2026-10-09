@@ -334,6 +334,7 @@ pub fn gate_values_with(
     drop(stage);
     let stage = crate::trace::stage("gate_values: lists");
     let lists = super::gate_lists::lists(store, &idx);
+    let selectors = super::gate_selectors::Selectors::new(store, &idx);
     drop(stage);
     // A BARE BOOLEAN PROPERTY IS READ AS WHAT IT IS ASSIGNED, and a call to a function of one
     // return as that return - see `gate_props` - unless a reader above already reads the call.
@@ -346,6 +347,7 @@ pub fn gate_values_with(
         restriction_of(n, negated, &mem, &idx)
             .or_else(|| predicate_restriction(n, negated, &preds, &mem, &idx))
             .or_else(|| lists.restriction(n, negated, &mem, &idx))
+            .or_else(|| selectors.restriction(n, negated))
             .into_iter()
             .collect()
     };
