@@ -9,19 +9,27 @@
 //! tokens alone cannot tell it from a call at package level. A package-level `var x = f()` is therefore not a row.
 //!
 //! WHERE A CALL POINTS, as the file graph does (`mod.rs`): a plain `Name(...)` is a top-level func of its own FOLDER
-//! (a Go package), `alias.Name(...)` one of the folder the import names through `go.mod`, and anything else - a method
-//! on a value, `x.y.Z` - needs the type checker and is left unbound (`target_path` and `target_name` are '').
+//! (a Go package), `alias.Name(...)` one of the folder the import names through `go.mod`, a method
+//! on a value, `x.M(`, is bound to the method `T.M` when the type of `x` is KNOWN (`types.rs`: the receiver, a parameter,
+//! a local from a call whose func declares its result, a composite literal, a typed `var`), and `x.y.Z` or a value of an
+//! unknown type needs the type checker and is left unbound (`target_path` and `target_name` are '').
 
-use super::{lines, modfile, receiver};
+use super::{lines, modfile, receiver, types};
 use gosyn::ast::{Declaration, Expression};
 use gosyn::token::{LitKind, Operator, Token};
 use gosyn::LexicalToken;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
-/// `(folder, name)` -> the file of that folder declaring the top-level func `name`. A name declared by several files
-/// (build-constraint variants) answers with the first by path, so a rerun binds alike.
-pub(crate) type Index = BTreeMap<(String, String), String>;
+/// What the folders declare. `funcs`: `(folder, name)` -> the file of that folder declaring the top-level func `name`,
+/// or the method `T.M` (a func name never holds a '.', so the keys do not meet). A name declared by several files
+/// (build-constraint variants) answers with the first by path, so a rerun binds alike. `results`: `(folder, F)` -> the
+/// type `T` of a top-level func whose single result is `T` or `*T`, a type of that same folder.
+#[derive(Default)]
+pub(crate) struct Index {
+    pub funcs: BTreeMap<(String, String), String>,
+    pub results: BTreeMap<(String, String), String>,
+}
 
 /// A constant's source text is cut here: a table literal is not a value worth a row of its own size.
 const MAX_VALUE: usize = 200;
@@ -76,14 +84,31 @@ pub(crate) fn folder_of(root: &Path, abs: &Path) -> String {
     dir.strip_prefix(root).unwrap_or(dir).to_string_lossy().replace('\\', "/").trim_matches('/').to_string()
 }
 
-/// The top-level funcs a file declares, for the index. `init` is never called by name, and a method is reached through
-/// a value.
-pub(crate) fn declared_funcs(text: &str) -> Vec<String> {
-    let Ok(file) = gosyn::parse_source(text.trim_start_matches('\u{feff}')) else { return Vec::new() };
-    file.decl.iter().filter_map(|d| match d {
-        Declaration::Function(f) if f.recv.is_none() && f.name.name != "init" && f.name.name != "_" => Some(f.name.name.clone()),
-        _ => None,
-    }).collect()
+/// The top-level funcs a file declares (`init` is never called by name) and its methods as `T.M`, for the index, and
+/// the result type of each top-level func that declares a single one.
+pub(crate) fn declared_funcs(text: &str) -> (Vec<String>, Vec<(String, String)>) {
+    let Ok(file) = gosyn::parse_source(text.trim_start_matches('\u{feff}')) else { return (Vec::new(), Vec::new()) };
+    let (mut funcs, mut results) = (Vec::new(), Vec::new());
+    for d in &file.decl {
+        let Declaration::Function(f) = d else { continue };
+        if f.name.name == "init" || f.name.name == "_" {
+            continue;
+        }
+        match &f.recv {
+            None => {
+                funcs.push(f.name.name.clone());
+                if let Some(typ) = types::result_of(f) {
+                    results.push((f.name.name.clone(), typ));
+                }
+            }
+            Some(recv) => {
+                if let Some(cls) = recv.list.first().and_then(|field| receiver(&field.typ)) {
+                    funcs.push(format!("{cls}.{}", f.name.name));
+                }
+            }
+        }
+    }
+    (funcs, results)
 }
 
 struct Span {
@@ -91,6 +116,7 @@ struct Span {
     close: usize,
     qual: String,
     cls: String,
+    typed: types::Typed,
 }
 
 pub(crate) fn rows_of(text: &str, root: &Path, abs: &Path, index: &Index) -> Result<Rows, (usize, String)> {
@@ -120,6 +146,7 @@ pub(crate) fn rows_of(text: &str, root: &Path, abs: &Path, index: &Index) -> Res
         }
     }
 
+    let own = folder_of(root, abs);
     let mut functions = Vec::new();
     let mut spans: Vec<Span> = Vec::new();
     let mut consts = Vec::new();
@@ -139,7 +166,8 @@ pub(crate) fn rows_of(text: &str, root: &Path, abs: &Path, index: &Index) -> Res
                 }
                 let (end_line, statements) = match &func.body {
                     Some(body) => {
-                        spans.push(Span { open: body.pos.0, close: body.pos.1, qual: qualname.clone(), cls: cls.clone() });
+                        let typed = types::typed_names(func, &tokens, body.pos, &own, &aliases, index);
+                        spans.push(Span { open: body.pos.0, close: body.pos.1, qual: qualname.clone(), cls: cls.clone(), typed });
                         (starts.line(body.pos.1), body.list.len())
                     }
                     None => (starts.line(func.name.pos), 0),
@@ -170,7 +198,6 @@ pub(crate) fn rows_of(text: &str, root: &Path, abs: &Path, index: &Index) -> Res
         Some(Token::Literal(LitKind::Ident, name)) => Some(name.as_str()),
         _ => None,
     };
-    let own = folder_of(root, abs);
     let mut calls = Vec::new();
     let mut literals = Vec::new();
     for at in 0..tokens.len() {
@@ -217,12 +244,20 @@ pub(crate) fn rows_of(text: &str, root: &Path, abs: &Path, index: &Index) -> Res
         }
         let Some(close) = close else { continue };
         let args = if close == at + 1 { 0 } else { commas + usize::from(!is_op(close - 1, Operator::Comma)) };
+        // `x.M(` with a typed x is a METHOD `T.M` of the type's folder, and a typed name wins over an import of the same
+        // name (a local shadows it); an interface has no method row, so it finds nothing.
+        let mut target = name.to_string();
         let bound = if member {
             None
         } else if parts.len() == 1 {
-            index.get(&(own.clone(), parts[0].to_string()))
+            index.funcs.get(&(own.clone(), parts[0].to_string()))
         } else if parts.len() == 2 {
-            aliases.get(parts[0]).and_then(|folder| index.get(&(folder.clone(), parts[1].to_string())))
+            if let Some((folder, typ)) = span.typed.get(parts[0]) {
+                target = format!("{typ}.{name}");
+                index.funcs.get(&(folder.clone(), target.clone()))
+            } else {
+                aliases.get(parts[0]).and_then(|folder| index.funcs.get(&(folder.clone(), parts[1].to_string())))
+            }
         } else {
             None
         };
@@ -231,7 +266,7 @@ pub(crate) fn rows_of(text: &str, root: &Path, abs: &Path, index: &Index) -> Res
             line: starts.line(tokens[head].start),
             callee: format!("{}{}", if member { "." } else { "" }, parts.join(".")),
             target_path: bound.cloned().unwrap_or_default(),
-            target_name: if bound.is_some() { name.to_string() } else { String::new() },
+            target_name: if bound.is_some() { target } else { String::new() },
             args,
             source: slice(tokens[head].start, tokens[close].end),
         });
@@ -316,8 +351,8 @@ mod tests {
 
     #[test]
     fn a_function_a_method_and_their_calls_are_rows_and_a_plain_name_binds_in_its_folder() {
-        let mut index = Index::new();
-        index.insert(("pkg".into(), "check".into()), "pkg/b.go".into());
+        let mut index = Index::default();
+        index.funcs.insert(("pkg".into(), "check".into()), "pkg/b.go".into());
         let found = rows("package pkg\n\ntype S struct{}\n\nfunc (s *S) Load(name string, rest ...int) error { return check(name) }\n\nfunc New() {}\n", &index);
         assert_eq!(found.package, "pkg");
         let load = &found.functions[0];
@@ -329,10 +364,19 @@ mod tests {
 
     #[test]
     fn a_constant_has_its_value_and_a_string_its_function() {
-        let found = rows("package pkg\n\nconst Limit = 3\n\nvar (\n\ta, b = 1, \"x\"\n\tsum = 1 +\n\t\t2\n)\n\nfunc f() string { return \"hi\" }\n", &Index::new());
+        let found = rows("package pkg\n\nconst Limit = 3\n\nvar (\n\ta, b = 1, \"x\"\n\tsum = 1 +\n\t\t2\n)\n\nfunc f() string { return \"hi\" }\n", &Index::default());
         let by: Vec<(&str, &str)> = found.consts.iter().map(|c| (c.name.as_str(), c.value.as_str())).collect();
         assert_eq!(by, vec![("Limit", "3"), ("a", "1"), ("b", "\"x\""), ("sum", "1 +\n\t\t2")]);
         let seen: Vec<(&str, &str)> = found.literals.iter().map(|l| (l.value.as_str(), l.func.as_str())).collect();
         assert_eq!(seen, vec![("x", ""), ("hi", "f")]);
+    }
+
+    #[test]
+    fn a_method_called_on_its_receiver_binds_to_the_method() {
+        let mut index = Index::default();
+        index.funcs.insert(("pkg".into(), "S.check".into()), "pkg/b.go".into());
+        let found = rows("package pkg\n\ntype S struct{}\n\nfunc (s *S) Load() { s.check() }\n", &index);
+        let call = &found.calls[0];
+        assert_eq!((call.callee.as_str(), call.target_path.as_str(), call.target_name.as_str()), ("s.check", "pkg/b.go", "S.check"));
     }
 }
