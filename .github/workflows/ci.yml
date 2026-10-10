@@ -15,6 +15,10 @@ on:
   workflow_dispatch:
   workflow_call:
 
+# Neither job writes: the token reads the checkout and nothing more.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
