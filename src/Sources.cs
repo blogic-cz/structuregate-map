@@ -12,9 +12,11 @@ public static class Sources
 {
     /// <summary>C# BY ROSLYN: a source line is a line a TOKEN sits on. Comments and whitespace are trivia,
     /// so this is exact where a scanner only approximates.</summary>
-    public static int CSharpLines(string text)
+    public static int CSharpLines(string text) => CSharpLines(CSharpSyntaxTree.ParseText(text));
+
+    /// <summary>The same count over a tree already parsed: the map reads the file's edges off the same tree.</summary>
+    public static int CSharpLines(SyntaxTree tree)
     {
-        var tree = CSharpSyntaxTree.ParseText(text);
         var lines = new HashSet<int>();
         foreach (var token in tree.GetRoot().DescendantTokens())
         {

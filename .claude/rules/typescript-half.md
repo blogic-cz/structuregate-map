@@ -86,6 +86,11 @@ by id STRING, so the gate reported thousands of changed rows with no fact differ
 nine prefixes are shared with the C# half (`f`, `c`, `x`, `fn`, `br`, `p`, `k`, `e`, `i`); the other halves
 stamp `lang`, never `half`, so the per-language tally in `_meta` says who is present.
 
+**IT PARSES IN FLIGHT** (`rust/fbtcore/src/mapper/deep/flight.rs`): node runs on a thread of its own while python,
+rust and C# store, and its rows are stored after theirs - so it NUMBERS IN A LANE, `LANE` above every counter it was
+handed (`floor` in `TsStore.mjs` for a prefix never recorded), and a lane the halves beside it crossed is parsed
+again in its turn. Not flown when ALONE (the ids must restart) or on a REBUILD; then it runs first, as before.
+
 **THE THREE OUTPUTS THAT ARE NOT TABLES ARE OPTIONS**, off by default because nothing in a build reads them:
 `--ts-html <dir>` (one JSON per template, every node carrying the rows' `n:` id), `--map-row-fts` (`row_fts` +
 `row_map`: which row anywhere mentions a word) and `--map-atlas <dir>` (`atlas.json` + `atlas.md`: projects,

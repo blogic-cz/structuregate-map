@@ -17,21 +17,21 @@ use crate::rows::calls;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-const LANGUAGE: &str = "typescript rows";
+pub(super) const LANGUAGE: &str = "typescript rows";
 /// What the `files` rows of this half are stamped with; `LANGUAGE` names the half in a report.
-const LANG: &str = "typescript";
+pub(super) const LANG: &str = "typescript";
 
 /// What the plan came to. `Absent` is a tree with no Angular workspace - a stop, and not this half's tree.
 #[derive(PartialEq)]
-enum Planned {
+pub(super) enum Planned {
     Full,
     Partial,
     Stop,
     Absent,
 }
 
-/// Runs the half. Returns true when the tree holds NO Angular workspace - the one outcome after which the
-/// plain TypeScript half answers for the tree instead.
+/// WHETHER THE HALF RUNS. A tree that holds NO Angular workspace is the one outcome after which the plain
+/// TypeScript half answers for the tree instead.
 ///
 /// NOT LAUNCHED AT ALL when `key` - the whole tree, the scripts, node, the borrowed compilers and the config -
 /// is the key recorded after its last clean run: node would hash the whole workspace only to say it has not
@@ -39,12 +39,15 @@ enum Planned {
 ///
 /// `key` is asked with the WORKSPACE folder (relative to the root) the last run reported, and keys by that
 /// folder alone; asked with none, by the whole tree. It is asked again after a run, with what that run reported.
-pub fn run(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: &dyn Fn(Option<&str>) -> Option<String>) -> bool {
+///
+/// Ok with whether the tree has no workspace, when the half is not launched; Err with the workspace the last run
+/// reported, when it has to be - beside the halves after it (`flight.rs`) or in its turn (`grounded`).
+pub(super) fn skipped(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: &dyn Fn(Option<&str>) -> Option<String>) -> Result<bool, Option<String>> {
     // NO WORKSPACE IS ANSWERED HERE, before the key - which asks node its version - and before node: every `.ts`
     // edit in a tree with no Angular in it started node twice to hear the same "not here" again.
     if !has_workspace(Path::new(root)) {
         into.notes.push(format!("the typescript half did not run: no Angular workspace (angular.json / nx.json / workspace.json) at or under {root}"));
-        return true;
+        return Ok(true);
     }
     // EVERY STEP OF THIS HALF IS A SPAN, as the C# half's are: over a minute of a full run was in none.
     let keying = crate::trace::stage("typescript: key the half");
@@ -59,25 +62,40 @@ pub fn run(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: &dyn Fn
     {
         into.notes.push("the typescript half had nothing to do: no file under its roots moved since its rows were written".into());
         into.notes.extend(kept["notes"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(String::from)));
-        return kept["absent"] == Value::Bool(true);
+        return Ok(kept["absent"] == Value::Bool(true));
     }
+    Err(fe_kept)
+}
+
+/// The half launched here and now, after whatever ran before it - and its key recorded after a clean run.
+pub(super) fn grounded(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: &dyn Fn(Option<&str>) -> Option<String>, fe_kept: Option<String>) -> bool {
     let (errors, notes) = (into.errors.len(), into.notes.len());
     let mut fe = None;
-    let absent = launched(into, deep, db, root, &mut fe);
-    // RECORDED ONLY AFTER A CLEAN RUN, so an error is said again next time. What is kept of the notes is the
-    // one that says there is no workspace - the rest describe the work, and a skipped run did none. A run that
-    // stored nothing (the plan found the tree unchanged) keeps the workspace it was told before.
+    let absent = launched(into, deep, db, root, &mut fe, &[false, true]);
+    let absence = absence(&into.notes[notes..]);
+    settle(db, key, absent, fe, fe_kept, into.errors.len() == errors, absence);
+    absent
+}
+
+/// What is kept of a run's notes with its key: the one that says there is no workspace - the rest describe the work,
+/// and a skipped run did none.
+pub(super) fn absence(notes: &[String]) -> Vec<String> {
+    notes.iter().filter(|n| n.starts_with("the typescript half did not run")).cloned().collect()
+}
+
+/// RECORDED ONLY AFTER A CLEAN RUN, so an error is said again next time. A run that stored nothing (the plan found the
+/// tree unchanged) keeps the workspace it was told before.
+pub(super) fn settle(db: &str, key: &dyn Fn(Option<&str>) -> Option<String>, absent: bool, fe: Option<String>, fe_kept: Option<String>,
+    clean: bool, absence: Vec<String>) {
     let fe = if absent { None } else { fe.or(fe_kept) };
     let keying = crate::trace::stage("typescript: key the half");
     let asked = key(fe.as_deref());
     drop(keying);
     if let Some(key) = asked
-        && into.errors.len() == errors
+        && clean
     {
-        let absence: Vec<&String> = into.notes[notes..].iter().filter(|n| n.starts_with("the typescript half did not run")).collect();
         super::payload::record(db, LANG, &json!({ "key": key, "absent": absent, "notes": absence, "fe": fe }).to_string());
     }
-    absent
 }
 
 /// WHETHER NODE WOULD FIND A WORKSPACE - `findWorkspaceRoot` in `TsProjects.mjs`, walked the same way: a marker at
@@ -107,59 +125,30 @@ pub(super) fn has_workspace(root: &Path) -> bool {
     marked(root) || walk(root, 3)
 }
 
-fn launched(into: &mut Collector, deep: &Deep, db: &str, root: &str, fe: &mut Option<String>) -> bool {
-    let parse = match deep.scripts.get("tsrows-node") {
-        Some(path) => path.clone(),
-        None => {
-            let why = deep.stage_errors.get("tsrows-node").map_or("not staged", String::as_str);
-            into.errors.push(format!("HALF      {LANGUAGE}: could not be staged ({why})"));
-            return false;
-        }
-    };
+/// State, then plan, parse and store - over `hops`: a run that stopped short of every hop and found it could not
+/// (`MAP-RETRY`, or a kept row that would point at nothing) wrote nothing, and is asked once more over every hop - see
+/// `rows/partial/reads.rs`. `[true]` is that second ask alone.
+pub(super) fn launched(into: &mut Collector, deep: &Deep, db: &str, root: &str, fe: &mut Option<String>, hops: &[bool]) -> bool {
+    let Some(parse) = staged(into, deep) else { return false };
     let handing = crate::trace::stage("typescript: read and hand over the state");
-    let state = match calls::ts_state(Path::new(db), LANG) {
-        // `--map-reread typescript`: node compares the setup it would write with the one recorded, and a setup that
-        // differs makes it read every file - so the recorded one is handed over as one no run ever wrote.
-        Ok(state) if deep.reread.iter().any(|h| h == "typescript") => {
-            into.notes.push("the typescript half re-reads every file: --map-reread typescript".into());
-            let mut held: Value = serde_json::from_str(&state).unwrap_or_default();
-            held["setup"] = Value::from("--map-reread");
-            held.to_string()
-        }
-        Ok(state) => state,
-        // A FAILURE HERE STOPS THE HALF: guessing an empty database would hand out ids already given away.
-        Err(error) => {
-            into.errors.push(format!("HALF      {LANGUAGE}: the database state could not be read — {error}"));
-            return false;
-        }
-    };
-    let work = crate::hosts::temp_dir().join(format!("structuregate-tsrows-{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&work);
-    let paths = Work {
-        state: work.join("state.json"),
-        rows: work.join("rows.json"),
-        plan: work.join("plan.json"),
-        carry: work.join("carry.json"),
-        lines: work.join("lines.json"),
-    };
-    let mut absent = false;
-    let written = std::fs::write(&paths.state, &state);
+    let Some(state) = state(into, deep, db) else { return false };
+    let work = Work::new();
+    let written = std::fs::write(&work.state, &state);
     drop(handing);
+    let mut absent = false;
     match written {
         Err(e) => into.errors.push(format!("HALF      {LANGUAGE}: the payload could not be written ({e})")),
         Ok(()) => {
-            // A RUN THAT STOPPED SHORT OF EVERY HOP AND FOUND IT COULD NOT (`MAP-RETRY`, or a kept row that would
-            // point at nothing) wrote nothing, and is asked once more over every hop - see `rows/partial/reads.rs`.
-            for every_hop in [false, true] {
+            for &every_hop in hops {
                 let mut carried = None;
-                let planned = plan(into, deep, &parse, root, db, &paths, every_hop, &mut carried);
+                let planned = plan(into, deep, &parse, root, db, &work, every_hop, &mut carried);
                 absent = planned == Planned::Absent;
                 if planned != Planned::Full && planned != Planned::Partial {
                     break;
                 }
-                let carry = (planned == Planned::Partial).then_some(&paths.carry);
-                let retry = match parse_tree(into, deep, &parse, root, db, &paths, carry, every_hop) {
-                    Parsed::Rows => store(into, db, root, &paths.rows, carried, fe),
+                let carry = (planned == Planned::Partial).then_some(&work.carry);
+                let retry = match parse_tree(into, deep, &parse, root, db, &work, carry, every_hop, &|| {}) {
+                    Parsed::Rows => store(into, db, root, &work.rows, carried, fe),
                     Parsed::Retry => true,
                     Parsed::Nothing => false,
                 };
@@ -169,16 +158,62 @@ fn launched(into: &mut Collector, deep: &Deep, db: &str, root: &str, fe: &mut Op
             }
         }
     }
-    let _ = std::fs::remove_dir_all(&work);
+    work.clean();
     absent
 }
 
-struct Work {
-    state: PathBuf,
-    rows: PathBuf,
+/// Where node's parse script was staged; None, said, when it was not.
+pub(super) fn staged(into: &mut Collector, deep: &Deep) -> Option<String> {
+    match deep.scripts.get("tsrows-node") {
+        Some(path) => Some(path.clone()),
+        None => {
+            let why = deep.stage_errors.get("tsrows-node").map_or("not staged", String::as_str);
+            into.errors.push(format!("HALF      {LANGUAGE}: could not be staged ({why})"));
+            None
+        }
+    }
+}
+
+/// WHAT NODE HAS TO KNOW BEFORE IT PARSES, read from the database; None, said, when it cannot be.
+pub(super) fn state(into: &mut Collector, deep: &Deep, db: &str) -> Option<String> {
+    match calls::ts_state(Path::new(db), LANG) {
+        // `--map-reread typescript`: node compares the setup it would write with the one recorded, and a setup that
+        // differs makes it read every file - so the recorded one is handed over as one no run ever wrote.
+        Ok(state) if deep.reread.iter().any(|h| h == "typescript") => {
+            into.notes.push("the typescript half re-reads every file: --map-reread typescript".into());
+            let mut held: Value = serde_json::from_str(&state).unwrap_or_default();
+            held["setup"] = Value::from("--map-reread");
+            Some(held.to_string())
+        }
+        Ok(state) => Some(state),
+        // A FAILURE HERE STOPS THE HALF: guessing an empty database would hand out ids already given away.
+        Err(error) => {
+            into.errors.push(format!("HALF      {LANGUAGE}: the database state could not be read — {error}"));
+            None
+        }
+    }
+}
+
+pub(super) struct Work {
+    dir: PathBuf,
+    pub(super) state: PathBuf,
+    pub(super) rows: PathBuf,
     plan: PathBuf,
-    carry: PathBuf,
+    pub(super) carry: PathBuf,
     lines: PathBuf,
+}
+
+impl Work {
+    pub(super) fn new() -> Work {
+        let dir = crate::hosts::temp_dir().join(format!("structuregate-tsrows-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        Work { state: dir.join("state.json"), rows: dir.join("rows.json"), plan: dir.join("plan.json"), carry: dir.join("carry.json"),
+            lines: dir.join("lines.json"), dir }
+    }
+
+    pub(super) fn clean(&self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
 }
 
 /// `{path: [sha, lines]}` of every file this half recorded with a line count.
@@ -224,7 +259,7 @@ fn shared(deep: &Deep, arguments: &mut Vec<String>) {
 /// FULL RUN, never a partial one: a fraction read because the answer was unavailable would be written over
 /// a whole map. How long the carry took goes to `carried`, for the note `store` writes.
 #[allow(clippy::too_many_arguments)]
-fn plan(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &str, work: &Work, every_hop: bool, carried: &mut Option<u64>) -> Planned {
+pub(super) fn plan(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &str, work: &Work, every_hop: bool, carried: &mut Option<u64>) -> Planned {
     let mut arguments = vec![parse.to_string(), "--root".into(), root.into(), "--rows".into(), text(&work.rows),
         "--state".into(), text(&work.state), "--plan".into(), text(&work.plan), "--db".into(), db.into()];
     if every_hop {
@@ -324,15 +359,16 @@ fn why(into: &mut Collector, why: &Value, reads: &str) {
 }
 
 /// What a parse run left: a payload to store, nothing, or a run that stopped short and has to be asked again.
-enum Parsed {
+pub(super) enum Parsed {
     Rows,
     Nothing,
     Retry,
 }
 
-/// node, with the workspace's own compiler.
+/// node, with the workspace's own compiler. `read` is told once the last read of the database is behind it, before node starts.
 #[allow(clippy::too_many_arguments)]
-fn parse_tree(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &str, work: &Work, carry: Option<&PathBuf>, every_hop: bool) -> Parsed {
+pub(super) fn parse_tree(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &str, work: &Work, carry: Option<&PathBuf>, every_hop: bool,
+    read: &dyn Fn()) -> Parsed {
     // `--db`: WHERE ITS OWN OUTPUT GOES, so a database inside the tree is not read as a file of it.
     let mut arguments = vec![parse.to_string(), "--root".into(), root.into(), "--rows".into(), text(&work.rows),
         "--state".into(), text(&work.state), "--db".into(), db.into()];
@@ -350,6 +386,7 @@ fn parse_tree(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &s
     if std::fs::write(&work.lines, counted(db)).is_ok() {
         arguments.extend(["--lines".into(), text(&work.lines)]);
     }
+    read();
     shared(deep, &mut arguments);
     if let Some(html) = &deep.ts_html {
         arguments.extend(["--html".into(), html.clone()]);
@@ -397,7 +434,7 @@ fn parse_tree(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &s
 
 /// THE ROWS, THE CLOSURE DERIVED FROM THEM AND THE GRAPH THE NEXT RUN PLANS WITH, stored in this process.
 /// True when nothing was stored because a run that stopped short would have left a kept row pointing at nothing.
-fn store(into: &mut Collector, db: &str, root: &str, rows: &Path, carried: Option<u64>, fe: &mut Option<String>) -> bool {
+pub(super) fn store(into: &mut Collector, db: &str, root: &str, rows: &Path, carried: Option<u64>, fe: &mut Option<String>) -> bool {
     // ONE SPAN FOR THE WHOLE STORE, its phases inside it: what they do not cover is the store's own `(untraced)`.
     let _storing = crate::trace::stage("typescript: store");
     let receipt = match calls::ts_apply(Path::new(db), root, &text(rows)) {

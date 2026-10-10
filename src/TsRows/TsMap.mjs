@@ -288,7 +288,7 @@ async function main() {
   // why it is a question about the database rather than a constant. A PARTIAL RUN NEVER RESTARTS THEM:
   // the rows it is about to load already carry ids, and numbering from 1 again would hand a new row an
   // id one of them points at.
-  const store = new Store(partial ? (state.counters ?? {}) : (state.alone ? {} : (state.counters ?? {})));
+  const store = new Store(partial ? (state.counters ?? {}) : (state.alone ? {} : (state.counters ?? {})), state.floor ?? 0);
   const affected = partial ? new Set(planned.affected) : null;
   let repointLater = null;
   if (partial) {

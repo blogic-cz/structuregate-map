@@ -12,6 +12,7 @@
 
 mod derived;
 mod driven;
+mod flight;
 mod hashes;
 mod inputs;
 mod payload;
@@ -26,7 +27,7 @@ mod ts;
 use super::halves;
 use super::protocol::Collector;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
@@ -196,9 +197,77 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
         let under = fe.map(|fe| Path::new(root).join(fe));
         key(&hashes, &crate::embedded::TSROWS, &deep.ts_host, &angular_arguments(deep), &files.script, &angular_outside(deep), under.as_deref())
     };
-    let typescript_stage = (!files.script.is_empty()).then(|| crate::trace::stage("deep: typescript"));
-    let plain_next = !files.script.is_empty() && clock.time("typescript", || ts::run(into, deep, db, root, &angular));
-    drop(typescript_stage);
+    // THE HALVES AFTER THE TYPESCRIPT ONE - run beside it while node parses (`flight.rs`), or after it in their turn.
+    // THE C# HALF HASHED FIRST: how much of it moves decides whether node parses beside it (`flight::BESIDE`).
+    let forced = deep.reread.iter().any(|h| h == "csharp");
+    let mut sharp = (!files.sharp.is_empty() || Path::new(db).is_file()).then(|| {
+        let _hashing = crate::trace::stage("csharp: hash the files and projects");
+        driven::hash(db, &files.sharp, &hashes, &deep.exclude)
+    });
+    let moving = sharp.as_ref().map_or(0, |h| h.moving(db, forced));
+    let mut python_early = python_early;
+    let (mut ms, mut beside_ms) = (BTreeMap::new(), BTreeMap::new());
+    let mut beside = |into: &mut Collector| {
+        if !files.python.is_empty() {
+            let timed = Instant::now();
+            let stage = crate::trace::stage("deep: python");
+            stage.set("structuregate.files", files.python.len() as i64);
+            let started = python_early.take().and_then(payload::Early::wait);
+            stage.set("structuregate.started_early", started.is_some());
+            let key = match &started {
+                Some(started) => started.key.clone(),
+                None => key(&hashes, &crate::embedded::PYROWS, &deep.py_host, &[roots_key(deep)], &files.python, "", None),
+            };
+            let python = payload::Half { key, ..python_half(deep, &hashes, files) };
+            payload::run(into, &python, &files.python, db, root, started);
+            beside_ms.insert("python", since(timed));
+        }
+
+        // IN PROCESS, by `syn`: no host to start, and an unchanged file is not parsed again. A tree whose last
+        // `.rs` has gone still runs it, so the rows it recorded go too.
+        {
+            let timed = Instant::now();
+            let stage = crate::trace::stage("deep: rust");
+            stage.set("structuregate.files", files.rust.len() as i64);
+            rust::run(into, db, root, &files.rust);
+            beside_ms.insert("rust", since(timed));
+        }
+
+        // NO C# IN THE TREE IS NOT NOTHING TO DO: a database holding C# rows holds them for files that have just
+        // left, so the half runs once with nothing in it and the store drops them.
+        if let Some(hashed) = sharp.take() {
+            let timed = Instant::now();
+            let stage = crate::trace::stage("deep: csharp");
+            stage.set("structuregate.files", files.sharp.len() as i64);
+            let roots: Vec<String> = deep.roots.iter().map(|(_, dir)| dir.clone()).collect();
+            driven::csharp(into, db, root, hashed, &roots, &deep.skip, forced, ask);
+            beside_ms.insert("csharp", since(timed));
+        }
+    };
+    let timed = Instant::now();
+    let fly = moving <= flight::BESIDE;
+    let flight = (!files.script.is_empty()).then(|| flight::run(into, deep, db, root, &angular, fly, &mut beside));
+    let (plain_next, flown) = match flight {
+        None => (false, false),
+        Some(flight::Flight::Flown { absent, ms: took }) => {
+            ms.insert("typescript", took);
+            (absent, true)
+        }
+        Some(flight::Flight::Done(absent)) => (absent, false),
+        Some(flight::Flight::Grounded(fe_kept)) => {
+            let stage = crate::trace::stage("deep: typescript");
+            if !fly {
+                stage.set("structuregate.flight", "in turn");
+                stage.set("structuregate.csharp.moving", moving as i64);
+                into.notes.push(format!("the typescript half runs in its turn, not beside the C# half: that re-reads {moving} file(s), over {}",
+                    flight::BESIDE));
+            }
+            (ts::grounded(into, deep, db, root, &angular, fe_kept), false)
+        }
+    };
+    if !flown && !files.script.is_empty() {
+        ms.insert("typescript", since(timed));
+    }
     if plain_next {
         let timed = Instant::now();
         let stage = crate::trace::stage("deep: plain typescript");
@@ -210,42 +279,22 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
             None => key(&hashes, &crate::embedded::TSPLAIN, &deep.ts_host, &plain.extra, &files.script, &typescript(deep, &files.script), None),
         };
         payload::run(into, &payload::Half { key, ..plain }, &files.script, db, root, started);
-        clock.add("plain typescript", since(timed));
+        ms.insert("plain typescript", since(timed));
     } else if Path::new(db).is_file() {
         payload::forget(into, "plain-ts rows", "ts", db, root);
     }
-
-    if !files.python.is_empty() {
-        let timed = Instant::now();
-        let stage = crate::trace::stage("deep: python");
-        stage.set("structuregate.files", files.python.len() as i64);
-        let started = python_early.and_then(payload::Early::wait);
-        stage.set("structuregate.started_early", started.is_some());
-        let key = match &started {
-            Some(started) => started.key.clone(),
-            None => key(&hashes, &crate::embedded::PYROWS, &deep.py_host, &[roots_key(deep)], &files.python, "", None),
-        };
-        let python = payload::Half { key, ..python_half(deep, &hashes, files) };
-        payload::run(into, &python, &files.python, db, root, started);
-        clock.add("python", since(timed));
+    if !flown {
+        beside(into);
+    }
+    drop(beside);
+    ms.extend(beside_ms);
+    // IN THE ORDER THE HALVES WERE ONCE RUN, whichever ran beside which.
+    for half in ["typescript", "plain typescript", "python", "rust", "csharp"] {
+        if let Some(&took) = ms.get(half) {
+            clock.add(half, took);
+        }
     }
 
-    // IN PROCESS, by `syn`: no host to start, and an unchanged file is not parsed again. A tree whose last
-    // `.rs` has gone still runs it, so the rows it recorded go too.
-    {
-        let stage = crate::trace::stage("deep: rust");
-        stage.set("structuregate.files", files.rust.len() as i64);
-        clock.time("rust", || rust::run(into, db, root, &files.rust));
-    }
-
-    // NO C# IN THE TREE IS NOT NOTHING TO DO: a database holding C# rows holds them for files that have just
-    // left, so the half runs once with nothing in it and the store drops them.
-    if !files.sharp.is_empty() || Path::new(db).is_file() {
-        let stage = crate::trace::stage("deep: csharp");
-        stage.set("structuregate.files", files.sharp.len() as i64);
-        let roots: Vec<String> = deep.roots.iter().map(|(_, dir)| dir.clone()).collect();
-        clock.time("csharp", || driven::csharp(into, db, root, &files.sharp, &hashes, &deep.exclude, &roots, &deep.skip, deep.reread.iter().any(|h| h == "csharp"), ask));
-    }
     // THE SQL HALF AFTER C#, AND THE LINKS AFTER BOTH: a link is a fact about two halves' rows. A database
     // that held SQL rows keeps being told when the last `.sql` has gone, as the C# half is.
     let timed = Instant::now();

@@ -16,7 +16,8 @@
  * two maps compares what a row SAYS and not which number it got. They are handed out from the counters the caller
  * passes: CONTINUED from what the database recorded when another half has rows in it, and RESTARTED when
  * this half is alone, so the same tree always numbers the same way. The rust store decides which, and says
- * what goes wrong under each.
+ * what goes wrong under each. A run that parses WHILE another half writes is handed a FLOOR: every prefix numbers
+ * from above it, recorded or not, so the ids the other half hands out meanwhile are never these.
  */
 
 /** What every row of this half is stamped with, so the database can drop exactly its own rows again.
@@ -137,8 +138,9 @@ function uniqueKeyFor(rows) {
 }
 
 export class Store {
-  constructor(counters) {
+  constructor(counters, floor = 0) {
     this.counters = { ...counters };
+    this.floor = floor;
     // WHICH FILE IS BEING EXTRACTED - see `enterFile`. Null outside one, which is the rollups.
     this.currentFile = null;
     // ROWS HANDED BACK rather than produced here, and what each looked like on arrival - see `load`.
@@ -478,7 +480,7 @@ export class Store {
   }
 
   id(prefix) {
-    const n = (this.counters[prefix] ?? 0) + 1;
+    const n = (this.counters[prefix] ?? this.floor) + 1;
     this.counters[prefix] = n;
     return `${prefix}:${n}`;
   }
