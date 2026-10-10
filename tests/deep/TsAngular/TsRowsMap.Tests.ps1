@@ -60,7 +60,15 @@ Test-Case 'tsrows: a join that reaches the wrong file is refused, however well i
 # refutes both. Publishing "no route" is the honest answer; picking one of the two is a wrong file on every
 # cross-file edge.
 Test-Case 'tsrows: a table whose joins all disagree about the file is published as unanchored' {
-    $tree = New-TsRowsWorkspace
+    # A CROSS-FILE EDGE IN SCOPE. The base fixture's only one is out of scope, which `render_graph` drops,
+    # leaving a same-file self edge whose joins agree.
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/shelf.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { CartComponent } from './cart.component';`n" +
+            "@Component({ selector: 'app-shelf', standalone: true, imports: [CartComponent], " +
+            "template: '<app-cart></app-cart>' })`n" +
+            "export class ShelfComponent {}`n"
+    }
     $made = New-TsRowsDb $tree
     # BY NAME, not by position: the list grows as the map does, and a case pinned to `[0]` would fail the
     # day another table joins it rather than the day this rule breaks.

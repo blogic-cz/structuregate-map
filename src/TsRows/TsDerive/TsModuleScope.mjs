@@ -214,23 +214,24 @@ export function rollupModuleScope(store, diag) {
       counts.direct_reference = (counts.direct_reference ?? 0) + 1;
       continue;
     }
+    // A STANDALONE COMPONENT IS ASKED FIRST: no NgModule may declare it, and the module lookup below is keyed
+    // by FILE - so one sharing a file with an NgModule took that module's scope, and a tag it never imports
+    // read as `declared`.
+    const standalone = standaloneByClass.get(r.from_class);
+    if (standalone) {
+      // Its own `imports` array IS the scope - the rule the compiler applies to a standalone component.
+      const hit = reach(importsOf(refsOf(standalone, 'imports'), standalone.file), r);
+      const scopeName = hit === null ? 'out_of_scope' : 'imported';
+      r.standalone = true;
+      r.scope = scopeName;
+      if (hit === 'name') r.scope_by_name = true;
+      counts[scopeName] = (counts[scopeName] ?? 0) + 1;
+      continue;
+    }
     const fromClass = classById.get(r.from_class);
     const fromFile = fromClass ? fileAbsById.get(fromClass.file) : undefined;
     const mod = (fromFile ? declaringModuleByFile.get(fromFile) : undefined)
       ?? (typeof fromClass?.name === 'string' ? declaringModule.get(fromClass.name) : undefined);
-    if (!mod) {
-      const standalone = standaloneByClass.get(r.from_class);
-      if (standalone) {
-        // Its own `imports` array IS the scope - the rule the compiler applies to a standalone component.
-        const hit = reach(importsOf(refsOf(standalone, 'imports'), standalone.file), r);
-        const scopeName = hit === null ? 'out_of_scope' : 'imported';
-        r.standalone = true;
-        r.scope = scopeName;
-        if (hit === 'name') r.scope_by_name = true;
-        counts[scopeName] = (counts[scopeName] ?? 0) + 1;
-        continue;
-      }
-    }
     const scope = scopeOf(mod);
     if (!scope || !mod) {
       r.scope = 'unknown';
