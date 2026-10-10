@@ -80,8 +80,11 @@ export function collectStrings(ts, store, node, owner, propName, evalNode) {
     // comes from. Published as its own table, so a consumer never has to re-parse the text to find them.
     if (ts.isTemplateExpression(n) && evalNode) {
       const v = evalNode(n);
+      const parts = [...(v.$template ?? [])];
+      const joined = joinedPrefix(ts, n, evalNode);
+      if (joined && parts.length) parts[0] = joined + parts[0];
       store.add('template_literals', 'tl', {
-        ...owner, parts: v.$template ?? [], holes: v.$holes ?? [],
+        ...owner, parts, holes: v.$holes ?? [],
         context: parentKind(ts, n), property: propertyContext(ts, n, propName), ...locationOf(n),
       });
     }
@@ -90,6 +93,23 @@ export function collectStrings(ts, store, node, owner, propName, evalNode) {
     ts.forEachChild(n, walk);
   };
   walk(node);
+}
+
+/**
+ * THE CONSTANT A `+` JOINS IN FRONT OF A TEMPLATE: `BASE + (child ? `.${n}.tipChild` : `.${n}.tip`)` spells keys that
+ * start with BASE, so BASE leads the first piece - through parentheses and either arm of a conditional, never its
+ * condition. Only a left side that EVALUATES to a string counts; a parameter or a call joins nothing, and is ''.
+ */
+function joinedPrefix(ts, n, evalNode) {
+  let at = n;
+  for (let p = at.parent; p; p = at.parent) {
+    if (ts.isParenthesizedExpression(p) || (ts.isConditionalExpression(p) && p.condition !== at)) at = p;
+    else break;
+  }
+  const plus = at.parent;
+  if (!plus || !ts.isBinaryExpression(plus) || plus.operatorToken.kind !== ts.SyntaxKind.PlusToken || plus.right !== at) return '';
+  const left = evalNode(plus.left);
+  return typeof left === 'string' ? left : '';
 }
 
 /**
