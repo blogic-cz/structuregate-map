@@ -175,8 +175,22 @@ fn absorb(into: &mut Collector, own: Collector) {
 mod tests {
     use super::*;
 
-    /// A database whose `_meta` records `counters`.
-    fn recording(name: &str, counters: &[(&str, i64)]) -> String {
+    /// A database whose `_meta` records `counters`, gone again when the guard drops - a failed assertion included.
+    struct Recording(std::path::PathBuf);
+
+    impl Recording {
+        fn path(&self) -> String {
+            self.0.to_string_lossy().into_owned()
+        }
+    }
+
+    impl Drop for Recording {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    fn recording(name: &str, counters: &[(&str, i64)]) -> Recording {
         let db = std::env::temp_dir().join(format!("fbt-flight-{name}-{}.sqlite", std::process::id()));
         let _ = std::fs::remove_file(&db);
         let conn = rusqlite::Connection::open(&db).unwrap();
@@ -184,20 +198,20 @@ mod tests {
         for (prefix, n) in counters {
             conn.execute("INSERT INTO _meta (key, value) VALUES (?1, ?2)", (format!("counter:{prefix}"), n.to_string())).unwrap();
         }
-        db.to_string_lossy().into_owned()
+        Recording(db)
     }
 
     #[test]
     fn a_lane_holds_while_the_halves_beside_it_stay_below_it() {
         let db = recording("held", &[("f", 30 + LANE), ("x", 7)]);
         let recorded = BTreeMap::from([("f".to_string(), 30)]);
-        assert_eq!(crossed(&db, &recorded), None);
+        assert_eq!(crossed(&db.path(), &recorded), None);
     }
 
     #[test]
     fn a_lane_is_crossed_by_one_id_past_it_even_of_a_prefix_never_recorded() {
         let recorded = BTreeMap::from([("f".to_string(), 30)]);
-        assert_eq!(crossed(&recording("past", &[("f", 31 + LANE)]), &recorded), Some("f".to_string()));
-        assert_eq!(crossed(&recording("new", &[("f", 31), ("q", LANE + 1)]), &recorded), Some("q".to_string()));
+        assert_eq!(crossed(&recording("past", &[("f", 31 + LANE)]).path(), &recorded), Some("f".to_string()));
+        assert_eq!(crossed(&recording("new", &[("f", 31), ("q", LANE + 1)]).path(), &recorded), Some("q".to_string()));
     }
 }
