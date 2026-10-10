@@ -65,6 +65,25 @@ Test-Case 'map: a file added or gone asks every file again - an answer resolves 
     Assert-Equal $added.Parsed['powershell'] 4 'parsed after a file was added'
 }
 
+# C# IS KEPT ACROSS A FILE ADDED ELSEWHERE: Roslyn reads the one file and the names are joined in rust, so its answer
+# does not hang on the file set (`Kept::own_key`) - a handful of new files on a large tree asked all of its C# again.
+Test-Case 'map: a file added asks no other C# file again, and the map equals a full parse' {
+    $tree = Use-Tree @{
+        'src/A.cs' = "namespace Demo;`npublic class A {}`n"
+        'src/B.cs' = "namespace Demo;`npublic class B { public A Item; }`n"
+    }
+    Assert-Equal (Invoke-MapKept $tree '.cs,.ps1').Parsed['csharp'] 2 'parsed on the first run'
+    [System.IO.File]::WriteAllText((Join-Path $tree 'run.ps1'), "Get-Date`n")
+    Assert-Equal (Invoke-MapKept $tree '.cs,.ps1').Parsed['csharp'] 0 'parsed after a .ps1 was added'
+    [System.IO.File]::WriteAllText((Join-Path $tree 'src/C.cs'), "namespace Demo;`npublic class C { public B Item; }`n")
+    $added = Invoke-MapKept $tree '.cs,.ps1'
+    Assert-Equal $added.Parsed['csharp'] 1 'parsed after a .cs was added'
+    Remove-Item -Recurse -Force (Join-Path $tree '.fbt')
+    $full = Invoke-MapKept $tree '.cs,.ps1'
+    Assert-Equal $full.Parsed['csharp'] 3 'parsed with the cache gone'
+    Assert-Equal ($added.Map -ceq $full.Map) $true 'the incremental map equals the full one'
+}
+
 $script:MapKeptTs = Get-TsModules
 if ($script:MapKeptTs) {
     Test-Case 'map: a TypeScript project file that moved asks every TypeScript file again' {

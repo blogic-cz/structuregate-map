@@ -34,15 +34,17 @@ after a restart. Off Windows it prints the `export` line for a shell profile ins
 ## What a line holds
 
 One OTLP/JSON `ExportTraceServiceRequest`: the run is the root span `structuregate`, every stage a child of
-the stage open when it started. One run at a time, one thread of stages — work fanned out inside a stage is
-timed as the stage, never span by span from the workers.
+the stage open when it started ON ITS THREAD. One run at a time; a thread that runs stages beside the main one
+(the TypeScript half in flight, `mapper/deep/flight.rs`) is `adopt`ed under the span open when it started, and a
+worker that opens none hangs under the main thread's innermost - work fanned out inside a stage is timed as the
+stage, never span by span from the workers.
 
 | span | covers |
 |---|---|
 | `structuregate` | the run: `structuregate.root`, `.roots`, `.mode` (`gate`, `map`, `deep`, `query`), `process.command_args`, `process.exit.code` |
 | `walk and count`, `<lang> rules`, `judge`, `plugins` | the gate's stages; `structuregate.gate.cached` when the pass cache answered |
-| `walk`, `map: <half>`, `write the map` | the file map, one span per half with its file count and host |
-| `deep map`, `deep: <half>`, `deep: links, seeds, index` | the deep halves in run order; `deep: python` carries `structuregate.early.python` (`used`, or `stale` when a half stored before it) |
+| `walk`, `map: <half>`, `write the map` | the file map, one span per half with its file count and host; `structuregate.parsed` is how many were not answered from the last run (`kept.rs`) |
+| `deep map`, `deep: <half>`, `deep: links, seeds, index` | the deep halves in run order; `deep: python` carries `structuregate.early.python` (`used`, or `stale` when a half stored before it); a flown TypeScript half is two `deep: typescript` spans, `structuregate.flight` = `parse` (its thread, beside the halves after it) and `store` |
 | `csharp: compile`, `typescript: <phase>`, … | totals a HOST reported (`structuregate.timing = reported`), laid back from the end of their stage |
 | `csharp: load references` / `parse sources` / `razor` / `declarations`, `csharp project: <csproj>` | where `csharp: compile` went: phase totals and the slowest projects with `structuregate.files`, `structuregate.csharp.assemblies_opened` / `.assemblies_shared` |
 | `csharp: hash the files and projects`, `read what the database recorded`, `open the session`, `order the files by project`, `batches`, `close the session`, `find unrestored projects` | every step of the deep C# half; `csharp: batches` carries `structuregate.batches` and `structuregate.csharp.store_thread_ms` |

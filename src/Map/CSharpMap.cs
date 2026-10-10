@@ -52,9 +52,8 @@ public static class CSharpMap
         ("AppDomain", "CreateInstanceAndUnwrap"),
     ];
 
-    public static void Read(MapFile file, string text, MapCollector into)
+    public static void Read(MapFile file, SyntaxTree tree, MapCollector into)
     {
-        var tree = CSharpSyntaxTree.ParseText(text);
         var root = (CompilationUnitSyntax)tree.GetRoot();
 
         // A PARSE ERROR IS NOT A SKIP. Roslyn error-recovers and hands back a PARTIAL tree, so every edge

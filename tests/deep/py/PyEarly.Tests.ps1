@@ -1,8 +1,9 @@
 <#
     THE DEEP PYTHON HALF STARTS BESIDE THE FILE MAP (`payload::Early`), not after it: on a `.py` edit the two
     python hosts waited for each other for nothing. Its answer is used only when the database state at its turn is
-    still the one it was started from - the TypeScript halves store first, and every half shares the id counters,
-    so an answer computed before them would hand out ids they have just taken.
+    still the one it was started from - a TypeScript half that stores first moves the id counters every half shares,
+    so an answer computed before it would hand out ids it has just taken. The plain half stores first; the Angular
+    half flies beside python and stores after it (`MapFlight.Tests.ps1`).
 
     Whether the early answer was used or thrown away is read off the run's trace (`structuregate.early.python` on `deep: python`).
     Its helpers are its own - `-Only PyEarly` runs this suite alone.

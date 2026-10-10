@@ -7,7 +7,7 @@
 //! WHAT AN ANSWER DEPENDS ON IS THE KEY, beside the content: the BUILD of this tool, the half, its host and its
 //! staged script (`stamp`), and EVERY PATH THE WALK SAW - a half resolves an import against the file set, and
 //! PowerShell asks the disk whether a dot-sourced path exists, so a file added or gone anywhere asks every file
-//! again, as before. TypeScript also reads `tsconfig` `paths`, so its stamp carries the project files (`gate::counts`).
+//! again, as before. C# is the exception: Roslyn reads the one file, and the names are joined here (`own_key`). TypeScript also reads `tsconfig` `paths`, so its stamp carries the project files (`gate::counts`).
 //!
 //! ONLY HALVES WHOSE LINES ABOUT A FILE COME FROM THAT FILE are kept. Python's do not - a name is bound by reading
 //! the module it comes from, and a `declares` check opens the file it names - so it parses everything, as before.
@@ -22,6 +22,8 @@ pub struct Kept {
     /// Path key -> the tree map's content hash.
     hashes: HashMap<String, String>,
     base: String,
+    /// The BUILD alone, for an answer that reads its own file and nothing else (C#): the file set is not in it.
+    own: String,
     kept: HashMap<String, String>,
     now: Vec<(String, String)>,
     read: usize,
@@ -48,6 +50,7 @@ impl Kept {
             .collect();
         paths.sort();
         let base = blake3::hash(format!("{build}\n{}", paths.join("\n")).as_bytes()).to_hex().to_string();
+        let own = blake3::hash(format!("{build}\nown").as_bytes()).to_hex().to_string();
         let mut kept = HashMap::new();
         if let Ok(conn) = Connection::open(&store)
             && let Ok(mut rows) = conn.prepare("SELECT key, lines FROM map_kept")
@@ -56,7 +59,7 @@ impl Kept {
             kept.extend(read.into_iter().flatten().flatten());
         }
         let previous = outputs.first().map(PathBuf::from).unwrap_or_default();
-        Some(Kept { store, hashes, base, kept, now: Vec::new(), read: 0, previous, importers: None })
+        Some(Kept { store, hashes, base, own, kept, now: Vec::new(), read: 0, previous, importers: None })
     }
 
     /// What a TypeScript answer depends on beyond the file: every file that says which compiler or which project.
@@ -73,9 +76,19 @@ impl Kept {
 
     /// This file's key under `stamp`, or None when the snapshot does not name it - it is then parsed.
     pub fn key(&self, stamp: &str, rel: &str) -> Option<String> {
+        self.keyed(&self.base, stamp, rel)
+    }
+
+    /// This file's key under `stamp` for an answer read off the file ALONE: a file added or gone elsewhere does not
+    /// move it. Keyed by the whole file set, a handful of new files asked every C# file of a large tree again.
+    pub fn own_key(&self, stamp: &str, rel: &str) -> Option<String> {
+        self.keyed(&self.own, stamp, rel)
+    }
+
+    fn keyed(&self, base: &str, stamp: &str, rel: &str) -> Option<String> {
         let path = fbt::entry::key_of(&fbt::entry::normalize(rel));
         let content = self.hashes.get(&path)?;
-        Some(blake3::hash(format!("{}\t{stamp}\t{path}\t{content}", self.base).as_bytes()).to_hex().to_string())
+        Some(blake3::hash(format!("{base}\t{stamp}\t{path}\t{content}").as_bytes()).to_hex().to_string())
     }
 
     /// ONE KEY FOR A WHOLE HALF, for a half whose answer about a file reads other files (python binds a name by
@@ -184,20 +197,38 @@ impl Kept {
     }
 }
 
-/// A C# file's answer from the caller (Roslyn), kept like a half's lines - a pure function of the file and the build.
-/// One that failed is asked again next run.
-pub fn answer(kept: &mut Option<Kept>, rel: &str, ask: impl FnOnce() -> serde_json::Value) -> serde_json::Value {
-    let key = kept.as_ref().and_then(|k| k.key("csharp", rel));
-    if let (Some(kept), Some(key)) = (kept.as_mut(), key.as_deref())
-        && let Some(found) = kept.get(key).and_then(|text| serde_json::from_str(&text).ok())
-    {
-        return found;
+/// C# files' answers from the caller (Roslyn), kept like a half's lines - each a pure function of its own file and the
+/// build, so a file added or gone elsewhere asks none of them again (`own_key`). The ones not kept are asked ON EVERY
+/// CORE: a cold run over a large tree was one Roslyn parse after another, minutes of it. In `files`' order, with how
+/// many were asked. One that failed is asked again next run.
+pub fn answers(kept: &mut Option<Kept>, files: &[(String, String)], ask: impl Fn(&str, &str) -> serde_json::Value + Sync) -> (Vec<serde_json::Value>, usize) {
+    let keys: Vec<Option<String>> = files.iter().map(|(rel, _)| kept.as_ref().and_then(|k| k.own_key("csharp", rel))).collect();
+    let mut found: Vec<Option<serde_json::Value>> = keys.iter()
+        .map(|key| key.as_deref().and_then(|key| kept.as_mut()?.get(key)).and_then(|text| serde_json::from_str(&text).ok()))
+        .collect();
+    let missing: Vec<usize> = (0..files.len()).filter(|&at| found[at].is_none()).collect();
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).min(missing.len()).max(1);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let asked: Vec<(usize, serde_json::Value)> = std::thread::scope(|scope| {
+        let running: Vec<_> = (0..workers).map(|_| scope.spawn(|| {
+            let mut mine = Vec::new();
+            while let Some(&at) = missing.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+                let (rel, abs) = &files[at];
+                let started = std::time::Instant::now();
+                mine.push((at, ask(rel, abs)));
+                crate::trace::file("csharp", rel, started);
+            }
+            mine
+        })).collect();
+        running.into_iter().flat_map(|worker| worker.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))).collect()
+    });
+    for (at, answer) in asked {
+        if let (Some(kept), Some(key)) = (kept.as_mut(), keys[at].clone())
+            && answer.get("error").is_none()
+        {
+            kept.put(key, answer.to_string());
+        }
+        found[at] = Some(answer);
     }
-    let answer = ask();
-    if let (Some(kept), Some(key)) = (kept.as_mut(), key)
-        && answer.get("error").is_none()
-    {
-        kept.put(key, answer.to_string());
-    }
-    answer
+    (found.into_iter().map(Option::unwrap_or_default).collect(), missing.len())
 }

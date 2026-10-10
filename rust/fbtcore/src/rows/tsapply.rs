@@ -332,8 +332,14 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
             payload.shas.len()
         ));
     } else if !full && db_path.exists() {
+        // ONE TRANSACTION, UNJOURNALLED as the store writes: a statement per table, each its own journalled commit,
+        // over a database of gigabytes - and in no phase, so its time was the store's own `(untraced)`.
+        let dropping = std::time::Instant::now();
         let db = Connection::open(db_path)?;
+        db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; BEGIN")?;
         drop_half(&db, LANG)?;
+        db.execute_batch("COMMIT")?;
+        receipt.phases.insert("drop the old rows".to_string(), dropping.elapsed().as_millis() as u64);
     }
 
     // THE MANIFEST, stored beside the rows it describes. SQLite records none of it, so the half
@@ -463,7 +469,9 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
         receipt.write_steps = applied.steps.iter().map(|(n, ms)| (n.to_string(), *ms)).collect();
         let rebuilt: Vec<String> = payload.spec.as_ref().map(|s| deps::list(s.get("rebuilt"))).unwrap_or_default();
         remember_graph(&mut receipt, db_path, &payload.tables, None, &rebuilt);
+        let freeing = std::time::Instant::now();
         payload.tables = Map::new();
+        receipt.phases.insert("free the payload".to_string(), freeing.elapsed().as_millis() as u64);
 
         let closure_started = std::time::Instant::now();
         let emitted = {

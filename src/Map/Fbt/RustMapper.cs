@@ -1,3 +1,4 @@
+using Microsoft.CodeAnalysis.CSharp;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -28,8 +29,10 @@ internal static class RustMapper
             }
             var file = new MapFile { Rel = rel };
             var scratch = new MapCollector();
-            file.Lines = Sources.CSharpLines(text);
-            CSharpMap.Read(file, text, scratch);
+            // ONE PARSE, read twice: the count and the edges each parsed the file again.
+            var tree = CSharpSyntaxTree.ParseText(text);
+            file.Lines = Sources.CSharpLines(tree);
+            CSharpMap.Read(file, tree, scratch);
             answer = Written(json =>
             {
                 json.WriteNumber("lines", file.Lines);

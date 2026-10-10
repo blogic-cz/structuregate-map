@@ -298,11 +298,11 @@ fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
     let mut kept = (input.roots.len() == 1).then(|| kept::Kept::open(&input.roots[0], &input.skip, input.tracked, &input.build, &buckets[0].tree,
         &[input.map_out.as_str(), input.map_sqlite.as_deref().unwrap_or("")])).flatten();
     let csharp = crate::trace::stage("map: csharp");
-    for (rel, abs) in &sharp {
-        let started = std::time::Instant::now();
-        let answer = kept::answer(&mut kept, rel, || cs_file(cs, free, abs, rel));
-        crate::trace::file("csharp", rel, started);
-        halves::csharp(&mut into, rel, &answer);
+    let (answers, parsed) = kept::answers(&mut kept, &sharp, |rel, abs| cs_file(cs, free, abs, rel));
+    csharp.set("structuregate.files", sharp.len() as i64);
+    csharp.set("structuregate.parsed", parsed as i64);
+    for ((rel, _), answer) in sharp.iter().zip(&answers) {
+        halves::csharp(&mut into, rel, answer);
     }
     drop(csharp);
     if !sharp.is_empty() {

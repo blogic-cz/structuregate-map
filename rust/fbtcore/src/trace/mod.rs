@@ -20,8 +20,9 @@
 //! cover is printed as the span's own `(untraced)` time - a gap is named, never hidden (minutes of `deep:
 //! csharp` were in no span).
 //!
-//! ONE RUN AT A TIME, ONE THREAD OF STAGES: the stages run in order, so the open span is a stack. Work fanned out
-//! inside a stage is timed as the stage, never span by span from the workers.
+//! ONE RUN AT A TIME, A STACK OF OPEN SPANS PER THREAD: a stage's parent is the innermost one open on ITS thread. A
+//! thread that runs stages beside the main one (the TypeScript half's node, while C# compiles) is `adopt`ed under a
+//! span the main thread had open; any other worker's spans hang under the main thread's innermost.
 
 mod otlp;
 pub mod report;
@@ -29,6 +30,7 @@ pub mod report;
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::thread::ThreadId;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// The file the run's line is appended to. Unset or empty: nothing is traced, and nothing is paid for it.
@@ -56,8 +58,10 @@ struct Run {
     started_ns: u128,
     resource: Vec<(String, Value)>,
     spans: Vec<Span>,
-    /// Indices into `spans`, innermost last.
-    open: Vec<usize>,
+    /// Indices into `spans` with the thread that opened them, innermost last.
+    open: Vec<(ThreadId, usize)>,
+    /// The thread that began the run: whose innermost span a thread with none open of its own hangs under.
+    main: ThreadId,
     /// The slowest single files, kept apart so the cap does not drop a stage.
     files: Vec<Span>,
     /// Spans made so far, dropped ones included: an id is never handed out twice.
@@ -81,8 +85,13 @@ impl Run {
         self.made += 1;
         blake3::hash(format!("{}|{}", self.trace_id, self.made).as_bytes()).to_hex()[..16].to_string()
     }
+    /// The innermost span open on THIS thread, or on the main one when this thread has none.
+    fn innermost(&self) -> Option<usize> {
+        let on = |thread: ThreadId| self.open.iter().rev().find(|(t, _)| *t == thread).map(|&(_, at)| at);
+        on(std::thread::current().id()).or_else(|| on(self.main))
+    }
     fn parent(&self) -> Option<String> {
-        self.open.last().map(|&at| self.spans[at].id.clone())
+        self.innermost().map(|at| self.spans[at].id.clone())
     }
 }
 
@@ -108,6 +117,7 @@ pub fn begin(given: Option<&str>, last: Option<String>, detail: bool, resource: 
         resource: owned(resource),
         spans: Vec::new(),
         open: Vec::new(),
+        main: std::thread::current().id(),
         files: Vec::new(),
         made: 0,
     };
@@ -118,7 +128,7 @@ pub fn begin(given: Option<&str>, last: Option<String>, detail: bool, resource: 
     }
     let id = run.span_id();
     run.spans.push(Span { id, parent: None, name: "structuregate".into(), start_ns: started_ns, end_ns: 0, attributes: owned(attributes) });
-    run.open.push(0);
+    run.open.push((run.main, 0));
     if let Ok(mut slot) = RUN.lock() {
         *slot = Some(run);
         ON.store(true, Ordering::Relaxed);
@@ -136,7 +146,7 @@ pub fn stage(name: &str) -> Stage {
     with(|run| {
         let span = Span { id: run.span_id(), parent: run.parent(), name: name.into(), start_ns: run.now_ns(), end_ns: 0, attributes: Vec::new() };
         run.spans.push(span);
-        run.open.push(run.spans.len() - 1);
+        run.open.push((std::thread::current().id(), run.spans.len() - 1));
         run.spans.len() - 1
     })
     .map_or(Stage(None), |at| Stage(Some(at)))
@@ -147,7 +157,7 @@ impl Stage {
     /// rest of the run (the PowerShell file map, through the deep map) would otherwise adopt every later stage.
     pub fn detach(&self) {
         if let Some(at) = self.0 {
-            with(|run| run.open.retain(|&open| open != at));
+            with(|run| run.open.retain(|&(_, open)| open != at));
         }
     }
 
@@ -165,7 +175,39 @@ impl Drop for Stage {
         if let Some(at) = self.0 {
             with(|run| {
                 run.spans[at].end_ns = run.now_ns();
-                run.open.retain(|&open| open != at);
+                run.open.retain(|&(_, open)| open != at);
+            });
+        }
+    }
+}
+
+/// The span open innermost on this thread, for a thread started from here to `adopt`.
+#[derive(Clone, Copy)]
+pub struct Anchor(Option<usize>);
+
+pub fn anchor() -> Anchor {
+    Anchor(if ON.load(Ordering::Relaxed) { with(|run| run.innermost()).flatten() } else { None })
+}
+
+/// The stages this thread opens hang under `anchor` until the guard drops, not under whatever the main thread has
+/// open by then.
+#[must_use = "the thread is adopted until the guard drops"]
+pub struct Adopted(Option<usize>);
+
+pub fn adopt(anchor: Anchor) -> Adopted {
+    let Anchor(Some(at)) = anchor else { return Adopted(None) };
+    with(|run| run.open.push((std::thread::current().id(), at)));
+    Adopted(Some(at))
+}
+
+impl Drop for Adopted {
+    fn drop(&mut self) {
+        if let Some(at) = self.0 {
+            let thread = std::thread::current().id();
+            with(|run| {
+                if let Some(found) = run.open.iter().rposition(|&(t, open)| t == thread && open == at) {
+                    run.open.remove(found);
+                }
             });
         }
     }
@@ -178,7 +220,7 @@ pub fn set(key: &str, value: impl Into<Value>) {
     }
     let value = value.into();
     with(|run| {
-        if let Some(&at) = run.open.last() {
+        if let Some(at) = run.innermost() {
             run.spans[at].attributes.push((key.into(), value));
         }
     });

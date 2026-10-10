@@ -40,9 +40,35 @@ pub type Ask<'a> = dyn FnMut(&Value) -> String + 'a;
 /// that have just left, so the half runs with nothing in it and the store drops them.
 /// `roots` and `skip`: a project referenced from the map but under a `--skip` folder is bound through its build's dll.
 /// `forced`: `--map-reread csharp` - every file is read again, whatever the database recorded.
-pub fn csharp(into: &mut Collector, db: &str, root: &str, files: &[(String, String)], hashes: &Hashes, exclude: &[String], roots: &[String], skip: &[String], forced: bool, ask: &mut Ask) {
-    const LANGUAGE: &str = "csharp rows";
-    // EVERY STEP OF THIS HALF IS A SPAN, so whatever the trace cannot place is a step's own `(untraced)`.
+/// WHAT THE C# HALF WILL BE GIVEN, hashed before it runs: each file's salted sha, its path and why it could move, every
+/// project's fingerprint in parts - and so how much of it has to be read again (`moving`), before anything is.
+pub struct Hashed<'a> {
+    /// Held to the half's end: the digests it took are kept when it drops, and only into a database that exists by then.
+    inputs: super::inputs::Inputs<'a>,
+    shas: BTreeMap<String, String>,
+    paths: BTreeMap<String, String>,
+    facts: HashMap<String, reasons::File>,
+    excluded: Vec<String>,
+    parts: Parts,
+    owned: Vec<String>,
+    before: Option<reasons::Before>,
+}
+
+impl Hashed<'_> {
+    /// How many files the half would read again or drop: every one when `forced` or the database is rebuilt.
+    pub fn moving(&self, db: &str, forced: bool) -> usize {
+        let path = Path::new(db);
+        if forced || !crate::rows::store::usable(path) {
+            return self.shas.len();
+        }
+        let recorded = crate::rows::store::recorded(path, "csharp");
+        let moved = self.shas.iter().filter(|(rel, sha)| recorded.get(*rel) != Some(*sha)).count();
+        moved + recorded.keys().filter(|rel| !self.shas.contains_key(*rel)).count()
+    }
+}
+
+/// The C# files hashed, each with its project's fingerprint folded in - see `Hashed`.
+pub fn hash<'a>(db: &str, files: &[(String, String)], hashes: &'a Hashes, exclude: &[String]) -> Hashed<'a> {
     let hashing = crate::trace::stage("csharp: hash the files and projects");
     let inputs = super::inputs::Inputs::open(db, hashes);
     // EVERY FILE AT ONCE: a file's hash, its markup inputs and its project are independent of every other's.
@@ -90,6 +116,13 @@ pub fn csharp(into: &mut Collector, db: &str, root: &str, files: &[(String, Stri
         paths.insert(rel, abs);
     }
     drop(hashing);
+    Hashed { inputs, shas, paths, facts, excluded, parts, owned, before }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn csharp(into: &mut Collector, db: &str, root: &str, hashed: Hashed, roots: &[String], skip: &[String], forced: bool, ask: &mut Ask) {
+    const LANGUAGE: &str = "csharp rows";
+    let Hashed { inputs: _inputs, shas, paths, facts, excluded, parts, owned, before } = hashed;
     let errors_before = into.errors.len();
     let reading_state = crate::trace::stage("csharp: read what the database recorded");
     let Some(mut state) = state(into, db, "csharp", LANGUAGE) else { return };
