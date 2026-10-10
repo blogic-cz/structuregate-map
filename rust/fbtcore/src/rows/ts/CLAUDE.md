@@ -116,6 +116,11 @@ requires and which enum members it still permits.
   element the child renders at binds it to one tree and the child never writes it; else unread.
 - **A KEY CHOSEN IN A CONDITIONAL ARM takes the arm** (#11): the extractor stamps `choices` on each statement
   row inside an arm; the i18n ref joins it through `i18n_refs.call` and `key_reach` folds it like a branch.
+- **A COMPONENT A FACTORY RETURNS UNDER A `case` OR `if` RENDERS UNDER IT** (#13, `key/key_returned.rs`): a
+  dynamic render's `renders.return_ways` lists the `returns` rows each way the class came through; the edge
+  holds the branches and cases EVERY way holds (two cases returning one class, or one case and no case, hold
+  nothing). They ride `render_path.branches` - never `gates` - and `key_reach` folds them with the key's own,
+  so `always_branches`/`always_values` gain the case. `path_always_gates` stays gates alone.
 
 **Not read yet**: a curried predicate (`const isPicked = isA([...])`), a set held in a local
 (`active?.some(...)`), a property written more than once.
@@ -125,7 +130,8 @@ requires and which enum members it still permits.
 The half replaced a predecessor 1:1, compared by NATURAL IDENTITY (what a row says about the source, never its
 id) with every carried field equal. A row the predecessor got wrong was reproduced, and changing it is a
 SIGNED-OFF divergence - a port that improves rows cannot be told from one that breaks them. The numbers above
-(#1-#11) are those decisions; #2 (the atlas reports `routes.children`, `rust/fbtcore/src/atlas.rs`) and #5
+(#1-#11, #13) are those decisions - #13 adds `renders.return_ways` and `render_path.branches`, and moves
+`key_reach` only for keys behind such a render; #2 (the atlas reports `routes.children`, `rust/fbtcore/src/atlas.rs`) and #5
 (an aliased dependency NgModule, the extractor's) and #12 (`render_graph` leaves out an `out_of_scope` render,
 `src/TsRows/TsDerive/TsIndexes.mjs`) live elsewhere. A new restriction is a new divergence: say
 which tables gain rows and that no other table moves, and bump the extractor's `rows` (it keys an unchanged tree).

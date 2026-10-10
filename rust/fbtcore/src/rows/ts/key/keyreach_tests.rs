@@ -9,6 +9,7 @@ fn path(hops: &[&str], gates: &[&str]) -> RenderPath {
         hops: hops.iter().map(|h| std::rc::Rc::from(&**h)).collect(),
         edges: Vec::new(),
         gates: gates.iter().map(|g| std::rc::Rc::from(&**g)).collect(),
+        branches: Vec::new(),
     }
 }
 

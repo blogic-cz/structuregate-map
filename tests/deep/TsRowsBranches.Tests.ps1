@@ -275,6 +275,60 @@ Test-Case 'tsrows: a key built by a template literal renders under its branch, a
     Assert-Line $r 'label.Aspen.value | 1 | firm in ["Aspen"]'
 }
 
+# A COMPONENT A FACTORY RETURNS FROM A `case` RENDERS ONLY FOR THAT CASE. The outlet's node holds no gate naming
+# the kind, so without the case on the edge every key in `AlphaDetailComponent` read as shown for every kind. The
+# case rides `render_path.branches` - `gates` names `gates` rows only - and folds into `key_reach` like the case
+# around a key written in TypeScript. The outlet is read through the binding's `Source` wrapper.
+Test-Case 'tsrows: a component a factory returns from a case renders only for that case' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/detail.ts' = "import { Component, Injectable, Type } from '@angular/core';`n" +
+            "import { BasketModule } from './basket.component';`n" +
+            "export enum DemoKind { Alpha = 1, Beta = 2, Gamma = 3 }`n" +
+            "@Component({ selector: 'demo-alpha', template: '<b [title]=`"\'demo.alpha.title\' | money`"></b>', standalone: true, imports: [BasketModule] })`n" +
+            "export class AlphaDetailComponent {}`n" +
+            "@Component({ selector: 'demo-beta', template: '<b [title]=`"\'demo.beta.title\' | money`"></b>', standalone: true, imports: [BasketModule] })`n" +
+            "export class BetaDetailComponent {}`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class DetailFactory {`n" +
+            "  componentFor(kind: DemoKind): Type<unknown> | null {`n" +
+            "    switch (kind) {`n" +
+            "      case DemoKind.Alpha: return AlphaDetailComponent;`n" +
+            "      case DemoKind.Beta: return BetaDetailComponent;`n" +
+            "    }`n" +
+            "    return null;`n" +
+            "  }`n" +
+            "}`n" +
+            "@Component({ selector: 'demo-host', template: '<ng-container *ngComponentOutlet=`"detail`"></ng-container>', standalone: true })`n" +
+            "export class HostComponent {`n" +
+            "  item = { kind: DemoKind.Alpha };`n" +
+            "  detail = this.factory.componentFor(this.item.kind);`n" +
+            "  constructor(private factory: DetailFactory) {}`n" +
+            "}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},' +
+            '"demo":{"alpha":{"title":"a"},"beta":{"title":"b"}}}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $edges = Invoke-TsRowsQ $made.Db ("SELECT r.to_name || ' | ' || r.via || ' | ' || m.name || ' | ' || " +
+        "json_array_length(r.return_ways) AS edge FROM renders r JOIN members m ON m.id = r.returned_by " +
+        "WHERE r.to_name LIKE '%Detail%'")
+    Assert-Line $edges 'AlphaDetailComponent | ngComponentOutlet | componentFor | 1'
+    Assert-Line $edges 'BetaDetailComponent | ngComponentOutlet | componentFor | 1'
+    # The case rides `branches`, and no `switch_cases` id lands in `gates`.
+    $paths = Invoke-TsRowsQ $made.Db ("SELECT c.name || ' | ' || sc.discriminant_source || ' | ' || " +
+        "(SELECT count(*) FROM json_each(rp.gates) j JOIN switch_cases s ON s.id = j.value) || ' | ' || sc.labels " +
+        "AS path FROM render_path rp JOIN components c ON c.id = rp.component " +
+        "JOIN json_each(rp.branches) b JOIN switch_cases sc ON sc.id = b.value")
+    Assert-Line $paths 'AlphaDetailComponent | kind | 0 | [{"$enum": "DemoKind.Alpha"'
+    Assert-Line $paths 'BetaDetailComponent | kind | 0 | [{"$enum": "DemoKind.Beta"'
+    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || json_array_length(always_branches) || ' | ' || " +
+        "json_extract(always_values, '$[0].enum_name') || ' ' || json_extract(always_values, '$[0].dimension') || ' ' || " +
+        "json_extract(always_values, '$[0].op') || ' ' || json_extract(always_values, '$[0].values') AS reach " +
+        "FROM key_reach WHERE key LIKE 'demo.%'")
+    Assert-Line $r 'demo.alpha.title | 1 | DemoKind kind in ["Alpha"]'
+    Assert-Line $r 'demo.beta.title | 1 | DemoKind kind in ["Beta"]'
+}
+
 # THE C# HALF WRITES INTO THE SAME `enums` AND `switch_cases`, and each half drops only its own:
 # C# by `file`, TypeScript by `half`. A re-read of either side that deleted the other's rows would leave a map
 # whose backend and frontend never join - and both sides' counts would still look plausible on their own.

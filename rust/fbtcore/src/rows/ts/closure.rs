@@ -25,6 +25,7 @@
 
 use std::rc::Rc;
 use std::collections::HashMap;
+use super::key_branches::Branches;
 use super::store::{Row, Store};
 use indexmap::{IndexMap, IndexSet};
 use serde_json::Value;
@@ -63,6 +64,9 @@ pub struct Edge {
     pub id: Rc<str>,
     pub parent: Rc<str>,
     pub gates: Vec<Rc<str>>,
+    /// The branches and cases a factory returned the child under (`key_returned`): conditions,
+    /// never `gates` rows, so they ride apart.
+    pub branches: Vec<Rc<str>>,
 }
 
 /// WHERE AN EDGE IS WRITTEN, in the tree's own terms: a path and a position, never a row id.
@@ -135,7 +139,8 @@ impl Ids {
 }
 
 /// The render DAG: child -> the sites that render it.
-pub fn load_edges(store: &Store<'_>) -> IndexMap<Rc<str>, Vec<Edge>> {
+pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Rc<str>, Vec<Edge>> {
+    let returned = super::key_returned::returned_under(store, branches);
     let nodes = store.table("template_nodes");
     let mut chains: IndexMap<String, Vec<String>> = IndexMap::new();
     for n in nodes.iter() {
@@ -167,11 +172,10 @@ pub fn load_edges(store: &Store<'_>) -> IndexMap<Rc<str>, Vec<Edge>> {
             .map(|g| ids.of(g))
             .collect();
         let to = ids.of(&to);
-        edges.entry(to).or_default().push(Edge {
-            id: ids.of(&id_of(r, "id").unwrap_or_default()),
-            parent: ids.of(&parent),
-            gates,
-        });
+        let id = id_of(r, "id").unwrap_or_default();
+        let branches: Vec<Rc<str>> =
+            returned.get(&id).into_iter().flatten().map(|b| ids.of(b)).collect();
+        edges.entry(to).or_default().push(Edge { id: ids.of(&id), parent: ids.of(&parent), gates, branches });
     }
     edges
 }
@@ -182,6 +186,7 @@ pub struct RenderPath {
     pub hops: Vec<Rc<str>>,
     pub edges: Vec<Rc<str>>,
     pub gates: Vec<Rc<str>>,
+    pub branches: Vec<Rc<str>>,
 }
 
 /// THE WALKS ALREADY DONE, shared by every component of one run.
@@ -289,6 +294,7 @@ fn walk(
             hops: vec![Rc::clone(current)],
             edges: Vec::new(),
             gates: Vec::new(),
+            branches: Vec::new(),
         }])
     };
     let Some(ups) = edges.get(&**current).filter(|u| !u.is_empty()) else {
@@ -312,7 +318,9 @@ fn walk(
             ids.push(Rc::clone(&u.id));
             let mut gates = p.gates.clone();
             gates.extend(u.gates.iter().cloned());
-            acc.push(RenderPath { hops, edges: ids, gates });
+            let mut branches = p.branches.clone();
+            branches.extend(u.branches.iter().cloned());
+            acc.push(RenderPath { hops, edges: ids, gates, branches });
         }
         seen.shift_remove(&u.parent);
     }
@@ -428,6 +436,7 @@ pub fn render_paths(
             row.insert("hops".into(), text(&p.hops));
             row.insert("edges".into(), text(&p.edges));
             row.insert("gates".into(), text(&p.gates));
+            row.insert("branches".into(), text(&p.branches));
             row.insert("truncated".into(), Value::from(i64::from(truncated)));
             store.emit("render_path", row);
             rows += 1;
