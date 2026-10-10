@@ -15,7 +15,7 @@ pub(crate) mod deep;
 pub(crate) use deep::{stored_nothing, UNRESTORED};
 mod halves;
 mod kept;
-mod protocol;
+pub(crate) mod protocol;
 mod script;
 mod stale;
 
@@ -216,6 +216,7 @@ fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
         script: lists(&buckets, |b| &b.script),
         sql: sql.clone(),
         rust: lists(&buckets, |b| &b.rust),
+        go: lists(&buckets, |b| &b.go),
     };
     let deep_options = || deep::Deep {
         db: input.map_sqlite.clone().unwrap_or_default(),

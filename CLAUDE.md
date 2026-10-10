@@ -83,7 +83,7 @@ two places:
 walk, every count, the hosts, the joins and the output; C#'s `Program.cs` is one call into `fbt_main` and a
 printer (.NET writes the console in the code page MSBuild reads). C# is called back only for what needs a .NET parser — a `.cs` file's
 count and async rule (`RustGate`), its graph and its deep rows (`RustMapper`, `DeepMap`), and T-SQL's deep
-rows (`SqlDeep`, `SqlLinks`); the deep map's order and every other deep half are `mapper/deep/`. An IN-PROCESS half (rust by `syn`, Go by `gosyn` - file map only, a name keyed by its package folder - markdown by `pulldown-cmark`) is called from `mapper/halves.rs`, and
+rows (`SqlDeep`, `SqlLinks`); the deep map's order and every other deep half are `mapper/deep/`. An IN-PROCESS half (rust by `syn`, Go by `gosyn` - a name keyed by its package folder - markdown by `pulldown-cmark`) is called from `mapper/halves.rs`, and
 every line counter but Roslyn's is `count/` — the gate and the map must agree on what a source line is.
 Markdown's files are the `--doc-scope` set, not `--ext`, and its edges are MENTIONS, never imports.
 

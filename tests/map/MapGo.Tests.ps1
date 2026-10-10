@@ -90,3 +90,56 @@ Test-Case 'go: the gate counts Go by its lexer, as the map does, and a file that
     Assert-Equal $run.Map.files.'raw.go'.lines 3 'the map agrees'
     Assert-Line $run.Result 'UNPARSED  bad.go:3:'
 }
+
+# THE DEEP ROWS (`--map-sqlite`, `lang = 'go'`): one value of a query, as the rust suite reads its own.
+function Get-GoDeep([string]$Db, [string]$Sql) {
+    $r = Invoke-Gate --map-query $Db --sql $Sql --width 0
+    Assert-Exit $r 0
+    $line = $r.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | Select-Object -First 1
+    if ($null -eq $line) { return '' }
+    return $line.Trim().Substring(2)
+}
+
+Test-Case 'go rows: functions, calls bound through the package and the import, consts, and --find reads them' {
+    $tree = Use-Tree @{
+        'go.mod'         = $script:GoModule
+        'main.go'        = "package main`n`nimport ""example.com/demo/store""`n`nfunc main() { store.Load(""a"") }`n"
+        'store/store.go' = "package store`n`nconst Limit = 3`n`nfunc Load(name string) error { return check(name) }`n`nfunc check(string) error { return nil }`n"
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .go --map-sqlite $db) 0
+    Assert-Equal (Get-GoDeep $db "SELECT 'v=' || group_concat(lang || '=' || n) FROM (SELECT lang, count(*) n FROM files GROUP BY lang)") 'go=2' 'both files are go rows'
+    Assert-Equal (Get-GoDeep $db "SELECT 'v=' || group_concat(name || ':' || kind || ':' || exported, ' ') FROM (SELECT name, kind, exported FROM functions ORDER BY name)") 'Load:function:1 check:function:0 main:function:0' 'the functions'
+    Assert-Equal (Get-GoDeep $db "SELECT 'v=' || func || '|' || target_path || '|' || target_name || '|' || args || '|' || source FROM calls WHERE callee = 'store.Load'") 'main|store/store.go|Load|1|store.Load("a")' 'the call through the import'
+    Assert-Equal (Get-GoDeep $db "SELECT 'v=' || func || '|' || target_path || '|' || target_name FROM calls WHERE callee = 'check'") 'Load|store/store.go|check' 'the call within the package'
+    Assert-Equal (Get-GoDeep $db "SELECT 'v=' || name || '|' || kind || '|' || value || '|' || exported FROM consts") 'Limit|const|3|1' 'the constant'
+    Assert-Equal (Get-GoDeep $db "SELECT 'v=' || func || '|' || value FROM string_literals") 'main|a' 'the string, not the import path'
+    $found = Invoke-Gate --map-query $db --find Load
+    Assert-Line $found 'functions'
+    Assert-Line $found 'calls'
+    # NOTHING MOVED: the second run keeps every row, id for id.
+    $ids = "SELECT 'v=' || group_concat(id) FROM (SELECT id FROM calls UNION ALL SELECT id FROM functions UNION ALL SELECT id FROM files ORDER BY id)"
+    $before = Get-GoDeep $db $ids
+    Assert-Exit (Invoke-Gate --root $tree --ext .go --map-sqlite $db) 0
+    Assert-Equal (Get-GoDeep $db $ids) $before 'an unchanged tree writes nothing new'
+}
+
+Test-Case 'go rows: a neighbour that gains a name binds the call of a file that did not change, and one that goes unbinds it' {
+    $tree = Use-Tree @{
+        'go.mod' = $script:GoModule
+        'a.go'   = "package demo`n`nfunc One() { helper() }`n"
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    $bound = "SELECT 'v=' || target_path FROM calls WHERE callee = 'helper'"
+    Assert-Exit (Invoke-Gate --root $tree --ext .go --map-sqlite $db) 0
+    Assert-Equal (Get-GoDeep $db $bound) '' 'nothing declares helper yet'
+    [System.IO.File]::WriteAllText((Join-Path $tree 'b.go'), "package demo`n`nfunc helper() {}`n")
+    Assert-Exit (Invoke-Gate --root $tree --ext .go --map-sqlite $db) 0
+    Assert-Equal (Get-GoDeep $db $bound) 'b.go' 'a.go was not edited, and its call now binds'
+    Remove-Item (Join-Path $tree 'b.go')
+    Assert-Exit (Invoke-Gate --root $tree --ext .go --map-sqlite $db) 0
+    Assert-Equal (Get-GoDeep $db $bound) '' 'and unbinds when the file has gone'
+    Remove-Item (Join-Path $tree 'a.go')
+    Assert-Exit (Invoke-Gate --root $tree --ext .go --map-sqlite $db) 0
+    Assert-Equal (Get-GoDeep $db "SELECT 'v=' || count(*) FROM files WHERE lang = 'go'") '0' 'the last .go gone takes the go rows'
+}

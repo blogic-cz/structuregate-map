@@ -12,9 +12,16 @@
 //!
 //! A FILE NOTHING NAMES IS STILL RUN when the tool chain runs it: `package main` with `func main`, a `_test.go` (`go
 //! test`) are entries; a file with a `func init()` runs when its package is imported, so it is `registered`.
+//!
+//! THE DEEP MAP'S GO ROWS (`--map-sqlite`, `lang = 'go'`): `deep.rs` stores, per `.go` file, a `files` row (`module` is
+//! the package clause) and `rows.rs` reads its `functions`, `calls` (a plain `Name(` binds to the folder's func, an
+//! `alias.Name(` to the imported folder's, as the graph does; a method call is unbound), `consts` (top-level `const`
+//! and `var`) and `string_literals`. A change to what they hold bumps `ROWS_VERSION` in `deep.rs`.
 
+pub(crate) mod deep;
 pub(crate) mod lines;
 mod modfile;
+mod rows;
 
 use gosyn::ast::{Declaration, File};
 use gosyn::token::{LitKind, Operator, Token};

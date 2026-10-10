@@ -35,6 +35,7 @@ Every half writes into ONE database and the halves SHARE table names (`calls`, `
 | `typescript` | the Angular half (`angular.json`/`nx.json` present) | semantic, replaced WHOLE each run; every row also carries `half = 'typescript'` and most of its tables have no `file` |
 | `sql` | T-SQL (ScriptDom), files under a `.sqlproj` | its own `sql_*` tables, joined to the C# rows by `sql_links` |
 | `rust` | `syn`, in the exe | `files`, `consts`, both literal tables, and `handlers`: every `?`, `Err` arm, `unwrap`, `.ok()`, `let _ =`… with its `shape`, `panics`, `test` |
+| `go` | `gosyn`, in the exe | syntactic, per file, shaped like python's: `functions` (`Recv.Name` for a method), `calls` bound to the package's own func or the imported package's by `go.mod` (a method call is unbound), `consts` (top-level `const`/`var`), `string_literals`; `files.module` is the package |
 
 **Not here:** `.ps1` and `.md` are in the JSON map (`buildmap.json`) and write no rows in this
 database. A count over a shared table without `f.lang = ...` adds two languages together.

@@ -74,6 +74,7 @@ pub struct Files {
     pub script: Vec<(String, String)>,
     pub sql: Vec<(String, String)>,
     pub rust: Vec<(String, String)>,
+    pub go: Vec<(String, String)>,
 }
 
 impl Deep {
@@ -134,7 +135,7 @@ fn plain_half<'a>(deep: &'a Deep, hashes: &hashes::Hashes, files: &Files) -> pay
 fn tree_hashes(deep: &Deep, files: &Files) -> hashes::Hashes {
     let db = deep.db.as_str();
     let any = !files.sharp.is_empty() || !files.sql.is_empty() || !files.script.is_empty() || !files.python.is_empty()
-        || !files.rust.is_empty() || Path::new(db).is_file();
+        || !files.rust.is_empty() || !files.go.is_empty() || Path::new(db).is_file();
     let roots: Vec<String> = deep.roots.iter().map(|(_, root)| root.clone()).collect();
     let mut avoid = vec![db];
     avoid.extend(deep.map_out.as_deref());
@@ -235,6 +236,15 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
             beside_ms.insert("rust", since(timed));
         }
 
+        // IN PROCESS, by `gosyn`, the same way: a tree whose last `.go` has gone still runs it.
+        {
+            let timed = Instant::now();
+            let stage = crate::trace::stage("deep: go");
+            stage.set("structuregate.files", files.go.len() as i64);
+            crate::gomap::deep::run(into, db, root, &files.go);
+            beside_ms.insert("go", since(timed));
+        }
+
         // NO C# IN THE TREE IS NOT NOTHING TO DO: a database holding C# rows holds them for files that have just
         // left, so the half runs once with nothing in it and the store drops them.
         if let Some(hashed) = sharp.take() {
@@ -291,7 +301,7 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
     drop(beside);
     ms.extend(beside_ms);
     // IN THE ORDER THE HALVES WERE ONCE RUN, whichever ran beside which.
-    for half in ["typescript", "plain typescript", "python", "rust", "csharp"] {
+    for half in ["typescript", "plain typescript", "python", "rust", "go", "csharp"] {
         if let Some(&took) = ms.get(half) {
             clock.add(half, took);
         }
