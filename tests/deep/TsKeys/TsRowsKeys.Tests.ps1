@@ -135,3 +135,24 @@ Test-Case 'tsrows keys: a key built by a + chain reaches the component it is bui
 }
 
 }
+
+# A CONSTANT JOINED IN FRONT WITH `+` IS PART OF THE KEY A TEMPLATE SPELLS: `BASE + (child ? `.${name}.tipChild` :
+# `.${name}.tip`)` recorded only `.` and `.tip`, so no reference row named the keys' prefix. The constant now leads
+# the first piece, through parentheses and either arm of a conditional. A literal under no `+`, or after one whose
+# left side is not a known string, keeps its own pieces.
+Test-Case 'tsrows keys: a constant joined in front of a template literal leads its first piece' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/tips.ts' = "const BASE = 'demo.section';`n" +
+            "export function applySettings(config: { tip: string }, name: string, child: boolean, lead: string) {`n" +
+            "  config.tip = BASE + (child ? ``.`${name}.tipChild`` : ``.`${name}.tip``);`n" +
+            "  config.tip = ``plain.`${name}.label``;`n" +
+            "  config.tip = lead + ``.`${name}.loose``;`n" +
+            "}`n"
+    }
+    $made = New-TsRowsDb $tree
+    $r = Invoke-TsRowsQ $made.Db "SELECT t.parts AS parts FROM template_literals t JOIN files f ON f.id = t.file WHERE f.path LIKE '%tips.ts' ORDER BY t.line, t.col"
+    Assert-Line $r '["demo.section.", ".tipChild"]'
+    Assert-Line $r '["demo.section.", ".tip"]'
+    Assert-Line $r '["plain.", ".label"]'
+    Assert-Line $r '[".", ".loose"]'
+}

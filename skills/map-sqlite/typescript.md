@@ -42,6 +42,8 @@ Beside the shared tables it adds the FRAMEWORK tables:
   and `renders` point at. `templates`/`template_nodes`/`bindings` are the template side; `gates`/
   `gate_values` what hides a node (`op` in/not_in/unknown; `listed_json` what a config object lists, even an
   exclusion the map cannot polarise); `state_*` NgRx; `di`/`injectables` injection.
+* **`template_literals.parts`** are a template's literal pieces, its `holes` what fills them; a string constant joined
+  in front with `+` (`BASE + `.${name}.tip``, through `( )` and either arm of `?:`) leads the first piece.
 * **A template's tables have no `file`** - a binding hangs off a template node - so join by the ids; every
   row carries `owner_file`. A body's `calls`, `locals`, `assignments`, `returns`, `raises`, `branches`,
   `handlers`, `switch_cases` and the literal tables carry `file` too, as every other half does. `_meta` publishes what SQLite cannot record: the 43 id prefixes, 129 joins and which
