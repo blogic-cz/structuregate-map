@@ -81,7 +81,7 @@ requires and which enum members it still permits.
   anywhere else it proves only the true side; INITIALISED with a decision and never written it is that
   expression. A read compared by value (`v === V.First`) is never replaced.
 - **A CALL OF ONE RETURN** (#10, `gate/ts/gate_calls.rs`): a method, function, arrow property or arrow `const`
-  of one unconditional return - or a property holding one - is that return with parameters replaced by
+  of one unconditional return - or a property holding one (an arrow, or a `function` declaration by its `$ref`) - is that return with parameters replaced by
   arguments, a service's dimensions then the service's. Not inlined: a second return, a `Promise`/`Observable`
   body, a parameter a callback rebinds, a different argument count, a callee `gate_predicates` or `gate_lists`
   already reads. An arrow property returns like a METHOD (#8: the extractor writes its implicit `returns`).

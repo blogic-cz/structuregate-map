@@ -20,12 +20,13 @@ $script:TsGateThroughSql = "SELECT g.source || ' => ' || v.enum_name || ' ' || v
 # and restricts nothing on a dimension one side says nothing of. A call to a method of one return - its
 # parameter typed `number`, its body an OR of equalities - reads as that return, and so does a call through a
 # property holding an imported arrow, even one holding a callback on the same line - and so does every other
-# property, in any component, holding the same arrow.
+# property, in any component, holding the same arrow. A property holding a `function` declaration reads the same.
 Test-Case 'tsrows: a negated flag, an or, and a call to a one-return function restrict like the flag itself' {
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/sizes.ts' = "export enum Size { Huge = 1, Large = 2, Small = 3, Medium = 4, Mini = 5, Tiny = 6 }`n" +
             "export const isBigOne = (id: Size) => [Size.Huge, Size.Large].includes(id);`n" +
-            "export const isHugeOne = (id: Size) => [Size.Huge].some((x) => x === id);`n"
+            "export const isHugeOne = (id: Size) => [Size.Huge].some((x) => x === id);`n" +
+            "export function isSmallOne(id: Size) { return [Size.Small, Size.Mini].includes(id); }`n"
         'apps/shop/src/size.component.html' = "<b *ngIf=`"isBig`">plain</b>`n" +
             "<i *ngIf=`"!isBig`">negated</i>`n" +
             "<u *ngIf=`"isSmall || isBig`">either</u>`n" +
@@ -33,11 +34,12 @@ Test-Case 'tsrows: a negated flag, an or, and a call to a one-return function re
             "<em *ngIf=`"model.edited && !isBig`">and</em>`n" +
             "<q *ngIf=`"isLarge(size)`">imported</q>`n" +
             "<q *ngIf=`"isHuge(size)`">callback</q>`n" +
+            "<q *ngIf=`"isSmallish(size)`">declared</q>`n" +
             "<a *ngIf=`"isBig || model.edited`">half</a>`n" +
             "<p *ngIf=`"!isLater`">not later</p>`n" +
             "<p *ngIf=`"isLater`">later</p>`n"
         'apps/shop/src/size.component.ts' = "import { Component, OnInit } from '@angular/core';`n" +
-            "import { Size, isBigOne, isHugeOne } from './sizes';`n" +
+            "import { Size, isBigOne, isHugeOne, isSmallOne } from './sizes';`n" +
             "@Component({ selector: 'app-size', templateUrl: './size.component.html', standalone: true })`n" +
             "export class SizeComponent implements OnInit {`n" +
             "  size: Size = Size.Medium;`n" +
@@ -47,6 +49,7 @@ Test-Case 'tsrows: a negated flag, an or, and a call to a one-return function re
             "  isLater = false;`n" +
             "  isLarge = isBigOne;`n" +
             "  isHuge = isHugeOne;`n" +
+            "  isSmallish = isSmallOne;`n" +
             "  ngOnInit() {`n" +
             "    this.isBig = this.size === Size.Huge || this.size === Size.Large;`n" +
             "    this.isSmall = this.size === Size.Small;`n" +
@@ -76,6 +79,7 @@ Test-Case 'tsrows: a negated flag, an or, and a call to a one-return function re
     Assert-Line $r 'model.edited && !isBig => Size size not_in ["Huge","Large"]'
     Assert-Line $r 'isLarge(size) => Size size in ["Huge","Large"]'
     Assert-Line $r 'isHuge(size) => Size size in ["Huge"]'
+    Assert-Line $r 'isSmallish(size) => Size size in ["Mini","Small"]'
     Assert-Line $r 'isBigToo(first) => Size first in ["Huge","Large"]'
     Assert-Line $r 'isBigToo(second) => Size second in ["Huge","Large"]'
     Assert-NoLine $r 'isBig || model.edited =>'
