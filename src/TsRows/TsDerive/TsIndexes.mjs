@@ -26,6 +26,11 @@ export function rollupSelectors(store) {
 export function rollupRenderGraph(store) {
   const aggregate = new Map();
   for (const r of store.table('renders')) {
+    // AN OUT-OF-SCOPE CANDIDATE IS NOT AN EDGE (divergence #12). A selector matched across the whole workspace
+    // links a native `<header>` to any component named `header`, in any app; Angular instantiates it only where
+    // the template's scope reaches it. `renders` keeps the candidate with its `scope`; the graph - and the atlas
+    // and view walking it - keeps what really renders, as `component_reach` already did.
+    if (r.scope === 'out_of_scope') continue;
     const key = `${String(r.from_class)}>${String(r.to_class)}>${String(r.kind)}`;
     const hit = aggregate.get(key);
     // A DYNAMIC EDGE HAS NO TAG. Coercing it would put the string "null" among real element names, which

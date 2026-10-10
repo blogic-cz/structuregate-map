@@ -39,7 +39,9 @@ Beside the shared tables it adds the FRAMEWORK tables:
 | the closure, derived LAST from every other table | `render_path` `key_reach` `gate_features` (+ `gate_values`): where a translation key can be travelled to from a routed root, what gates every way in, which capability each gate requires |
 
 * **`components.class`** is the class row (`c:...`) that `routes.component_id`, `render_graph.from_class`
-  and `renders` point at. `templates`/`template_nodes`/`bindings` are the template side; `gates`/
+  and `renders` point at. `renders` keeps every selector candidate with its `scope` (`declared`, `imported`,
+  `out_of_scope`, `unknown`, `direct_reference`); `render_graph` leaves out the `out_of_scope` ones - a tag
+  Angular never instantiates there. `templates`/`template_nodes`/`bindings` are the template side; `gates`/
   `gate_values` what hides a node (`op` in/not_in/unknown; `listed_json` what a config object lists, even an
   exclusion the map cannot polarise); `state_*` NgRx; `di`/`injectables` injection.
 * **`template_literals.parts`** are a template's literal pieces, its `holes` what fills them; a string constant joined

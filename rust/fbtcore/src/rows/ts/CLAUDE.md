@@ -126,5 +126,6 @@ The half replaced a predecessor 1:1, compared by NATURAL IDENTITY (what a row sa
 id) with every carried field equal. A row the predecessor got wrong was reproduced, and changing it is a
 SIGNED-OFF divergence - a port that improves rows cannot be told from one that breaks them. The numbers above
 (#1-#11) are those decisions; #2 (the atlas reports `routes.children`, `rust/fbtcore/src/atlas.rs`) and #5
-(an aliased dependency NgModule, the extractor's) live elsewhere. A new restriction is a new divergence: say
+(an aliased dependency NgModule, the extractor's) and #12 (`render_graph` leaves out an `out_of_scope` render,
+`src/TsRows/TsDerive/TsIndexes.mjs`) live elsewhere. A new restriction is a new divergence: say
 which tables gain rows and that no other table moves, and bump the extractor's `rows` (it keys an unchanged tree).
