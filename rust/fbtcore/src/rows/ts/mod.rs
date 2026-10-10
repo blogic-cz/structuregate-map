@@ -59,6 +59,8 @@ pub mod key_dead;
 pub mod keyreach;
 #[path = "key/key_literals.rs"]
 pub mod key_literals;
+#[path = "key/key_returned.rs"]
+pub mod key_returned;
 #[path = "key/key_routes.rs"]
 pub mod key_routes;
 pub mod sourcescan;
@@ -268,7 +270,7 @@ pub fn render_paths_json(db: &Path, half: &str, checks: &[String], enum_name: &s
         }
     }
 
-    let edges = closure::load_edges(&store);
+    let edges = closure::load_edges(&store, &key_branches::Branches::new(&store));
     let mut emitting = store::Store::from_db(&conn, half)?;
     let paths = closure::render_paths(&mut emitting, &edges, &needed);
 

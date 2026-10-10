@@ -165,12 +165,12 @@ pub fn build_closure(
     note: &mut dyn FnMut(&str),
 ) -> (Closure, Derived) {
     let stage = crate::trace::stage("closure: branches");
-    let step = crate::trace::stage("branches: edges");
-    let edges = load_edges(store);
-    drop(step);
     let step = crate::trace::stage("branches: index");
     let branches = Branches::new(store);
     let idx0 = enum_index(store);
+    drop(step);
+    let step = crate::trace::stage("branches: edges");
+    let edges = load_edges(store, &branches);
     drop(step);
     let conds = branches.conds(store, &idx0);
     drop(stage);
@@ -384,8 +384,10 @@ pub fn ways_of(
             });
             w.path_sets.push(p.gates.iter().map(|g| g.to_string()).collect());
             for chain in chains {
+                // A case a factory returned a child under (`key_returned`) holds on this path like a
+                // gate does, and folds with the key's own branches.
                 let mut one: IndexSet<String> =
-                    p.gates.iter().map(|g| g.to_string()).collect();
+                    p.gates.iter().chain(p.branches.iter()).map(|g| g.to_string()).collect();
                 one.extend(chain.iter().cloned());
                 w.sets.push(one);
             }

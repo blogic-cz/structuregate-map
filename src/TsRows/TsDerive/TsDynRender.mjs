@@ -72,7 +72,11 @@ function componentSlots(value, out, seen) {
 
 /** The property an implicit read names - `[ngComponentOutlet]="cmp"`, not `svc.cmp` and not a call. */
 function implicitReadName(ast) {
-  const node = obj(ast);
+  // A BINDING'S TREE IS STORED WITH ITS SOURCE AROUND IT (`{k: 'Source', ast}`, `TsTpl/TsTplExpr.mjs`), so the
+  // read is one level in. Testing the wrapper itself matched no outlet at all: every `[ngComponentOutlet]`
+  // and `*ngComponentOutlet` was reported as a site with no nameable component.
+  const outer = obj(ast);
+  const node = outer !== null && outer.k === 'Source' ? obj(outer.ast) : outer;
   if (node === null || node.k !== 'Read') return null;
   const receiver = obj(node.receiver);
   if (receiver === null || (receiver.k !== 'Implicit' && receiver.k !== 'This')) return null;
@@ -179,7 +183,7 @@ export function rollupDynamicRenders(store, diag) {
   for (const r of store.table('returns')) {
     if (r.member === undefined || r.value === undefined) continue;
     const list = returnsOf.get(r.member);
-    if (list) list.push(r.value); else returnsOf.set(r.member, [r.value]);
+    if (list) list.push(r); else returnsOf.set(r.member, [r]);
   }
 
   const paramNames = (row) => arr(row?.params).map((p) => String(p.name ?? ''));
@@ -279,21 +283,27 @@ export function rollupDynamicRenders(store, diag) {
 
   /** THE CLASSES A SITE CAN CREATE - its own references, plus everything the callee in its component
    *  position RETURNS. One hop is not enough: a registry method returns the class and the helper that
-   *  creates it takes it as a parameter, so the chain is followed through declarations until it repeats. */
+   *  creates it takes it as a parameter, so the chain is followed through declarations until it repeats.
+   *
+   *  EACH CANDIDATE KEEPS THE `returns` ROWS IT CAME THROUGH (`way`, outermost first): `case A: return X;`
+   *  creates X only when the case holds, and the closure reads that case off the rows (`closure::load_edges`).
+   *  A declaration is followed once per WAY in, never twice on one way - a second caller of the same
+   *  registry is a second way, and dropping it would hand the edge the first way's conditions alone. */
   const candidatesOf = (slots) => {
-    const out = slots.refs.map((ref) => ({ ref, returnedBy: null }));
-    const seenDecls = new Set();
-    const queue = slots.calls.map((ref) => declForRef(ref)).filter((d) => d != null);
+    const out = slots.refs.map((ref) => ({ ref, returnedBy: null, way: [] }));
+    const queue = slots.calls.map((ref) => ({ decl: declForRef(ref), way: [], path: [] }))
+      .filter((q) => q.decl != null);
     while (queue.length) {
-      const decl = queue.shift();
-      if (seenDecls.has(decl)) continue;
-      seenDecls.add(decl);
-      for (const value of returnsOf.get(decl) ?? []) {
-        const inner = slotsOf(value);
-        for (const ref of inner.refs) out.push({ ref, returnedBy: decl });
+      const { decl, way, path } = queue.shift();
+      if (path.includes(decl)) continue;
+      const onPath = [...path, decl];
+      for (const r of returnsOf.get(decl) ?? []) {
+        const inner = slotsOf(r.value);
+        const through = [...way, r.id];
+        for (const ref of inner.refs) out.push({ ref, returnedBy: decl, way: through });
         for (const ref of inner.calls) {
           const next = declForRef(ref);
-          if (next != null) queue.push(next);
+          if (next != null) queue.push({ decl: next, way: through, path: onPath });
         }
       }
     }
@@ -309,12 +319,14 @@ export function rollupDynamicRenders(store, diag) {
     // carried copy sat beside a fresh one naming the same edge through a different `call`: hundreds
     // of duplicate `renders`, which the path walk multiplied into several times the true render paths.
     const targets = new Map();
-    for (const { ref, returnedBy } of candidatesOf(site.slots)) {
+    for (const { ref, returnedBy, way } of candidatesOf(site.slots)) {
       const hit = componentForRef(ref);
       // A REFERENCE THAT IS NOT A COMPONENT IS NOT A RENDER. The evaluator publishes a `$ref` for any class,
       // enum or function, and one the map holds no `@Component` for cannot be instantiated as one.
       if (hit === null) { diag.note('dynamic_render_target_unresolved'); continue; }
-      if (!targets.has(hit.row.class)) targets.set(hit.row.class, { ...hit, returnedBy });
+      const held = targets.get(hit.row.class);
+      if (held === undefined) targets.set(hit.row.class, { ...hit, returnedBy, ways: [way] });
+      else if (!held.ways.some((w) => w.join(' ') === way.join(' '))) held.ways.push(way);
     }
     if (!targets.size) {
       // A CREATION SITE WITH NO NAMEABLE COMPONENT IS THE FINDING, and it has to survive in the map: this is
@@ -329,7 +341,7 @@ export function rollupDynamicRenders(store, diag) {
       unresolved += 1;
       continue;
     }
-    for (const [cls, { row: component, byName, returnedBy }] of targets) {
+    for (const [cls, { row: component, byName, returnedBy, ways }] of targets) {
       store.add('renders', 'rd', {
         from_component: registrationByClass.get(site.fromClass) ?? null, from_class: site.fromClass,
         to: component.id, to_class: cls, to_name: component.name, kind: 'component',
@@ -339,6 +351,9 @@ export function rollupDynamicRenders(store, diag) {
         // WHERE THE CLASS WAS WRITTEN, when it was not written at the creation site. Without it an edge into
         // dozens of components from one line is unauditable.
         ...(returnedBy === null ? {} : { returned_by: returnedBy }),
+        // EVERY WAY THE CLASS IS RETURNED, as the `returns` rows on it - the edge holds only what every way
+        // holds, and a way through no `return` (the class written at the site) holds nothing.
+        ...(returnedBy === null ? {} : { return_ways: ways }),
         // An outlet edge still happens AT a node and keeps it; a call has neither. No element MATCHED in
         // either case, so `tag` is empty rather than borrowed from the container the outlet sits on.
         template: site.where.template ?? null,

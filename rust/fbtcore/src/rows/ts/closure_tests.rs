@@ -28,7 +28,7 @@ fn names(ids: &[Rc<str>]) -> Vec<&str> {
 fn edges_of(tables: Value) -> IndexMap<Rc<str>, Vec<Edge>> {
     let map = store_of(tables);
     let store = Store::from_payload(map, "typescript");
-    load_edges(&store)
+    load_edges(&store, &super::super::key_branches::Branches::new(&store))
 }
 
 #[test]
@@ -214,6 +214,7 @@ fn naive(edges: &IndexMap<Rc<str>, Vec<Edge>>, comp: &str) -> Vec<RenderPath> {
                 hops: vec![Rc::clone(current)],
                 edges: Vec::new(),
                 gates: Vec::new(),
+                branches: Vec::new(),
             }]
         };
         let Some(ups) = edges.get(&**current).filter(|u| !u.is_empty()) else {
@@ -232,7 +233,7 @@ fn naive(edges: &IndexMap<Rc<str>, Vec<Edge>>, comp: &str) -> Vec<RenderPath> {
                 ids.push(Rc::clone(&u.id));
                 let mut gates = q.gates;
                 gates.extend(u.gates.iter().cloned());
-                acc.push(RenderPath { hops, edges: ids, gates });
+                acc.push(RenderPath { hops, edges: ids, gates, branches: Vec::new() });
             }
             seen.shift_remove(&u.parent);
         }
@@ -258,6 +259,7 @@ fn shapes() -> IndexMap<Rc<str>, Vec<Edge>> {
             id: Rc::from(id),
             parent: Rc::from(parent),
             gates: gate.map(|g| vec![Rc::from(g)]).unwrap_or_default(),
+            branches: Vec::new(),
         });
     };
     add("spine", "root", "e1", Some("g1"));
