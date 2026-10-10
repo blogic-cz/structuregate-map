@@ -24,7 +24,7 @@ use super::gate_tsrows::{bare, TsRows};
 use super::gate_values::EnumIndex;
 use super::store::{Row, Store};
 use indexmap::{IndexMap, IndexSet};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::rc::Rc;
 
 fn cell(row: &Row, field: &str) -> Option<String> {
@@ -93,6 +93,16 @@ impl<'a> Calls<'a> {
                         callable.insert(id, (names, cell(r, "type")));
                     }
                     continue;
+                }
+                // A PROPERTY HOLDING A FUNCTION DECLARATION (`p = pDecl`) is a `$ref` to it, not a tree: resolved
+                // by name and file to the one `functions` row, it aliases like an arrow does - unread, its gates
+                // restricted nothing.
+                if let (Some(Value::String(name)), Some(Value::String(file)), "members") =
+                    (r.get("value").and_then(|v| v.get("$ref")), r.get("value").and_then(|v| v.get("file")), table)
+                {
+                    if let Some(f) = rows.function_named(&json!({ "name": name, "file": file })) {
+                        alias.insert(id.clone(), f);
+                    }
                 }
                 let tree = r.get("value").filter(|v| v.get("$fn").is_some()).and_then(|v| v.get("$expr_id"));
                 if let (Some(Value::String(x)), "members") = (tree, table) {
