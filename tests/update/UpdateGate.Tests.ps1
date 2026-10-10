@@ -73,3 +73,24 @@ Test-WindowsCase 'update-gate: -Trace sets the user variable, keeps the user''s 
         [Environment]::SetEnvironmentVariable('STRUCTUREGATE_TRACE', $saved, 'User')
     }
 }
+
+# THE TRACE IS IGNORED WHERE THE MAP ALREADY IS, once: a connected npm or hook tree's `.gitignore` names
+# `buildmap.sqlite`, an MSBuild tree's does not and is left as it was.
+Test-Case 'update-gate: a tree ignoring the map gets the trace line once, and one that does not is left alone' {
+    $release = New-UpdateGateRelease
+    $trees = Split-Path $release.Root -Parent
+    foreach ($tree in @('hooked', 'msbuild')) {
+        foreach ($dir in @('.claude', 'buildtools')) { [void](New-Item -ItemType Directory -Force -Path (Join-Path $trees "$tree/$dir")) }
+    }
+    [System.IO.File]::WriteAllText((Join-Path $trees 'hooked/.gitignore'), "node_modules`nbuildmap.json`nbuildmap.sqlite")
+    [System.IO.File]::WriteAllText((Join-Path $trees 'msbuild/.gitignore'), "bin/`nobj/`n")
+    [void](New-Item -ItemType Directory -Force -Path $release.Root)
+    [System.IO.File]::WriteAllLines((Join-Path $release.Root 'consumers.txt'),
+        [string[]]@((Join-Path $trees 'hooked/buildtools'), (Join-Path $trees 'msbuild/buildtools')))
+    Assert-Exit (Invoke-UpdateGate $release @()) 0
+    Assert-Exit (Invoke-UpdateGate $release @()) 0
+    $hooked = @([System.IO.File]::ReadAllText((Join-Path $trees 'hooked/.gitignore')).Split([char]10) | ForEach-Object { $_.Trim() })
+    Assert-Equal @($hooked | Where-Object { $_ -eq 'buildmap.sqlite.last-run.jsonl' }).Count 1 'the trace lines'
+    Assert-Equal @($hooked | Where-Object { $_ -eq 'buildmap.sqlite' }).Count 1 'the map line, kept'
+    Assert-Equal ([System.IO.File]::ReadAllText((Join-Path $trees 'msbuild/.gitignore'))) "bin/`nobj/`n" 'the MSBuild tree'
+}

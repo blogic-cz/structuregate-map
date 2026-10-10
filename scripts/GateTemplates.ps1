@@ -119,13 +119,14 @@ exit 0
 }
 
 # THE MAP'S OUTPUTS ARE CACHES, so they are ignored where the entry point writes them. Appended only when
-# missing, and only in a git tree; `map-baseline.json` is NOT here - it is the ratchet and stays tracked.
+# missing, and only in a git tree. The run's trace beside the database (`<db>.last-run.jsonl`) is one too;
+# `map-baseline.json` is NOT here - it is the ratchet and stays tracked.
 function Add-GateIgnore([string]$Path) {
     if (-not (Test-Path (Join-Path $Path '.git'))) { return 'no git' }
     $file = Join-Path $Path '.gitignore'
     $text = if (Test-Path $file) { [System.IO.File]::ReadAllText($file) } else { '' }
     $held = @($text.Split([char]10) | ForEach-Object { $_.Trim() })
-    $missing = @(@('buildmap.json', 'buildmap.sqlite') | Where-Object { $held -notcontains $_ })
+    $missing = @(@('buildmap.json', 'buildmap.sqlite', 'buildmap.sqlite.last-run.jsonl') | Where-Object { $held -notcontains $_ })
     if ($missing.Count -eq 0) { return 'present' }
     $lead = if ($text.Length -gt 0 -and -not $text.EndsWith([string][char]10)) { [string][char]10 } else { '' }
     $block = $lead + '# the structure gate''s code map - a cache, rebuilt by the entry point' + [char]10 + (($missing -join [char]10) + [char]10)

@@ -26,7 +26,8 @@
       3  write every file of it INTO release/ IN PLACE, so each hard link a consumer holds sees the new bytes
       4  per consumer: hard-link the two gate files, re-point each junction (symbolic link off Windows) in
          <tree>/.claude/skills and each agent in <tree>/.claude/agents whose name the release carries - a
-         tree's OWN skills are not touched
+         tree's OWN skills are not touched; a tree whose .gitignore holds `buildmap.sqlite` gets the run's trace
+         (`buildmap.sqlite.last-run.jsonl`) beside it
       5  drop from consumers.txt each gate folder that no longer exists (a deleted or moved tree), so it does
          not fail every later run; a folder on a drive or root that is itself missing (an unplugged disk) is
          kept, and -DryRun only reports it
@@ -240,12 +241,29 @@ function Find-GateTree([string]$GateDir) {
     return $null
 }
 
+# THE RUN'S TRACE IS A CACHE LIKE THE MAP (`<db>.last-run.jsonl` beside it): a tree whose `.gitignore` already
+# keeps the map out gets the trace's line too, or every hook run shows it in `git status`. A tree whose ignore
+# file does not name the map is an MSBuild one, wired without an ignore block, and is left alone.
+function Add-GateTraceIgnore([string]$Tree) {
+    $file = Join-Path $Tree '.gitignore'
+    if (-not (Test-Path $file)) { return }
+    $text = [System.IO.File]::ReadAllText($file)
+    $held = @($text.Split([char]10) | ForEach-Object { $_.Trim() })
+    $line = 'buildmap.sqlite.last-run.jsonl'
+    if ($held -notcontains 'buildmap.sqlite' -or $held -contains $line) { return }
+    Write-Host "  [ignore]   .gitignore: $line"
+    if ($DryRun) { return }
+    $lead = if ($text.Length -gt 0 -and -not $text.EndsWith([string][char]10)) { [string][char]10 } else { '' }
+    [System.IO.File]::AppendAllText($file, $lead + $line + [char]10)
+}
+
 function Update-GateConsumer([string]$GateDir) {
     foreach ($name in @($exeName, 'StructureGate.targets')) {
         Write-Host "  [gate]     $(Set-GateFileLink (Join-Path $release $name) (Join-Path $GateDir $name)) $name"
     }
     $tree = Find-GateTree $GateDir
     if (-not $tree) { return }
+    Add-GateTraceIgnore $tree
     $skills = Join-Path (Join-Path $tree '.claude') 'skills'
     if (Test-Path $skills) {
         foreach ($link in Get-ChildItem $skills -Directory) {

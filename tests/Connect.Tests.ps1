@@ -307,7 +307,10 @@ Test-Case 'the npm launcher rebuilds the map, and still fails on a limit' {
     # THE CACHES ARE IGNORED, ONCE: a second connect must not add the lines again.
     [void](Invoke-Connect $tree @('-SkipMap', '-SkipSkill', '-SkipPrereq'))
     $ignore = Join-Path $tree '.gitignore'
-    Assert-Equal (Get-ConnectCount $ignore 'buildmap.sqlite') 1 'buildmap.sqlite lines in .gitignore'
+    # Whole LINES: the trace's name contains the database's, so a substring count would see two.
+    $held = @([System.IO.File]::ReadAllText($ignore).Split([char]10) | ForEach-Object { $_.Trim() })
+    Assert-Equal @($held | Where-Object { $_ -eq 'buildmap.sqlite' }).Count 1 'buildmap.sqlite lines in .gitignore'
+    Assert-Equal @($held | Where-Object { $_ -eq 'buildmap.sqlite.last-run.jsonl' }).Count 1 'the last-run trace lines in .gitignore'
     Assert-Equal (Get-ConnectCount $ignore 'map-baseline.json') 0 'the baseline is not ignored'
 }
 

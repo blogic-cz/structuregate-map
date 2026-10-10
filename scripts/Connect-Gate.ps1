@@ -144,7 +144,7 @@ switch ($point.Kind) {
     'none'    { Write-Host '  [skipped]  entry point (-Entry none)' }
 }
 # The npm launcher and the hook wrapper rebuild the map on every run, so its outputs are ignored there.
-if ($point.Kind -eq 'npm' -or $point.Kind -eq 'hook') { Write-Host "  [$(Add-GateIgnore $tree)]  .gitignore: buildmap.json, buildmap.sqlite" }
+if ($point.Kind -eq 'npm' -or $point.Kind -eq 'hook') { Write-Host "  [$(Add-GateIgnore $tree)]  .gitignore: buildmap.json, buildmap.sqlite, buildmap.sqlite.last-run.jsonl" }
 
 if ($SkipPrereq) { Write-Host '  [skipped]  host probe' }
 else { foreach ($note in Test-GatePrereq $tree $extensions $true $TypeScriptSpec) { Write-Host "  [host]     $note" } }
