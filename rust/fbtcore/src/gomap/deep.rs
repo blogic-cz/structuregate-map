@@ -17,7 +17,7 @@ use std::path::Path;
 
 const LANG: &str = "go";
 /// Part of every file's sha: changing what a file's rows hold changes this, and every file is read again.
-const ROWS_VERSION: &str = "go-rows 1";
+const ROWS_VERSION: &str = "go-rows 2";
 
 pub(crate) fn run(into: &mut Collector, db: &str, root: &str, files: &[(String, String)]) {
     let state = store::state(Path::new(db), LANG, false);
@@ -38,7 +38,7 @@ pub(crate) fn run(into: &mut Collector, db: &str, root: &str, files: &[(String, 
         let moved = texts.iter().any(|(rel, _, _)| held.get(*rel).map(String::as_str) != shas[*rel].as_str())
             || held.keys().any(|rel| !shas.contains_key(rel));
         let stale: Vec<&(&str, &str, String)> = if moved { texts.iter().collect() } else { Vec::new() };
-        let index = if moved { index_of(Path::new(root), &texts) } else { Index::new() };
+        let index = if moved { index_of(Path::new(root), &texts) } else { Index::default() };
         let mut counters: BTreeMap<String, i64> = if state.rebuild { BTreeMap::new() } else { state.counters.clone() };
         let mut tables: BTreeMap<&str, Vec<Value>> = BTreeMap::new();
         for (rel, abs, text) in &stale {
@@ -82,16 +82,20 @@ fn folded(text: &str) -> String {
     Sha256::digest(text.as_bytes()).iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
-/// Every top-level func of the run, by folder: what a call binds to. A `_test.go` declares nothing (`mod.rs`), and the
+/// Every top-level func and method of the run, by folder: what a call binds to. A `_test.go` declares nothing (`mod.rs`), and the
 /// files are taken in path order so a name two build variants declare always answers with the same one.
 fn index_of(root: &Path, texts: &[(&str, &str, String)]) -> Index {
     let mut ordered: Vec<&(&str, &str, String)> = texts.iter().filter(|(rel, _, _)| !rel.ends_with("_test.go")).collect();
     ordered.sort_by(|a, b| a.0.cmp(b.0));
-    let mut index = Index::new();
+    let mut index = Index::default();
     for (rel, abs, text) in ordered {
         let folder = rows::folder_of(root, Path::new(abs));
-        for name in rows::declared_funcs(text) {
-            index.entry((folder.clone(), name)).or_insert_with(|| rel.to_string());
+        let (funcs, results) = rows::declared_funcs(text);
+        for name in funcs {
+            index.funcs.entry((folder.clone(), name)).or_insert_with(|| rel.to_string());
+        }
+        for (name, typ) in results {
+            index.results.entry((folder.clone(), name)).or_insert(typ);
         }
     }
     index

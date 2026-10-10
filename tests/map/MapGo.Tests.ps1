@@ -103,14 +103,19 @@ function Get-GoDeep([string]$Db, [string]$Sql) {
 Test-Case 'go rows: functions, calls bound through the package and the import, consts, and --find reads them' {
     $tree = Use-Tree @{
         'go.mod'         = $script:GoModule
-        'main.go'        = "package main`n`nimport ""example.com/demo/store""`n`nfunc main() { store.Load(""a"") }`n"
-        'store/store.go' = "package store`n`nconst Limit = 3`n`nfunc Load(name string) error { return check(name) }`n`nfunc check(string) error { return nil }`n"
+        'main.go'        = "package main`n`nimport ""example.com/demo/store""`n`ntype Getter interface{ Get() }`n`nfunc main() { store.Load(""a""); s := store.New(); s.Load(n) }`n`nfunc use(st *store.Store) { st.Load(n) }`n`nfunc call(g Getter) { g.Get() }`n"
+        'store/store.go' = "package store`n`nconst Limit = 3`n`ntype Store struct{}`n`nfunc New() *Store { return &Store{} }`n`nfunc (s *Store) Load(name string) error { return s.check(name) }`n`nfunc (s *Store) check(string) error { return nil }`n`nfunc Load(name string) error { return check(name) }`n`nfunc check(string) error { return nil }`n"
     }
     $db = Join-Path $tree 'map.sqlite'
     Assert-Exit (Invoke-Gate --root $tree --ext .go --map-sqlite $db) 0
     Assert-Equal (Get-GoDeep $db "SELECT 'v=' || group_concat(lang || '=' || n) FROM (SELECT lang, count(*) n FROM files GROUP BY lang)") 'go=2' 'both files are go rows'
-    Assert-Equal (Get-GoDeep $db "SELECT 'v=' || group_concat(name || ':' || kind || ':' || exported, ' ') FROM (SELECT name, kind, exported FROM functions ORDER BY name)") 'Load:function:1 check:function:0 main:function:0' 'the functions'
+    Assert-Equal (Get-GoDeep $db "SELECT 'v=' || group_concat(qualname || ':' || kind || ':' || exported, ' ') FROM (SELECT qualname, kind, exported FROM functions ORDER BY qualname)") 'Load:function:1 New:function:1 Store.Load:method:1 Store.check:method:0 call:function:0 check:function:0 main:function:0 use:function:0' 'the functions'
     Assert-Equal (Get-GoDeep $db "SELECT 'v=' || func || '|' || target_path || '|' || target_name || '|' || args || '|' || source FROM calls WHERE callee = 'store.Load'") 'main|store/store.go|Load|1|store.Load("a")' 'the call through the import'
+    Assert-Equal (Get-GoDeep $db "SELECT 'v=' || func || '|' || target_path || '|' || target_name FROM calls WHERE callee = 'store.New'") 'main|store/store.go|New' 'the constructor through the import'
+    Assert-Equal (Get-GoDeep $db "SELECT 'v=' || target_path || '|' || target_name FROM calls WHERE callee = 's.Load' AND func = 'main'") 'store/store.go|Store.Load' 'a method on a local made by a call'
+    Assert-Equal (Get-GoDeep $db "SELECT 'v=' || target_path || '|' || target_name FROM calls WHERE callee = 'st.Load'") 'store/store.go|Store.Load' 'a method on a parameter'
+    Assert-Equal (Get-GoDeep $db "SELECT 'v=' || target_path || '|' || target_name FROM calls WHERE callee = 's.check'") 'store/store.go|Store.check' 'a method on its receiver'
+    Assert-Equal (Get-GoDeep $db "SELECT 'v=' || target_path || '|' || target_name FROM calls WHERE callee = 'g.Get'") '|' 'an interface value stays unbound'
     Assert-Equal (Get-GoDeep $db "SELECT 'v=' || func || '|' || target_path || '|' || target_name FROM calls WHERE callee = 'check'") 'Load|store/store.go|check' 'the call within the package'
     Assert-Equal (Get-GoDeep $db "SELECT 'v=' || name || '|' || kind || '|' || value || '|' || exported FROM consts") 'Limit|const|3|1' 'the constant'
     Assert-Equal (Get-GoDeep $db "SELECT 'v=' || func || '|' || value FROM string_literals") 'main|a' 'the string, not the import path'
