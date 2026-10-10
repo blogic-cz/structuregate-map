@@ -58,6 +58,8 @@ pub struct TsRows {
     locals: IndexMap<String, (String, Option<Value>)>,
     /// `file + " " + name` -> the class members of that name in that file.
     members_named: IndexMap<String, Vec<String>>,
+    /// `file + " " + name` -> the top-level functions of that name in that file (an arrow `const` is one).
+    functions_named: IndexMap<String, Vec<String>>,
 }
 
 /// A bare name that resolved to nothing: a local, a parameter, a callback's element.
@@ -82,9 +84,20 @@ impl TsRows {
                 out.members_named.entry(format!("{file} {name}")).or_default().push(id);
             }
         }
+        for f in store.table("functions").iter() {
+            let (Some(file), Some(name), Some(id)) = (cell(f.get("file")), cell(f.get("name")), cell(f.get("id"))) else { continue };
+            if cell(f.get("parent")).is_none() {
+                out.functions_named.entry(format!("{file} {name}")).or_default().push(id);
+            }
+        }
         for table in DECLARING {
             for r in store.table(table).iter() {
                 let (Some(file), Some(line)) = (cell(r.get("file")), cell(r.get("line"))) else { continue };
+                // AN ANONYMOUS CALLBACK on its declaration's line (`(k) => [..].some((x) => x === k)`) declares
+                // nothing: counted, it made the line ambiguous and the declaration was never found.
+                if cell(r.get("parent")).is_some() && cell(r.get("name")).is_none() {
+                    continue;
+                }
                 at.entry(format!("{file} {line}")).or_default().push((table, cell(r.get("id")), cell(r.get("name"))));
             }
         }
@@ -160,6 +173,16 @@ impl TsRows {
         let (name, abs) = (target.get("name")?.as_str()?, target.get("file")?.as_str()?.replace('\\', "/"));
         let (id, _) = self.by_tail.get(&tail(&abs))?.iter().find(|(_, p)| abs.ends_with(p.as_str()))?;
         match self.members_named.get(&format!("{id} {name}"))?.as_slice() {
+            [one] => Some(one.clone()),
+            _ => None,
+        }
+    }
+
+    /// The ONE function a `{name, file}` target names (a call's evaluated `$target`, which has no line).
+    pub fn function_named(&self, target: &Value) -> Option<String> {
+        let (name, abs) = (target.get("name")?.as_str()?, target.get("file")?.as_str()?.replace('\\', "/"));
+        let (id, _) = self.by_tail.get(&tail(&abs))?.iter().find(|(_, p)| abs.ends_with(p.as_str()))?;
+        match self.functions_named.get(&format!("{id} {name}"))?.as_slice() {
             [one] => Some(one.clone()),
             _ => None,
         }

@@ -24,10 +24,12 @@ pub mod gate_config;
 pub mod gate_directives;
 #[path = "gate/gate_features.rs"]
 pub mod gate_features;
-#[path = "gate/ts/gate_guard_eval.rs"]
+#[path = "gate/ts/directive/gate_guard_eval.rs"]
 pub mod gate_guard_eval;
-#[path = "gate/ts/gate_guards.rs"]
+#[path = "gate/ts/directive/gate_guards.rs"]
 pub mod gate_guards;
+#[path = "gate/ts/gate_curried.rs"]
+pub mod gate_curried;
 #[path = "gate/ts/gate_lists.rs"]
 pub mod gate_lists;
 #[path = "gate/gate_lookups.rs"]
@@ -53,8 +55,12 @@ pub mod key_branches;
 pub mod key_built;
 #[path = "key/key_fields.rs"]
 pub mod key_fields;
+#[path = "key/key_loops.rs"]
+pub mod key_loops;
 #[path = "key/key_dead.rs"]
 pub mod key_dead;
+#[path = "key/key_bound.rs"]
+pub mod key_bound;
 #[path = "key/keyreach.rs"]
 pub mod keyreach;
 #[path = "key/key_literals.rs"]

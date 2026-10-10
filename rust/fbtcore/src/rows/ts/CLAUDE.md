@@ -43,7 +43,7 @@ requires and which enum members it still permits.
   members whatever the `op`; null when no config lists it, `[]` for an empty list. An exclusion list tested
   under a `!` stays `unknown` (hide or disable cannot be told apart), its members in `listed_json`. A
   conditional config (`c ? {...} : {...}`) is read per branch: a member every branch lists permits their
-  union, one a branch omits is `unknown`, one no branch writes has no row.
+  union, one a branch omits is `unknown`, one no branch writes has no row. **A CONFIG READING AN `*ngFor` ITEM'S ENUM PROPERTY** (`{ kinds: [t.kind] }` over a list of literal objects, `key/key_loops.rs::Loops::expand`) is one branch PER ELEMENT: the gate permits their union, and a key rendered from element i carries `loop:<gate>#i`, whose own rows (`config_restrictions_all`) give it element i's value alone.
 - **NOTHING PERMITTED ON EVERY WAY IS `in []`, AND IT IS THE ANSWER** (`value_folds.rs`): two nested config
   lists sharing no member, or a built key whose hole names no member, render the key for NOBODY. Moving it to
   `unreadable_values` made the key read as unrestricted.
@@ -66,10 +66,11 @@ requires and which enum members it still permits.
   siblings; a write outside any branch empties the intersection. A key CHOSEN in a value is a link: `c ? 'a' :
   'b'` holds `c`/`!c`, `x && 'k'` holds `x`, `x || 'k'` holds `!x`, `??` nothing - the link is the condition's
   `expressions` id, `!`-prefixed when negated. A GETTER's returns are its writes; a method's are not (its
-  branches may test parameters). A translation call (`ts_call`) takes its own row's chain; a literal the chain
+  branches may test parameters), except that a field HOLDING ITS CALL reads the method's ONE plain return (`key_fields.rs`; no branch, no
+  second return, its `tpl:` links dropped). **A KEY IN A LIST OF OBJECTS** (`tips = [{ tooltip: 'k' }]`, or a call returning one) is a site only where an `*ngFor` over the field has its loop variable's property read (`t.tooltip`, `key/key_loops.rs`), at THAT node with ITS `gate_chain`; the whole field's read would drop every condition inside the loop from `always_gates`, and a list no `*ngFor` reads stays a `literal`. A translation call (`ts_call`) takes its own row's chain; a literal the chain
   of the innermost assignment, `return` or argument holding it; a PIPE's `transform` key renders at every node
   applying the pipe (route `pipe`). `key_reach` adds `always_branches`/`maybe_branches` and `branch_senses`
-  (`then`/`else`/`case`); `always_gates` still names `gates` rows only.
+  (`then`/`else`/`case`/`loop`/`bind`; `always_branches`/`maybe_branches` can carry `loop:` and `bind:` ids); `always_gates` still names `gates` rows only.
 - **A KEY A TEMPLATE LITERAL BUILDS** (`key/key_built.rs`) is every locale key its pieces spell, with a
   `tpl:<tree>=<holes>` link. A hole `Enum[x]` is the member's NAME, one typed by an enum its VALUE; text no
   member spells is a way that cannot happen. A `const` local of the member resolves in a condition.
@@ -84,23 +85,27 @@ requires and which enum members it still permits.
   arguments, a service's dimensions then the service's. Not inlined: a second return, a `Promise`/`Observable`
   body, a parameter a callback rebinds, a different argument count, a callee `gate_predicates` or `gate_lists`
   already reads. An arrow property returns like a METHOD (#8: the extractor writes its implicit `returns`).
+- **A PREDICATE A FACTORY BUILDS** (`gate/ts/gate_curried.rs`): `const isA = make([Kind.A])` over `make = (ids) =>
+  (k) => ids.includes(k)` - the factory found by the call's `$target`, its one unconditional return an arrow whose one
+  return tests the INNER parameter in the OUTER one's list - is `in [A]` (`not_in` negated), the list being the call's
+  constant argument (`$args`). A variable or a spread handed over, a second parameter or a second return is unread.
 - **AN OR IS THE UNION OF ITS SIDES** (#10, `gate/gate_collapse.rs::either`); `!(a && b)` is `!a || !b`. A
   dimension one side says nothing of is no row, `unknown` on either side is `unknown`, a SET dimension unions
   only two `in`s, and `gate_features` reads nothing from an OR.
-- **A STRUCTURAL DIRECTIVE THE TEMPLATE HANDS A CONSTANT** (#9, `gate/ts/gate_directive_inputs.rs`):
+- **A STRUCTURAL DIRECTIVE THE TEMPLATE HANDS A CONSTANT** (#9, `gate/ts/directive/gate_directive_inputs.rs`):
   `*whenMode="Modes.A"` over an `@Input` (or a setter copying its one parameter into a field) compared with a
   member of the same enum - or with a field declared a bare `number`/`string` the member can equal, an injected
   config value - is a row on THAT member. The `op` is what every `createEmbeddedView` in the class
   chain requires - its branches, a one-level `return` before it, what every `this.` call into its method
   requires - so a render under the `else` of `===` is `not_in`. `unknown`: a field written by anything but
   the copy, a copy under an `if`, two comparisons, an unguarded render, a value that is not the enum's constant.
-- **A DIRECTIVE RENDERING WHEN ITS CONFIG'S VALUE IS IN ITS CONFIG'S LIST** (`gate/ts/gate_guards.rs`,
-  `gate/ts/gate_guard_eval.rs`): the render path is EVALUATED from the input setter through `extends` to every
+- **A DIRECTIVE RENDERING WHEN ITS CONFIG'S VALUE IS IN ITS CONFIG'S LIST** (`gate/ts/directive/gate_guards.rs`,
+  `gate/ts/directive/gate_guard_eval.rs`): the render path is EVALUATED from the input setter through `extends` to every
   `createEmbeddedView`, under its branches and the negation of each earlier `return`. A field copied from
   `config.M` holds `M`, an omitted member is `undefined`, `L.find((x) => x === S) === undefined` over a constant
   list is membership. A render that can run but the walk cannot reach (a callback, an `ng*` hook, a decorated
   member) refuses the directive.
-- **A LIST HANDED TO A DIRECTIVE** (#10, `gate/ts/gate_directive_lists.rs`): `*whenKind="[Kind.A]"` tested by
+- **A LIST HANDED TO A DIRECTIVE** (#10, `gate/ts/directive/gate_directive_lists.rs`): `*whenKind="[Kind.A]"` tested by
   `includes`, `indexOf(x) !== -1` or `some((e) => e === x)` is a SET row (`items.kind in ["A"]`), or a value row
   when tested for a class member. A `const` local is its initializer; an `||` side needing truthy a field no
   template can set is its other side. **A LIST THE SETTER HANDS ON** (#11) is the method parameter it lands in,
@@ -113,7 +118,11 @@ requires and which enum members it still permits.
   `items.filter((i) => i.F === p)` to a helper whose one return is `list.some(...)` (`?? false` allowed) over THAT
   parameter - is a SET row `F.F in [M]`, true side only: `async` is null before the first emit, so a negated one is no row.
 - **AN `@Input` FLAG IS WHAT ITS PARENT BINDS** (#11, `gate/ts/gate_input_flags.rs`), both ways, when EVERY
-  element the child renders at binds it to one tree and the child never writes it; else unread.
+  element the child renders at binds it to one tree and the child never writes it: that is the `gate_values` row.
+  **PARENTS THAT DISAGREE ARE READ PER RENDER EDGE** (#14, `key/key_bound.rs`): no `gate_values` row, but each
+  edge into the child resolves the flag by its own binding, or by the input's literal initializer when it binds
+  nothing, and the way through it holds `bind:<render>#<gate>` (sense `bind`). An edge on which the gate's
+  condition becomes the literal `false` is no way. The child writing the flag itself is still unread.
 - **A KEY CHOSEN IN A CONDITIONAL ARM takes the arm** (#11): the extractor stamps `choices` on each statement
   row inside an arm; the i18n ref joins it through `i18n_refs.call` and `key_reach` folds it like a branch.
 - **A COMPONENT A FACTORY RETURNS UNDER A `case` OR `if` RENDERS UNDER IT** (#13, `key/key_returned.rs`): a
@@ -122,8 +131,7 @@ requires and which enum members it still permits.
   nothing). They ride `render_path.branches` - never `gates` - and `key_reach` folds them with the key's own,
   so `always_branches`/`always_values` gain the case. `path_always_gates` stays gates alone.
 
-**Not read yet**: a curried predicate (`const isPicked = isA([...])`), a set held in a local
-(`active?.some(...)`), a property written more than once.
+**Not read yet**: a set held in a local (`active?.some(...)`), a property written more than once.
 
 ## Divergences, and the rule that made them
 
@@ -135,3 +143,9 @@ SIGNED-OFF divergence - a port that improves rows cannot be told from one that b
 (an aliased dependency NgModule, the extractor's) and #12 (`render_graph` leaves out an `out_of_scope` render,
 `src/TsRows/TsDerive/TsIndexes.mjs`) live elsewhere. A new restriction is a new divergence: say
 which tables gain rows and that no other table moves, and bump the extractor's `rows` (it keys an unchanged tree).
+
+
+**#14 - an input flag the parents bind differently is read per render edge** (signed off; replaces "else unread"
+of #11). A way whose edge leaves the flag at a literal `false` is no way. Tables that move: `key_reach`
+`always_values`, `always_branches`, `maybe_branches`, `n_paths` and `roots`, for keys under such gates. `gate_values`
+does not move.

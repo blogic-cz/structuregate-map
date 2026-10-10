@@ -16,6 +16,11 @@
 export function makeTsExprNormalizer(ts, resolveRead, resolveName = null) {
   const outermost = (node) => !(node.parent !== undefined && ts.isPropertyAccessExpression(node.parent)
     && node.parent.expression === node);
+  // A FIELD A METHOD IS CALLED ON (`this.allowed.includes(v)`) is resolved too: the list a membership test reads
+  // is that field, and with no target the test named nothing a gate could read its members from.
+  const calledOn = (node) => ts.isPropertyAccessExpression(node) && node.expression.kind === ts.SyntaxKind.ThisKeyword
+    && !outermost(node) && node.parent.parent !== undefined && ts.isCallExpression(node.parent.parent)
+    && node.parent.parent.expression === node.parent;
 
   const norm = (node) => {
     if (node === undefined) return null;
@@ -47,7 +52,7 @@ export function makeTsExprNormalizer(ts, resolveRead, resolveName = null) {
       // `a?.b` is a distinct kind on the template side too - keep the distinction rather than flattening
       // it, because a safe read says something real about what the author expected to be absent.
       const safe = node.questionDotToken !== undefined;
-      const target = resolveRead && outermost(node) ? resolveRead(node.name) : null;
+      const target = resolveRead && (outermost(node) || calledOn(node)) ? resolveRead(node.name) : null;
       return {
         k: safe ? 'SafeRead' : 'Read', name: node.name.getText(), receiver: norm(node.expression),
         ...(target ? { target } : {}),
@@ -154,7 +159,11 @@ export function makeTsExprNormalizer(ts, resolveRead, resolveName = null) {
       };
       ts.forEachChild(body, visit);
     }
-    return returns.length ? { k: 'Fn', src: node.getText(), returns } : { k: 'Fn', src: node.getText() };
+    // ITS PARAMETERS' NAMES: a function a factory RETURNS has no `functions` row, so a reader substituting what the
+    // factory was handed into its body had no way to tell which bare name is the inner parameter.
+    const names = node.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : null));
+    const shape = { k: 'Fn', src: node.getText(), ...(names.length && !names.includes(null) ? { params: names } : {}) };
+    return returns.length ? { ...shape, returns } : shape;
   }
 
   return norm;

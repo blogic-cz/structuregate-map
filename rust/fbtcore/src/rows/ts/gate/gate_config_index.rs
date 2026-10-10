@@ -264,3 +264,45 @@ pub(super) fn supplied(
     let lists = present.iter().map(|v| listed_of(v, en, mem, idx)).collect();
     Some(Supplied { every: present.len() == branches.len(), lists })
 }
+
+/// One row per member the directive tests, from the object literals its config may bind.
+pub(super) fn rows_of(
+    gate_name: &str,
+    branches: &Option<Vec<IndexMap<String, Value>>>,
+    members: &IndexMap<String, Option<ConfigMember>>,
+    verdict: &IndexMap<String, &'static str>,
+    mem: &MemberEnums,
+    idx: &EnumIndex,
+) -> Vec<Value> {
+    let mut rows = Vec::new();
+    for (name, kind) in verdict {
+        let Some(Some(decl)) = members.get(name) else { continue };
+        // NO LITERAL AT ALL is still a restriction: the directive tests this member
+        // whatever the bound object turns out to hold, and reporting nothing would
+        // be the silence this file removes. A literal - or every branch of a
+        // conditional - that never writes the member reports nothing for it.
+        let said = match branches {
+            Some(branches) => match supplied(branches, name, &decl.enum_id, mem, idx) {
+                Some(said) => Some(said),
+                None => continue,
+            },
+            None => None,
+        };
+        let values = match (kind, &said) {
+            (&"restriction", Some(said)) => said.permitted(),
+            _ => None,
+        };
+        let dim = format!("{gate_name}.{name}");
+        let mut row = match values {
+            Some(values) => json!({"enum": decl.enum_id, "dim": dim, "row": decl.row,
+                                   "op": "in", "values": values}),
+            None => json!({"enum": decl.enum_id, "dim": dim, "row": decl.row,
+                           "op": "unknown"}),
+        };
+        if let Some(listed) = said.and_then(|s| s.listed()) {
+            row["listed"] = json!(listed);
+        }
+        rows.push(row);
+    }
+    rows
+}

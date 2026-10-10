@@ -79,7 +79,9 @@ impl<'a> Calls<'a> {
         // an ALIAS of the function its tree is anchored on.
         let mut callable: IndexMap<String, (Vec<String>, Option<String>)> = IndexMap::new();
         let mut alias: IndexMap<String, String> = IndexMap::new();
-        let mut anchors: IndexMap<String, String> = IndexMap::new();
+        // EVERY PROPERTY HOLDING ONE FUNCTION shares its tree: keyed to one member, each later property
+        // replaced the one before, and only the last gate calling it was read.
+        let mut anchors: IndexMap<String, Vec<String>> = IndexMap::new();
         for table in ["members", "functions"] {
             for r in store.table(table).iter() {
                 let Some(id) = cell(r, "id") else { continue };
@@ -94,15 +96,15 @@ impl<'a> Calls<'a> {
                 }
                 let tree = r.get("value").filter(|v| v.get("$fn").is_some()).and_then(|v| v.get("$expr_id"));
                 if let (Some(Value::String(x)), "members") = (tree, table) {
-                    anchors.insert(x.clone(), id);
+                    anchors.entry(x.clone()).or_default().push(id);
                 }
             }
         }
         for e in store.table("expressions").iter() {
-            let Some(member) = cell(e, "id").and_then(|x| anchors.get(&x)) else { continue };
+            let Some(members) = cell(e, "id").and_then(|x| anchors.get(&x)) else { continue };
             let (Some(file), Some(line)) = (cell(e, "file"), cell(e, "line")) else { continue };
             if let Some(f) = rows.declared_at(&file, &line) {
-                alias.insert(member.clone(), f);
+                alias.extend(members.iter().map(|m| (m.clone(), f.clone())));
             }
         }
 

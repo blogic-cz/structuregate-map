@@ -134,6 +134,58 @@ Test-Case 'tsrows keys: a key built by a + chain reaches the component it is bui
     Assert-Line $r 'labels.laptop | literal | 1'
 }
 
+# A FIELD HOLDING WHAT AN INJECTED METHOD RETURNS holds the keys that method's ONE plain return builds: `k =
+# this.labels.key(this.grade)` is bound in the template, so the component renders `demo.grades.*`. A callee with
+# a branch and a second return (`pick`) is not read - its branches test its parameter - and stays a literal.
+# A LIST OF OBJECTS rendered by `*ngFor` (`tips`, held or returned by that call) is a site only where the loop
+# variable's property is read (`t.tooltip`), carrying the loop's gate; `t.other` is never read, so it stays literal.
+Test-Case 'tsrows keys: a field holding an injected method call, and a list of objects an ngFor reads, hold their keys' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/ids.ts' = "export enum Grade { Alpha = 1, Beta = 2 }`n"
+        'apps/shop/src/label.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "import { Grade } from './ids';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class LabelService {`n" +
+            "  key(grade: Grade): string {`n    return ``demo.grades.`${Grade[grade]}``;`n  }`n" +
+            "  pick(grade: Grade): string {`n    if (grade === Grade.Alpha) {`n      return 'demo.pick.first';`n    }`n" +
+            "    return 'demo.pick.other';`n  }`n" +
+            "  tips() {`n    return [{ tooltip: 'demo.tips.alpha', other: 'demo.tips.unread' }, { tooltip: 'demo.tips.beta' }];`n  }`n" +
+            "}`n"
+        'apps/shop/src/badge.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "import { Grade } from './ids';`n" +
+            "import { LabelService } from './label.service';`n" +
+            "@Component({ selector: 'app-badge', standalone: true,`n" +
+            "  template: '<b [title]=`"k`">a</b><i [title]=`"p`">b</i>' +`n" +
+            "    '<ng-container *ngFor=`"let t of tips`"><b [title]=`"t.tooltip`">x</b></ng-container>' +`n" +
+            "    '<u *ngFor=`"let o of own`" [title]=`"o.label`">y</u>' })`n" +
+            "export class BadgeComponent {`n" +
+            "  @Input() grade: Grade = Grade.Alpha;`n" +
+            "  k = this.labels.key(this.grade);`n" +
+            "  p = this.labels.pick(this.grade);`n" +
+            "  tips = this.labels.tips();`n" +
+            "  own = [{ label: 'demo.own.first' }];`n" +
+            "  constructor(private labels: LabelService) {}`n" +
+            "}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},' +
+            '"demo":{"grades":{"Alpha":"a","Beta":"b"},"pick":{"first":"c","other":"d"},' +
+            '"tips":{"alpha":"e","beta":"f","unread":"g"},"own":{"first":"h"}}}'
+    }
+    $made = New-TsRowsDb $tree
+    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || route || ' | ' || json_array_length(components) AS reach " +
+        "FROM key_reach WHERE key LIKE 'demo.%'")
+    Assert-Line $r 'demo.grades.Alpha | field_binding | 1'
+    Assert-Line $r 'demo.grades.Beta | field_binding | 1'
+    Assert-Line $r 'demo.pick.first | literal | 0'
+    Assert-Line $r 'demo.pick.other | literal | 0'
+    Assert-Line $r 'demo.tips.alpha | field_binding | 1'
+    Assert-Line $r 'demo.tips.beta | field_binding | 1'
+    Assert-Line $r 'demo.own.first | field_binding | 1'
+    Assert-Line $r 'demo.tips.unread | literal | 0'
+    $g = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || json_array_length(always_gates) AS g " +
+        "FROM key_reach WHERE key = 'demo.tips.alpha'")
+    Assert-Line $g 'demo.tips.alpha | 1'
+}
+
 }
 
 # A CONSTANT JOINED IN FRONT WITH `+` IS PART OF THE KEY A TEMPLATE SPELLS: `BASE + (child ? `.${name}.tipChild` :

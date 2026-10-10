@@ -176,9 +176,11 @@ async function main() {
   // directive renders through a `this.` call made inside a callback.
   // 30: `renders.return_ways` and an `ngComponentOutlet` read through its binding's `Source`; a `case` a factory
   // returns a component under rides `render_path.branches` into `key_reach` - the last derived in rust.
+  // 31: a `this.` field a method is called on (`this.allowed.includes(v)`) carries its `target`.
+  // 32: a function expression's tree (`Fn`) names its `params`, for a predicate a factory returns.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 30,
+    config: config.file, data: config.data, rows: 32,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

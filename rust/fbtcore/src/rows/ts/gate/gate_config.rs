@@ -298,6 +298,22 @@ pub fn config_restrictions(
     mem: &MemberEnums,
     idx: &EnumIndex,
 ) -> (IndexMap<String, Vec<Value>>, ConfigStats) {
+    let (gates, _, stats) = config_restrictions_all(store, mem, idx);
+    (gates, stats)
+}
+
+/// The gate rows, the rows of each `loop:<gate>#<element>` link, and the counts.
+///
+/// EACH ELEMENT OF A LOOP IS ONE BRANCH OF THE CONFIG, read like `c ? {…} : {…}`, so the gate
+/// permits their union. A key rendered from element i carries `loop:<gate>#i`, which the fold
+/// intersects along the way, so it gets element i's value only - not every element's.
+pub fn config_restrictions_all(
+    store: &Store<'_>,
+    mem: &MemberEnums,
+    idx: &EnumIndex,
+) -> (IndexMap<String, Vec<Value>>, IndexMap<String, Vec<Value>>, ConfigStats) {
+    let loops = super::key_loops::Loops::new(store);
+    let mut per_loop: IndexMap<String, Vec<Value>> = IndexMap::new();
     let expressions = store.table("expressions");
     let classes = store.table("classes");
     let locals = store.table("locals");
@@ -357,40 +373,24 @@ pub fn config_restrictions(
             let (Some(members), Some(verdict)) = (by_class.get(cls), uses.get(cls)) else {
                 continue;
             };
-            let branches = id_of(g, "expression")
-                .and_then(|x| ctx.expr_by_id.get(&x).copied())
-                .and_then(|e| e.get("ast"))
-                .and_then(literal_branches);
-
-            let mut rows = Vec::new();
-            for (name, kind) in verdict {
-                let Some(Some(decl)) = members.get(name) else { continue };
-                // NO LITERAL AT ALL is still a restriction: the directive tests this member
-                // whatever the bound object turns out to hold, and reporting nothing would
-                // be the silence this file removes. A literal - or every branch of a
-                // conditional - that never writes the member reports nothing for it.
-                let said = match &branches {
-                    Some(branches) => match supplied(branches, name, &decl.enum_id, mem, idx) {
-                        Some(said) => Some(said),
-                        None => continue,
-                    },
-                    None => None,
-                };
-                let values = match (kind, &said) {
-                    (&"restriction", Some(said)) => said.permitted(),
-                    _ => None,
-                };
-                let dim = format!("{gate_name}.{name}");
-                let mut row = match values {
-                    Some(values) => json!({"enum": decl.enum_id, "dim": dim, "row": decl.row,
-                                           "op": "in", "values": values}),
-                    None => json!({"enum": decl.enum_id, "dim": dim, "row": decl.row,
-                                   "op": "unknown"}),
-                };
-                if let Some(listed) = said.and_then(|s| s.listed()) {
-                    row["listed"] = json!(listed);
+            let ast = id_of(g, "expression").and_then(|x| ctx.expr_by_id.get(&x).copied()).and_then(|e| e.get("ast"));
+            let copies = id_of(g, "node").zip(ast).and_then(|(node, ast)| loops.expand(&node, ast, idx));
+            let (branches, each) = match &copies {
+                Some(copies) => {
+                    let each: Vec<_> = copies.iter().map(literal_branches).collect();
+                    let all = each.iter().cloned().collect::<Option<Vec<_>>>().map(|v| v.concat());
+                    (all, each)
                 }
-                rows.push(row);
+                None => (ast.and_then(literal_branches), Vec::new()),
+            };
+            let rows = rows_of(&gate_name, &branches, members, verdict, mem, idx);
+            if let Some(id) = id_of(g, "id") {
+                for (i, one) in each.iter().enumerate() {
+                    let said = rows_of(&gate_name, one, members, verdict, mem, idx);
+                    if !said.is_empty() {
+                        per_loop.entry(format!("loop:{id}#{i}")).or_default().extend(said);
+                    }
+                }
             }
             if rows.is_empty() {
                 continue;
@@ -403,7 +403,7 @@ pub fn config_restrictions(
             }
         }
     }
-    (out, stats)
+    (out, per_loop, stats)
 }
 
 #[cfg(test)]

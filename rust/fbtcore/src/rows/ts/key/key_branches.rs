@@ -330,6 +330,8 @@ impl Branches {
         if id.starts_with("tpl:") {
             return "built";
         }
+        if id.starts_with("loop:") { return "loop"; }
+        if id.starts_with("bind:") { return "bind"; }
         if self.cases.contains_key(id) {
             return "case";
         }
@@ -343,7 +345,7 @@ impl Branches {
 
     pub fn contains(&self, id: &str) -> bool {
         let choice = id.strip_prefix('!').unwrap_or(id);
-        id.starts_with("tpl:") || self.by_id.contains_key(id) || self.cases.contains_key(id) || self.choices.contains_key(choice)
+        ["tpl:", "loop:", "bind:"].iter().any(|p| id.starts_with(p)) || self.by_id.contains_key(id) || self.cases.contains_key(id) || self.choices.contains_key(choice)
     }
 
     /// Every branch, every case and every conditional ARM a statement row sits in.

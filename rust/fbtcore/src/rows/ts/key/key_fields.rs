@@ -36,19 +36,68 @@ pub struct Stats {
     pub sites: usize,
 }
 
-fn text(row: &Row, field: &str) -> Option<String> {
+pub(super) fn text(row: &Row, field: &str) -> Option<String> {
     match row.get(field) {
         Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
         _ => None,
     }
 }
 
-fn id_of(row: &Row, field: &str) -> Option<String> {
+pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
     match row.get(field) {
         None | Some(Value::Null) => None,
         Some(Value::String(s)) => Some(s.clone()),
         Some(other) => Some(other.to_string()),
     }
+}
+
+/// A FIELD HOLDING WHAT A CALLED METHOD RETURNS holds the keys of that method's ONE plain return
+/// (`k = this.labels.key(this.kind)` over `return `a.${Kind[kind]}``): the call's `$target` names the
+/// callee, and its returns row is read like the field's own value. A callee with a branch or a second
+/// return is not read - its branches test its parameters, which no gate shares. A `tpl:` link is dropped
+/// for the same reason: its hole names the CALLEE's parameter, not anything the field's class holds.
+fn callee_keys(
+    value: Option<&Value>,
+    rows: &super::gate_tsrows::TsRows,
+    one_return: &std::collections::HashMap<String, &Row>,
+    keys: &super::key_branches::KeySet,
+) -> Vec<(String, Vec<String>)> {
+    let Some(ret) = callee_return(value, rows, one_return) else { return Vec::new() };
+    let mut found = Vec::new();
+    value_keys(ret, &[], keys, &mut found);
+    for (_, chain) in found.iter_mut() {
+        chain.retain(|link| !link.starts_with("tpl:"));
+    }
+    found
+}
+
+/// The value of the ONE plain return of the callee a call's `$target` names - what `callee_keys` and
+/// `key_loops` (a list of objects a method returns) both read.
+pub(super) fn callee_return<'a>(
+    value: Option<&Value>,
+    rows: &super::gate_tsrows::TsRows,
+    one_return: &std::collections::HashMap<String, &'a Row>,
+) -> Option<&'a Value> {
+    let target = value?.get("$target")?;
+    let ret = rows.member_named(target).and_then(|m| one_return.get(&m).copied())?;
+    ret.get("value")
+}
+
+/// Member id -> its ONE `returns` row, when it has no branch and no case.
+pub(super) fn one_returns(returns: &[Row]) -> std::collections::HashMap<String, &Row> {
+    let mut per_member: std::collections::HashMap<String, Vec<&Row>> = std::collections::HashMap::new();
+    for r in returns.iter() {
+        if let Some(member) = id_of(r, "member").filter(|m| !m.is_empty()) {
+            per_member.entry(member).or_default().push(r);
+        }
+    }
+    per_member
+        .into_iter()
+        .filter_map(|(member, rs)| match rs.as_slice() {
+            [r] if text(r, "branch").is_none() && text(r, "case").is_none() => Some((member, *r)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Member id -> the translation keys its literal writes can hold, each with the WAYS it is
@@ -78,6 +127,9 @@ fn keys_by_member(store: &Store<'_>) -> IndexMap<String, IndexMap<String, Vec<Ve
         .collect();
 
     let branches = Branches::new(store);
+    let rows = super::gate_tsrows::TsRows::new(store);
+    let returns = store.table("returns");
+    let one_return = one_returns(&returns);
     let mut owner: IndexMap<String, Option<String>> = IndexMap::new();
     let mut out: IndexMap<String, IndexMap<String, Vec<Vec<String>>>> = IndexMap::new();
     let mut foreign: Vec<String> = Vec::new();
@@ -94,6 +146,7 @@ fn keys_by_member(store: &Store<'_>) -> IndexMap<String, IndexMap<String, Vec<Ve
         }
         let mut found = Vec::new();
         value_keys(m.get("value").unwrap_or(&Value::Null), &[], &keys, &mut found);
+        found.extend(callee_keys(m.get("value"), &rows, &one_return, &keys));
         for (key, chain) in found {
             member_ways(out.entry(id.clone()).or_default(), &key, chain);
         }
@@ -104,6 +157,11 @@ fn keys_by_member(store: &Store<'_>) -> IndexMap<String, IndexMap<String, Vec<Ve
         let Some(target) = id_of(a, "target_id").filter(|t| !t.is_empty()) else { continue };
         let mut found = Vec::new();
         value_keys(a.get("value").unwrap_or(&Value::Null), &branches.chain_of(a), &keys, &mut found);
+        for (key, chain) in callee_keys(a.get("value"), &rows, &one_return, &keys) {
+            let mut way = branches.chain_of(a);
+            way.extend(chain);
+            found.push((key, way));
+        }
         if found.is_empty() || !owner.contains_key(&target) {
             continue;
         }
@@ -120,7 +178,7 @@ fn keys_by_member(store: &Store<'_>) -> IndexMap<String, IndexMap<String, Vec<Ve
     // binds at the node that reads `tip`, under the branch the return sits in. Only a getter
     // - a method's returns may test its parameters, and a parameter is not a dimension any
     // gate shares.
-    for r in store.table("returns").iter() {
+    for r in returns.iter() {
         let Some(member) = id_of(r, "member").filter(|m| getters.contains(m)) else { continue };
         let mut found = Vec::new();
         value_keys(r.get("value").unwrap_or(&Value::Null), &branches.chain_of(r), &keys, &mut found);
@@ -145,6 +203,7 @@ pub fn field_sites(store: &Store<'_>) -> (Vec<FieldSite>, Stats) {
     let mut out = Vec::new();
     let mut stats = Stats { fields: by_member.len(), nodes: 0, sites: 0 };
     if by_member.is_empty() {
+        add_loops(store, &mut out, &mut stats);
         return (out, stats);
     }
 
@@ -195,7 +254,16 @@ pub fn field_sites(store: &Store<'_>) -> (Vec<FieldSite>, Stats) {
             stats.nodes += 1;
         }
     }
+    add_loops(store, &mut out, &mut stats);
     (out, stats)
+}
+
+/// The sites a list of objects proves through `*ngFor` - see `key_loops`.
+fn add_loops(store: &Store<'_>, out: &mut Vec<FieldSite>, stats: &mut Stats) {
+    let (loops, loop_nodes) = super::key_loops::loop_sites(store);
+    stats.sites += loops.len();
+    stats.nodes += loop_nodes;
+    out.extend(loops);
 }
 
 #[cfg(test)]

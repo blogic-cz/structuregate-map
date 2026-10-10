@@ -38,6 +38,11 @@ pub fn input_alias(m: &Row) -> Option<String> {
     alias.or_else(|| cell(m, "name"))
 }
 
+/// Every member id some assignment writes: the inputs a child sets itself are no input flag.
+pub fn written_members(store: &Store<'_>) -> IndexSet<String> {
+    store.table("assignments").iter().filter_map(|a| cell(a, "target_id")).collect()
+}
+
 /// Input property id -> the one tree every usage binds it to.
 pub fn bound_inputs(store: &Store<'_>, written: &IndexSet<String>) -> IndexMap<String, Value> {
     // class -> every node it is rendered at.

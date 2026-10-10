@@ -47,6 +47,7 @@ use super::gate_directives;
 use super::gate_features::gate_features_with;
 use super::gate_switch;
 use super::gate_values::{enum_index, gate_values_with, member_enums, EnumIndex};
+use super::key_bound::{bind_links, bound_conds, Bound};
 use super::key_branches::Branches;
 use super::key_fields::field_sites;
 use super::key_literals::literal_gates;
@@ -139,9 +140,12 @@ const TRACES: &[&str] = &["full_literal", "unparsed_file", "prefix", "leaf", "ab
 /// A gate may carry a config row, a switch arm and a directive at once, and the collapse
 /// folds them together exactly as it folds two comparisons — a consumer cannot tell which
 /// source proved a restriction, and does not need to.
-pub fn extra_restrictions(store: &Store<'_>, idx: &EnumIndex) -> IndexMap<String, Vec<Value>> {
+pub fn extra_restrictions(
+    store: &Store<'_>,
+    idx: &EnumIndex,
+) -> (IndexMap<String, Vec<Value>>, IndexMap<String, Vec<Value>>) {
     let mem = member_enums(store, idx);
-    let (cfg, _) = gate_config::config_restrictions(store, &mem, idx);
+    let (cfg, per_loop, _) = gate_config::config_restrictions_all(store, &mem, idx);
     let (sw, _) = gate_switch::switch_restrictions(store, &mem, idx);
     let (dir, _) = gate_directives::directive_restrictions(store, &mem, idx);
     let guards = super::gate_guards::guard_restrictions(store, &mem, idx);
@@ -149,7 +153,7 @@ pub fn extra_restrictions(store: &Store<'_>, idx: &EnumIndex) -> IndexMap<String
     for (gate, rows) in sw.into_iter().chain(dir).chain(guards) {
         extra.entry(gate).or_default().extend(rows);
     }
-    extra
+    (extra, per_loop)
 }
 
 /// What the closure derived beyond its rows: the trace, read by the differential.
@@ -201,7 +205,11 @@ pub fn build_closure(
     let stage = crate::trace::stage("closure: gate_values");
 
     let gf_rows = write_gate_features(store, &gf.map);
-    let extra = extra_restrictions(store, &idx0);
+    let (extra, per_loop) = extra_restrictions(store, &idx0);
+    // A FLAG THE PARENTS BIND DIFFERENTLY IS ONE CONDITION PER RENDER EDGE (`key_bound`).
+    let bound = bound_conds(store);
+    let mut conds = conds;
+    conds.extend(bound.conds.clone());
     let (gv, idx) = gate_values_with(store, &extra, &conds);
     let gv_rows = write_gate_values(store, &gv.map, &idx);
     // THE FOLDS READ GATES AND BRANCHES ALIKE; only the published tables are gates alone.
@@ -220,6 +228,8 @@ pub fn build_closure(
         .cloned()
         .collect();
     value_map.extend(super::key_built::built_values(store, &links, &mem, &idx));
+    // ONE ELEMENT OF AN `*ngFor` AT A TIME: see `gate_config::config_restrictions_all`.
+    value_map.extend(per_loop.into_iter().map(|(link, rows)| (link, (None, rows))));
 
     drop(stage);
     let stage = crate::trace::stage("closure: reach and trace");
@@ -261,7 +271,7 @@ pub fn build_closure(
             hit.map(|h| h.sites.keys().flatten().cloned().collect()).unwrap_or_default();
         comps.sort();
 
-        let ways = ways_of(&comps, hit, &paths, &reach, &dead);
+        let ways = ways_of(&comps, hit, &paths, &reach, &dead, &bound);
         let Ways { sets, path_sets, roots, mods, rts, depth, cut } = ways;
 
         let (always, always_br) = split_branches(fold(&sets).0, &branches);
@@ -351,6 +361,7 @@ pub fn ways_of(
     paths: &Paths,
     reach: &IndexMap<String, (Vec<String>, Vec<String>)>,
     dead: &IndexSet<String>,
+    bound: &Bound,
 ) -> Ways {
     let mut w = Ways::default();
     for c in comps {
@@ -364,8 +375,12 @@ pub fn ways_of(
         };
         for p in comp_paths {
             // A WAY THROUGH A LITERAL `false` IS NO WAY (`key_dead`): not a path, not a root, not counted.
-            let chains: Vec<&Vec<String>> =
-                own.iter().filter(|c| !c.iter().any(|g| dead.contains(g))).collect();
+            // NOR IS ONE THROUGH AN EDGE THAT LEAVES AN INPUT FLAG AT A LITERAL `false` (`key_bound`).
+            let Some(plinks) = bind_links(bound, p, p.gates.iter().map(|g| &**g)) else { continue };
+            let chains: Vec<(&Vec<String>, Vec<String>)> = own.iter()
+                .filter(|c| !c.iter().any(|g| dead.contains(g)))
+                .filter_map(|c| Some((c, bind_links(bound, p, c.iter().map(String::as_str))?)))
+                .collect();
             if chains.is_empty() || p.gates.iter().any(|g| dead.contains(&**g)) {
                 continue;
             }
@@ -383,12 +398,13 @@ pub fn ways_of(
                 Some(d) => d.min(hops),
             });
             w.path_sets.push(p.gates.iter().map(|g| g.to_string()).collect());
-            for chain in chains {
+            for (chain, links) in chains {
                 // A case a factory returned a child under (`key_returned`) holds on this path like a
                 // gate does, and folds with the key's own branches.
                 let mut one: IndexSet<String> =
                     p.gates.iter().chain(p.branches.iter()).map(|g| g.to_string()).collect();
                 one.extend(chain.iter().cloned());
+                one.extend(plinks.iter().chain(links.iter()).cloned());
                 w.sets.push(one);
             }
         }

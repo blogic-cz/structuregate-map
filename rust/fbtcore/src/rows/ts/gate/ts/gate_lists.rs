@@ -28,10 +28,10 @@ use serde_json::{json, Value};
 /// A list a row holds: the enum its items NAME (`BandIDs` of `BandIDs.Small`), the one it
 /// is declared as when the declaration says, and the members in order.
 #[derive(Debug, Clone)]
-struct List {
-    named: String,
-    enum_id: Option<String>,
-    members: Vec<String>,
+pub(super) struct List {
+    pub named: String,
+    pub enum_id: Option<String>,
+    pub members: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -42,7 +42,7 @@ pub struct Lists {
 }
 
 /// `[{"$enum": "BandIDs.Small"}, …]` as (`BandIDs`, [`Small`, …]), or nothing.
-fn spelled(value: Option<&Value>) -> Option<(String, Vec<String>)> {
+pub(super) fn spelled(value: Option<&Value>) -> Option<(String, Vec<String>)> {
     let items = value?.as_array().filter(|a| !a.is_empty())?;
     let mut named: Option<&str> = None;
     let mut members = Vec::new();
@@ -72,7 +72,7 @@ fn element_test(body: &Value) -> Option<&Value> {
 }
 
 /// The (list, value) a test compares, for the three shapes that mean membership.
-fn list_test(n: &Value) -> Option<(&Value, &Value)> {
+pub(super) fn list_test(n: &Value) -> Option<(&Value, &Value)> {
     if let Some(found) = method_call(n, "includes") {
         return Some(found);
     }
@@ -93,7 +93,7 @@ fn list_test(n: &Value) -> Option<(&Value, &Value)> {
 
 /// The enum a list named `named` belongs to: its declaration's, else the dimension's when
 /// that enum IS called so, else the one enum of that name — and nothing when there are two.
-fn enum_for(list: &List, dim_enum: Option<&String>, idx: &EnumIndex) -> Option<String> {
+pub(super) fn enum_for(list: &List, dim_enum: Option<&String>, idx: &EnumIndex) -> Option<String> {
     if let Some(en) = &list.enum_id {
         return Some(en.clone());
     }
@@ -169,6 +169,7 @@ pub fn lists(store: &Store<'_>, idx: &EnumIndex) -> Lists {
             out.preds.insert(member.clone(), (en.clone(), members));
         }
     }
+    out.preds.extend(super::gate_curried::curried(store, idx, &rows, &bound));
     out
 }
 

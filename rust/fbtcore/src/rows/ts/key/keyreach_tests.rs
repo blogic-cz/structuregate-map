@@ -61,7 +61,7 @@ fn a_refs_own_gates_join_the_gates_of_THAT_path_and_no_other() {
     let hit = route_of(&[("ng:a", vec![vec!["g:ra"]]), ("ng:b", vec![vec!["g:rb"]])]);
     let comps = vec!["ng:a".to_string(), "ng:b".to_string()];
 
-    let w = ways_of(&comps, Some(&hit), &paths, &no_reach(), &IndexSet::new());
+    let w = ways_of(&comps, Some(&hit), &paths, &no_reach(), &IndexSet::new(), &Bound::default());
     assert_eq!(as_lists(&w.sets), vec![vec!["g:pa", "g:ra"], vec!["g:pb", "g:rb"]]);
     // Which is the whole point: nothing holds on both ways in.
     assert!(fold(&w.sets).0.is_empty());
@@ -77,7 +77,7 @@ fn a_refs_own_gates_join_the_gates_of_THAT_path_and_no_other() {
 fn one_ref_per_chain_so_two_refs_in_one_template_are_two_ways() {
     let paths = paths_of(&[("ng:a", vec![path(&["r1", "ng:a"], &["g:p"])])]);
     let hit = route_of(&[("ng:a", vec![vec!["g:one"], vec![]])]);
-    let w = ways_of(&["ng:a".to_string()], Some(&hit), &paths, &no_reach(), &IndexSet::new());
+    let w = ways_of(&["ng:a".to_string()], Some(&hit), &paths, &no_reach(), &IndexSet::new(), &Bound::default());
     assert_eq!(as_lists(&w.sets), vec![vec!["g:one", "g:p"], vec!["g:p"]]);
     // An unconditional ref makes the path's gates the only thing that always holds.
     assert_eq!(fold(&w.sets).0, vec!["g:p"]);
@@ -89,7 +89,7 @@ fn path_always_gates_exclude_the_refs_own_gates_on_purpose() {
     // the template the key sits.
     let paths = paths_of(&[("ng:a", vec![path(&["r1", "ng:a"], &["g:p"])])]);
     let hit = route_of(&[("ng:a", vec![vec!["g:own"]])]);
-    let w = ways_of(&["ng:a".to_string()], Some(&hit), &paths, &no_reach(), &IndexSet::new());
+    let w = ways_of(&["ng:a".to_string()], Some(&hit), &paths, &no_reach(), &IndexSet::new(), &Bound::default());
     assert_eq!(fold(&w.sets).0, vec!["g:own", "g:p"]);
     assert_eq!(fold(&w.path_sets).0, vec!["g:p"]);
 }
@@ -100,7 +100,7 @@ fn a_key_with_no_own_chain_still_renders_by_its_paths() {
     // component dropped and the key reported as reaching nothing.
     let paths = paths_of(&[("ng:a", vec![path(&["r1", "ng:a"], &["g:p"])])]);
     let hit = route_of(&[("ng:a", vec![])]);
-    let w = ways_of(&["ng:a".to_string()], Some(&hit), &paths, &no_reach(), &IndexSet::new());
+    let w = ways_of(&["ng:a".to_string()], Some(&hit), &paths, &no_reach(), &IndexSet::new(), &Bound::default());
     assert_eq!(as_lists(&w.sets), vec![vec!["g:p"]]);
     assert_eq!(w.depth, Some(1));
 }
@@ -109,7 +109,7 @@ fn a_key_with_no_own_chain_still_renders_by_its_paths() {
 fn a_component_with_no_paths_of_its_own_contributes_nothing_rather_than_panicking() {
     let paths = paths_of(&[]);
     let hit = route_of(&[("ng:gone", vec![vec!["g:own"]])]);
-    let w = ways_of(&["ng:gone".to_string()], Some(&hit), &paths, &no_reach(), &IndexSet::new());
+    let w = ways_of(&["ng:gone".to_string()], Some(&hit), &paths, &no_reach(), &IndexSet::new(), &Bound::default());
     assert!(w.sets.is_empty());
     assert_eq!(w.depth, None, "no path means no depth, not depth zero");
 }
@@ -119,7 +119,7 @@ fn min_depth_is_the_SHORTEST_way_in_over_every_component() {
     let paths = paths_of(&[("ng:a", vec![path(&["r1", "x", "ng:a"], &[]),
                                          path(&["r2", "ng:a"], &[])])]);
     let hit = route_of(&[("ng:a", vec![vec![]])]);
-    let w = ways_of(&["ng:a".to_string()], Some(&hit), &paths, &no_reach(), &IndexSet::new());
+    let w = ways_of(&["ng:a".to_string()], Some(&hit), &paths, &no_reach(), &IndexSet::new(), &Bound::default());
     assert_eq!(w.depth, Some(1));
     assert_eq!(w.roots.len(), 2);
 }
@@ -132,7 +132,7 @@ fn the_area_and_the_route_come_from_the_ROOT_of_each_path() {
     let paths = paths_of(&[("ng:a", vec![path(&["r1", "ng:a"], &[]),
                                          path(&["r9", "ng:a"], &[])])]);
     let hit = route_of(&[("ng:a", vec![vec![]])]);
-    let w = ways_of(&["ng:a".to_string()], Some(&hit), &paths, &reach, &IndexSet::new());
+    let w = ways_of(&["ng:a".to_string()], Some(&hit), &paths, &reach, &IndexSet::new(), &Bound::default());
     assert_eq!(sorted(w.mods), vec!["Admin"]);
     assert_eq!(sorted(w.rts), vec!["/admin"]);
     // A root with no reach row is reported as a root, not dropped.
@@ -145,18 +145,18 @@ fn a_way_through_a_literal_false_is_no_way_so_a_key_behind_only_that_renders_now
                                          path(&["r2", "ng:a"], &["g:off"])])]);
     let dead: IndexSet<String> = ["g:off".to_string()].into_iter().collect();
     let hit = route_of(&[("ng:a", vec![vec!["g:own"], vec!["g:off"]])]);
-    let w = ways_of(&["ng:a".to_string()], Some(&hit), &paths, &no_reach(), &dead);
+    let w = ways_of(&["ng:a".to_string()], Some(&hit), &paths, &no_reach(), &dead, &Bound::default());
     assert_eq!(as_lists(&w.sets), vec![vec!["g:own", "g:p"]], "the dead chain and the dead path are gone");
     assert_eq!(sorted(w.roots), vec!["r1"]);
     let hit = route_of(&[("ng:a", vec![vec!["g:off"]])]);
-    let w = ways_of(&["ng:a".to_string()], Some(&hit), &paths, &no_reach(), &dead);
+    let w = ways_of(&["ng:a".to_string()], Some(&hit), &paths, &no_reach(), &dead, &Bound::default());
     assert!(w.sets.is_empty() && w.path_sets.is_empty() && w.roots.is_empty());
 }
 
 #[test]
 fn a_key_the_routes_never_located_takes_its_gates_from_nowhere() {
     let paths = paths_of(&[("ng:a", vec![path(&["r1", "ng:a"], &["g:p"])])]);
-    let w = ways_of(&[], None, &paths, &no_reach(), &IndexSet::new());
+    let w = ways_of(&[], None, &paths, &no_reach(), &IndexSet::new(), &Bound::default());
     assert!(w.sets.is_empty());
     assert!(w.path_sets.is_empty());
 }

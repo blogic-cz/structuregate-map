@@ -2,7 +2,7 @@
     A gate whose restriction lives one hop further out than `TsRowsGateThrough` reads it: a list a directive's
     setter HANDS ON to a method that tests it inside a subscription callback, and an `@Input` flag whose
     meaning is the PARENT's binding. Resolved in the
-    render closure - `gate/ts/gate_directive_lists.rs` and `gate/ts/gate_input_flags.rs`.
+    render closure - `gate/ts/directive/gate_directive_lists.rs` and `gate/ts/gate_input_flags.rs`.
 #>
 
 . (Join-Path $PSScriptRoot '../TsRows.Helpers.ps1')
@@ -174,10 +174,14 @@ Test-Case 'tsrows: an input flag every parent binds alike restricts what the par
     Assert-Line $k 'pro.both | in ["Basic","ProSolo","ProTeam"]'
 }
 
-Test-Case 'tsrows: an input flag two parents bind differently, or one leaves unbound, restricts nothing' {
+# TWO PARENTS THAT DISAGREE (#21): the per-gate rows stay unwritten - one row cannot say what two ways differ on - but
+# each way in reads the flag BY ITS OWN EDGE. A binds both flags to its fields; B binds only `isProPlan`, so `isBasic`
+# stays at its initializer `false` there and the way through B is no way for the `isBasic` key. `!isProPlan` is
+# permitted by A for all but ProSolo and by B for all but ProTeam, and the union of the two is every member.
+Test-Case 'tsrows: an input flag two parents bind differently restricts each way by its own parent, and one left unbound is its initializer' {
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/pro.ts' = "export enum PlanIDs { Basic = 1, ProSolo = 2, ProTeam = 3, Tablet = 4 }`n"
-        'apps/shop/src/pro-panel.component.html' = "<i *ngIf=`"!isProPlan`">not pro</i>`n<u *ngIf=`"isBasic`">basic</u>`n"
+        'apps/shop/src/pro-panel.component.html' = "<i *ngIf=`"!isProPlan`">{{ 'pro.notpro' | money }}</i>`n<u *ngIf=`"isBasic`">{{ 'pro.basic' | money }}</u>`n"
         'apps/shop/src/pro-panel.component.ts' = "import { Component, Input } from '@angular/core';`n" +
             "@Component({ selector: 'app-pro-panel', templateUrl: './pro-panel.component.html', standalone: true })`n" +
             "export class ProPanelComponent {`n  @Input() isBasic = false;`n  @Input() isProPlan = false;`n}`n"
@@ -196,12 +200,20 @@ Test-Case 'tsrows: an input flag two parents bind differently, or one leaves unb
             "@Component({ selector: 'app-b', templateUrl: './b.component.html', standalone: true, imports: [ProPanelComponent] })`n" +
             "export class BComponent implements OnInit {`n  planID: PlanIDs = PlanIDs.Basic;`n  isProPlan = false;`n" +
             "  ngOnInit(): void {`n    this.isProPlan = this.planID === PlanIDs.ProTeam;`n  }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},"pro":{"notpro":"a","basic":"b"}}'
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsGateParentsSql
     Assert-Exit $r 0
     Assert-NoLine $r '!isProPlan =>'
     Assert-NoLine $r 'isBasic =>'
+    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || json_extract(v.value, '$.op') || ' ' || " +
+        "json_extract(v.value, '$.values') AS reach FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'pro.%'")
+    Assert-Line $k 'pro.basic | in ["Basic"]'
+    Assert-NoLine $k 'pro.notpro'
+    $n = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT key || ' paths ' || n_paths AS p FROM key_reach WHERE key LIKE 'pro.%'"
+    Assert-Line $n 'pro.basic paths 1'
+    Assert-Line $n 'pro.notpro paths 2'
 }
 
 }

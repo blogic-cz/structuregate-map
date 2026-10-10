@@ -14,7 +14,7 @@
 //! against a value of its own - leaves a bare `Read` where a `Binary` is needed and binds no
 //! constant in a constructor, so neither this rule nor the comparison walk fired, and a few
 //! gates on a large Angular workspace stated a provable restriction and published nothing. It is
-//! the same machinery sourced from the other side, in `ts/gate_directive_inputs.rs`.
+//! the same machinery sourced from the other side, in `ts/directive/gate_directive_inputs.rs`.
 //!
 //! NOTHING HERE IS PARSED OUT OF SOURCE — every step is a row the map already RESOLVED:
 //!   `assignments.target_id`  the constructor's write resolved ACROSS the inheritance
@@ -56,7 +56,7 @@ use serde_json::{json, Value};
 mod index;
 use index::*;
 
-#[path = "ts/gate_directive_inputs.rs"]
+#[path = "ts/directive/gate_directive_inputs.rs"]
 mod inputs;
 
 /// The `@Input` members typed by the enum, on the class or any ancestor.

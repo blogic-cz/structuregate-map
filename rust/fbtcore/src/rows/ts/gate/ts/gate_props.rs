@@ -164,7 +164,7 @@ impl<'a> Props<'a> {
         }
 
         // AN `@Input` FLAG every usage binds alike is the parent's expression, both ways.
-        let written: IndexSet<String> = writes.keys().cloned().collect();
+        let written = super::gate_input_flags::written_members(store);
         let mut out: IndexMap<String, (Value, bool)> = super::gate_input_flags::bound_inputs(store, &written)
             .into_iter().map(|(id, tree)| (id, (tree, true))).collect();
         for m in store.table("members").iter() {
