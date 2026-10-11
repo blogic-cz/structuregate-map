@@ -167,3 +167,10 @@ Tables that move: `render_path.branches` (an `or:` id) and `key_reach` `always_b
 move: `key_reach` `always_values`, `unreadable_values`, `always_features`, `maybe_features`, `always_branches`,
 `maybe_branches`, `branch_senses` and `n_paths` (a key in both arms is two ways), for keys chosen by a ternary, `&&`
 or `||` inside a template expression. `gate_values` and `render_path` do not move.
+
+**#17 - an out-of-scope render is no way in** (signed off; #12 for the closure, `closure.rs::load_edges`). A tag
+matched to a component the host's NgModule cannot see is no edge, as `render_graph` and `component_reach` already
+read it; `unknown` stays an edge. Tables that move: `render_path` (no path through such an edge) and `key_reach`
+`roots`, `routes`, `components`, `modules`, `n_paths` and every `always_*`/`maybe_*` column, for keys behind a
+same-selector component. A component a module exports from its own file is `imported`, no longer `out_of_scope`
+(`renders.scope`, `src/TsRows/TsDerive/TsModuleScope.mjs`).

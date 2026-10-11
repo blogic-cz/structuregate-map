@@ -184,9 +184,11 @@ async function main() {
   // declaration a call resolves to), and a factory's predicate may be tested through `rest[0]` or such a method.
   // 35: a key a template expression chooses (a ternary, `&&`, `||`) holds its arm (`arm:` links); a service
   // key follows a one-return hop and `??`/`||`, and an `*ngFor` list reads every write, spread and return.
+  // 36: a component a module exports from its own file is in scope where the module is imported, and the
+  // closure walks no `out_of_scope` render.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 35,
+    config: config.file, data: config.data, rows: 36,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
