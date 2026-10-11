@@ -64,6 +64,13 @@ impl Returned<'_, '_> {
         self.enter(member, value, seen, out);
     }
 
+    /// The keys a value holds through the calls in it, read inside `member` (its locals and parameters in scope):
+    /// an element's property of a list `member` returns.
+    pub(in super::super) fn in_member(&self, value: &Value, member: &str, out: &mut Found) {
+        let frame = Frame { member: member.to_string(), args: &[] };
+        self.through(value, &frame, &mut Seen::new(), out);
+    }
+
     /// The keys of the ONE plain return of `member`, or what each of its several returns hands back through a
     /// call - each (member, arguments) read once.
     fn enter(&self, member: String, call: &Value, seen: &mut Seen, out: &mut Found) {

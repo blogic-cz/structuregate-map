@@ -94,7 +94,7 @@ fn callee_keys(value: Option<&Value>, reader: &Returned<'_, '_>) -> Vec<(String,
 }
 
 /// (member id, local name) -> every `=` written to that local, in source order.
-fn local_writes(assignments: &[Row]) -> std::collections::HashMap<(String, String), Vec<&Row>> {
+pub(super) fn local_writes(assignments: &[Row]) -> std::collections::HashMap<(String, String), Vec<&Row>> {
     let mut writes: std::collections::HashMap<(String, String), Vec<&Row>> = std::collections::HashMap::new();
     for a in assignments.iter().filter(|a| text(a, "scope").as_deref() == Some("local") && text(a, "operator").as_deref() == Some("=")) {
         if let (Some(member), Some(target)) = (id_of(a, "member"), text(a, "target")) {
@@ -105,7 +105,7 @@ fn local_writes(assignments: &[Row]) -> std::collections::HashMap<(String, Strin
 }
 
 /// Member or `functions` row id -> its parameters' names, and `locals` row id -> the arrow it holds.
-fn callables(store: &Store<'_>) -> (std::collections::HashMap<String, Vec<String>>, std::collections::HashMap<String, String>) {
+pub(super) fn callables(store: &Store<'_>) -> (std::collections::HashMap<String, Vec<String>>, std::collections::HashMap<String, String>) {
     let mut params = std::collections::HashMap::new();
     for table in ["members", "functions"] {
         for r in store.table(table).iter() {
@@ -119,24 +119,6 @@ fn callables(store: &Store<'_>) -> (std::collections::HashMap<String, Vec<String
         .filter_map(|l| Some((id_of(l, "id")?, l.get("value")?.get("$fn_id")?.as_str()?.to_string())))
         .collect();
     (params, fn_of_local)
-}
-
-/// THE ELEMENTS OF EVERY LIST A CALL'S CALLEE RETURNS, when every return of it is an array literal:
-/// `items(flag) { if (flag) { return [{ label: 'a' }]; } return [{ label: 'b' }]; }` is both elements. A
-/// return that is anything else reads nothing. The branches are not carried - they test the callee's
-/// parameters, which no gate shares, as `callee_keys` drops a `tpl:` link.
-pub(super) fn callee_lists(
-    value: Option<&Value>,
-    rows: &super::gate_tsrows::TsRows,
-    by_member: &std::collections::HashMap<String, Vec<&Row>>,
-) -> Option<Vec<Value>> {
-    let target = value?.get("$target")?;
-    let mut items = Vec::new();
-    for r in by_member.get(&rows.member_named(target)?)? {
-        let Some(Value::Array(xs)) = r.get("value") else { return None };
-        items.extend(xs.iter().cloned());
-    }
-    Some(items)
 }
 
 /// Member id -> every `returns` row of it.
@@ -181,30 +163,15 @@ pub(super) fn one_returns(returns: &[Row]) -> std::collections::HashMap<String, 
 /// is in the field when it renders. Nearly all fields are written only from inside;
 /// the few that are not are dropped whole, keys and all.
 fn keys_by_member(store: &Store<'_>) -> IndexMap<String, IndexMap<String, Vec<Vec<String>>>> {
-    let keys: super::key_branches::KeySet = store
-        .table("translations")
-        .iter()
-        .filter_map(|t| text(t, "key"))
-        .collect();
+    super::key_lists::with_reader(store, |reader| member_keys(store, reader))
+}
 
+/// `keys_by_member`, over the reader `key_lists::with_reader` built - the one place its maps are made.
+fn member_keys(store: &Store<'_>, reader: &Returned<'_, '_>) -> IndexMap<String, IndexMap<String, Vec<Vec<String>>>> {
+    let keys = reader.keys;
     let branches = Branches::new(store);
-    let i18n = store.option_list("i18n_calls");
-    let rows = super::gate_tsrows::TsRows::new(store);
     let returns = store.table("returns");
-    let one_return = one_returns(&returns);
-    let every = returns_by_member(&returns);
-    let (params, fn_of_local) = callables(store);
     let assignments = store.table("assignments");
-    let writes = local_writes(&assignments);
-    let parent: std::collections::HashMap<String, String> = store
-        .table("functions")
-        .iter()
-        .filter_map(|f| Some((id_of(f, "id")?, id_of(f, "parent").filter(|p| !p.is_empty())?)))
-        .collect();
-    let reader = Returned {
-        rows: &rows, one_return: &one_return, every: &every, keys: &keys, i18n: &i18n, params: &params,
-        fn_of_local: &fn_of_local, writes: &writes, parent: &parent,
-    };
     let mut owner: IndexMap<String, Option<String>> = IndexMap::new();
     let mut out: IndexMap<String, IndexMap<String, Vec<Vec<String>>>> = IndexMap::new();
     let mut foreign: Vec<String> = Vec::new();
@@ -221,7 +188,7 @@ fn keys_by_member(store: &Store<'_>) -> IndexMap<String, IndexMap<String, Vec<Ve
         }
         let mut found = Vec::new();
         value_keys(m.get("value").unwrap_or(&Value::Null), &[], &keys, &mut found);
-        found.extend(callee_keys(m.get("value"), &reader));
+        found.extend(callee_keys(m.get("value"), reader));
         for (key, chain) in found {
             member_ways(out.entry(id.clone()).or_default(), &key, chain);
         }
@@ -231,7 +198,7 @@ fn keys_by_member(store: &Store<'_>) -> IndexMap<String, IndexMap<String, Vec<Ve
         let Some(target) = id_of(a, "target_id").filter(|t| !t.is_empty()) else { continue };
         let mut found = Vec::new();
         value_keys(a.get("value").unwrap_or(&Value::Null), &branches.chain_of(a), &keys, &mut found);
-        for (key, chain) in callee_keys(a.get("value"), &reader) {
+        for (key, chain) in callee_keys(a.get("value"), reader) {
             let mut way = branches.chain_of(a);
             way.extend(chain);
             found.push((key, way));

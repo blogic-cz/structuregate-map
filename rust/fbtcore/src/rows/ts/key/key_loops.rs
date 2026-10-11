@@ -28,7 +28,9 @@
 use super::astreads::{is_read, read_rows, unwrap};
 use super::gate_values::EnumIndex;
 use super::key_branches::{value_keys, Branches, KeySet};
-use super::key_fields::{callee_lists, id_of, returns_by_member, text};
+use super::key_follow::Returned;
+use super::key_fields::{id_of, returns_by_member, text};
+use super::key_lists::{callee_lists, with_reader};
 use super::key_routes::FieldSite;
 use super::store::{Row, Store};
 use indexmap::IndexMap;
@@ -38,7 +40,7 @@ use std::collections::{HashMap, HashSet};
 /// property -> key -> (element index, way), per loop.
 type Elements = IndexMap<String, IndexMap<String, Vec<(usize, Vec<String>)>>>;
 
-fn element_keys(items: &[Element], keys: &KeySet, i18n: &[String]) -> Elements {
+fn element_keys(items: &[Element], keys: &KeySet, i18n: &[String], reader: &Returned<'_, '_>) -> Elements {
     let mut out: Elements = IndexMap::new();
     for (i, item) in items.iter().enumerate() {
         let Some(object) = item.value.as_object() else { continue };
@@ -48,6 +50,13 @@ fn element_keys(items: &[Element], keys: &KeySet, i18n: &[String]) -> Elements {
             // A TRANSLATE CALL AS THE PROPERTY'S VALUE holds its arguments' keys, as a method's return of one does.
             for arg in super::key_follow::translated(value, i18n).unwrap_or_default() {
                 value_keys(arg, &item.chain, keys, &mut found);
+            }
+            // A CALL AS THE PROPERTY'S VALUE inside a list a callee returns is read as that callee's own return of it is -
+            // a local arrow of the callee, a free function, a method - with the string it is handed spelled into its hole
+            // (`label('alpha')` over `(n) => `demo.${n}``). No condition is carried: the call's branches test its parameters.
+            if let Some(owner) = &item.owner {
+                reader.in_member(value, owner, &mut found);
+                found.iter_mut().for_each(|(_, chain)| chain.retain(|l| !l.starts_with("tpl:")));
             }
             for (key, mut chain) in found {
                 if item.from_call {
@@ -70,6 +79,8 @@ pub struct Element {
     pub value: Value,
     chain: Vec<String>,
     from_call: bool,
+    /// The member or function whose return the element came out of: where a call inside it resolves its locals.
+    owner: Option<String>,
 }
 
 /// The elements a list VALUE spells, each under `chain`: an array literal's items, a `...` spread of a call
@@ -77,18 +88,18 @@ pub struct Element {
 /// list. A spread no callee resolves stays ONE item, as an unread item always was, so `Loops::expand`
 /// refuses the list instead of reading it in part.
 fn elements(value: &Value, rows: &super::gate_tsrows::TsRows, by_member: &HashMap<String, Vec<&Row>>, chain: &[String]) -> Option<Vec<Element>> {
-    let of = |items: Vec<Value>, from_call: bool| items.into_iter().map(move |value| Element { value, chain: chain.to_vec(), from_call });
+    let of = |items: Vec<Value>, owner: String| items.into_iter().map(move |value| Element { value, chain: chain.to_vec(), from_call: true, owner: Some(owner.clone()) });
     match value {
         Value::Array(items) => Some(
             items
                 .iter()
                 .flat_map(|item| match callee_lists(item.get("$spread"), rows, by_member) {
-                    Some(spread) => of(spread, true).collect(),
-                    None => vec![Element { value: item.clone(), chain: chain.to_vec(), from_call: false }],
+                    Some((spread, owner)) => of(spread, owner).collect(),
+                    None => vec![Element { value: item.clone(), chain: chain.to_vec(), from_call: false, owner: None }],
                 })
                 .collect(),
         ),
-        other => callee_lists(Some(other), rows, by_member).map(|items| of(items, true).collect()),
+        other => callee_lists(Some(other), rows, by_member).map(|(items, owner)| of(items, owner).collect()),
     }
 }
 
@@ -357,8 +368,8 @@ pub fn loop_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
         .filter_map(|g| Some((id_of(g, "id")?, expr_by_id.get(&id_of(g, "expression")?)?.get("ast")?)))
         .collect();
 
-    for lp in &loops.list {
-        let elements = element_keys(&lp.items, &keyset, &i18n);
+    let per_loop: Vec<Elements> = with_reader(store, |reader| loops.list.iter().map(|lp| element_keys(&lp.items, &keyset, &i18n, reader)).collect());
+    for (lp, elements) in loops.list.iter().zip(per_loop) {
         if elements.is_empty() {
             continue;
         }
