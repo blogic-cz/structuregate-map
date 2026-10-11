@@ -10,13 +10,15 @@
 //! is not read, and the call restricts nothing, as before.
 //!
 //! A REST PARAMETER (`(...rest) => rest.some((x) => ids.includes(x))`) is the same test: the call site
-//! hands exactly one argument (`Lists::restriction`), so `rest` is that one value.
+//! hands exactly one argument (`Lists::restriction`), so `rest` is that one value. So are `ids.includes(rest[0])`
+//! and `rest.m(ids)` over an `Array.prototype.m = function (o) { return this.some((x) => o.includes(x)); }`,
+//! joined by the call's `target` to the `prototype-method` row the extractor files for the assignment.
 
 use super::gate_lists::{enum_for, list_test, spelled, List};
-use super::gate_predicates::{kind, local, method_call, only_return};
+use super::gate_predicates::{kind, literal_is, local, method_call, only_return};
 use super::gate_tsrows::TsRows;
 use super::gate_values::{enum_of_type_ref, EnumIndex};
-use super::astreads::unwrap;
+use super::astreads::{is_read, unwrap};
 use super::store::Store;
 use indexmap::{IndexMap, IndexSet};
 use serde_json::Value;
@@ -54,6 +56,7 @@ pub fn curried(
         .filter_map(|(m, xs)| match xs.as_slice() { [Some(x)] => Some((*x, *m)), _ => None })
         .collect();
     let none = IndexSet::new();
+    let protos = some_methods(store);
     let mut params: IndexMap<&str, &Value> = IndexMap::new();
     let functions = store.table("functions");
     for f in functions.iter() {
@@ -74,7 +77,11 @@ pub fn curried(
         let (Some(p), Some(q)) = (outer.get("name").and_then(Value::as_str), q.as_str()) else { continue };
         let tree = rows.resolve_in(body, bound.get(*factory).unwrap_or(&none), idx, Some(factory));
         let rest = inner.get("rest").and_then(Value::as_str) == Some(q);
-        let tested = if rest { some_of_rest(&tree, q) } else { list_test(&tree).filter(|(_, d)| local(d) == Some(q)) };
+        let tested = if rest {
+            some_of_rest(&tree, q).or_else(|| first_of_rest(&tree, q)).or_else(|| proto_of_rest(&tree, q, &protos))
+        } else {
+            list_test(&tree).filter(|(_, d)| local(d) == Some(q))
+        };
         let Some((list, _)) = tested else { continue };
         if local(list) != Some(p) {
             continue;
@@ -100,4 +107,70 @@ fn some_of_rest<'a>(tree: &'a Value, rest: &str) -> Option<(&'a Value, &'a Value
     let [x] = cb.get("params")?.as_array()?.as_slice() else { return None };
     let (list, d) = list_test(only_return(cb)?)?;
     (local(over) == Some(rest) && local(d) == x.as_str()).then_some((list, d))
+}
+
+/// `ids.includes(rest[0])`: the call site hands one argument, so `rest[0]` is it.
+fn first_of_rest<'a>(tree: &'a Value, rest: &str) -> Option<(&'a Value, &'a Value)> {
+    let (list, d) = list_test(tree)?;
+    let first = kind(d) == Some("KeyedRead")
+        && d.get("receiver").is_some_and(|r| local(r) == Some(rest))
+        && d.get("key").is_some_and(|k| literal_is(k, 0));
+    first.then_some((list, d))
+}
+
+/// `rest.overlaps(ids)` over a `prototype-method` whose one return is `this.some((x) => P.includes(x))`.
+fn proto_of_rest<'a>(tree: &'a Value, rest: &str, protos: &IndexSet<String>) -> Option<(&'a Value, &'a Value)> {
+    if kind(tree) != Some("Call") {
+        return None;
+    }
+    let callee = tree.get("receiver")?;
+    let [list] = tree.get("args")?.as_array()?.as_slice() else { return None };
+    let over = callee.get("receiver")?;
+    (is_read(callee) && local(over) == Some(rest) && protos.contains(&target_key(callee.get("target")?)?))
+        .then_some((list, over))
+}
+
+fn target_key(t: &Value) -> Option<String> {
+    Some(format!("{} {} {}", t.get("name")?.as_str()?, t.get("file")?.as_str()?.replace('\\', "/"), t.get("line")?.as_i64()?))
+}
+
+/// The `target` of every `prototype-method` whose body PROVES "some element of `this` is in my one parameter".
+fn some_methods(store: &Store<'_>) -> IndexSet<String> {
+    let mut found: IndexMap<String, (String, String)> = IndexMap::new(); // fn id -> (target key, param)
+    for f in store.table("functions").iter() {
+        if f.get("form").and_then(Value::as_str) != Some("prototype-method") {
+            continue;
+        }
+        let (Some(id), Some(key), Some(Value::Array(ps))) =
+            (f.get("id").and_then(Value::as_str), f.get("target").and_then(target_key), f.get("params"))
+        else {
+            continue;
+        };
+        let [p] = ps.as_slice() else { continue };
+        let Some(p) = p.get("name").and_then(Value::as_str) else { continue };
+        found.insert(id.to_string(), (key, p.to_string()));
+    }
+    let mut returns: IndexMap<&str, Vec<Option<String>>> = IndexMap::new();
+    let all = store.table("returns");
+    for r in all.iter() {
+        let Some(member) = r.get("member").and_then(Value::as_str).filter(|m| found.contains_key(*m)) else { continue };
+        let plain = ["branch", "case"].iter().all(|f| r.get(f).is_none_or(Value::is_null));
+        returns.entry(member).or_default().push(r.get("expression").and_then(Value::as_str).filter(|_| plain).map(str::to_string));
+    }
+    let one: IndexMap<String, &str> = returns.iter()
+        .filter_map(|(m, xs)| match xs.as_slice() { [Some(x)] => Some((x.clone(), *m)), _ => None })
+        .collect();
+    let mut out = IndexSet::new();
+    for e in store.table("expressions").iter() {
+        let Some(fid) = e.get("id").and_then(Value::as_str).and_then(|x| one.get(x)) else { continue };
+        let (key, p) = &found[*fid];
+        let Some(ast) = e.get("ast").map(unwrap) else { continue };
+        let Some((this, cb)) = method_call(ast, "some") else { continue };
+        let ([x], Some(body)) = (cb.get("params").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default(), only_return(cb)) else { continue };
+        let Some((l, d)) = list_test(body) else { continue };
+        if kind(this) == Some("This") && local(l) == Some(p.as_str()) && local(d) == x.as_str() {
+            out.insert(key.clone());
+        }
+    }
+    out
 }

@@ -147,4 +147,41 @@ Test-Case 'tsrows: a key behind a literal false renders on no way' {
     Assert-Line $r 'dk.on | 1'
 }
 
+
+
+# A KEY A TEMPLATE EXPRESSION CHOOSES holds its arm, as a TypeScript value does: `c ? 'a' : 'b'` gives `a` under `c`
+# and `b` under `!c`, `c && 'k'` under `c`, `c || 'k'` under `!c` - read exactly as `*ngIf="c"` reads `c`, so a
+# flag assigned an enum test (or a function testing a fixed list) in `ngOnInit` restricts. A key outside any
+# arm stays unrestricted.
+Test-Case 'tsrows: a key a template expression chooses carries its arm' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace @{
+        'apps/shop/src/tc.component.html' = "<translate [text]=`"isLike ? 'tc.like.yes' : 'tc.like.no'`"></translate>`n" +
+            "<translate [text]=`"isAlpha ? 'tc.alpha.yes' : 'tc.alpha.no'`"></translate>`n" +
+            "<b>{{ (isAlpha && 'tc.and') | money }}</b><i>{{ (isAlpha || 'tc.or') | money }}</i>`n" +
+            "<translate [text]=`"'tc.plain'`"></translate>`n"
+        'apps/shop/src/tc.component.ts' = "import { Component, Input, OnInit } from '@angular/core';`n" +
+            "export enum Kind { Alpha = 1, Beta = 2, Gamma = 3 }`n" +
+            "export const isLikeAlpha = (kind: Kind) => [Kind.Alpha, Kind.Beta].some((x) => x === kind);`n" +
+            "@Component({ selector: 'app-tc', templateUrl: './tc.component.html', standalone: true })`n" +
+            "export class TcComponent implements OnInit {`n" +
+            "  @Input() kind: Kind = Kind.Alpha;`n  isLike = false;`n  isAlpha = false;`n" +
+            "  ngOnInit() {`n    this.isLike = isLikeAlpha(this.kind);`n    this.isAlpha = this.kind === Kind.Alpha;`n  }`n" +
+            "}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},' +
+            '"tc":{"like":{"yes":"1","no":"2"},"alpha":{"yes":"3","no":"4"},"and":"5","or":"6","plain":"7"}}'
+    })
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql ($script:TsKeyArmsSql.Replace("'ov.%'", "'tc.%'"))
+    Assert-Exit $r 0
+    Assert-Line $r 'tc.like.yes | kind not_in ["Gamma"]'
+    Assert-Line $r 'tc.like.no | kind in ["Gamma"]'
+    Assert-Line $r 'tc.alpha.yes | kind in ["Alpha"]'
+    Assert-Line $r 'tc.alpha.no | kind not_in ["Alpha"]'
+    Assert-Line $r 'tc.and | kind in ["Alpha"]'
+    Assert-Line $r 'tc.or | kind not_in ["Alpha"]'
+    Assert-NoLine $r 'tc.plain'
+    $s = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT key || ' | ' || branch_senses AS senses FROM key_reach WHERE key LIKE 'tc.alpha.%'"
+    Assert-Line $s 'tc.alpha.no | {"!arm:'
+    Assert-Line $s 'tc.alpha.yes | {"arm:'
+}
+
 }

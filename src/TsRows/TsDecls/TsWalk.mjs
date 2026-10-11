@@ -164,7 +164,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     const declRows = makeDeclRows({
       ts, store, modifiersOf, localExports, evalNode, collectBody,
       paramsOf: classRows.paramsOf, typeText: classRows.typeText,
-      jsdocOf: (node) => jsdocOf(ts, node),
+      jsdocOf: (node) => jsdocOf(ts, node), resolveRead: readRefs.resolveRead,
     });
     /** An inline function - a callback, a nested arrow - as a `functions` row, so its body has an owner. It
      *  is anonymous by construction, so it is identified by POSITION, and `parent` says which body it sits
@@ -254,6 +254,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
             }
           }
           else if (ts.isFunctionDeclaration(statement)) declRows.functionRow(statement, fid);
+          else if (ts.isExpressionStatement(statement)) declRows.prototypeRow(statement, fid);
         } catch {
           diag.note('ts_statement_failed');
         }

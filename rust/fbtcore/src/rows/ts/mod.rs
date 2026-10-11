@@ -49,6 +49,8 @@ pub mod gate_tsrows;
 #[path = "gate/gate_values.rs"]
 pub mod gate_values;
 pub mod jsstr;
+#[path = "key/key_arms.rs"]
+pub mod key_arms;
 #[path = "key/key_branches.rs"]
 pub mod key_branches;
 #[path = "key/key_built.rs"]

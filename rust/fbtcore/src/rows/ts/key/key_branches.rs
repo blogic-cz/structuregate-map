@@ -32,6 +32,7 @@
 //! the only thing a `gates` column names, and the branch ids get columns of their own.
 
 use super::gate_features::Conds;
+use super::key_arms::template_arms;
 use super::gate_tsrows::TsRows;
 use super::gate_values::EnumIndex;
 use super::store::{Row, Store};
@@ -63,6 +64,8 @@ pub struct Branches {
     cases: IndexMap<String, Option<String>>,
     /// A ternary's or a logical operator's condition row -> the member the value sits in.
     choices: IndexMap<String, Option<String>>,
+    /// A TEMPLATE expression's arm, `arm:<expression>#<n>` -> its condition's tree (`template_arms`).
+    arms: IndexMap<String, Value>,
 }
 
 /// THE TRANSLATION KEYS, SORTED as well as hashed, so a template literal reaches only the keys its literal head
@@ -310,6 +313,17 @@ impl Branches {
                 choices_in(arg, &member, &mut out.choices);
             }
         }
+        // A TEMPLATE EXPRESSION CHOOSES KEYS TOO: `[text]="c ? 'a' : 'b'"` - see `template_arms`.
+        let mut held: IndexSet<String> = store.table("template_strings").iter().filter_map(|r| cell(r, "expression")).collect();
+        held.extend(store.table("i18n_refs").iter()
+            .filter(|r| cell(r, "source").as_deref() == Some("html"))
+            .filter_map(|r| cell(r, "expression")));
+        for e in store.table("expressions").iter() {
+            let (Some(id), Some(ast)) = (cell(e, "id"), e.get("ast")) else { continue };
+            if held.contains(&id) {
+                out.arms.extend(template_arms(&id, ast).1.into_iter().map(|(arm, tree)| (arm, tree.clone())));
+            }
+        }
         // AND A STATEMENT SITS IN ONE: `c ? this.t('a') : this.t('b')` stamps each call with the
         // arm it runs in - see `TsBody.mjs`. The link is the condition's row, `!` for the false arm.
         for table in ["calls", "assignments", "returns", "locals"] {
@@ -346,7 +360,8 @@ impl Branches {
 
     pub fn contains(&self, id: &str) -> bool {
         let choice = id.strip_prefix('!').unwrap_or(id);
-        ["tpl:", "loop:", "bind:", "or:"].iter().any(|p| id.starts_with(p)) || self.by_id.contains_key(id) || self.cases.contains_key(id) || self.choices.contains_key(choice)
+        ["tpl:", "loop:", "bind:", "or:"].iter().any(|p| id.starts_with(p)) || self.by_id.contains_key(id) || self.cases.contains_key(id)
+            || self.choices.contains_key(choice) || self.arms.contains_key(choice)
     }
 
     /// Every branch, every case and every conditional ARM a statement row sits in.
@@ -423,6 +438,10 @@ impl Branches {
             let resolved = rows.resolve_in(super::astreads::unwrap(ast), names, idx, member.as_deref());
             out.insert(format!("!{id}"), (resolved.clone(), true));
             out.insert(id.clone(), (resolved, false));
+        }
+        for (id, tree) in &self.arms {
+            out.insert(format!("!{id}"), (tree.clone(), true));
+            out.insert(id.clone(), (tree.clone(), false));
         }
         out
     }

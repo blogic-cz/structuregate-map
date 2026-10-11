@@ -256,7 +256,9 @@ Test-Case 'tsrows: a list handed to a structural directive restricts what the di
 # A PREDICATE BUILT BY A FACTORY (`isAlpha = makeCheck([Grade.Alpha])`, the factory a function returning an arrow
 # over the list it was given) is that list tested for membership, exact both ways. The control is the same test
 # written as the arrow itself, which an earlier reader already takes. An inner arrow taking a REST parameter
-# (`(...rest) => rest.some((x) => ids.includes(x))`) is the same test of the one argument the call hands it.
+# (`(...rest) => rest.some((x) => ids.includes(x))`) is the same test of the one argument the call hands it, and so
+# are `ids.includes(rest[0])` and `rest.overlaps(ids)` over an `Array.prototype` method whose body proves membership;
+# `misses` (the same method negated) is the control: the body decides, not the call's shape.
 Test-Case 'tsrows: a predicate constant a factory builds restricts to the list the factory was handed' {
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/curried.component.ts' = "import { Component } from '@angular/core';`n" +
@@ -265,11 +267,20 @@ Test-Case 'tsrows: a predicate constant a factory builds restricts to the list t
             "export const isAlpha = makeCheck([Grade.Alpha]);`n" +
             "export const makeAny = (ids: Grade[]) => (...rest: Grade[]) => rest.some((x) => ids.includes(x));`n" +
             "export const isAlphaOrDelta = makeAny([Grade.Alpha, Grade.Delta]);`n" +
+            "declare global { interface Array<T> { overlaps(other: T[]): boolean; misses(other: T[]): boolean; } }`n" +
+            "Array.prototype.overlaps = function <T>(other: T[]): boolean { return this.some((x: T) => other.includes(x)); };`n" +
+            "Array.prototype.misses = function <T>(other: T[]): boolean { return !this.some((x: T) => other.includes(x)); };`n" +
+            "export const makeOver = (ids: Grade[]) => (...rest: Grade[]) => rest.overlaps(ids);`n" +
+            "export const isBravoOver = makeOver([Grade.Bravo]);`n" +
+            "export const makeMiss = (ids: Grade[]) => (...rest: Grade[]) => rest.misses(ids);`n" +
+            "export const isBravoMiss = makeMiss([Grade.Bravo]);`n" +
+            "export const makeFirst = (ids: Grade[]) => (...rest: Grade[]) => ids.includes(rest[0]);`n" +
+            "export const isDeltaFirst = makeFirst([Grade.Delta]);`n" +
             "export const isBravoOne = (grade: Grade) => [Grade.Bravo].includes(grade);`n" +
             "@Component({ selector: 'demo-curried', standalone: true,`n" +
-            "  template: '<b *ngIf=`"isAlpha(item.grade)`">a</b><i *ngIf=`"!isAlpha(item.grade)`">n</i><u *ngIf=`"isBravo(item.grade)`">b</u><s *ngIf=`"isAD(item.grade)`">r</s>' })`n" +
+            "  template: '<b *ngIf=`"isAlpha(item.grade)`">a</b><i *ngIf=`"!isAlpha(item.grade)`">n</i><u *ngIf=`"isBravo(item.grade)`">b</u><s *ngIf=`"isAD(item.grade)`">r</s><p *ngIf=`"isO(item.grade)`">o</p><q *ngIf=`"isM(item.grade)`">m</q><em *ngIf=`"isF(item.grade)`">f</em>' })`n" +
             "export class CurriedComponent {`n" +
-            "  isAlpha = isAlpha;`n  isBravo = isBravoOne;`n  isAD = isAlphaOrDelta;`n" +
+            "  isAlpha = isAlpha;`n  isBravo = isBravoOne;`n  isAD = isAlphaOrDelta;`n  isO = isBravoOver;  isM = isBravoMiss;  isF = isDeltaFirst;`n" +
             "  item: { grade: Grade } = { grade: Grade.Delta };`n" +
             "}`n"
     }
@@ -280,6 +291,9 @@ Test-Case 'tsrows: a predicate constant a factory builds restricts to the list t
     Assert-Line $r '!isAlpha(item.grade) => Grade item.grade not_in ["Alpha"]'
     Assert-Line $r 'isBravo(item.grade) => Grade item.grade in ["Bravo"]'
     Assert-Line $r 'isAD(item.grade) => Grade item.grade not_in ["Bravo"]'
+    Assert-Line $r 'isO(item.grade) => Grade item.grade in ["Bravo"]'
+    Assert-Line $r 'isF(item.grade) => Grade item.grade in ["Delta"]'
+    Assert-NoLine $r 'isM(item.grade) =>'
 }
 
 

@@ -180,9 +180,13 @@ async function main() {
   // 32: a function expression's tree (`Fn`) names its `params`, for a predicate a factory returns.
   // 33: an `Fn` names its `rest` parameter, a `Read` of a body's local its declaration (`local`), a `$fn` call
   // argument its `functions` row (`$fn_id`) and a chained call the call it is made on (`receiver_call`).
+  // 34: a top-level `X.prototype.m = function` is a `functions` row (`form: 'prototype-method'`, `target` the
+  // declaration a call resolves to), and a factory's predicate may be tested through `rest[0]` or such a method.
+  // 35: a key a template expression chooses (a ternary, `&&`, `||`) holds its arm (`arm:` links); a service
+  // key follows a one-return hop and `??`/`||`, and an `*ngFor` list reads every write, spread and return.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 33,
+    config: config.file, data: config.data, rows: 35,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

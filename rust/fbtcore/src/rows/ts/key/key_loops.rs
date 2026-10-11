@@ -1,7 +1,7 @@
 //! A KEY HELD IN A LIST OF OBJECTS IS A SITE WHERE `*ngFor`'S LOOP VARIABLE READS ITS PROPERTY.
 //!
-//! `tips = [{ tooltip: 'demo.tips.alpha' }]` (or `tips = this.labels.tips()` over a method whose one
-//! plain return is such a list) rendered by `<b *ngFor="let t of tips" [title]="t.tooltip">`: the
+//! `tips = [{ tooltip: 'demo.tips.alpha' }]` (or `tips = this.labels.tips()` over a method whose
+//! every return is such a list) rendered by `<b *ngFor="let t of tips" [title]="t.tooltip">`: the
 //! key lives in the field, but the template never reads the field at the node that shows it - it reads
 //! `t.tooltip`, and `t` is a variable of the `ngForOf` gate's node.
 //!
@@ -15,9 +15,10 @@
 //! EVERY HOP IS AN ID JOIN: the `ngForOf` gate's expression reads the field by `Read.target.row`, the
 //! gate's `node` declares the variable (`variables` entry whose value is `$implicit`), and the sites
 //! are that node and its descendants by `parent` - NOT a descendant that declares the same name, which
-//! shadows it. The element keys are read from the member's own value (or the one plain return of the
-//! method it holds a call of) ONLY, never from assignments; a member any other class writes is dropped,
-//! like `key_fields` drops a field written from outside.
+//! shadows it. The elements are what the member's own value spells, or - when nothing initialises it but an
+//! empty list - the union of every plain `=` its own class writes, each element under the branches of its
+//! write (`elements`), a callee's own branches not carried; a member any other class writes is dropped, like
+//! `key_fields` drops a field written from outside.
 //!
 //! A KEY'S WAYS CARRY THE ELEMENT THEY CAME FROM, `loop:<gate>#<index>` for each gate of the site's chain
 //! that reads the loop's variable:
@@ -26,8 +27,8 @@
 
 use super::astreads::{is_read, read_rows, unwrap};
 use super::gate_values::EnumIndex;
-use super::key_branches::{value_keys, KeySet};
-use super::key_fields::{callee_return, id_of, one_returns, text};
+use super::key_branches::{value_keys, Branches, KeySet};
+use super::key_fields::{callee_lists, id_of, returns_by_member, text};
 use super::key_routes::FieldSite;
 use super::store::{Row, Store};
 use indexmap::IndexMap;
@@ -37,15 +38,15 @@ use std::collections::{HashMap, HashSet};
 /// property -> key -> (element index, way), per loop.
 type Elements = IndexMap<String, IndexMap<String, Vec<(usize, Vec<String>)>>>;
 
-fn element_keys(items: &[Value], from_call: bool, keys: &KeySet) -> Elements {
+fn element_keys(items: &[Element], keys: &KeySet) -> Elements {
     let mut out: Elements = IndexMap::new();
     for (i, item) in items.iter().enumerate() {
-        let Some(object) = item.as_object() else { continue };
+        let Some(object) = item.value.as_object() else { continue };
         for (prop, value) in object {
             let mut found = Vec::new();
-            value_keys(value, &[], keys, &mut found);
+            value_keys(value, &item.chain, keys, &mut found);
             for (key, mut chain) in found {
-                if from_call {
+                if item.from_call {
                     chain.retain(|link| !link.starts_with("tpl:"));
                 }
                 let ways = out.entry(prop.clone()).or_default().entry(key).or_default();
@@ -58,19 +59,47 @@ fn element_keys(items: &[Value], from_call: bool, keys: &KeySet) -> Elements {
     out
 }
 
+/// One element of a loop's list: the object, the branches of the write that put it there, and whether it
+/// came out of a call - a `tpl:` link in it names the callee's parameter, never anything the loop holds.
+#[derive(Clone)]
+pub struct Element {
+    pub value: Value,
+    chain: Vec<String>,
+    from_call: bool,
+}
+
+/// The elements a list VALUE spells, each under `chain`: an array literal's items, a `...` spread of a call
+/// replaced by what its callee returns (`callee_lists`), a call by the same. None for a value that is no
+/// list. A spread no callee resolves stays ONE item, as an unread item always was, so `Loops::expand`
+/// refuses the list instead of reading it in part.
+fn elements(value: &Value, rows: &super::gate_tsrows::TsRows, by_member: &HashMap<String, Vec<&Row>>, chain: &[String]) -> Option<Vec<Element>> {
+    let of = |items: Vec<Value>, from_call: bool| items.into_iter().map(move |value| Element { value, chain: chain.to_vec(), from_call });
+    match value {
+        Value::Array(items) => Some(
+            items
+                .iter()
+                .flat_map(|item| match callee_lists(item.get("$spread"), rows, by_member) {
+                    Some(spread) => of(spread, true).collect(),
+                    None => vec![Element { value: item.clone(), chain: chain.to_vec(), from_call: false }],
+                })
+                .collect(),
+        ),
+        other => callee_lists(Some(other), rows, by_member).map(|items| of(items, true).collect()),
+    }
+}
+
 /// One `*ngFor` over a list of objects: its node, its variable and the list's ELEMENTS.
 pub struct Loop {
     pub node: String,
     pub variable: String,
-    pub items: Vec<Value>,
-    from_call: bool,
+    pub items: Vec<Element>,
 }
 
 /// THE LOOPS OF A TREE, found once for the sites and for the config a directive inside one reads.
 ///
-/// The elements are the member's own list (or the one plain return of the method it holds a call
-/// of) ONLY; a member any other class writes has none, like `key_fields` drops a field written from
-/// outside.
+/// The elements are the member's own list, or the union of every write of its own class (`elements`),
+/// a callee's branches not carried; a member any other class writes has none, like `key_fields` drops a
+/// field written from outside.
 pub struct Loops {
     pub list: Vec<Loop>,
     by_node: HashMap<String, usize>,
@@ -100,31 +129,32 @@ impl Loops {
         let expr_by_id: HashMap<String, &Row> = expressions.iter().filter_map(|e| id_of(e, "id").map(|i| (i, e))).collect();
         let rows = super::gate_tsrows::TsRows::new(store);
         let returns = store.table("returns");
-        let one_return = one_returns(&returns);
+        let by_member = returns_by_member(&returns);
+        let branches = Branches::new(store);
         let members = store.table("members");
         let mut owner: HashMap<String, Option<String>> = HashMap::new();
-        let mut lists: HashMap<String, (Vec<Value>, bool)> = HashMap::new();
-        let mut members_valued: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut lists: HashMap<String, Vec<Element>> = HashMap::new();
+        let mut members_valued: HashSet<String> = HashSet::new();
         for m in members.iter() {
             let Some(id) = id_of(m, "id").filter(|i| !i.is_empty()) else { continue };
             owner.insert(id.clone(), text(m, "class"));
-            if m.get("value").is_some_and(|v| !v.is_null()) {
-                members_valued.insert(id.clone());
-            }
-            let list = match m.get("value") {
-                Some(Value::Array(items)) => Some(items),
-                other => match callee_return(other, &rows, &one_return) {
-                    Some(Value::Array(items)) => Some(items),
-                    _ => None,
-                },
-            };
-            if let Some(items) = list {
-                lists.insert(id, (items.clone(), !matches!(m.get("value"), Some(Value::Array(_)))));
+            // AN EMPTY LIST INITIALISES NOTHING: `tips: T[] = []` filled in `ngOnInit` holds what that writes.
+            match m.get("value") {
+                None | Some(Value::Null) => {}
+                Some(Value::Array(items)) if items.is_empty() => {}
+                Some(value) => {
+                    members_valued.insert(id.clone());
+                    if let Some(list) = elements(value, &rows, &by_member, &[]) {
+                        lists.insert(id, list);
+                    }
+                }
             }
         }
-        // A LIST WRITTEN ONCE IN A METHOD OF ITS OWN CLASS is the member's list when nothing initialises it:
-        // `ngOnInit() { this.tips = [...] }` (or `= this.labels.tips()`) renders the same elements a field
-        // initializer does. One plain `=` - no branch, no case, no arm - or none is read.
+        // EVERY WRITE IN A METHOD OF ITS OWN CLASS adds its elements when nothing initialises the member:
+        // `ngOnInit() { this.tips = [...] }`, one write per arm of an `if`, or `= this.build()` over a method
+        // of several returns. An element keeps the branches of the write that put it there. A write that is
+        // not a plain `=` of a list leaves the member unread - a list read in part would hand a directive
+        // fewer members than it can hold.
         let mut written: HashMap<String, Vec<&Row>> = HashMap::new();
         let assignments = store.table("assignments");
         for a in assignments.iter() {
@@ -141,28 +171,28 @@ impl Loops {
             }
         }
         for (target, writes) in written {
-            let [a] = writes.as_slice() else { continue };
-            let plain = ["branch", "case"].iter().all(|f| text(a, f).is_none())
-                && a.get("choices").is_none_or(|c| c.is_null() || c.as_array().is_some_and(Vec::is_empty))
-                && text(a, "operator").as_deref() == Some("=");
-            if !plain || lists.contains_key(&target) || members_valued.contains(&target) {
+            if lists.contains_key(&target) || members_valued.contains(&target) {
                 continue;
             }
-            let list = match a.get("value") {
-                Some(Value::Array(items)) => Some((items.clone(), false)),
-                other => match callee_return(other, &rows, &one_return) {
-                    Some(Value::Array(items)) => Some((items.clone(), true)),
-                    _ => None,
-                },
-            };
-            if let Some(list) = list {
-                lists.insert(target, list);
+            let mut all = Vec::new();
+            for a in writes {
+                let list = a.get("value")
+                    .filter(|_| text(a, "operator").as_deref() == Some("="))
+                    .and_then(|v| elements(v, &rows, &by_member, &branches.chain_of(a)));
+                let Some(list) = list else {
+                    all.clear();
+                    break;
+                };
+                all.extend(list);
+            }
+            if !all.is_empty() {
+                lists.insert(target, all);
             }
         }
         for g in gates.iter().filter(|g| text(g, "name").as_deref() == Some("ngForOf")) {
             let (Some(top), Some(expr)) = (id_of(g, "node"), id_of(g, "expression")) else { continue };
             let Some(ast) = expr_by_id.get(&expr).and_then(|e| e.get("ast")).filter(|a| !a.is_null()) else { continue };
-            let Some((items, from_call)) = read_rows(unwrap(ast)).iter().find_map(|r| lists.get(r)) else { continue };
+            let Some(items) = read_rows(unwrap(ast)).iter().find_map(|r| lists.get(r)) else { continue };
             let variable = match nodes.iter().find(|n| id_of(n, "id").as_deref() == Some(top.as_str())).and_then(|n| n.get("variables")) {
                 Some(Value::Array(vs)) => vs
                     .iter()
@@ -172,7 +202,7 @@ impl Loops {
             };
             let Some(variable) = variable else { continue };
             out.by_node.entry(top.clone()).or_insert(out.list.len());
-            out.list.push(Loop { node: top, variable: variable.to_string(), items: items.clone(), from_call: *from_call });
+            out.list.push(Loop { node: top, variable: variable.to_string(), items: items.clone() });
         }
         out
     }
@@ -202,7 +232,7 @@ impl Loops {
         let mut hits = 0;
         let mut copies = Vec::new();
         for element in &lp.items {
-            copies.push(substitute(ast, &lp.variable, element, idx, &mut hits)?);
+            copies.push(substitute(ast, &lp.variable, &element.value, idx, &mut hits)?);
         }
         (hits > 0 && !copies.is_empty()).then_some(copies)
     }
@@ -316,7 +346,7 @@ pub fn loop_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
         .collect();
 
     for lp in &loops.list {
-        let elements = element_keys(&lp.items, lp.from_call, &keyset);
+        let elements = element_keys(&lp.items, &keyset);
         if elements.is_empty() {
             continue;
         }
