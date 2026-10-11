@@ -157,9 +157,11 @@ Test-Case 'tsrows: a key passed to a translation call carries the branch the cal
     $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || route || ' | ' || " +
         "json_extract(always_values, '$[0].dimension') || ' ' || json_extract(always_values, '$[0].op') || ' ' || " +
         "json_extract(always_values, '$[0].values') AS reach FROM key_reach WHERE key LIKE 'labels.%'")
-    Assert-Line $r 'labels.duo | ts_call | plan in ["Duo"]'
-    Assert-Line $r 'labels.team | ts_call | plan in ["Team"]'
-    Assert-Line $r 'labels.rest | ts_call | plan not_in ["Team"]'
+    # the getter is bound by the template, so its returned translate call is a field_binding site (it was a
+    # ts_call, which any other component's field_binding for the same key then replaced); the branches are the same.
+    Assert-Line $r 'labels.duo | field_binding | plan in ["Duo"]'
+    Assert-Line $r 'labels.team | field_binding | plan in ["Team"]'
+    Assert-Line $r 'labels.rest | field_binding | plan not_in ["Team"]'
 }
 
 # A BARE BOOLEAN PROPERTY IS READ AS WHAT IT IS ASSIGNED. Written once, it proves its expression when true and

@@ -77,6 +77,10 @@ pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
 /// A RETURN OF A BARE `let` LOCAL reads every later `=` of it too (`let s = ''; s = t(k); return s;`), the
 /// local of the method or of the method an arrow sits in, no branch carried - see `key_follow::Returned::written`.
 ///
+/// A GETTER'S RETURN IS READ THE SAME WAY (`get g() { return this.svc.single(); }`, a free function, a method of
+/// the class): the getter is a field whose writes are its returns, so a call it returns hands the template the
+/// callee's keys. The return's own `if`/`case` is carried, the callee's is not.
+///
 /// A FUNCTION IS ENTERED LIKE A METHOD, by its `functions` row: a call of the member's own PARAMETER runs the
 /// function the call handed in (`pick(get) { return get(); }` over `this.pick(() => first)`, `$fn_id`), and a
 /// call of a `const` local runs the arrow it holds (`const t = (k) => this.translate.get(`a.${k}`)`). A hole
@@ -228,6 +232,19 @@ fn member_keys(store: &Store<'_>, reader: &Returned<'_, '_>) -> IndexMap<String,
         let Some(member) = id_of(r, "member").filter(|m| getters.contains(m)) else { continue };
         let mut found = Vec::new();
         value_keys(r.get("value").unwrap_or(&Value::Null), &branches.chain_of(r), &keys, &mut found);
+        // A RETURN THAT IS A CALL hands the getter the callee's keys, as the assignment above does: the
+        // getter's own branch is carried, the callee's are not. A RETURN THAT IS A TRANSLATE CALL ITSELF
+        // holds its arguments' keys, read in the getter (`in_member`): left to the callee read alone it stayed a
+        // `ts_call`, and a key another component's field binding promoted lost this component.
+        let mut reached = Vec::new();
+        if let Some(value) = r.get("value") {
+            reader.in_member(value, &member, &mut reached);
+        }
+        for (key, chain) in reached {
+            let mut way = branches.chain_of(r);
+            way.extend(chain.into_iter().filter(|link| !link.starts_with("tpl:")));
+            found.push((key, way));
+        }
         for (key, chain) in found {
             member_ways(out.entry(member.clone()).or_default(), &key, chain);
         }

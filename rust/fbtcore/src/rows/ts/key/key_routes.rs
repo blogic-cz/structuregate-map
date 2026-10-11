@@ -60,6 +60,15 @@ pub struct Route {
     pub sites: IndexMap<Option<String>, Vec<Vec<String>>>,
     pub refs: usize,
     pub nodes: IndexSet<String>,
+    /// Per component: the rank of the route its sites came from, and what they cost (`put_ways`).
+    held: IndexMap<Option<String>, Held>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct Held {
+    rank: u8,
+    refs: usize,
+    nodes: Vec<String>,
 }
 
 struct Routes {
@@ -90,24 +99,29 @@ impl Routes {
             return;
         }
         let incoming = rank(route);
-        let existing = self.inner.get(key).map(|hit| rank(&hit.route));
-
-        match existing {
-            // A STRONGER ROUTE REPLACES what is there, sites and all: the weaker evidence
-            // is not part of this key's answer any more.
-            None => {
-                self.inner.insert(key.to_string(), Route { route: route.to_string(), ..Default::default() });
-            }
-            Some(held) if incoming > held => {
-                // `insert` on an existing key keeps its position, exactly as rebinding a
-                // python dict entry does.
-                self.inner.insert(key.to_string(), Route { route: route.to_string(), ..Default::default() });
-            }
-            Some(held) if incoming < held => return,
-            Some(_) => {}
+        let hit = self.inner.entry(key.to_string()).or_default();
+        // THE ROUTE LABEL IS THE STRONGEST PRESENT; THE SITES ARE EVERY COMPONENT'S OWN. A stronger route used to
+        // REPLACE the key's sites whole, so one component's field binding hid every other component that reached the
+        // same key by a `literal` or a `ts_call`, and the key read as reaching one component of five. Now a COMPONENT
+        // keeps the sites of the strongest route that reaches IT (signed-off divergence #18): a weaker route's site in a
+        // component a stronger one already reaches is dropped, so its empty gate list never dilutes the position's own
+        // gates in `always_gates`, and a component only a weaker route reaches stays.
+        if incoming > rank(&hit.route) || hit.route.is_empty() {
+            hit.route = route.to_string();
         }
-
-        let hit = self.inner.get_mut(key).expect("just inserted or already present");
+        let held = hit.held.entry(comp.clone()).or_default();
+        if held.rank > incoming {
+            return;
+        }
+        if held.rank < incoming {
+            for node in held.nodes.drain(..) {
+                hit.nodes.shift_remove(&node);
+            }
+            hit.refs -= held.refs;
+            held.refs = 0;
+            held.rank = incoming;
+            hit.sites.shift_remove(&comp);
+        }
 
         // ONE NODE IS ONE POSITION, and the two render routes overlap almost completely —
         // nearly all keyed `i18n_refs` rows have a `template_strings` row on the
@@ -119,9 +133,11 @@ impl Routes {
                 return;
             }
             hit.nodes.insert(node.to_string());
+            held.nodes.push(node.to_string());
         }
 
         hit.refs += 1;
+        held.refs += 1;
         let site = hit.sites.entry(comp).or_default();
         if ways.is_empty() {
             site.push(gates);
@@ -476,7 +492,7 @@ mod tests {
 
     #[test]
     fn a_stronger_route_replaces_a_weaker_ones_sites_entirely() {
-        // A bare literal is weak evidence. When a real position turns up, the literal's
+        // A bare literal is weak evidence. When a real position turns up IN THE SAME COMPONENT, the literal's
         // site is not part of the answer any more.
         let tables = json!({
             "translations": [{"key": "a.b"}],
@@ -488,6 +504,22 @@ mod tests {
         let routes = run(tables, &[]);
         assert_eq!(routes["a.b"].route, "template");
         assert_eq!(routes["a.b"].refs, 1, "the literal did not add a ref");
+    }
+
+    #[test]
+    fn a_stronger_route_in_one_component_keeps_the_components_a_weaker_route_reaches() {
+        // Divergence #18: the label is the strongest route, the sites are every component's own.
+        let tables = json!({
+            "translations": [{"key": "a.b"}],
+            "template_nodes": [{"id": "n:1", "component": "ng:1", "gate_chain": ["g:1"]}],
+            "i18n_refs": [{"key": "a.b", "node": "n:1"}],
+            "components": [{"id": "ng:2", "file": "f:9", "class": "c:2"}],
+            "string_literals": [{"value": "a.b", "file": "f:9"}],
+        });
+        let routes = run(tables, &[]);
+        assert_eq!(routes["a.b"].route, "template");
+        assert_eq!(routes["a.b"].sites.len(), 2, "the literal's component stays");
+        assert_eq!(routes["a.b"].refs, 2);
     }
 
     #[test]
