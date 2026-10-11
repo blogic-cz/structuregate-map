@@ -282,7 +282,8 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
 }
 
 /**
- * A FUNCTION A CALL IS HANDED NAMES ITS `functions` ROW (`$fn_id`), beside the `$expr_id` of its tree.
+ * A FUNCTION A CALL IS HANDED NAMES ITS `functions` ROW (`$fn_id`), beside the `$expr_id` of its tree - in a
+ * `calls` row's arguments, a `returns` row's value and a `locals` row's value.
  *
  * Joined by position the two agreed for an inline arrow and not for `.map(getTotal)`: that `$fn` is the arrow of
  * the `const`, whose expression starts at the arrow while its `functions` row sits at the const's NAME. So a
@@ -312,6 +313,8 @@ function linkFunctions(store) {
     for (const k of Object.keys(v)) visit(v[k]);
   };
   for (const c of store.table('calls')) if (!store.hydrated.has(c)) visit(c.args);
+  // A RETURN OR A LOCAL HOLDING A FUNCTION names it too: `return this.pick(() => k)` and `const t = (k) => ...`.
+  for (const t of ['returns', 'locals']) for (const r of store.table(t)) if (!store.hydrated.has(r)) visit(r.value);
 }
 
 /**

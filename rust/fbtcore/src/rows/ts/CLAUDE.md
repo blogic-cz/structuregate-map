@@ -5,7 +5,7 @@ How the closure runs inside the store (partial runs, `Cell`, memory) is
 it reads are [../../../../../src/TsRows/CLAUDE.md](../../../../../src/TsRows/CLAUDE.md). This file is WHAT the
 four derived tables mean and which restrictions a gate is read for. Black-box cases:
 `tests/deep/TsRowsGates.Tests.ps1`, `tests/deep/TsRowsBranches.Tests.ps1`, `tests/deep/TsKeys/` and
-`tests/deep/TsAngular/` (`TsRowsGateThrough.Tests.ps1`, `TsRowsGateParents.Tests.ps1`).
+`tests/deep/TsAngular/` (gates in `TsGates/`: `TsRowsGateThrough`, `TsRowsGateParents`, `TsRowsGateSpread`).
 
 ## The closure (`closure.rs`, `key/keyreach.rs`, `value_folds.rs`)
 
@@ -37,7 +37,7 @@ requires and which enum members it still permits.
 
 - **`op`**: `in` (renders only for these members), `not_in` (for every member but these), `unknown` (restricts
   the dimension in a way the map cannot read; `values_json` is `[]`). `values_json` is always the SMALLER side,
-  so a long `in` is published as its `not_in` complement. `set = 1` marks a dimension several members can
+  so a long `in` is published as its `not_in` complement - except on a SET, whose sides are not complements ("holds some of A, B" is not "holds no C"): it keeps the side it was written on. `set = 1` marks a dimension several members can
   hold at once (a collection): a second `in` on it does not intersect.
 - **`listed_json`** (divergence #7) is what a directive's CONFIG OBJECT lists for the dimension, resolved to
   members whatever the `op`; null when no config lists it, `[]` for an empty list. An exclusion list tested
@@ -70,7 +70,7 @@ requires and which enum members it still permits.
   'b'` holds `c`/`!c`, `x && 'k'` holds `x`, `x || 'k'` holds `!x`, `??` nothing - the link is the condition's
   `expressions` id, `!`-prefixed when negated. A GETTER's returns are its writes; a method's are not (its
   branches may test parameters), except that a field HOLDING ITS CALL reads the method's ONE plain return (`key_fields.rs`; no branch, no
-  second return, its `tpl:` links dropped; a return that is a call of a configured `i18nCalls` method holds its arguments' keys; a return is followed through a call of another method - every return of one with several, no branch carried, never a key such a return spells itself - and either side of `??`/`||`, no condition carried). **A KEY IN A LIST OF OBJECTS** (`tips = [{ tooltip: 'k' }]`, a call returning one from every return, a `...` spread of such a call, or the union of every plain `=` the field's own class writes when it is initialised with nothing or `[]` - each element under its write's branches, a callee's branches not carried) is a site only where an `*ngFor` over the field has its loop variable's property read (`t.tooltip`, `key/key_loops.rs`), at THAT node with ITS `gate_chain`; the whole field's read would drop every condition inside the loop from `always_gates`, and a list no `*ngFor` reads stays a `literal`. A translation call (`ts_call`) takes its own row's chain; a literal the chain
+  second return, its `tpl:` links dropped; a return that is a call of a configured `i18nCalls` method holds its arguments' keys; a return is followed through a call of another method - every return of one with several, no branch carried, never a key such a return spells itself - and either side of `??`/`||`, no condition carried; a call of the method's own parameter runs the function the call handed in, a call of a `const` local the arrow it holds, and a hole naming a parameter handed a string is that string (`t('a')` spells `x.a` alone)). **A KEY IN A LIST OF OBJECTS** (`tips = [{ tooltip: 'k' }]`, a call returning one from every return, a `...` spread of such a call, or the union of every plain `=` the field's own class writes when it is initialised with nothing or `[]` - each element under its write's branches, a callee's branches not carried) is a site only where an `*ngFor` over the field has its loop variable's property read (`t.tooltip`, `key/key_loops.rs`), at THAT node with ITS `gate_chain`; the whole field's read would drop every condition inside the loop from `always_gates`, and a list no `*ngFor` reads stays a `literal`. A translation call (`ts_call`) takes its own row's chain; a literal the chain
   of the innermost assignment, `return` or argument holding it; a PIPE's `transform` key renders at every node
   applying the pipe (route `pipe`). `key_reach` adds `always_branches`/`maybe_branches` and `branch_senses`
   (`then`/`else`/`case`/`loop`/`bind`/`either`; `always_branches`/`maybe_branches` can carry `loop:`, `bind:` and `or:` ids); `always_gates` still names `gates` rows only.
@@ -91,7 +91,7 @@ requires and which enum members it still permits.
 - **A PREDICATE A FACTORY BUILDS** (`gate/ts/gate_curried.rs`): `const isA = make([Kind.A])` over `make = (ids) =>
   (k) => ids.includes(k)` - the factory found by the call's `$target`, its one unconditional return an arrow whose one
   return tests the INNER parameter in the OUTER one's list - or a REST parameter's `rest.some((x) => ids.includes(x))`, `ids.includes(rest[0])`, or `rest.m(ids)` over an `Array.prototype.m = function (o) { return this.some((x) => o.includes(x)); }` (or `o.some((x) => this.includes(x))`; a `this` parameter is a type; assigned under `if (!..)` or by `Object.defineProperty` too; a method defined twice is read only when every body proves it) (joined by the call's `target`: the extractor files the assignment as a `prototype-method` function row; never by the name) -
-  is `in [A]` (`not_in` negated), the list being the call's constant argument (`$args`). A variable or a spread handed over, a second parameter or a second return is unread.
+  is `in [A]` (`not_in` negated), the list being the call's constant argument (`$args`). A variable or a spread handed over, a second parameter or a second return is unread. A CALL handed a spread, `isA(...this.xs)`, over a test of EVERY element of the rest (`rest.some(..)` or such a prototype method, never `rest[0]`) is `xs.some(..)`: a SET row on `xs`, `in` the list and `not_in` negated, exact both ways.
 - **AN OR IS THE UNION OF ITS SIDES** (#10, `gate/gate_collapse.rs::either`); `!(a && b)` is `!a || !b`. A
   dimension one side says nothing of is no row, `unknown` on either side is `unknown`, a SET dimension unions
   only two `in`s, and `gate_features` reads nothing from an OR.

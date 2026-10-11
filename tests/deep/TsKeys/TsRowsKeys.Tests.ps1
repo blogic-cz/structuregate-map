@@ -316,6 +316,80 @@ Test-Case 'tsrows keys: a service key reaches its caller through a hop from a me
     # the key `oneIf` spells in its own second return is the branch's choice, and stays unread
     Assert-NoLine $r 'demo.mine.none |'
 }
+
+# A SERVICE'S KEY REACHES THE CALLER THROUGH A CALLBACK AND A LOCAL ARROW: a translated value handed back by a callback
+# another method calls (`viaLambda` -> `pick(() => first)`), and a local arrow wrapping the translate call called with
+# literals (`localArrow` -> `t('alpha')`) linked nothing, and the key read as a `literal` in no component. A `let`
+# reassigned under an `if` (`letVar`) already linked. No condition is carried, as for a hop (#39).
+Test-Case 'tsrows keys: a service key reaches its caller through a callback and a local arrow' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/ids.ts' = "export enum Kind { Alpha = 1, Beta = 2 }`n"
+        'apps/shop/src/translate.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class TranslateService {`n  getTranslation(key: string): string {`n    return key;`n  }`n}`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class Picker {`n  run(get: () => string): string {`n    return get();`n  }`n}`n"
+        'apps/shop/src/desc.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "import { Kind } from './ids';`n" +
+            "import { TranslateService, Picker } from './translate.service';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class DescService {`n" +
+            "  constructor(private translate: TranslateService, private picker: Picker) {}`n" +
+            "  letVar(kind: Kind): string {`n    const name = Kind[kind];`n" +
+            "    let first = this.translate.getTranslation(``demo.letvar.`${name}``);`n" +
+            "    if (kind === Kind.Beta) { first = this.translate.getTranslation(``demo.letvar.`${name}.beta``); }`n" +
+            "    return first;`n  }`n" +
+            "  viaLambda(kind: Kind): string {`n" +
+            "    const first = this.translate.getTranslation(``demo.lambda.`${Kind[kind]}``);`n" +
+            "    return this.pick(() => first);`n  }`n" +
+            "  private pick(get: () => string): string { return get(); }`n" +
+            "  localArrow(kind: Kind): string {`n" +
+            "    const t = (key: string) => this.translate.getTranslation(``demo.arrow.`${key}``);`n" +
+            "    if (kind === Kind.Alpha) { return t('alpha'); }`n" +
+            "    return t('beta');`n  }`n" +
+            "  otherPick(kind: Kind): string {`n" +
+            "    return this.picker.run(() => this.translate.getTranslation(``demo.other.`${Kind[kind]}``));`n  }`n" +
+            "  twoHoles(kind: Kind): string {`n" +
+            "    const t = (group: string, key: string) => this.translate.getTranslation(``demo.two.`${group}.`${key}``);`n" +
+            "    return t('main', 'title');`n  }`n" +
+            "  unused(kind: Kind): string {`n" +
+            "    const t = (key: string) => this.translate.getTranslation(``demo.unused.`${key}``);`n" +
+            "    return '-';`n  }`n" +
+            "}`n"
+        'apps/shop/src/host.component.ts' = "import { Component, Input, OnInit } from '@angular/core';`n" +
+            "import { Kind } from './ids';`n" +
+            "import { DescService } from './desc.service';`n" +
+            "@Component({ selector: 'demo-host', standalone: true, template: '{{ a }} {{ b }} {{ c }} {{ d }} {{ e }} {{ f }}' })`n" +
+            "export class HostComponent implements OnInit {`n" +
+            "  @Input() kind: Kind = Kind.Alpha;`n" +
+            "  a!: string;`n  b!: string;`n  c!: string;`n  d!: string;`n  e!: string;`n  f!: string;`n" +
+            "  constructor(private desc: DescService) {}`n" +
+            "  ngOnInit() {`n    this.a = this.desc.letVar(this.kind);`n    this.b = this.desc.viaLambda(this.kind);`n" +
+            "    this.c = this.desc.localArrow(this.kind);`n    this.d = this.desc.otherPick(this.kind);`n" +
+            "    this.e = this.desc.twoHoles(this.kind);`n    this.f = this.desc.unused(this.kind);`n  }`n" +
+            "}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},' +
+            '"demo":{"letvar":{"Alpha":"a","Beta":{"beta":"b"}},"lambda":{"Alpha":"c","Beta":"d"},' +
+            '"arrow":{"alpha":"e","beta":"f","gamma":"g"},"other":{"Alpha":"h","Beta":"i"},' +
+            '"two":{"main":{"title":"j","other":"k"}},"unused":{"x":"l"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
+        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    Assert-Line $r 'demo.letvar.Alpha | field_binding | HostComponent'
+    Assert-Line $r 'demo.lambda.Alpha | field_binding | HostComponent'
+    Assert-Line $r 'demo.lambda.Beta | field_binding | HostComponent'
+    Assert-Line $r 'demo.arrow.alpha | field_binding | HostComponent'
+    Assert-Line $r 'demo.arrow.beta | field_binding | HostComponent'
+    Assert-Line $r 'demo.other.Alpha | field_binding | HostComponent'
+    Assert-Line $r 'demo.two.main.title | field_binding | HostComponent'
+    # spelled by no argument the arrow is called with, or held by an arrow nothing calls: not reached
+    Assert-NoLine $r 'demo.arrow.gamma |'
+    Assert-NoLine $r 'demo.two.main.other |'
+    Assert-NoLine $r 'demo.unused.x |'
+}
 }
 
 # A CONSTANT JOINED IN FRONT WITH `+` IS PART OF THE KEY A TEMPLATE SPELLS: `BASE + (child ? `.${name}.tipChild` :

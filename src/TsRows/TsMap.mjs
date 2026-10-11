@@ -189,9 +189,13 @@ async function main() {
   // 37: a prototype method defined under `if (!X.prototype.m)` or by `Object.defineProperty`, a `this` param or the
   // turned-round test, is read only when every definition proves it; a service key follows every return of a method
   // with several returns; an `*ngFor` item typed by a named interface, `type` or class is read like a literal one.
+  // 38: a factory predicate handed a spread, `isA(...xs)`, over a test of every element is a SET row on `xs`; a
+  // set keeps the side it was written on, never its complement.
+  // 38 (too): a `$fn` in a return or local value names its `functions` row; a service key is followed into a function a
+  // call hands in or a `const` arrow it calls, a hole bound to a string argument.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 37,
+    config: config.file, data: config.data, rows: 38,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

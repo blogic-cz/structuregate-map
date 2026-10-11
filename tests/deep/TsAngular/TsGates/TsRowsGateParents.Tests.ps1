@@ -5,7 +5,7 @@
     render closure - `gate/ts/directive/gate_directive_lists.rs` and `gate/ts/gate_input_flags.rs`.
 #>
 
-. (Join-Path $PSScriptRoot '../TsRows.Helpers.ps1')
+. (Join-Path $PSScriptRoot '../../TsRows.Helpers.ps1')
 
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 

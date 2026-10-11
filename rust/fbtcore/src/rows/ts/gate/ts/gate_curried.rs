@@ -13,6 +13,10 @@
 //! hands exactly one argument (`Lists::restriction`), so `rest` is that one value. So are `ids.includes(rest[0])`
 //! and `rest.m(ids)` over an `Array.prototype.m = function (o) { return this.some((x) => o.includes(x)); }`,
 //! joined by the call's `target` to the `prototype-method` row the extractor files for the assignment.
+//!
+//! A CALL HANDED A SPREAD (`isAB(...this.chosen)`) is `chosen.some((x) => ids.includes(x))` when the test
+//! runs over every element of the rest - `rest.some(..)` or such a prototype method, never `rest[0]` - so it
+//! is a SET row on `chosen` (`Lists::restriction`): `in` the list, and negated `not_in` it, exact both ways.
 
 use super::gate_lists::{enum_for, list_test, spelled, List};
 use super::gate_predicates::{kind, literal_is, local, method_call, only_return};
@@ -23,13 +27,14 @@ use super::store::Store;
 use indexmap::{IndexMap, IndexSet};
 use serde_json::Value;
 
-/// Row id of every member or `const` holding such a call -> the enum and members it tests in.
+/// Row id of every member or `const` holding such a call -> the enum and members it tests in, and whether
+/// the test runs over every element of a rest parameter (`rest.some(..)`, a `some` prototype method).
 pub fn curried(
     store: &Store<'_>,
     idx: &EnumIndex,
     rows: &TsRows,
     bound: &IndexMap<String, IndexSet<String>>,
-) -> IndexMap<String, (String, Vec<String>)> {
+) -> IndexMap<String, (String, Vec<String>, bool)> {
     // (factory, list the call handed it) by the row the call initialises.
     let mut built: IndexMap<String, (String, Value)> = IndexMap::new();
     for table in ["members", "consts"] {
@@ -77,12 +82,15 @@ pub fn curried(
         let (Some(p), Some(q)) = (outer.get("name").and_then(Value::as_str), q.as_str()) else { continue };
         let tree = rows.resolve_in(body, bound.get(*factory).unwrap_or(&none), idx, Some(factory));
         let rest = inner.get("rest").and_then(Value::as_str) == Some(q);
+        // `true`: the test runs over EVERY element of the rest, so a call handed `...xs` is `xs.some(..)`.
         let tested = if rest {
-            some_of_rest(&tree, q).or_else(|| first_of_rest(&tree, q)).or_else(|| proto_of_rest(&tree, q, &protos))
+            some_of_rest(&tree, q).map(|t| (t, true))
+                .or_else(|| first_of_rest(&tree, q).map(|t| (t, false)))
+                .or_else(|| proto_of_rest(&tree, q, &protos).map(|t| (t, true)))
         } else {
-            list_test(&tree).filter(|(_, d)| local(d) == Some(q))
+            list_test(&tree).filter(|(_, d)| local(d) == Some(q)).map(|t| (t, false))
         };
-        let Some((list, _)) = tested else { continue };
+        let Some(((list, _), every)) = tested else { continue };
         if local(list) != Some(p) {
             continue;
         }
@@ -94,7 +102,7 @@ pub fn curried(
             let Some(en) = enum_for(&held, None, idx) else { continue };
             let domain = idx.by_id.get(&en).map(|i| &i.domain);
             if domain.is_some_and(|d| held.members.iter().all(|m| d.contains(m))) {
-                out.insert(row.clone(), (en, held.members));
+                out.insert(row.clone(), (en, held.members, every));
             }
         }
     }
