@@ -27,6 +27,7 @@ rust/*/target/
 buildtools/
 buildmap.json
 buildmap.sqlite
+buildmap.sqlite.last-run.jsonl
 .fbt/
 .claude/*
 !.claude/rules/
