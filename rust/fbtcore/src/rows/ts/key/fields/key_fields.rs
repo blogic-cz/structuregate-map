@@ -266,6 +266,7 @@ pub fn field_sites(store: &Store<'_>) -> (Vec<FieldSite>, Stats) {
     let mut out = Vec::new();
     let mut stats = Stats { fields: by_member.len(), nodes: 0, sites: 0 };
     if by_member.is_empty() {
+        add_methods(store, &mut out, &mut stats);
         add_loops(store, &mut out, &mut stats);
         return (out, stats);
     }
@@ -284,16 +285,7 @@ pub fn field_sites(store: &Store<'_>) -> (Vec<FieldSite>, Stats) {
             continue;
         }
 
-        let gates: Vec<String> = match n.get("gate_chain") {
-            Some(Value::Array(items)) => items
-                .iter()
-                .map(|v| match v {
-                    Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                })
-                .collect(),
-            _ => Vec::new(),
-        };
+        let gates = super::key_methods::gates_of(n);
 
         let mut hit = false;
         for row in read_rows(unwrap(ast)) {
@@ -317,8 +309,17 @@ pub fn field_sites(store: &Store<'_>) -> (Vec<FieldSite>, Stats) {
             stats.nodes += 1;
         }
     }
+    add_methods(store, &mut out, &mut stats);
     add_loops(store, &mut out, &mut stats);
     (out, stats)
+}
+
+/// The sites a METHOD THE TEMPLATE CALLS proves - see `key_methods`.
+fn add_methods(store: &Store<'_>, out: &mut Vec<FieldSite>, stats: &mut Stats) {
+    let (sites, nodes) = super::key_methods::method_sites(store);
+    stats.sites += sites.len();
+    stats.nodes += nodes;
+    out.extend(sites);
 }
 
 /// The sites a list of objects proves through `*ngFor` - see `key_loops`.
@@ -431,7 +432,7 @@ mod tests {
     }
 
     #[test]
-    fn a_getters_returns_are_its_writes_and_a_methods_are_not() {
+    fn a_getters_returns_are_its_writes_and_a_methods_are_its_sites_only_where_a_template_calls_it() {
         let mut tables = own_class();
         tables["members"] = json!([{"id": "m:1", "class": "c:1", "kind": "getter"}]);
         tables["branches"] = json!([{"id": "br:1", "sense": "then"}]);
@@ -439,7 +440,14 @@ mod tests {
         let (sites, _) = run(tables.clone());
         assert_eq!(sites[0].ways, vec![vec!["br:1".to_string()]]);
         tables["members"][0]["kind"] = json!("method");
-        assert!(run(tables).0.is_empty());
+        assert!(run(tables.clone()).0.is_empty(), "a method the template only reads is no site");
+        let call = json!({"k": "Call", "args": [], "receiver": {"k": "Read", "target": {"row": "m:1"}}});
+        tables["expressions"] = json!([{"node": "n:1", "ast": call}]);
+        let (sites, _) = run(tables.clone());
+        assert_eq!(sites[0].ways, vec![vec!["br:1".to_string()]]);
+        // a method WITH parameters carries no branch: they may test the parameters
+        tables["members"][0]["params"] = json!([{"name": "n"}]);
+        assert_eq!(run(tables).0[0].ways, vec![Vec::<String>::new()]);
     }
 
     #[test]

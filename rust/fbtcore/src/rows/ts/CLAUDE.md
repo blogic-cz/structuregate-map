@@ -68,8 +68,7 @@ requires and which enum members it still permits.
   branches; an `else` holds the condition negated; a `case` group is one `in`, a `default` a `not_in` of its
   siblings; a write outside any branch empties the intersection. A key CHOSEN in a value is a link: `c ? 'a' :
   'b'` holds `c`/`!c`, `x && 'k'` holds `x`, `x || 'k'` holds `!x`, `??` nothing - the link is the condition's
-  `expressions` id, `!`-prefixed when negated. A GETTER's returns are its writes, and a getter RETURNING A CALL follows it as a field holding the call does (its own `if`/`case` carried, the callee's not); a method's are not (its
-  branches may test parameters), except that a field (or such a getter) HOLDING ITS CALL reads the method's ONE plain return (`key/fields/key_fields.rs`, `key/fields/key_follow.rs`; no branch, no
+  `expressions` id, `!`-prefixed when negated. A GETTER's returns are its writes, and a getter RETURNING A CALL follows it as a field holding the call does (its own `if`/`case` carried, the callee's not); a METHOD's are too, but only at a node whose template CALLS it (#19, `key/fields/key_methods.rs`: a method WITH parameters carries no branch - they may test parameters - and a string or ternary of strings handed as an argument is bound into the holes naming the parameter, any other argument leaves the hole open); otherwise a method's are not, except that a field (or such a getter) HOLDING ITS CALL reads the method's ONE plain return (`key/fields/key_fields.rs`, `key/fields/key_follow.rs`; no branch, no
   second return, its `tpl:` links dropped; a return that is a call of a configured `i18nCalls` method holds its arguments' keys; a return is followed through a call of another method - every return of one with several, no branch carried, never a key such a return spells itself - and either side of `??`/`||` or a ternary's arms, no condition carried; a translate call WRAPPED in an object's property values, a list's non-object elements, a `+` chain or `Promise.resolve(..)` is held too (never the argument of another call, and a template literal's hole or a method chained on the call is unread); a return of a bare `let` local reads every later `=` of it too, its own or its enclosing method's, no branch carried; a call of the method's own parameter runs the function the call handed in, a call of a `const` local the arrow it holds, a call of a FREE function (a `function` or `const` arrow of no class, found by the call's `$target` when no member of that name is) is entered like a method - and a hole naming a parameter handed a string is that string (`t('a')` spells `x.a` alone), a string enum member's value, or a ternary of those (`t(c ? 'a' : 'b')` spells both, no condition carried, up to 16 combinations)). **A KEY IN A LIST OF OBJECTS** (`tips = [{ tooltip: 'k' }]`, a call of a method or free function returning one from every return (`<list>.filter(..)` over one counts; `key/key_lists.rs`) - a property's value may be a translate call, its arguments' keys, or a call read as the callee reads its own (a local arrow, a hole handed a string), no condition carried - a `...` spread of such a call, or the union of every plain `=` the field's own class writes when it is initialised with nothing or `[]` - each element under its write's branches, a callee's branches not carried) is a site only where an `*ngFor` over the field has its loop variable's property read (`t.tooltip`, `key/key_loops.rs`), at THAT node with ITS `gate_chain`; the whole field's read would drop every condition inside the loop from `always_gates`, and a list no `*ngFor` reads stays a `literal`. A translation call (`ts_call`) takes its own row's chain; a literal the chain
   of the innermost assignment, `return` or argument holding it; a PIPE's `transform` key renders at every node
   applying the pipe (route `pipe`). `key_reach` adds `always_branches`/`maybe_branches` and `branch_senses`
@@ -181,10 +180,17 @@ read it; `unknown` stays an edge. Tables that move: `render_path` (no path throu
 same-selector component. A component a module exports from its own file is `imported`, no longer `out_of_scope`
 (`renders.scope`, `src/TsRows/TsDerive/TsModuleScope.mjs`).
 
-**#18 - a stronger route never drops another component's site** (signed off; `key/key_routes.rs::put_ways`). The
+**#18 - a stronger route never drops another component's site** (signed off; `key/routes/key_routes.rs::put_ways`). The
 `route` column stays the strongest route present, but the sites are kept PER COMPONENT, each from the strongest route
 that reaches IT: a `literal` or `ts_call` component beside another component's `field_binding` (or a carrier) stays
 listed, where the stronger route used to replace the whole site set. A weaker site in a component a stronger route
 already reaches is still dropped, so a bare literal's empty gate list never dilutes a position's own `always_gates`.
 Tables that move: `key_reach` `components`, `roots`, `routes`, `modules`, `n_paths`, `n_refs` and every `always_*`/`maybe_*`
 column, for keys with sites of more than one route in different components; nothing else moves.
+
+**#19 - a method a template calls hands the template the keys it returns** (signed off; the method form of #18's getter).
+`{{ label() }}`, `[title]="tip('a')"` read the method's `returns` like a getter's, at the node that calls it (the
+receiver's checker-resolved row, never the name), under the node's own `gate_chain`. A method with parameters carries
+no branch; one without carries its `if`/`case`. A string literal or ternary of strings argument spells its hole alone.
+Tables that move: `key_reach` for keys a template-called method returns (a `ts_call`/`literal` gains the
+`field_binding` route and its components); nothing else moves.
