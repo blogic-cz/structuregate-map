@@ -186,9 +186,12 @@ async function main() {
   // key follows a one-return hop and `??`/`||`, and an `*ngFor` list reads every write, spread and return.
   // 36: a component a module exports from its own file is in scope where the module is imported, and the
   // closure walks no `out_of_scope` render.
+  // 37: a prototype method defined under `if (!X.prototype.m)` or by `Object.defineProperty`, a `this` param or the
+  // turned-round test, is read only when every definition proves it; a service key follows every return of a method
+  // with several returns; an `*ngFor` item typed by a named interface, `type` or class is read like a literal one.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 36,
+    config: config.file, data: config.data, rows: 37,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

@@ -118,7 +118,7 @@ fn first_of_rest<'a>(tree: &'a Value, rest: &str) -> Option<(&'a Value, &'a Valu
     first.then_some((list, d))
 }
 
-/// `rest.overlaps(ids)` over a `prototype-method` whose one return is `this.some((x) => P.includes(x))`.
+/// `rest.overlaps(ids)` over a `prototype-method` whose one return is `this.some((x) => P.includes(x))` (or turned round).
 fn proto_of_rest<'a>(tree: &'a Value, rest: &str, protos: &IndexSet<String>) -> Option<(&'a Value, &'a Value)> {
     if kind(tree) != Some("Call") {
         return None;
@@ -134,21 +134,25 @@ fn target_key(t: &Value) -> Option<String> {
     Some(format!("{} {} {}", t.get("name")?.as_str()?, t.get("file")?.as_str()?.replace('\\', "/"), t.get("line")?.as_i64()?))
 }
 
-/// The `target` of every `prototype-method` whose body PROVES "some element of `this` is in my one parameter".
+/// The `target` of every `prototype-method` whose body PROVES "some element of `this` is in my one parameter" -
+/// `this.some((x) => P.includes(x))`, or `P.some((x) => this.includes(x))`, the same test turned round. A `this`
+/// parameter is a type, never an argument. A method two definitions give two bodies is read only when EVERY
+/// one proves it: which assignment runs last is not in the source.
 fn some_methods(store: &Store<'_>) -> IndexSet<String> {
-    let mut found: IndexMap<String, (String, String)> = IndexMap::new(); // fn id -> (target key, param)
+    let mut found: IndexMap<String, (String, Option<String>)> = IndexMap::new(); // fn id -> (target key, the one param)
     for f in store.table("functions").iter() {
         if f.get("form").and_then(Value::as_str) != Some("prototype-method") {
             continue;
         }
-        let (Some(id), Some(key), Some(Value::Array(ps))) =
-            (f.get("id").and_then(Value::as_str), f.get("target").and_then(target_key), f.get("params"))
-        else {
+        let (Some(id), Some(key)) = (f.get("id").and_then(Value::as_str), f.get("target").and_then(target_key)) else {
             continue;
         };
-        let [p] = ps.as_slice() else { continue };
-        let Some(p) = p.get("name").and_then(Value::as_str) else { continue };
-        found.insert(id.to_string(), (key, p.to_string()));
+        let params: Vec<&str> = f.get("params").and_then(Value::as_array).into_iter().flatten()
+            .filter_map(|p| p.get("name").and_then(Value::as_str))
+            .filter(|n| *n != "this")
+            .collect();
+        let one = match params.as_slice() { [p] => Some(p.to_string()), _ => None };
+        found.insert(id.to_string(), (key, one));
     }
     let mut returns: IndexMap<&str, Vec<Option<String>>> = IndexMap::new();
     let all = store.table("returns");
@@ -160,17 +164,23 @@ fn some_methods(store: &Store<'_>) -> IndexSet<String> {
     let one: IndexMap<String, &str> = returns.iter()
         .filter_map(|(m, xs)| match xs.as_slice() { [Some(x)] => Some((x.clone(), *m)), _ => None })
         .collect();
-    let mut out = IndexSet::new();
+    let mut proves: IndexSet<&str> = IndexSet::new();
     for e in store.table("expressions").iter() {
         let Some(fid) = e.get("id").and_then(Value::as_str).and_then(|x| one.get(x)) else { continue };
-        let (key, p) = &found[*fid];
+        let Some(p) = found[*fid].1.as_deref() else { continue };
         let Some(ast) = e.get("ast").map(unwrap) else { continue };
-        let Some((this, cb)) = method_call(ast, "some") else { continue };
+        let Some((over, cb)) = method_call(ast, "some") else { continue };
         let ([x], Some(body)) = (cb.get("params").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default(), only_return(cb)) else { continue };
         let Some((l, d)) = list_test(body) else { continue };
-        if kind(this) == Some("This") && local(l) == Some(p.as_str()) && local(d) == x.as_str() {
-            out.insert(key.clone());
+        let this_in_p = kind(over) == Some("This") && local(l) == Some(p);
+        let p_in_this = local(over) == Some(p) && kind(l) == Some("This");
+        if (this_in_p || p_in_this) && local(d) == x.as_str() {
+            proves.insert(*fid);
         }
     }
-    out
+    let mut every: IndexMap<&str, bool> = IndexMap::new();
+    for (id, (key, _)) in &found {
+        *every.entry(key.as_str()).or_insert(true) &= proves.contains(id.as_str());
+    }
+    every.into_iter().filter(|(_, ok)| *ok).map(|(k, _)| k.to_string()).collect()
 }

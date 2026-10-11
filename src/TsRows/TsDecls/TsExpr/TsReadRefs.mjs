@@ -34,6 +34,18 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     return { name: node.getText(), ...first, ...(rest.length ? { also: rest } : {}) };
   }
 
+  /**
+   * A MEMBER NAMED BY A STRING, resolved through the TYPE of what it is defined on: `Object.defineProperty(
+   * Array.prototype, 'm', ...)` names `m` in a literal, which no symbol sits on, so the member is the property
+   * the prototype's type declares - the same declarations a call `xs.m(..)` resolves to.
+   */
+  function resolveMember(objectNode, name) {
+    const decls = checker.getTypeAtLocation(objectNode).getProperty(name)?.declarations ?? [];
+    const [first, ...rest] = decls.map(at);
+    if (first === undefined) return null;
+    return { name, ...first, ...(rest.length ? { also: rest } : {}) };
+  }
+
   /** A declaration a module makes: a top-level `const`, a function, an enum. Never a local or a parameter. */
   const moduleLevel = (d) => {
     if (ts.isFunctionDeclaration(d) || ts.isEnumDeclaration(d)) return ts.isSourceFile(d.parent);
@@ -74,5 +86,5 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     return { file: canonicalPath(sf.fileName), line: pos.line + 1, col: pos.character + 1 };
   }
 
-  return { resolveRead, resolveName, resolveLocal };
+  return { resolveRead, resolveName, resolveLocal, resolveMember };
 }
