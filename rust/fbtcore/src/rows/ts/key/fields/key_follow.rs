@@ -1,7 +1,7 @@
 //! WHAT A CALLED METHOD OR FUNCTION HANDS BACK, read for the keys it holds - see `key_fields::callee_keys`.
 
 use super::key_branches::value_keys;
-use super::store::Row;
+use super::store::{Row, Store};
 use serde_json::Value;
 
 /// What `callee_keys` reads a callee's return with.
@@ -43,6 +43,45 @@ fn is_promise_resolve(v: &Value) -> bool {
         && pieces.windows(2).any(|w| w == ["typescript", "lib"])
 }
 
+/// The text a value spells: a string, or a STRING ENUM's member (`{"$enum": "Codes.A", "value": "A"}`, any marked
+/// object carrying a string `value`) as its VALUE. A numeric member, a variable or a property spells nothing.
+pub(super) fn spell(v: &Value) -> Option<&str> {
+    match v {
+        Value::String(s) => Some(s),
+        Value::Object(o) if o.keys().any(|k| k.starts_with('$')) => o.get("value").and_then(Value::as_str),
+        _ => None,
+    }
+}
+
+/// Most argument lists one call's ternaries of strings expand to.
+const MAX_SPELLINGS: usize = 16;
+
+/// Every string a ternary (nested too) of string arms is, None for any other value.
+fn arms(v: &Value) -> Option<Vec<Value>> {
+    if spell(v).is_some() {
+        return Some(vec![v.clone()]);
+    }
+    let (then, other) = (v.get("$then")?, v.get("$else")?);
+    v.get("$cond_expr")?;
+    let mut all = arms(then)?;
+    all.extend(arms(other)?);
+    Some(all)
+}
+
+/// The argument lists a call stands for: the product of each ternary-of-strings argument's arms, or the list
+/// itself when none is one or the product passes `MAX_SPELLINGS`.
+fn spellings(args: &[Value]) -> Vec<Vec<Value>> {
+    let mut lists = vec![Vec::new()];
+    for arg in args {
+        let options = arms(arg).filter(|_| spell(arg).is_none()).unwrap_or_else(|| vec![arg.clone()]);
+        if lists.len() * options.len() > MAX_SPELLINGS {
+            return vec![args.to_vec()];
+        }
+        lists = lists.into_iter().flat_map(|l| options.iter().map(move |o| [l.clone(), vec![o.clone()]].concat())).collect();
+    }
+    lists
+}
+
 /// The member a call entered and the arguments it handed over.
 struct Frame<'v> {
     member: String,
@@ -73,8 +112,23 @@ impl Returned<'_, '_> {
 
     /// The keys of the ONE plain return of `member`, or what each of its several returns hands back through a
     /// call - each (member, arguments) read once.
+    ///
+    /// AN ARGUMENT THAT IS A TERNARY OF STRINGS IS EACH OF THEM: `k(on ? 'x' : 'y')` over `(n) => t(`q.${n}`)` reads the
+    /// callee once per spelling, no condition carried. Left whole, the hole stayed open and an open hole matches every
+    /// key under the prefix. Past `MAX_SPELLINGS` combinations the call is read as it was.
     fn enter(&self, member: String, call: &Value, seen: &mut Seen, out: &mut Found) {
         let args = call.get("$args").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+        let spelled = spellings(args);
+        if spelled.len() > 1 {
+            for combo in &spelled {
+                self.enter_args(member.clone(), combo, seen, out);
+            }
+            return;
+        }
+        self.enter_args(member, args, seen, out);
+    }
+
+    fn enter_args(&self, member: String, args: &[Value], seen: &mut Seen, out: &mut Found) {
         if seen.len() > 64 || !seen.insert(format!("{member} {}", Value::from(args.to_vec()))) {
             return;
         }
@@ -181,36 +235,118 @@ impl Returned<'_, '_> {
 
     /// `v` with every template hole that names a parameter the call handed a string spelled as that string.
     fn bind(&self, v: &Value, frame: &Frame<'_>) -> Value {
-        let Some(params) = self.params.get(&frame.member).filter(|_| !frame.args.is_empty()) else { return v.clone() };
-        let string = |hole: &str| params.iter().position(|p| p == hole).and_then(|i| frame.args.get(i)).and_then(Value::as_str);
-        match v {
-            Value::Object(o) if o.contains_key("$template") => {
-                let strs = |k: &str| o.get(k).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>();
-                let (pieces, holes) = (strs("$template"), strs("$holes"));
-                if pieces.len() != holes.len() + 1 {
-                    return v.clone();
-                }
-                let (mut kept, mut open) = (vec![pieces[0].to_string()], Vec::new());
-                for (hole, next) in holes.iter().zip(&pieces[1..]) {
-                    match string(hole) {
-                        Some(s) => kept.last_mut().expect("never empty").push_str(&format!("{s}{next}")),
-                        None => {
-                            open.push(*hole);
-                            kept.push((*next).to_string());
-                        }
-                    }
-                }
-                if open.is_empty() {
-                    return Value::String(kept.remove(0));
-                }
-                let mut o = o.clone();
-                o.insert("$template".into(), Value::from(kept));
-                o.insert("$holes".into(), Value::from(open));
-                Value::Object(o)
-            }
-            Value::Object(o) => Value::Object(o.iter().map(|(k, x)| (k.clone(), self.bind(x, frame))).collect()),
-            Value::Array(xs) => Value::Array(xs.iter().map(|x| self.bind(x, frame)).collect()),
-            other => other.clone(),
+        match self.params.get(&frame.member).filter(|_| !frame.args.is_empty()) {
+            Some(params) => bind_args(v, params, frame.args),
+            None => v.clone(),
         }
     }
+}
+
+/// `v` with every template hole naming one of `params` spelled by the argument at its position, when that spells
+/// text (`spell`): a string, or a string enum's member.
+pub(super) fn bind_args(v: &Value, params: &[String], args: &[Value]) -> Value {
+    let string = |hole: &str| params.iter().position(|p| p == hole).and_then(|i| args.get(i)).and_then(spell);
+    match v {
+        Value::Object(o) if o.contains_key("$template") => {
+            let strs = |k: &str| o.get(k).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>();
+            let (pieces, holes) = (strs("$template"), strs("$holes"));
+            if pieces.len() != holes.len() + 1 {
+                return v.clone();
+            }
+            let (mut kept, mut open) = (vec![pieces[0].to_string()], Vec::new());
+            for (hole, next) in holes.iter().zip(&pieces[1..]) {
+                match string(hole) {
+                    Some(s) => kept.last_mut().expect("never empty").push_str(&format!("{s}{next}")),
+                    None => {
+                        open.push(*hole);
+                        kept.push((*next).to_string());
+                    }
+                }
+            }
+            if open.is_empty() {
+                return Value::String(kept.remove(0));
+            }
+            let mut o = o.clone();
+            o.insert("$template".into(), Value::from(kept));
+            o.insert("$holes".into(), Value::from(open));
+            Value::Object(o)
+        }
+        Value::Object(o) => Value::Object(o.iter().map(|(k, x)| (k.clone(), bind_args(x, params, args))).collect()),
+        Value::Array(xs) => Value::Array(xs.iter().map(|x| bind_args(x, params, args)).collect()),
+        other => other.clone(),
+    }
+}
+
+/// Every call of a name, from every statement row: (the member it sits in, its argument list).
+fn calls_by_name(store: &Store<'_>) -> std::collections::HashMap<String, Vec<(String, Vec<Value>)>> {
+    fn walk(v: &Value, member: &str, out: &mut std::collections::HashMap<String, Vec<(String, Vec<Value>)>>) {
+        match v {
+            Value::Object(o) => {
+                if let Some(name) = o.get("$call").and_then(Value::as_str).filter(|n| !n.contains('.')) {
+                    let args = o.get("$args").and_then(Value::as_array).cloned().unwrap_or_default();
+                    out.entry(name.to_string()).or_default().push((member.to_string(), args));
+                }
+                o.values().for_each(|x| walk(x, member, out));
+            }
+            Value::Array(xs) => xs.iter().for_each(|x| walk(x, member, out)),
+            _ => {}
+        }
+    }
+    let mut out: std::collections::HashMap<String, Vec<(String, Vec<Value>)>> = std::collections::HashMap::new();
+    for table in ["calls", "assignments", "returns", "locals"] {
+        for r in store.table(table).iter() {
+            let member = super::key_fields::id_of(r, "member").unwrap_or_default();
+            if let Some(callee) = super::key_fields::text(r, "callee").filter(|c| !c.contains('.')) {
+                let args = r.get("args").and_then(Value::as_array).cloned().unwrap_or_default();
+                out.entry(callee).or_default().push((member.clone(), args));
+            }
+            r.get("args").into_iter().chain(r.get("value")).for_each(|v| walk(v, &member, &mut out));
+        }
+    }
+    out
+}
+
+/// `functions` row of a `const` local arrow -> the argument lists EVERY call of it hands, ternaries of strings
+/// expanded, when each of them spells every parameter (`spell`). An arrow with a call that does not - a variable, a
+/// property, a numeric member, a callback's item - or with no call found is NOT here: its own template stays a
+/// wildcard, since nothing says which keys it spells. Calls are found by the local's name inside the member that holds
+/// it (and the functions nested in that member), never by text.
+pub(super) fn spelled_arrows(store: &Store<'_>, params: &std::collections::HashMap<String, Vec<String>>) -> std::collections::HashMap<String, Vec<Vec<Value>>> {
+    let mut out = std::collections::HashMap::new();
+    let locals = store.table("locals");
+    let arrows: Vec<(String, String, String)> = locals
+        .iter()
+        .filter_map(|l| Some((l.get("value")?.get("$fn_id")?.as_str()?.to_string(), super::key_fields::text(l, "name")?, super::key_fields::id_of(l, "member")?)))
+        .collect();
+    if arrows.is_empty() {
+        return out;
+    }
+    let parent: std::collections::HashMap<String, String> = store
+        .table("functions")
+        .iter()
+        .filter_map(|f| Some((super::key_fields::id_of(f, "id")?, super::key_fields::id_of(f, "parent")?)))
+        .collect();
+    let calls = calls_by_name(store);
+    for (function, name, home) in arrows {
+        let Some(ps) = params.get(&function).filter(|p| !p.is_empty()) else { continue };
+        let inside = |member: &str| {
+            let mut at = member.to_string();
+            for _ in 0..64 {
+                if at == home {
+                    return true;
+                }
+                match parent.get(&at) {
+                    Some(up) => at = up.clone(),
+                    None => return false,
+                }
+            }
+            false
+        };
+        let mine: Vec<&Vec<Value>> = calls.get(&name).into_iter().flatten().filter(|(m, _)| inside(m)).map(|(_, a)| a).collect();
+        let lists: Vec<Vec<Value>> = mine.iter().flat_map(|a| spellings(a)).collect();
+        if !lists.is_empty() && lists.iter().all(|l| ps.iter().enumerate().all(|(i, _)| l.get(i).is_some_and(|a| spell(a).is_some()))) {
+            out.insert(function, lists);
+        }
+    }
+    out
 }

@@ -83,6 +83,11 @@ pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
 /// naming a parameter the call hands a STRING is that string: `t('alpha')` spells `a.alpha` alone.
 /// A call whose `$target` is a FREE FUNCTION (a `function` declaration or a `const` arrow of no class) is entered
 /// the same way, when no member of that name sits in the file.
+///
+/// AN ARGUMENT THAT IS A TERNARY OF STRINGS (nested too, at most 16 spellings in all) is read once per arm, no condition
+/// carried: `k(on ? 'x' : 'y')` spells `x` and `y`, never every key the open hole would match. A STRING ENUM's member
+/// spells its value (`key_follow::spell`). And a `const` local arrow's OWN template literal naming its parameter is read
+/// per call when every call spells it (`key_branches::literal_ways`); one call that does not keeps it a wildcard.
 fn callee_keys(value: Option<&Value>, reader: &Returned<'_, '_>) -> Vec<(String, Vec<String>)> {
     let mut found = Vec::new();
     let mut seen = std::collections::HashSet::new();
