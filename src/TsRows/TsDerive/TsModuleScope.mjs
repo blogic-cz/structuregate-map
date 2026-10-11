@@ -83,6 +83,10 @@ export function rollupModuleScope(store, diag) {
       if (fid !== undefined) {
         const exact = byFileName.get(`${String(fid)}#${name}`);
         if (exact) return [exact];
+        // A DECLARABLE OF THAT FILE IS NO MODULE: a module exporting a component it declares beside itself
+        // named the file's one NgModule, the export folded into a module already seen, and the component read
+        // `out_of_scope` in every module importing it.
+        if (declarableByFileName.has(`${String(fid)}#${name}`)) return [];
         // An ALIASED module import: the file is authoritative, and a file declaring exactly one NgModule
         // leaves nothing to guess.
         const inFile = modulesByFile.get(fid);

@@ -156,7 +156,14 @@ pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Rc<str>, V
     let renders = store.table("renders");
     let mut ordered: Vec<&Row> = renders
         .iter()
-        .filter(|r| id_of(r, "from_component").is_some())
+        // AN OUT-OF-SCOPE CANDIDATE IS NO WAY IN (divergence #17): a tag matched a selector the host's module
+        // cannot see, so Angular never renders it there - `render_graph` and `component_reach` already drop
+        // it. `unknown` stays: nothing proves which candidate renders, and an edge resolving today must not
+        // vanish for a scope the map cannot read.
+        .filter(|r| {
+            id_of(r, "from_component").is_some()
+                && r.get("scope").and_then(Value::as_str) != Some("out_of_scope")
+        })
         .collect();
     ordered.sort_by_key(|r| site(r));
 

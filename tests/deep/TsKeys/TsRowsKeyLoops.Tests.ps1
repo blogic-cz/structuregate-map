@@ -2,7 +2,7 @@
     The ELEMENTS of a list an `*ngFor` renders, when no one literal holds them all: a spread of a method's list,
     one write per arm of an `if`, a method returning a list from each arm. A directive config over the loop's item
     is read once per element (`rust/fbtcore/src/rows/ts/key/key_loops.rs`), and the elements are collected by
-    `key/key_lists.rs`. Its helpers are `TsRows.Helpers.ps1`.
+    `key/key_loops.rs`. Its helpers are `TsRows.Helpers.ps1`.
 #>
 
 . (Join-Path $PSScriptRoot '../TsRows.Helpers.ps1')
