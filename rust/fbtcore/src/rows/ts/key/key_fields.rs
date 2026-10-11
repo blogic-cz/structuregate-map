@@ -56,15 +56,25 @@ pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
 /// callee, and its returns row is read like the field's own value. A callee with a branch or a second
 /// return is not read - its branches test its parameters, which no gate shares. A `tpl:` link is dropped
 /// for the same reason: its hole names the CALLEE's parameter, not anything the field's class holds.
+///
+/// A RETURN THAT IS A TRANSLATE CALL (a method the config's `i18nCalls` names) holds the keys of its
+/// arguments: `return this.translate.get(`a.${Kind[kind]}`)` hands the field the key's text.
 fn callee_keys(
     value: Option<&Value>,
     rows: &super::gate_tsrows::TsRows,
     one_return: &std::collections::HashMap<String, &Row>,
     keys: &super::key_branches::KeySet,
+    i18n: &[String],
 ) -> Vec<(String, Vec<String>)> {
     let Some(ret) = callee_return(value, rows, one_return) else { return Vec::new() };
     let mut found = Vec::new();
     value_keys(ret, &[], keys, &mut found);
+    let method = ret.get("$target").and_then(|t| t.get("name")).and_then(Value::as_str);
+    if method.is_some_and(|m| i18n.iter().any(|c| c == m)) {
+        for arg in ret.get("$args").and_then(Value::as_array).into_iter().flatten() {
+            value_keys(arg, &[], keys, &mut found);
+        }
+    }
     for (_, chain) in found.iter_mut() {
         chain.retain(|link| !link.starts_with("tpl:"));
     }
@@ -127,6 +137,7 @@ fn keys_by_member(store: &Store<'_>) -> IndexMap<String, IndexMap<String, Vec<Ve
         .collect();
 
     let branches = Branches::new(store);
+    let i18n = store.option_list("i18n_calls");
     let rows = super::gate_tsrows::TsRows::new(store);
     let returns = store.table("returns");
     let one_return = one_returns(&returns);
@@ -146,7 +157,7 @@ fn keys_by_member(store: &Store<'_>) -> IndexMap<String, IndexMap<String, Vec<Ve
         }
         let mut found = Vec::new();
         value_keys(m.get("value").unwrap_or(&Value::Null), &[], &keys, &mut found);
-        found.extend(callee_keys(m.get("value"), &rows, &one_return, &keys));
+        found.extend(callee_keys(m.get("value"), &rows, &one_return, &keys, &i18n));
         for (key, chain) in found {
             member_ways(out.entry(id.clone()).or_default(), &key, chain);
         }
@@ -157,7 +168,7 @@ fn keys_by_member(store: &Store<'_>) -> IndexMap<String, IndexMap<String, Vec<Ve
         let Some(target) = id_of(a, "target_id").filter(|t| !t.is_empty()) else { continue };
         let mut found = Vec::new();
         value_keys(a.get("value").unwrap_or(&Value::Null), &branches.chain_of(a), &keys, &mut found);
-        for (key, chain) in callee_keys(a.get("value"), &rows, &one_return, &keys) {
+        for (key, chain) in callee_keys(a.get("value"), &rows, &one_return, &keys, &i18n) {
             let mut way = branches.chain_of(a);
             way.extend(chain);
             found.push((key, way));

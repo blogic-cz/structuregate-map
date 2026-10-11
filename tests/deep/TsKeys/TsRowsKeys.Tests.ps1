@@ -145,20 +145,29 @@ Test-Case 'tsrows keys: a field holding an injected method call, and a list of o
         'apps/shop/src/label.service.ts' = "import { Injectable } from '@angular/core';`n" +
             "import { Grade } from './ids';`n" +
             "@Injectable({ providedIn: 'root' })`n" +
+            "export class Words {`n  instant(key: string): string {`n    return key;`n  }`n}`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
             "export class LabelService {`n" +
+            "  constructor(private words: Words) {}`n" +
+            "  told(grade: Grade): string {`n    return this.words.instant(``demo.told.`${Grade[grade]}``);`n  }`n" +
+            "  later() {`n    return [{ tooltip: 'demo.later.tip' }];`n  }`n" +
             "  key(grade: Grade): string {`n    return ``demo.grades.`${Grade[grade]}``;`n  }`n" +
             "  pick(grade: Grade): string {`n    if (grade === Grade.Alpha) {`n      return 'demo.pick.first';`n    }`n" +
             "    return 'demo.pick.other';`n  }`n" +
             "  tips() {`n    return [{ tooltip: 'demo.tips.alpha', other: 'demo.tips.unread' }, { tooltip: 'demo.tips.beta' }];`n  }`n" +
             "}`n"
-        'apps/shop/src/badge.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+        'apps/shop/src/badge.component.ts' = "import { Component, Input, OnInit } from '@angular/core';`n" +
             "import { Grade } from './ids';`n" +
             "import { LabelService } from './label.service';`n" +
             "@Component({ selector: 'app-badge', standalone: true,`n" +
             "  template: '<b [title]=`"k`">a</b><i [title]=`"p`">b</i>' +`n" +
             "    '<ng-container *ngFor=`"let t of tips`"><b [title]=`"t.tooltip`">x</b></ng-container>' +`n" +
-            "    '<u *ngFor=`"let o of own`" [title]=`"o.label`">y</u>' })`n" +
-            "export class BadgeComponent {`n" +
+            "    '<u *ngFor=`"let o of own`" [title]=`"o.label`">y</u><s [title]=`"told`">c</s>' +`n" +
+            "    '<ng-container *ngFor=`"let l of later`"><b [title]=`"l.tooltip`">z</b></ng-container>' })`n" +
+            "export class BadgeComponent implements OnInit {`n" +
+            "  told = '';`n" +
+            "  later: { tooltip: string }[];`n" +
+            "  ngOnInit() {`n    this.told = this.labels.told(this.grade);`n    this.later = this.labels.later();`n  }`n" +
             "  @Input() grade: Grade = Grade.Alpha;`n" +
             "  k = this.labels.key(this.grade);`n" +
             "  p = this.labels.pick(this.grade);`n" +
@@ -168,7 +177,11 @@ Test-Case 'tsrows keys: a field holding an injected method call, and a list of o
             "}`n"
         'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},' +
             '"demo":{"grades":{"Alpha":"a","Beta":"b"},"pick":{"first":"c","other":"d"},' +
-            '"tips":{"alpha":"e","beta":"f","unread":"g"},"own":{"first":"h"}}}'
+            '"tips":{"alpha":"e","beta":"f","unread":"g"},"own":{"first":"h"},' +
+            '"told":{"Alpha":"i","Beta":"j"},"later":{"tip":"k"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["money"],' +
+            '"i18nCalls":["instant"],"gateInputs":["disabled"],' +
+            '"featureChecks":["FlagService.isOn"],"featureEnum":"FlagCodes"}'
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || route || ' | ' || json_array_length(components) AS reach " +
@@ -181,6 +194,11 @@ Test-Case 'tsrows keys: a field holding an injected method call, and a list of o
     Assert-Line $r 'demo.tips.beta | field_binding | 1'
     Assert-Line $r 'demo.own.first | field_binding | 1'
     Assert-Line $r 'demo.tips.unread | literal | 0'
+    # A TRANSLATE CALL THE METHOD RETURNS hands the field its key, and a list written once in `ngOnInit` is the
+    # field's list.
+    Assert-Line $r 'demo.told.Alpha | field_binding | 1'
+    Assert-Line $r 'demo.told.Beta | field_binding | 1'
+    Assert-Line $r 'demo.later.tip | field_binding | 1'
     $g = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || json_array_length(always_gates) AS g " +
         "FROM key_reach WHERE key = 'demo.tips.alpha'")
     Assert-Line $g 'demo.tips.alpha | 1'

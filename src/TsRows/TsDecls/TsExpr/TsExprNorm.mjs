@@ -13,7 +13,7 @@
  * Imports are flat: see `TsTypeRef.mjs`.
  */
 
-export function makeTsExprNormalizer(ts, resolveRead, resolveName = null) {
+export function makeTsExprNormalizer(ts, resolveRead, resolveName = null, resolveLocal = null) {
   const outermost = (node) => !(node.parent !== undefined && ts.isPropertyAccessExpression(node.parent)
     && node.parent.expression === node);
   // A FIELD A METHOD IS CALLED ON (`this.allowed.includes(v)`) is resolved too: the list a membership test reads
@@ -38,7 +38,10 @@ export function makeTsExprNormalizer(ts, resolveRead, resolveName = null) {
       // a target the condition they sit in names nothing a consumer can join. A local or a parameter gets
       // none: `resolveName` answers for module-level declarations only.
       const target = resolveName ? resolveName(node) : null;
-      return { k: 'Read', name: node.text, receiver: { k: 'Implicit' }, ...(target ? { target } : {}) };
+      // A LOCAL names where its `locals` row is declared (`local`), so a `returns` row joins it exactly.
+      const local = !target && resolveLocal ? resolveLocal(node) : null;
+      return { k: 'Read', name: node.text, receiver: { k: 'Implicit' }, ...(target ? { target } : {}),
+        ...(local ? { local } : {}) };
     }
     if (node.kind === ts.SyntaxKind.ThisKeyword) return { k: 'This' };
     if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
@@ -162,7 +165,11 @@ export function makeTsExprNormalizer(ts, resolveRead, resolveName = null) {
     // ITS PARAMETERS' NAMES: a function a factory RETURNS has no `functions` row, so a reader substituting what the
     // factory was handed into its body had no way to tell which bare name is the inner parameter.
     const names = node.parameters.map((p) => (ts.isIdentifier(p.name) ? p.name.text : null));
-    const shape = { k: 'Fn', src: node.getText(), ...(names.length && !names.includes(null) ? { params: names } : {}) };
+    // THE REST PARAMETER BY NAME: `(...rest) => rest.some(...)` handed one argument tests that argument, and
+    // `params` alone could not tell it from a parameter that IS the list.
+    const rest = node.parameters.find((p) => p.dotDotDotToken && ts.isIdentifier(p.name));
+    const shape = { k: 'Fn', src: node.getText(), ...(names.length && !names.includes(null) ? { params: names } : {}),
+      ...(rest ? { rest: rest.name.text } : {}) };
     return returns.length ? { ...shape, returns } : shape;
   }
 

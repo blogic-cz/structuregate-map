@@ -62,6 +62,20 @@ pub struct TsRows {
     functions_named: IndexMap<String, Vec<String>>,
 }
 
+/// A test a local may hold in place of its condition: a comparison, a logical operator, a `!`, or a
+/// membership call (`includes`, `some`). A list, an object or any other call keeps its row: a reader
+/// of a list local (`gate_lists`) finds it by that row.
+fn decision(ast: &Value) -> bool {
+    let k = ast.get("k").and_then(Value::as_str);
+    let op = ast.get("op").and_then(Value::as_str).unwrap_or("");
+    match k {
+        Some("Not") => true,
+        Some("Binary") => matches!(op, "===" | "!==" | "==" | "!=" | "<" | ">" | "<=" | ">=" | "&&" | "||"),
+        Some("Call") => super::gate_lists::list_test(ast).is_some(),
+        _ => false,
+    }
+}
+
 /// A bare name that resolved to nothing: a local, a parameter, a callback's element.
 pub(crate) fn bare(o: &Map<String, Value>) -> Option<&str> {
     let implicit = o.get("receiver").and_then(|r| r.get("k")).and_then(|k| k.as_str()) == Some("Implicit");
@@ -127,15 +141,21 @@ impl TsRows {
             }
             let value = l.get("value");
             let arrow = value.and_then(|v| v.get("$fn")).and(value.and_then(|v| v.get("$expr_id"))).and_then(|x| x.as_str());
-            if let Some(x) = arrow {
-                wanted.insert(x.to_string(), key.clone());
+            // A DECISION HELD IN A LOCAL is its initializer too: `const hop = this.allowed.includes(k);
+            // this.flag = hop` restricted nothing while the read stopped at the local's row.
+            let held = cell(l.get("expression")).filter(|_| value.is_none_or(|v| v.get("$fn").is_none()));
+            if let Some(x) = arrow.map(str::to_string).or(held) {
+                wanted.insert(x, key.clone());
             }
             out.locals.insert(key, (id, None));
         }
         for e in store.table("expressions").iter() {
             let Some(key) = cell(e.get("id")).and_then(|x| wanted.get(&x)) else { continue };
             if let (Some(slot), Some(ast)) = (out.locals.get_mut(key), e.get("ast")) {
-                slot.1 = Some(super::astreads::unwrap(ast).clone());
+                let ast = super::astreads::unwrap(ast);
+                if ast.get("k").and_then(Value::as_str) == Some("Fn") || decision(ast) {
+                    slot.1 = Some(ast.clone());
+                }
             }
         }
         out

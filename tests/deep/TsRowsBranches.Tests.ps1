@@ -278,22 +278,27 @@ Test-Case 'tsrows: a key built by a template literal renders under its branch, a
 # A COMPONENT A FACTORY RETURNS FROM A `case` RENDERS ONLY FOR THAT CASE. The outlet's node holds no gate naming
 # the kind, so without the case on the edge every key in `AlphaDetailComponent` read as shown for every kind. The
 # case rides `render_path.branches` - `gates` names `gates` rows only - and folds into `key_reach` like the case
-# around a key written in TypeScript. The outlet is read through the binding's `Source` wrapper.
+# around a key written in TypeScript. The outlet is read through the binding's `Source` wrapper. A class returned
+# from two separate cases renders for EITHER (divergence #15): one `or:` link, the union of the two cases' values.
 Test-Case 'tsrows: a component a factory returns from a case renders only for that case' {
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/detail.ts' = "import { Component, Injectable, Type } from '@angular/core';`n" +
             "import { BasketModule } from './basket.component';`n" +
-            "export enum DemoKind { Alpha = 1, Beta = 2, Gamma = 3 }`n" +
+            "export enum DemoKind { Alpha = 1, Beta = 2, Gamma = 3, Delta = 4 }`n" +
             "@Component({ selector: 'demo-alpha', template: '<b [title]=`"\'demo.alpha.title\' | money`"></b>', standalone: true, imports: [BasketModule] })`n" +
             "export class AlphaDetailComponent {}`n" +
             "@Component({ selector: 'demo-beta', template: '<b [title]=`"\'demo.beta.title\' | money`"></b>', standalone: true, imports: [BasketModule] })`n" +
             "export class BetaDetailComponent {}`n" +
+            "@Component({ selector: 'demo-pair', template: '<b [title]=`"\'demo.pair.title\' | money`"></b>', standalone: true, imports: [BasketModule] })`n" +
+            "export class PairDetailComponent {}`n" +
             "@Injectable({ providedIn: 'root' })`n" +
             "export class DetailFactory {`n" +
             "  componentFor(kind: DemoKind): Type<unknown> | null {`n" +
             "    switch (kind) {`n" +
             "      case DemoKind.Alpha: return AlphaDetailComponent;`n" +
             "      case DemoKind.Beta: return BetaDetailComponent;`n" +
+            "      case DemoKind.Gamma: return PairDetailComponent;`n" +
+            "      case DemoKind.Delta: return PairDetailComponent;`n" +
             "    }`n" +
             "    return null;`n" +
             "  }`n" +
@@ -305,7 +310,7 @@ Test-Case 'tsrows: a component a factory returns from a case renders only for th
             "  constructor(private factory: DetailFactory) {}`n" +
             "}`n"
         'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},' +
-            '"demo":{"alpha":{"title":"a"},"beta":{"title":"b"}}}'
+            '"demo":{"alpha":{"title":"a"},"beta":{"title":"b"},"pair":{"title":"p"}}}'
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
@@ -327,6 +332,7 @@ Test-Case 'tsrows: a component a factory returns from a case renders only for th
         "FROM key_reach WHERE key LIKE 'demo.%'")
     Assert-Line $r 'demo.alpha.title | 1 | DemoKind kind in ["Alpha"]'
     Assert-Line $r 'demo.beta.title | 1 | DemoKind kind in ["Beta"]'
+    Assert-Line $r 'demo.pair.title | 1 | DemoKind kind in ["Delta","Gamma"]'
 }
 
 # THE C# HALF WRITES INTO THE SAME `enums` AND `switch_cases`, and each half drops only its own:

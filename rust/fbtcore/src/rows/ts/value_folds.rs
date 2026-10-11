@@ -173,7 +173,65 @@ pub fn fold_values(ways: &[Way], gates: &GateMap, idx: &EnumIndex, per_way: Opti
             "values": values, "domain": info.domain.len(),
         }));
     }
+    out.extend(fold_enums(per_way, idx, &out));
     sort_by_collation(&mut out);
+    out
+}
+
+/// ONE ENUM TESTED THROUGH DIFFERENTLY WRITTEN EXPRESSIONS, folded as the enum.
+///
+/// The fold above is per dimension TEXT, so a child rendered under `kind === Alpha` from one
+/// parent and `item.kind === Alpha` from another had two dimensions, each absent on the other's
+/// way - each union came out the whole domain and the key read as unrestricted, when every way
+/// requires `Alpha`. Per way, the enum permits the UNION of what its own dimensions of that enum
+/// permit (the weaker claim: two dimensions on one way are not assumed to be one value), a way
+/// mentioning none of them permits the domain, and the ways union as above. Only for an enum no
+/// per-dimension row was published for: one already says more. The dimension names every text
+/// the fold merged, sorted and joined by ` | `.
+fn fold_enums(per_way: &PerWay, idx: &EnumIndex, published: &[Value]) -> Vec<Value> {
+    let mut dims: IndexMap<String, IndexSet<String>> = IndexMap::new();
+    for k in dimensions(per_way) {
+        let (enum_id, dim) = split(&k);
+        dims.entry(enum_id.to_string()).or_default().insert(dim.to_string());
+    }
+    let mut out = Vec::new();
+    for (enum_id, names) in dims {
+        if names.len() < 2 || published.iter().any(|r| field(r, "enum") == enum_id) {
+            continue;
+        }
+        let Some(info) = idx.by_id.get(&enum_id) else { continue };
+        let mut union: IndexSet<String> = IndexSet::new();
+        for here in per_way {
+            let mut mentioned = false;
+            for name in &names {
+                if let Some(allowed) = here.get(&format!("{enum_id}#{name}")) {
+                    mentioned = true;
+                    union.extend(allowed.iter().cloned());
+                }
+            }
+            if !mentioned {
+                union.extend(info.domain.iter().cloned());
+            }
+            if union.len() >= info.domain.len() {
+                break;
+            }
+        }
+        if union.len() >= info.domain.len() {
+            continue;
+        }
+        let excluded: Vec<String> =
+            info.domain.iter().filter(|v| !union.contains(*v)).cloned().collect();
+        let in_side = union.len() <= excluded.len();
+        let mut values: Vec<String> = if in_side { union.into_iter().collect() } else { excluded };
+        values.sort();
+        let mut names: Vec<String> = names.into_iter().collect();
+        names.sort();
+        out.push(json!({
+            "enum": enum_id, "enum_name": info.name, "dimension": names.join(" | "),
+            "op": if in_side { "in" } else { "not_in" },
+            "values": values, "domain": info.domain.len(),
+        }));
+    }
     out
 }
 

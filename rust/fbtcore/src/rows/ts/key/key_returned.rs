@@ -8,9 +8,9 @@
 //! those rows names the branch and the case it sits in - the chain `key_branches` already reads for a
 //! key written in TypeScript. This joins the two.
 //!
-//! THE EDGE HOLDS WHAT EVERY WAY HOLDS. A class returned under two cases, or once under a case and
-//! once with none, renders under either, and one edge carries one chain: the intersection is the
-//! only part of it that is true of the edge, the same rule `always_gates` folds by. A way through
+//! THE EDGE HOLDS WHAT EVERY WAY HOLDS. A class returned once under a case and once with none renders
+//! under either, and one edge carries one chain: the intersection is the only part of it that is true
+//! of the edge, the same rule `always_gates` folds by. Two CASES are the exception (`either_link`). A way through
 //! several returns (a registry returning another registry's answer) holds every return's chain.
 //!
 //! A branch rides the path AS A BRANCH, never as a gate: `render_path.gates` names `gates` rows and
@@ -52,6 +52,7 @@ pub fn returned_under(store: &Store<'_>, branches: &Branches) -> IndexMap<String
     for (render, ways) in wanted {
         let Some(id) = cell(render, "id") else { continue };
         let mut held: Option<IndexSet<String>> = None;
+        let mut chains: Vec<IndexSet<String>> = Vec::new();
         for way in ways {
             let mut chain = IndexSet::new();
             for rv in way.as_array().into_iter().flatten().filter_map(|v| v.as_str()) {
@@ -63,14 +64,67 @@ pub fn returned_under(store: &Store<'_>, branches: &Branches) -> IndexMap<String
                 };
                 chain.extend(branches.chain_of(row));
             }
+            chains.push(chain.clone());
             held = Some(match held {
                 None => chain,
                 Some(h) => h.into_iter().filter(|b| chain.contains(b)).collect(),
             });
         }
-        let held: Vec<String> = held.unwrap_or_default().into_iter().collect();
+        let held: IndexSet<String> = held.unwrap_or_default();
+        let either = either_link(&chains, &held, branches);
+        let mut held: Vec<String> = held.into_iter().collect();
+        held.extend(either);
         if !held.is_empty() {
             out.insert(id, held);
+        }
+    }
+    out
+}
+
+/// SEVERAL CASES RETURNING ONE CLASS ARE ONE CONDITION: either of them (divergence #15). When every
+/// way holds exactly ONE case beyond what all ways hold, the edge holds `or:<case>|<case>`, which
+/// `key_reach` reads as the union of the cases' values (`gate_collapse::either`). A way holding no
+/// case of its own, or more than one condition of its own, leaves the edge with the intersection.
+fn either_link(chains: &[IndexSet<String>], held: &IndexSet<String>, branches: &Branches) -> Option<String> {
+    let mut cases: IndexSet<String> = IndexSet::new();
+    for chain in chains {
+        let own: Vec<&String> = chain.iter().filter(|c| !held.contains(*c)).collect();
+        let [case] = own.as_slice() else { return None };
+        if branches.sense(case) != "case" {
+            return None;
+        }
+        cases.insert((*case).clone());
+    }
+    if cases.len() < 2 {
+        return None;
+    }
+    Some(format!("or:{}", cases.into_iter().collect::<Vec<_>>().join("|")))
+}
+
+/// The `or:` links the factories' edges hold, each as the union of its cases' value rows. A case
+/// with no rows of its own leaves the link unread: either side may be the one that held.
+pub fn either_values(
+    store: &Store<'_>,
+    branches: &Branches,
+    value_map: &IndexMap<String, (Option<String>, Vec<Value>)>,
+    idx: &super::gate_values::EnumIndex,
+) -> IndexMap<String, (Option<String>, Vec<Value>)> {
+    let mut out = IndexMap::new();
+    for link in returned_under(store, branches).into_values().flatten() {
+        let Some(ids) = link.strip_prefix("or:") else { continue };
+        let mut rows: Option<Vec<Value>> = None;
+        for id in ids.split('|') {
+            let Some((_, these)) = value_map.get(id).filter(|(_, r)| !r.is_empty()) else {
+                rows = None;
+                break;
+            };
+            rows = Some(match rows {
+                None => these.clone(),
+                Some(held) => super::gate_collapse::either(&held, these, idx),
+            });
+        }
+        if let Some(rows) = rows.filter(|r| !r.is_empty()) {
+            out.insert(link, (None, rows));
         }
     }
     out
@@ -102,9 +156,15 @@ mod tests {
     }
 
     #[test]
-    fn a_class_returned_under_two_cases_or_none_holds_nothing() {
+    fn a_class_returned_under_two_cases_holds_either() {
+        let s = store(json!([{"id": "rd:1", "return_ways": [["rv:1"], ["rv:2"]]}]));
+        let out = returned_under(&s, &Branches::new(&s));
+        assert_eq!(out["rd:1"], vec!["or:sc:1|sc:2".to_string()]);
+    }
+
+    #[test]
+    fn a_class_returned_under_one_case_or_none_holds_nothing() {
         let s = store(json!([
-            {"id": "rd:1", "return_ways": [["rv:1"], ["rv:2"]]},
             {"id": "rd:2", "return_ways": [["rv:1"], []]},
             {"id": "rd:3", "return_ways": [["rv:3"]]},
         ]));

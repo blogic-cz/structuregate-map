@@ -8,9 +8,12 @@
 //! the OUTER parameter's list by the INNER parameter. The list is the call's argument, spelled out
 //! in constants (`$args`); anything else - a variable, a spread, two parameters, a second return -
 //! is not read, and the call restricts nothing, as before.
+//!
+//! A REST PARAMETER (`(...rest) => rest.some((x) => ids.includes(x))`) is the same test: the call site
+//! hands exactly one argument (`Lists::restriction`), so `rest` is that one value.
 
 use super::gate_lists::{enum_for, list_test, spelled, List};
-use super::gate_predicates::{kind, local, only_return};
+use super::gate_predicates::{kind, local, method_call, only_return};
 use super::gate_tsrows::TsRows;
 use super::gate_values::{enum_of_type_ref, EnumIndex};
 use super::astreads::unwrap;
@@ -70,8 +73,10 @@ pub fn curried(
         ) else { continue };
         let (Some(p), Some(q)) = (outer.get("name").and_then(Value::as_str), q.as_str()) else { continue };
         let tree = rows.resolve_in(body, bound.get(*factory).unwrap_or(&none), idx, Some(factory));
-        let Some((list, d)) = list_test(&tree) else { continue };
-        if local(list) != Some(p) || local(d) != Some(q) {
+        let rest = inner.get("rest").and_then(Value::as_str) == Some(q);
+        let tested = if rest { some_of_rest(&tree, q) } else { list_test(&tree).filter(|(_, d)| local(d) == Some(q)) };
+        let Some((list, _)) = tested else { continue };
+        if local(list) != Some(p) {
             continue;
         }
         let element = outer.get("type_ref").and_then(|t| t.get("element"));
@@ -87,4 +92,12 @@ pub fn curried(
         }
     }
     out
+}
+
+/// `rest.some((x) => <list test of x>)`, as the (list, element) the callback tests.
+fn some_of_rest<'a>(tree: &'a Value, rest: &str) -> Option<(&'a Value, &'a Value)> {
+    let (over, cb) = method_call(tree, "some")?;
+    let [x] = cb.get("params")?.as_array()?.as_slice() else { return None };
+    let (list, d) = list_test(only_return(cb)?)?;
+    (local(over) == Some(rest) && local(d) == x.as_str()).then_some((list, d))
 }

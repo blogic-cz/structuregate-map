@@ -104,9 +104,13 @@ impl Loops {
         let members = store.table("members");
         let mut owner: HashMap<String, Option<String>> = HashMap::new();
         let mut lists: HashMap<String, (Vec<Value>, bool)> = HashMap::new();
+        let mut members_valued: std::collections::HashSet<String> = std::collections::HashSet::new();
         for m in members.iter() {
             let Some(id) = id_of(m, "id").filter(|i| !i.is_empty()) else { continue };
             owner.insert(id.clone(), text(m, "class"));
+            if m.get("value").is_some_and(|v| !v.is_null()) {
+                members_valued.insert(id.clone());
+            }
             let list = match m.get("value") {
                 Some(Value::Array(items)) => Some(items),
                 other => match callee_return(other, &rows, &one_return) {
@@ -118,13 +122,41 @@ impl Loops {
                 lists.insert(id, (items.clone(), !matches!(m.get("value"), Some(Value::Array(_)))));
             }
         }
-        for a in store.table("assignments").iter() {
+        // A LIST WRITTEN ONCE IN A METHOD OF ITS OWN CLASS is the member's list when nothing initialises it:
+        // `ngOnInit() { this.tips = [...] }` (or `= this.labels.tips()`) renders the same elements a field
+        // initializer does. One plain `=` - no branch, no case, no arm - or none is read.
+        let mut written: HashMap<String, Vec<&Row>> = HashMap::new();
+        let assignments = store.table("assignments");
+        for a in assignments.iter() {
             let Some(target) = id_of(a, "target_id") else { continue };
             if let Some(own) = owner.get(&target) {
                 let writer = text(a, "class");
                 if writer.is_none() || writer != *own {
                     lists.remove(&target);
+                    written.remove(&target);
+                    owner.insert(target, Some(String::new()));
+                    continue;
                 }
+                written.entry(target).or_default().push(a);
+            }
+        }
+        for (target, writes) in written {
+            let [a] = writes.as_slice() else { continue };
+            let plain = ["branch", "case"].iter().all(|f| text(a, f).is_none())
+                && a.get("choices").is_none_or(|c| c.is_null() || c.as_array().is_some_and(Vec::is_empty))
+                && text(a, "operator").as_deref() == Some("=");
+            if !plain || lists.contains_key(&target) || members_valued.contains(&target) {
+                continue;
+            }
+            let list = match a.get("value") {
+                Some(Value::Array(items)) => Some((items.clone(), false)),
+                other => match callee_return(other, &rows, &one_return) {
+                    Some(Value::Array(items)) => Some((items.clone(), true)),
+                    _ => None,
+                },
+            };
+            if let Some(list) = list {
+                lists.insert(target, list);
             }
         }
         for g in gates.iter().filter(|g| text(g, "name").as_deref() == Some("ngForOf")) {
