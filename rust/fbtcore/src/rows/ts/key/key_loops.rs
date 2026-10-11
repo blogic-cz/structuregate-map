@@ -38,13 +38,17 @@ use std::collections::{HashMap, HashSet};
 /// property -> key -> (element index, way), per loop.
 type Elements = IndexMap<String, IndexMap<String, Vec<(usize, Vec<String>)>>>;
 
-fn element_keys(items: &[Element], keys: &KeySet) -> Elements {
+fn element_keys(items: &[Element], keys: &KeySet, i18n: &[String]) -> Elements {
     let mut out: Elements = IndexMap::new();
     for (i, item) in items.iter().enumerate() {
         let Some(object) = item.value.as_object() else { continue };
         for (prop, value) in object {
             let mut found = Vec::new();
             value_keys(value, &item.chain, keys, &mut found);
+            // A TRANSLATE CALL AS THE PROPERTY'S VALUE holds its arguments' keys, as a method's return of one does.
+            for arg in super::key_follow::translated(value, i18n).unwrap_or_default() {
+                value_keys(arg, &item.chain, keys, &mut found);
+            }
             for (key, mut chain) in found {
                 if item.from_call {
                     chain.retain(|link| !link.starts_with("tpl:"));
@@ -327,6 +331,7 @@ pub fn loop_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
     if loops.list.is_empty() {
         return (out, nodes_hit);
     }
+    let i18n = store.option_list("i18n_calls");
     let keyset: KeySet = store.table("translations").iter().filter_map(|t| text(t, "key")).collect();
     let nodes = store.table("template_nodes");
     let node_by_id: HashMap<String, &Row> = nodes.iter().filter_map(|n| id_of(n, "id").map(|i| (i, n))).collect();
@@ -353,7 +358,7 @@ pub fn loop_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
         .collect();
 
     for lp in &loops.list {
-        let elements = element_keys(&lp.items, &keyset);
+        let elements = element_keys(&lp.items, &keyset, &i18n);
         if elements.is_empty() {
             continue;
         }

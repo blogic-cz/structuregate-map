@@ -21,6 +21,28 @@ pub(super) struct Returned<'r, 'a> {
     pub(super) parent: &'r std::collections::HashMap<String, String>,
 }
 
+/// The arguments of a call of a configured `i18nCalls` method, None for any other value.
+pub(super) fn translated<'v>(v: &'v Value, i18n: &[String]) -> Option<&'v [Value]> {
+    let method = v.get("$target").and_then(|t| t.get("name")).and_then(Value::as_str)?;
+    i18n.iter().any(|c| c == method).then(|| v.get("$args").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default())
+}
+
+/// An object literal: no key of it is a row marker (`$call`, `$template`, `$cond_expr` ...).
+fn plain_object(v: &Value) -> bool {
+    v.as_object().is_some_and(|o| o.keys().all(|k| !k.starts_with('$')))
+}
+
+/// `Promise.resolve(x)` of the compiler's own lib: `$target` names `resolve` in `typescript/lib/lib.*.d.ts`, compared
+/// by path pieces.
+fn is_promise_resolve(v: &Value) -> bool {
+    let Some(target) = v.get("$target") else { return false };
+    let file = target.get("file").and_then(Value::as_str).unwrap_or_default();
+    let pieces: Vec<&str> = file.split(['/', '\\']).collect();
+    target.get("name").and_then(Value::as_str) == Some("resolve")
+        && pieces.last().is_some_and(|f| f.starts_with("lib."))
+        && pieces.windows(2).any(|w| w == ["typescript", "lib"])
+}
+
 /// The member a call entered and the arguments it handed over.
 struct Frame<'v> {
     member: String,
@@ -104,9 +126,32 @@ impl Returned<'_, '_> {
             }
             return;
         }
-        let method = ret.get("$target").and_then(|t| t.get("name")).and_then(Value::as_str);
-        if method.is_some_and(|m| self.i18n.iter().any(|c| c == m)) {
-            for arg in ret.get("$args").and_then(Value::as_array).into_iter().flatten() {
+        // A VALUE THAT WRAPS A TRANSLATE CALL HANDS IT BACK: an object's property values, a list's elements that are
+        // no objects, a `+` chain's parts, the argument of `Promise.resolve` (the compiler's own lib). No condition
+        // carried. The ARGUMENT OF ANY OTHER CALL is not followed - `download(t('k'))` renders nothing in the field -
+        // and an object INSIDE a list is `key_loops`'s, read where the loop variable's property is, since reading it
+        // here would link a property no template shows.
+        match ret {
+            Value::Array(items) => {
+                items.iter().filter(|i| !plain_object(i)).for_each(|i| self.through(i, frame, seen, out));
+                return;
+            }
+            Value::Object(o) if plain_object(ret) => {
+                o.values().for_each(|v| self.through(v, frame, seen, out));
+                return;
+            }
+            Value::Object(o) if o.contains_key("$concat") => {
+                o["$concat"].as_array().into_iter().flatten().for_each(|v| self.through(v, frame, seen, out));
+                return;
+            }
+            _ => {}
+        }
+        if is_promise_resolve(ret) {
+            ret.get("$args").and_then(Value::as_array).into_iter().flatten().for_each(|a| self.through(a, frame, seen, out));
+            return;
+        }
+        if let Some(args) = translated(ret, self.i18n) {
+            for arg in args {
                 value_keys(arg, &[], self.keys, out);
             }
             return;

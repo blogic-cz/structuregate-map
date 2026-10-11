@@ -69,6 +69,11 @@ pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
 /// carried - they test its parameters - while a key one of its returns spells itself is still not read: which of
 /// those renders is the branch's choice, and dropping it would publish every choice as always rendered.
 ///
+/// A RETURN THAT WRAPS A TRANSLATE CALL hands it back as well: an object's property values (`{ title: t(k) }`), a
+/// list's elements that are no objects, the parts of a `+` chain and the argument of `Promise.resolve`, no condition
+/// carried. The argument of any other call is not followed, and an object inside a list is `key_loops`'s, read where
+/// the loop variable's property is. A template literal's holes and a method chained on the call are not read.
+///
 /// A RETURN OF A BARE `let` LOCAL reads every later `=` of it too (`let s = ''; s = t(k); return s;`), the
 /// local of the method or of the method an arrow sits in, no branch carried - see `key_follow::Returned::written`.
 ///
