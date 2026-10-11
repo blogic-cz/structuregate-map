@@ -53,10 +53,14 @@ type Seen = std::collections::HashSet<String>;
 type Found = Vec<(String, Vec<String>)>;
 
 impl Returned<'_, '_> {
-    /// The member a call's `$target` names, entered with the call's arguments.
+    /// The member - or, failing that, the free function - a call's `$target` names, entered with the call's
+    /// arguments. A FREE FUNCTION IS ENTERED LIKE A METHOD: `this.c = label('a')` over `export const label = (n) =>
+    /// `demo.${n}`` hands the field `demo.a`, and reading only class members left every key such a function builds
+    /// a `literal` no component reached. No condition is carried, and each (callee, arguments) is read once.
     pub(super) fn call(&self, value: Option<&Value>, seen: &mut Seen, out: &mut Found) {
         let Some(value) = value else { return };
-        let Some(member) = value.get("$target").and_then(|t| self.rows.member_named(t)) else { return };
+        let Some(target) = value.get("$target") else { return };
+        let Some(member) = self.rows.member_named(target).or_else(|| self.rows.function_named(target)) else { return };
         self.enter(member, value, seen, out);
     }
 

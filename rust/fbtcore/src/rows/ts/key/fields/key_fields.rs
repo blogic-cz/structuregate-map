@@ -81,6 +81,8 @@ pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
 /// function the call handed in (`pick(get) { return get(); }` over `this.pick(() => first)`, `$fn_id`), and a
 /// call of a `const` local runs the arrow it holds (`const t = (k) => this.translate.get(`a.${k}`)`). A hole
 /// naming a parameter the call hands a STRING is that string: `t('alpha')` spells `a.alpha` alone.
+/// A call whose `$target` is a FREE FUNCTION (a `function` declaration or a `const` arrow of no class) is entered
+/// the same way, when no member of that name sits in the file.
 fn callee_keys(value: Option<&Value>, reader: &Returned<'_, '_>) -> Vec<(String, Vec<String>)> {
     let mut found = Vec::new();
     let mut seen = std::collections::HashSet::new();
