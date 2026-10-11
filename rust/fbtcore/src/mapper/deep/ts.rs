@@ -253,6 +253,9 @@ fn shared(deep: &Deep, arguments: &mut Vec<String>) {
     if let Some(config) = &deep.ts_config {
         arguments.extend(["--config".into(), config.clone()]);
     }
+    // THE RUNNING BUILD joins node's own setup hash, beside `rows`: node's plan says "unchanged" from its setup and
+    // the tree's hashes alone, so rust's key moving (`angular_arguments`) would still be answered by a stale plan.
+    arguments.extend(["--build".into(), deep.build.clone()]);
 }
 
 /// ASK WHAT WOULD HAVE TO BE READ, then fetch the rows that would not be. A PLAN THAT CANNOT BE READ IS A
@@ -347,7 +350,7 @@ fn why(into: &mut Collector, why: &Value, reads: &str) {
         causes.push("no rows of it were recorded before".into());
     }
     if why["setup_moved"] == Value::Bool(true) {
-        causes.push("its setup moved (typescript, angular, node, its config or its rows version)".into());
+        causes.push("its setup moved (typescript, angular, node, its config, its rows version or this build)".into());
     }
     if why["template"].as_i64().unwrap_or(0) > 0 {
         causes.push(format!("{} of them are new or can move what a template resolves", why["template"]));

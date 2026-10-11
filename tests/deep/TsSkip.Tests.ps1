@@ -143,4 +143,30 @@ Test-Case 'tsskip: an edit BESIDE the workspace does not start node, and one ins
     Assert-NoLine (Invoke-TsSkipDeep $tree $mixed) $script:TsSkipQuiet
 }
 
+Test-Case 'tsskip: another BUILD of the exe runs the half again over a tree where nothing moved - its closure may derive differently' {
+    # THE RUNNING BUILD IS PART OF THE HALF'S SETUP: a release that changes only what rust derives inside this half
+    # (`key_reach`, `gate_values`) leaves the tree's bytes, the compiler and the extractor's `rows` as they were, so
+    # both skip layers kept the last release's closure for ever. The copy is a second build: another path and time.
+    $tree = New-TsSkipWorkspace
+    Invoke-TsSkipDeep $tree | Out-Null
+    Assert-Line (Invoke-TsSkipDeep $tree) $script:TsSkipQuiet
+    $copy = Join-Path ([System.IO.Path]::GetTempPath()) ('sgtest-build-' + [guid]::NewGuid().ToString('N'))
+    $realOut = $script:Out
+    try {
+        [void](New-Item -ItemType Directory -Path $copy -Force)
+        Get-ChildItem -Path $realOut -File | Copy-Item -Destination $copy
+        (Get-Item (Join-Path $copy 'structuregate.dll')).LastWriteTimeUtc = [datetime]::UtcNow.AddMinutes(-7)
+        $script:Out = $copy
+        $other = Invoke-TsSkipDeep $tree
+        $quiet = Invoke-TsSkipDeep $tree
+    } finally {
+        $script:Out = $realOut
+        Remove-Item -Recurse -Force $copy -ErrorAction SilentlyContinue
+    }
+    Assert-NoLine $other 'the typescript half had nothing to do'
+    Assert-Line $other 'the typescript half reads '
+    # THE SAME BUILD AGAIN is quiet: the build is in the key, not a reason to read on every run.
+    Assert-Line $quiet $script:TsSkipQuiet
+}
+
 }
