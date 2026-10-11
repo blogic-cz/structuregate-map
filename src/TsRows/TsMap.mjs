@@ -193,9 +193,11 @@ async function main() {
   // set keeps the side it was written on, never its complement.
   // 38 (too): a `$fn` in a return or local value names its `functions` row; a service key is followed into a function a
   // call hands in or a `const` arrow it calls, a hole bound to a string argument.
+  // 39: a service key follows a ternary's arms, a `let`'s later writes, an object's values, a concat, a
+  // `Promise.resolve`, a free function, and a free function's list (`.filter` too) under an `*ngFor`.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 38,
+    config: config.file, data: config.data, rows: 39,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
