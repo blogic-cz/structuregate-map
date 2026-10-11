@@ -115,8 +115,9 @@ pub fn collapse(items: &[Value], idx: &EnumIndex) -> Vec<Value> {
             continue;
         }
         let excluded: Vec<String> = domain.iter().filter(|v| !allowed.contains(*v)).cloned().collect();
-        let in_side = allowed.len() <= excluded.len();
-        // `values` is always the SMALLER side, named by `op`.
+        // `values` is always the SMALLER side, named by `op` - except on a SET, where the sides are not
+        // complements: "holds some of A, B" is not "holds no C" (`[A, C]` is the first and not the second).
+        let in_side = if slot.set { !slot.ins.is_empty() } else { allowed.len() <= excluded.len() };
         let mut values: Vec<String> =
             if in_side { allowed.into_iter().collect() } else { excluded };
         values.sort();

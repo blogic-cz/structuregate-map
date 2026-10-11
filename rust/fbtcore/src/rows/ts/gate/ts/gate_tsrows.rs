@@ -198,6 +198,11 @@ impl TsRows {
         }
     }
 
+    /// The row of the ONE `const` local `name` declares in `member`; two of that name in it are neither.
+    pub fn local_row(&self, member: &str, name: &str) -> Option<&str> {
+        self.locals.get(&format!("{member} {name}")).map(|(row, _)| row.as_str()).filter(|r| !r.is_empty())
+    }
+
     /// The ONE function a `{name, file}` target names (a call's evaluated `$target`, which has no line).
     pub fn function_named(&self, target: &Value) -> Option<String> {
         let (name, abs) = (target.get("name")?.as_str()?, target.get("file")?.as_str()?.replace('\\', "/"));

@@ -61,23 +61,20 @@ pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
 /// arguments: `return this.translate.get(`a.${Kind[kind]}`)` hands the field the key's text.
 ///
 /// A RETURN IS FOLLOWED THROUGH what it hands back unchanged: a call of another method (`hop(k) { return
-/// this.inner(k); }`), once per method so a cycle ends, and either side of a `??` or `||` (`return
+/// this.inner(k); }`), once per method and arguments so a cycle ends, and either side of a `??` or `||` (`return
 /// this.translate.get(k) ?? 'x'`). Neither side carries a condition: `x || 'k'` tests the call's own result,
 /// which is the key's text whenever the key renders, and nothing a gate reads. A method of SEVERAL returns
 /// hands back through each of them (`if (a) { return this.inner(k); } return '-';`), no branch carried - they
 /// test its parameters - while a key one of its returns spells itself is still not read: which of those
 /// renders is the branch's choice, and dropping it would publish every choice as always rendered.
-fn callee_keys(
-    value: Option<&Value>,
-    rows: &super::gate_tsrows::TsRows,
-    one_return: &std::collections::HashMap<String, &Row>,
-    every: &std::collections::HashMap<String, Vec<&Row>>,
-    keys: &super::key_branches::KeySet,
-    i18n: &[String],
-) -> Vec<(String, Vec<String>)> {
+///
+/// A FUNCTION IS ENTERED LIKE A METHOD, by its `functions` row: a call of the member's own PARAMETER runs the
+/// function the call handed in (`pick(get) { return get(); }` over `this.pick(() => first)`, `$fn_id`), and a
+/// call of a `const` local runs the arrow it holds (`const t = (k) => this.translate.get(`a.${k}`)`). A hole
+/// naming a parameter the call hands a STRING is that string: `t('alpha')` spells `a.alpha` alone.
+fn callee_keys(value: Option<&Value>, reader: &Returned<'_, '_>) -> Vec<(String, Vec<String>)> {
     let mut found = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    let reader = Returned { rows, one_return, every, keys, i18n };
     reader.call(value, &mut seen, &mut found);
     for (_, chain) in found.iter_mut() {
         chain.retain(|link| !link.starts_with("tpl:"));
@@ -92,37 +89,57 @@ struct Returned<'r, 'a> {
     every: &'r std::collections::HashMap<String, Vec<&'a Row>>,
     keys: &'r super::key_branches::KeySet,
     i18n: &'r [String],
+    /// Member or `functions` row id -> its parameters' names.
+    params: &'r std::collections::HashMap<String, Vec<String>>,
+    /// `locals` row id -> the `functions` row of the arrow it holds.
+    fn_of_local: &'r std::collections::HashMap<String, String>,
 }
 
+/// The member a call entered and the arguments it handed over.
+struct Frame<'v> {
+    member: String,
+    args: &'v [Value],
+}
+
+type Seen = std::collections::HashSet<String>;
+type Found = Vec<(String, Vec<String>)>;
+
 impl Returned<'_, '_> {
-    /// The keys of the ONE plain return of the member a call's `$target` names, or what each of its several
-    /// returns hands back through a call, each member read once.
-    fn call(&self, value: Option<&Value>, seen: &mut std::collections::HashSet<String>, out: &mut Vec<(String, Vec<String>)>) {
-        let Some(target) = value.and_then(|v| v.get("$target")) else { return };
-        let Some(member) = self.rows.member_named(target) else { return };
-        if !seen.insert(member.clone()) {
+    /// The member a call's `$target` names, entered with the call's arguments.
+    fn call(&self, value: Option<&Value>, seen: &mut Seen, out: &mut Found) {
+        let Some(value) = value else { return };
+        let Some(member) = value.get("$target").and_then(|t| self.rows.member_named(t)) else { return };
+        self.enter(member, value, seen, out);
+    }
+
+    /// The keys of the ONE plain return of `member`, or what each of its several returns hands back through a
+    /// call - each (member, arguments) read once.
+    fn enter(&self, member: String, call: &Value, seen: &mut Seen, out: &mut Found) {
+        let args = call.get("$args").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+        if seen.len() > 64 || !seen.insert(format!("{member} {}", Value::from(args.to_vec()))) {
             return;
         }
-        if let Some(ret) = self.one_return.get(&member).and_then(|r| r.get("value")) {
-            self.held(ret, seen, out);
+        let frame = Frame { member, args };
+        if let Some(ret) = self.one_return.get(&frame.member).and_then(|r| r.get("value")) {
+            self.held(&self.bind(ret, &frame), &frame, seen, out);
         } else {
-            for ret in self.every.get(&member).into_iter().flatten().filter_map(|r| r.get("value")) {
-                self.through(ret, seen, out);
+            for ret in self.every.get(&frame.member).into_iter().flatten().filter_map(|r| r.get("value")) {
+                self.through(&self.bind(ret, &frame), &frame, seen, out);
             }
         }
     }
 
     /// A return's own keys, then the keys it hands back through calls.
-    fn held(&self, ret: &Value, seen: &mut std::collections::HashSet<String>, out: &mut Vec<(String, Vec<String>)>) {
+    fn held(&self, ret: &Value, frame: &Frame<'_>, seen: &mut Seen, out: &mut Found) {
         value_keys(ret, &[], self.keys, out);
-        self.through(ret, seen, out);
+        self.through(ret, frame, seen, out);
     }
 
-    /// A translate call's arguments, another method's return, either side of a `??` or `||`.
-    fn through(&self, ret: &Value, seen: &mut std::collections::HashSet<String>, out: &mut Vec<(String, Vec<String>)>) {
+    /// A translate call's arguments, another method's or function's return, either side of a `??` or `||`.
+    fn through(&self, ret: &Value, frame: &Frame<'_>, seen: &mut Seen, out: &mut Found) {
         if matches!(ret.get("$logic").and_then(Value::as_str), Some("??" | "||")) {
             for side in ret.get("$operands").and_then(Value::as_array).into_iter().flatten() {
-                self.through(side, seen, out);
+                self.through(side, frame, seen, out);
             }
             return;
         }
@@ -133,8 +150,69 @@ impl Returned<'_, '_> {
             }
             return;
         }
+        if let Some(name) = ret.get("$call").and_then(Value::as_str).filter(|n| !n.contains('.')) {
+            let param = self.params.get(&frame.member).and_then(|ps| ps.iter().position(|p| p == name));
+            let handed = param.and_then(|i| frame.args.get(i)).and_then(|a| a.get("$fn_id")).and_then(Value::as_str);
+            let local = self.rows.local_row(&frame.member, name).and_then(|row| self.fn_of_local.get(row));
+            if let Some(function) = handed.map(str::to_string).or_else(|| local.cloned().filter(|_| param.is_none())) {
+                self.enter(function, ret, seen, out);
+                return;
+            }
+        }
         self.call(Some(ret), seen, out);
     }
+
+    /// `v` with every template hole that names a parameter the call handed a string spelled as that string.
+    fn bind(&self, v: &Value, frame: &Frame<'_>) -> Value {
+        let Some(params) = self.params.get(&frame.member).filter(|_| !frame.args.is_empty()) else { return v.clone() };
+        let string = |hole: &str| params.iter().position(|p| p == hole).and_then(|i| frame.args.get(i)).and_then(Value::as_str);
+        match v {
+            Value::Object(o) if o.contains_key("$template") => {
+                let strs = |k: &str| o.get(k).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>();
+                let (pieces, holes) = (strs("$template"), strs("$holes"));
+                if pieces.len() != holes.len() + 1 {
+                    return v.clone();
+                }
+                let (mut kept, mut open) = (vec![pieces[0].to_string()], Vec::new());
+                for (hole, next) in holes.iter().zip(&pieces[1..]) {
+                    match string(hole) {
+                        Some(s) => kept.last_mut().expect("never empty").push_str(&format!("{s}{next}")),
+                        None => {
+                            open.push(*hole);
+                            kept.push((*next).to_string());
+                        }
+                    }
+                }
+                if open.is_empty() {
+                    return Value::String(kept.remove(0));
+                }
+                let mut o = o.clone();
+                o.insert("$template".into(), Value::from(kept));
+                o.insert("$holes".into(), Value::from(open));
+                Value::Object(o)
+            }
+            Value::Object(o) => Value::Object(o.iter().map(|(k, x)| (k.clone(), self.bind(x, frame))).collect()),
+            Value::Array(xs) => Value::Array(xs.iter().map(|x| self.bind(x, frame)).collect()),
+            other => other.clone(),
+        }
+    }
+}
+
+/// Member or `functions` row id -> its parameters' names, and `locals` row id -> the arrow it holds.
+fn callables(store: &Store<'_>) -> (std::collections::HashMap<String, Vec<String>>, std::collections::HashMap<String, String>) {
+    let mut params = std::collections::HashMap::new();
+    for table in ["members", "functions"] {
+        for r in store.table(table).iter() {
+            let (Some(id), Some(Value::Array(ps))) = (id_of(r, "id"), r.get("params")) else { continue };
+            params.insert(id, ps.iter().filter_map(|p| p.get("name").and_then(Value::as_str).map(str::to_string)).collect());
+        }
+    }
+    let fn_of_local = store
+        .table("locals")
+        .iter()
+        .filter_map(|l| Some((id_of(l, "id")?, l.get("value")?.get("$fn_id")?.as_str()?.to_string())))
+        .collect();
+    (params, fn_of_local)
 }
 
 /// THE ELEMENTS OF EVERY LIST A CALL'S CALLEE RETURNS, when every return of it is an array literal:
@@ -209,6 +287,8 @@ fn keys_by_member(store: &Store<'_>) -> IndexMap<String, IndexMap<String, Vec<Ve
     let returns = store.table("returns");
     let one_return = one_returns(&returns);
     let every = returns_by_member(&returns);
+    let (params, fn_of_local) = callables(store);
+    let reader = Returned { rows: &rows, one_return: &one_return, every: &every, keys: &keys, i18n: &i18n, params: &params, fn_of_local: &fn_of_local };
     let mut owner: IndexMap<String, Option<String>> = IndexMap::new();
     let mut out: IndexMap<String, IndexMap<String, Vec<Vec<String>>>> = IndexMap::new();
     let mut foreign: Vec<String> = Vec::new();
@@ -225,7 +305,7 @@ fn keys_by_member(store: &Store<'_>) -> IndexMap<String, IndexMap<String, Vec<Ve
         }
         let mut found = Vec::new();
         value_keys(m.get("value").unwrap_or(&Value::Null), &[], &keys, &mut found);
-        found.extend(callee_keys(m.get("value"), &rows, &one_return, &every, &keys, &i18n));
+        found.extend(callee_keys(m.get("value"), &reader));
         for (key, chain) in found {
             member_ways(out.entry(id.clone()).or_default(), &key, chain);
         }
@@ -236,7 +316,7 @@ fn keys_by_member(store: &Store<'_>) -> IndexMap<String, IndexMap<String, Vec<Ve
         let Some(target) = id_of(a, "target_id").filter(|t| !t.is_empty()) else { continue };
         let mut found = Vec::new();
         value_keys(a.get("value").unwrap_or(&Value::Null), &branches.chain_of(a), &keys, &mut found);
-        for (key, chain) in callee_keys(a.get("value"), &rows, &one_return, &every, &keys, &i18n) {
+        for (key, chain) in callee_keys(a.get("value"), &reader) {
             let mut way = branches.chain_of(a);
             way.extend(chain);
             found.push((key, way));

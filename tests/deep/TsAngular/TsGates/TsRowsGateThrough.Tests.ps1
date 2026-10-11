@@ -6,7 +6,7 @@
     disjunction in `featurewalk.rs` / `gate_collapse.rs`. Its helpers are `TsRows.Helpers.ps1`.
 #>
 
-. (Join-Path $PSScriptRoot '../TsRows.Helpers.ps1')
+. (Join-Path $PSScriptRoot '../../TsRows.Helpers.ps1')
 
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 

@@ -39,6 +39,8 @@ pub struct Lists {
     by_row: IndexMap<String, List>,
     /// Function or method id -> the enum and the members its one return tests its argument in.
     preds: IndexMap<String, (String, Vec<String>)>,
+    /// The `preds` whose test runs over every element of a rest parameter: a call handed `...xs` tests `xs`.
+    every: IndexSet<String>,
 }
 
 /// `[{"$enum": "TierIDs.Small"}, …]` as (`TierIDs`, [`Small`, …]), or nothing.
@@ -169,7 +171,12 @@ pub fn lists(store: &Store<'_>, idx: &EnumIndex) -> Lists {
             out.preds.insert(member.clone(), (en.clone(), members));
         }
     }
-    out.preds.extend(super::gate_curried::curried(store, idx, &rows, &bound));
+    for (row, (en, members, every)) in super::gate_curried::curried(store, idx, &rows, &bound) {
+        if every {
+            out.every.insert(row.clone());
+        }
+        out.preds.insert(row, (en, members));
+    }
     out
 }
 
@@ -201,13 +208,19 @@ impl Lists {
 
     /// A leaf of the polarity walk, as the restriction its list proves.
     pub fn restriction(&self, n: &Value, negated: bool, mem: &MemberEnums, idx: &EnumIndex) -> Option<Value> {
-        let (values, d) = if let Some((list, d)) = list_test(n) {
+        let (values, d, set) = if let Some((list, d)) = list_test(n) {
             let dim_enum = dimension_of(d, mem).map(|(e, _, _)| e);
-            (self.values_of(list, dim_enum.as_ref(), mem, idx)?, d)
+            (self.values_of(list, dim_enum.as_ref(), mem, idx)?, d, false)
         } else if kind(n) == Some("Call") {
             let row = n.get("receiver")?.get("target")?.get("row")?.as_str()?;
             let [d] = n.get("args")?.as_array()?.as_slice() else { return None };
-            (self.preds.get(row)?.clone(), d)
+            // `f(...xs)` over a test of every element is `xs.some(..)`: a SET row on `xs`.
+            let (d, set) = match d.get("expr").filter(|_| kind(d) == Some("Spread")) {
+                Some(xs) if self.every.contains(row) => (xs, true),
+                Some(_) => return None,
+                None => (d, false),
+            };
+            (self.preds.get(row)?.clone(), d, set)
         } else {
             return None;
         };
@@ -217,15 +230,19 @@ impl Lists {
         let (en, members) = values;
         let (dim, row) = match dimension_of(d, mem) {
             Some((typed, dim, row)) if typed != en => {
-                return Some(json!({"enum": typed, "dim": dim, "row": row, "op": "unknown"}));
+                return Some(json!({"enum": typed, "dim": dim, "row": row, "op": "unknown", "set": set}));
             }
             Some((_, dim, row)) => (dim, row),
             None => (untyped_dimension(d)?, None),
         };
-        Some(json!({
+        let mut out = json!({
             "enum": en, "dim": dim, "row": row,
             "op": if negated { "not_in" } else { "in" }, "values": members,
-        }))
+        });
+        if set {
+            out["set"] = json!(true);
+        }
+        Some(out)
     }
 }
 
