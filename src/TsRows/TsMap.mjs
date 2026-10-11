@@ -150,6 +150,8 @@ async function main() {
   // against the ones the database recorded, and the setup that produced them against the one recorded
   // beside those. A run that would rewrite nearly a million identical rows is minutes spent to change nothing.
   //
+  // `build` IS THE EXE RUNNING IT (handed by rust): a release that only changes what rust derives from these rows
+  // (`key_reach`, `render_path`, `gate_values`, `gate_features`) reaches an unchanged tree with no `rows` bump.
   // `rows` IS WHAT THIS EXTRACTOR WRITES, and it is part of the setup for the same reason the compiler is:
   // a new column over unchanged source is a different map over the same bytes. Without it a deployed exe
   // that adds one reads a consumer's tree as unchanged and keeps the old rows for ever. Raise it whenever
@@ -197,7 +199,7 @@ async function main() {
   // `Promise.resolve`, a free function, and a free function's list (`.filter` too) under an `*ngFor`.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 39,
+    config: config.file, data: config.data, rows: 39, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

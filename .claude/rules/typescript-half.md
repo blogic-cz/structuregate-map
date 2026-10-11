@@ -69,13 +69,17 @@ a BOM and other trims disagree (`JS_SPACE` in `rust/fbtcore/src/rows/ts/jsstr.rs
 
 **THIS HALF IS NOT INCREMENTAL PER FILE, and must not become so: its rows are SEMANTIC.** Rename a component and
 the resolved rows of files that did not change become wrong. It refuses to work when the answer is already right:
-the tree's hashes AND the `setup` (compiler versions, `structuregate.ts.json` - OUTSIDE the tree - and the
-extractor's `rows` number in `src/TsRows/TsMap.mjs`) against what the database recorded. The output database is
+the tree's hashes AND the `setup` (compiler versions, `structuregate.ts.json` - OUTSIDE the tree - the
+extractor's `rows` number in `src/TsRows/TsMap.mjs`, and the RUNNING BUILD of the exe, handed as `--build`: rust derives
+`key_reach`, `render_path`, `gate_values` and `gate_features` inside this half, so a release that changes only those
+must reach an unchanged tree) against what the database recorded. The output database is
 excluded from that walk, since a consumer may write it inside the tree it maps.
 
 **AN UNCHANGED TREE DOES NOT START NODE** (`mapper/deep/ts.rs`, key built in `mapper/deep/mod.rs`): the key is the
 tree-map entries under the WORKSPACE the last run mapped (`fe`, kept in the record) - so a C# edit beside it does
-not launch node - the files it is given, the embedded scripts, `node --version`, its arguments, and what it reads
+not launch node - the files it is given, the embedded scripts, `node --version`, its arguments (the running build among them,
+so every release re-reads a tree once; two consumers of one exe share a build, but a tree mapped by `dotnet out/structuregate.dll`
+and then by the exe re-reads once too, the build being the paths, sizes and times), and what it reads
 from OUTSIDE the tree (the borrowed `typescript`/`@angular/compiler` `package.json`, `structuregate.ts.json`), kept
 in `_meta` as `skip:typescript` after a clean run. A changed tree is hashed by the plan run, whose hashes ride
 `plan.json` into the parse run (`--hashes`).

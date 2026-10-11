@@ -16,7 +16,7 @@ export function emit(...fields) {
 
 export function parseArgs(argv) {
   const args = { root: '', rows: '', state: '', fe: '', config: '', db: '', html: '', plan: '',
-    hashes: '', lines: '', carry: '', everyHop: false, nodeModules: [], skipDirs: ['node_modules'] };
+    hashes: '', lines: '', carry: '', build: '', everyHop: false, nodeModules: [], skipDirs: ['node_modules'] };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     const value = argv[i + 1];
@@ -27,6 +27,8 @@ export function parseArgs(argv) {
     else if (flag === '--config') { args.config = value; i++; }
     // `--skip-dir` IS A FOLDER NAME THE GATE SKIPS, repeatable - the same `--skip` every other half walks by.
     else if (flag === '--node-modules' || flag === '--skip-dir') { args[flag === '--skip-dir' ? 'skipDirs' : 'nodeModules'].push(value); i++; }
+    // THE EXE BUILD RUNNING THIS MAP, part of the setup hash: rust derives tables from these rows (see `setup`).
+    else if (flag === '--build') { args.build = value; i++; }
     else if (flag === '--db') { args.db = value; i++; }
     else if (flag === '--html') { args.html = value; i++; }
     else if (flag === '--plan') { args.plan = value; i++; }

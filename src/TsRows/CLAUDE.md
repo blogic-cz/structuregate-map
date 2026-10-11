@@ -12,9 +12,10 @@ nodes, render edges, input uses, routes and what each can reach - 53 tables with
 plus `diagnostics` (what the extraction could not answer: a count with no names cannot be checked). Every row
 carries `half = "typescript"`.
 
-**BUMP `rows` IN THE SETUP HASH (`TsMap.mjs`) WITH EVERY CHANGE TO WHAT A ROW CARRIES** - and with every change to
-a table rust DERIVES from these rows (`gate_values`, `key_reach`, the stylesheet tables): an unchanged tree skips node and
-keeps its rows, so a deployed exe that adds a column reads a consumer's tree as unchanged for ever. The comment
+**BUMP `rows` IN THE SETUP HASH (`TsMap.mjs`) WITH EVERY CHANGE TO WHAT A ROW CARRIES**: an unchanged tree skips node and
+keeps its rows, so a deployed exe that adds a column reads a consumer's tree as unchanged for ever. A change only to a
+table rust DERIVES from these rows (`gate_values`, `key_reach`, `render_path`, the stylesheet tables) needs no bump: the
+running build is in the setup (`--build`) and in rust's key, so every release re-reads an unchanged tree once. The comment
 above it lists what each number added; add a line.
 
 **THE MAP STATES WHAT SQLITE CANNOT RECORD** - no foreign keys, no arrays, no note of which column reaches a

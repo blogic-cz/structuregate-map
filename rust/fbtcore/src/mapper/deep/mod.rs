@@ -464,6 +464,9 @@ fn angular_arguments(deep: &Deep) -> Vec<String> {
     arguments.extend(deep.skip.iter().cloned());
     arguments.extend(deep.ts_config.iter().cloned());
     arguments.extend(deep.ts_html.iter().cloned());
+    // THE RUNNING BUILD: rust derives `key_reach`, `render_path`, `gate_values` and `gate_features` inside this half, so a
+    // release that changes only that leaves every other input equal and an unchanged tree kept the last release's rows.
+    arguments.push(deep.build.clone());
     arguments
 }
 
