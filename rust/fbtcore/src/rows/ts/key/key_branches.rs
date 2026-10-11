@@ -469,12 +469,20 @@ pub fn literal_ways(store: &Store<'_>, branches: &Branches) -> IndexMap<String, 
     let (assignments, returns, calls) = (store.table("assignments"), store.table("returns"), store.table("calls"));
     let statements = assignments.iter().chain(returns.iter()).map(|r| (r, r.get("value").into_iter().collect::<Vec<_>>()))
         .chain(calls.iter().map(|c| (c, c.get("args").and_then(|a| a.as_array()).into_iter().flatten().collect())));
+    // A `const` local arrow whose every call spells its parameters is read once per call, the hole bound: its own
+    // template is not a wildcard over every key its pieces match - see `key_follow::spelled_arrows`.
+    let (params, _) = super::key_fields::callables(store);
+    let spelled = super::key_follow::spelled_arrows(store, &params);
     for (row, values) in statements {
         let (Some(file), Some(line), Some(end)) = (cell(row, "owner_file"), number(row, "line"), number(row, "end_line")) else { continue };
         let mut found = Vec::new();
         let chain = branches.chain_of(row);
+        let own = cell(row, "member").and_then(|m| Some((params.get(&m)?, spelled.get(&m)?)));
         for v in values {
-            value_keys(v, &chain, &keys, &mut found);
+            match own {
+                Some((ps, lists)) => lists.iter().for_each(|args| value_keys(&super::key_follow::bind_args(v, ps, args), &chain, &keys, &mut found)),
+                None => value_keys(v, &chain, &keys, &mut found),
+            }
         }
         for (key, chain) in found {
             writes.entry(format!("{key} {file}")).or_default().push((line, end, chain));
