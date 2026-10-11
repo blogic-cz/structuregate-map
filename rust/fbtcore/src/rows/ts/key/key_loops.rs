@@ -244,8 +244,8 @@ fn substitute(ast: &Value, variable: &str, element: &Value, idx: &EnumIndex, hit
         Value::Array(items) => items.iter().map(|i| substitute(i, variable, element, idx, hits)).collect::<Option<Vec<_>>>().map(Value::Array),
         Value::Object(object) => {
             if is_read(ast)
-                && object.get("target").is_none_or(|t| t.is_null())
                 && let Some(name) = object.get("name").and_then(|n| n.as_str())
+                && object.get("target").is_none_or(|t| t.is_null() || property_of(t, name))
                 && let Some(receiver) = object.get("receiver")
                 && is_read(receiver)
                 && receiver.get("name").and_then(|n| n.as_str()) == Some(variable)
@@ -269,6 +269,13 @@ fn substitute(ast: &Value, variable: &str, element: &Value, idx: &EnumIndex, hit
         }
         other => Some(other.clone()),
     }
+}
+
+/// A `target` the reader stamped on `<variable>.<property>` because the list's element type is NAMED (an
+/// interface, a `type` alias or a class, in any file): it is that type's declaration of the same property, so
+/// the read is still the element's own value. A type literal written in place leaves no target at all.
+fn property_of(target: &Value, name: &str) -> bool {
+    target.get("name").and_then(Value::as_str) == Some(name)
 }
 
 /// A gate whose condition reads `<variable>.<property>` - the only gate a loop element can restrict.

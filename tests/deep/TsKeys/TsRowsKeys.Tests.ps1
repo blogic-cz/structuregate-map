@@ -204,8 +204,6 @@ Test-Case 'tsrows keys: a field holding an injected method call, and a list of o
     Assert-Line $g 'demo.tips.alpha | 1'
 }
 
-
-
 # A SERVICE'S KEY REACHES THE COMPONENT HOLDING ITS CALL THROUGH WHAT THE CALLEE HANDS BACK: a method returning another
 # method's call (`hop` -> `inner`), a translate call under `??` or `||`, and a list of objects returned from
 # both arms of an `if` (`items`) each linked nothing, and the key read as a `literal` in no component. The
@@ -257,6 +255,66 @@ Test-Case 'tsrows keys: a service key reaches its caller through a hop, a ?? or 
     Assert-Line $r 'demo.ored.Beta | field_binding | HostComponent'
     Assert-Line $r 'demo.items.a | field_binding | HostComponent'
     Assert-Line $r 'demo.items.b | field_binding | HostComponent'
+}
+
+# A SERVICE'S KEY REACHES THE CALLER THROUGH A HOP FROM ANY RETURN: a method whose call of another method sits under
+# an `if` (`oneIf`), after an early return (`dflt`), in a `switch` (`sw`) or two hops down an arm (`both`) linked
+# nothing, and the key read as a `literal` in no component. No condition is carried: the callee's branches test its
+# own parameter, which no gate shares. A key a return of such a method spells itself (`demo.mine.none`, and `pick`
+# above) is still not read: which of them renders is the branch's choice.
+Test-Case 'tsrows keys: a service key reaches its caller through a hop from a method with several returns' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/ids.ts' = "export enum Grade { Alpha = 1, Beta = 2 }`n"
+        'apps/shop/src/desc.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "import { Grade } from './ids';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class Words {`n  instant(key: string): string {`n    return key;`n  }`n}`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class DescService {`n" +
+            "  constructor(private words: Words) {}`n" +
+            "  oneIf(grade: Grade): string {`n    if (grade === Grade.Alpha) {`n      return this.p2(grade);`n    }`n    return 'demo.mine.none';`n  }`n" +
+            "  private p2(grade: Grade): string {`n    return this.words.instant(``demo.oneif.`${Grade[grade]}``);`n  }`n" +
+            "  dflt(grade: Grade): string {`n    if (grade === Grade.Alpha) {`n      return '-';`n    }`n    return this.p3(grade);`n  }`n" +
+            "  private p3(grade: Grade): string {`n    return this.words.instant(``demo.dflt.`${Grade[grade]}``);`n  }`n" +
+            "  sw(grade: Grade): string {`n    switch (grade) {`n      case Grade.Alpha:`n        return this.p4(grade);`n" +
+            "      default:`n        return '-';`n    }`n  }`n" +
+            "  private p4(grade: Grade): string {`n    return ``demo.sw.`${Grade[grade]}``;`n  }`n" +
+            "  both(grade: Grade): string {`n    if (grade === Grade.Alpha) {`n      return this.deep(grade);`n    }`n" +
+            "    return this.words.instant('demo.both.other');`n  }`n" +
+            "  private deep(grade: Grade): string {`n    return this.p5(grade);`n  }`n" +
+            "  private p5(grade: Grade): string {`n    return this.words.instant(``demo.both.`${Grade[grade]}``);`n  }`n" +
+            "}`n"
+        'apps/shop/src/host.component.ts' = "import { Component, Input, OnInit } from '@angular/core';`n" +
+            "import { Grade } from './ids';`n" +
+            "import { DescService } from './desc.service';`n" +
+            "@Component({ selector: 'app-host', standalone: true,`n" +
+            "  template: '<b [title]=`"b`">b</b><i [title]=`"c`">c</i><s [title]=`"d`">d</s><u [title]=`"e`">e</u>' })`n" +
+            "export class HostComponent implements OnInit {`n" +
+            "  @Input() grade: Grade = Grade.Alpha;`n" +
+            "  b!: string;`n  c!: string;`n  d!: string;`n  e!: string;`n" +
+            "  constructor(private desc: DescService) {}`n" +
+            "  ngOnInit() {`n    this.b = this.desc.oneIf(this.grade);`n    this.c = this.desc.dflt(this.grade);`n" +
+            "    this.d = this.desc.sw(this.grade);`n    this.e = this.desc.both(this.grade);`n  }`n" +
+            "}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},' +
+            '"demo":{"oneif":{"Alpha":"a","Beta":"b"},"mine":{"none":"z"},"dflt":{"Alpha":"c","Beta":"d"},' +
+            '"sw":{"Alpha":"e","Beta":"f"},"both":{"Alpha":"g","Beta":"h","other":"i"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["instant"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
+        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    Assert-Line $r 'demo.oneif.Alpha | field_binding | HostComponent'
+    Assert-Line $r 'demo.oneif.Beta | field_binding | HostComponent'
+    Assert-Line $r 'demo.dflt.Alpha | field_binding | HostComponent'
+    Assert-Line $r 'demo.dflt.Beta | field_binding | HostComponent'
+    Assert-Line $r 'demo.sw.Alpha | field_binding | HostComponent'
+    Assert-Line $r 'demo.sw.Beta | field_binding | HostComponent'
+    Assert-Line $r 'demo.both.Alpha | field_binding | HostComponent'
+    Assert-Line $r 'demo.both.other | field_binding | HostComponent'
+    # the key `oneIf` spells in its own second return is the branch's choice, and stays unread
+    Assert-NoLine $r 'demo.mine.none |'
 }
 }
 

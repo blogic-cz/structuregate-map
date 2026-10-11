@@ -297,6 +297,53 @@ Test-Case 'tsrows: a predicate constant a factory builds restricts to the list t
 }
 
 
+# THE OTHER WAYS A PROTOTYPE METHOD IS DEFINED, each in a file of extensions the predicates never import: a
+# `this` parameter (a type, not an argument), the test turned round (`other.some((x) => this.includes(x))`), the
+# assignment under `if (!Array.prototype.m)`, and `Object.defineProperty(Array.prototype, 'm', { value })`, whose
+# member is the one the prototype's TYPE declares. The controls: a guard naming another member defines nothing,
+# and a method assigned twice, once proving and once not, proves nothing - which runs last is not in the source.
+Test-Case 'tsrows: a prototype method a factory predicate calls is read however the extension defines it' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/kind-ids.ts' = "export enum Kind { Alpha = 1, Beta = 2, Gamma = 3 }`n"
+        'apps/shop/src/array.extensions.ts' = "export {};`n" +
+            "declare global { interface Array<T> { withThis(o: T[]): boolean; turned(o: T[]): boolean; guarded(o: T[]): boolean;`n" +
+            "  misguarded(o: T[]): boolean; defined(o: T[]): boolean; twice(o: T[]): boolean; } }`n" +
+            "Array.prototype.withThis = function <T>(this: T[], o: T[]): boolean { return this.some((x) => o.includes(x)); };`n" +
+            "Array.prototype.turned = function <T>(o: T[]): boolean { return o.some((x) => this.includes(x)); };`n" +
+            "if (!Array.prototype.guarded) {`n  Array.prototype.guarded = function <T>(o: T[]): boolean {`n    return this.some((x) => o.includes(x));`n  };`n}`n" +
+            "if (!Array.prototype.twice) {`n  Array.prototype.misguarded = function <T>(o: T[]): boolean { return this.some((x) => o.includes(x)); };`n}`n" +
+            "Object.defineProperty(Array.prototype, 'defined', { value: function <T>(this: T[], o: T[]): boolean { return this.some((x) => o.includes(x)); } });`n" +
+            "Array.prototype.twice = function <T>(o: T[]): boolean { return this.some((x) => o.includes(x)); };`n" +
+            "Array.prototype.twice = function <T>(o: T[]): boolean { return false; };`n"
+        'apps/shop/src/preds.ts' = "import { Kind } from './kind-ids';`n" +
+            "const make = (ids: Kind[]) => (...rest: Kind[]) => rest.withThis(ids);`n" +
+            "export const isW = make([Kind.Alpha]);`n" +
+            "const makeT = (ids: Kind[]) => (...rest: Kind[]) => rest.turned(ids);`nexport const isT = makeT([Kind.Beta]);`n" +
+            "const makeG = (ids: Kind[]) => (...rest: Kind[]) => rest.guarded(ids);`nexport const isG = makeG([Kind.Gamma]);`n" +
+            "const makeM = (ids: Kind[]) => (...rest: Kind[]) => rest.misguarded(ids);`nexport const isM = makeM([Kind.Alpha]);`n" +
+            "const makeD = (ids: Kind[]) => (...rest: Kind[]) => rest.defined(ids);`nexport const isD = makeD([Kind.Beta]);`n" +
+            "const makeTw = (ids: Kind[]) => (...rest: Kind[]) => rest.twice(ids);`nexport const isTw = makeTw([Kind.Gamma]);`n"
+        'apps/shop/src/ext.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { Kind } from './kind-ids';`n" +
+            "import { isW, isT, isG, isM, isD, isTw } from './preds';`n" +
+            "@Component({ selector: 'demo-ext', standalone: true, template: '<p *ngIf=`"isW(item.kind)`">w</p>" +
+            "<p *ngIf=`"isT(item.kind)`">t</p><p *ngIf=`"isG(item.kind)`">g</p><p *ngIf=`"isM(item.kind)`">m</p>" +
+            "<p *ngIf=`"isD(item.kind)`">d</p><p *ngIf=`"isTw(item.kind)`">tw</p>' })`n" +
+            "export class ExtComponent { isW = isW; isT = isT; isG = isG; isM = isM; isD = isD; isTw = isTw;`n" +
+            "  item: { kind: Kind } = { kind: Kind.Alpha }; }`n"
+    }
+    $made = New-TsRowsDb $tree
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsGateThroughSql
+    Assert-Exit $r 0
+    Assert-Line $r 'isW(item.kind) => Kind item.kind in ["Alpha"]'
+    Assert-Line $r 'isT(item.kind) => Kind item.kind in ["Beta"]'
+    Assert-Line $r 'isG(item.kind) => Kind item.kind in ["Gamma"]'
+    Assert-Line $r 'isD(item.kind) => Kind item.kind in ["Beta"]'
+    Assert-NoLine $r 'isM(item.kind) =>'
+    Assert-NoLine $r 'isTw(item.kind) =>'
+}
+
+
 # A STRUCTURAL DIRECTIVE'S CONFIG TAKEN FROM AN `*ngFor` ITEM is one branch per element, read like `c ? {..} : {..}`:
 # the gate permits the union, and a key rendered from element i is permitted by element i's value alone. The
 # control is the same config written as a literal. A list assigned once in `ngOnInit` is read like an initializer.

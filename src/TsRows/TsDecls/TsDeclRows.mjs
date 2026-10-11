@@ -6,7 +6,7 @@
 import { locationOf } from './TsNodes.mjs';
 
 export function makeDeclRows({ ts, store, modifiersOf, localExports, evalNode, paramsOf, typeText,
-  jsdocOf, collectBody, resolveRead }) {
+  jsdocOf, collectBody, resolveRead, resolveMember }) {
   /**
    * One row per declared name - `const a = 1, b = 2` is two consts, not one statement.
    *
@@ -61,21 +61,51 @@ export function makeDeclRows({ ts, store, modifiersOf, localExports, evalNode, p
    * AN AUGMENTATION'S BODY - `Array.prototype.overlaps = function (other) { ... }` - as a function row named by
    * what it assigns, with the `target` a CALL of the method resolves to: the checker gives the assigned name and
    * every `xs.overlaps(..)` the same declaration (the `declare global` signature), so that is the join, never the
-   * name. Only a `function` expression: an arrow's `this` is not the receiver.
+   * name. Only a `function` expression: an arrow's `this` is not the receiver. The same assignment under
+   * `if (!Array.prototype.overlaps)` (no `else`; the guard names what it assigns) defines it too, and so does
+   * `Object.defineProperty(Array.prototype, 'overlaps', { value: function ... })`.
    */
   function prototypeRow(statement, fid) {
-    const e = statement.expression;
-    if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return;
-    const { left, right } = e;
-    if (!ts.isPropertyAccessExpression(left) || !ts.isPropertyAccessExpression(left.expression)
-      || left.expression.name.text !== 'prototype' || !ts.isFunctionExpression(right)) return;
-    const target = resolveRead(left.name);
+    const inner = guarded(statement);
+    const found = definitionOf(inner);
+    if (!found) return;
+    const { name, target, fn } = found;
     const fnId = store.add('functions', 'fn', {
-      file: fid, name: left.getText(), exported: false, form: 'prototype-method',
-      params: paramsOf(right), returns: right.type ? right.type.getText() : typeText(right),
-      ...(target ? { target } : {}), ...locationOf(statement),
+      file: fid, name, exported: false, form: 'prototype-method',
+      params: paramsOf(fn), returns: fn.type ? fn.type.getText() : typeText(fn),
+      ...(target ? { target } : {}), ...locationOf(inner),
     });
-    if (right.body) collectBody(right.body, fnId, null);
+    if (fn.body) collectBody(fn.body, fnId, null);
+  }
+
+  const isPrototype = (n) => ts.isPropertyAccessExpression(n) && n.name.text === 'prototype';
+
+  /** What one statement defines on a prototype: its name, the member it resolves to, and the function. */
+  function definitionOf(statement) {
+    if (!statement || !ts.isExpressionStatement(statement)) return null;
+    const e = statement.expression;
+    if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const { left, right } = e;
+      if (!ts.isPropertyAccessExpression(left) || !isPrototype(left.expression) || !ts.isFunctionExpression(right)) return null;
+      return { name: left.getText(), target: resolveRead(left.name), fn: right };
+    }
+    if (!ts.isCallExpression(e) || e.expression.getText() !== 'Object.defineProperty') return null;
+    const [on, key, descriptor] = e.arguments;
+    if (!on || !isPrototype(on) || !key || !ts.isStringLiteral(key) || !descriptor
+      || !ts.isObjectLiteralExpression(descriptor)) return null;
+    const value = descriptor.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText() === 'value');
+    if (!value || !ts.isFunctionExpression(value.initializer)) return null;
+    return { name: `${on.getText()}.${key.text}`, target: resolveMember(on, key.text), fn: value.initializer };
+  }
+
+  /** `if (!X.prototype.m) { <one statement defining X.prototype.m> }` as that statement; any other `if` as nothing. */
+  function guarded(statement) {
+    if (!ts.isIfStatement(statement)) return statement;
+    const { expression: cond, thenStatement: then } = statement;
+    const inner = ts.isBlock(then) ? (then.statements.length === 1 ? then.statements[0] : null) : then;
+    if (statement.elseStatement || !inner || !ts.isPrefixUnaryExpression(cond)
+      || cond.operator !== ts.SyntaxKind.ExclamationToken) return null;
+    return definitionOf(inner)?.name === cond.operand.getText() ? inner : null;
   }
 
   return { constRows, functionRow, prototypeRow };

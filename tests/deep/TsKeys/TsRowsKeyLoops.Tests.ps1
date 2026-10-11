@@ -1,6 +1,7 @@
 <#
     The ELEMENTS of a list an `*ngFor` renders, when no one literal holds them all: a spread of a method's list,
-    one write per arm of an `if`, a method returning a list from each arm. A directive config over the loop's item
+    one write per arm of an `if`, a method returning a list from each arm - its element type written in place
+    or NAMED (an interface, a `type` alias, a class). A directive config over the loop's item
     is read once per element (`rust/fbtcore/src/rows/ts/key/key_loops.rs`), and the elements are collected by
     `key/key_loops.rs`. Its helpers are `TsRows.Helpers.ps1`.
 #>
@@ -11,8 +12,9 @@ if ($script:TsRowsModules -and $script:TsRowsPython) {
 
 # One component per file - a key literal in the component's own file links to it and hides the gap. The
 # template is the same in each; only how the class fills `cards` differs.
-function New-KeyLoopsCards([string]$Name, [string]$Class, [string]$Field, [string]$Body) {
-    return "import { Component, OnInit } from '@angular/core';`n" +
+function New-KeyLoopsCards([string]$Name, [string]$Class, [string]$Field, [string]$Body,
+        [string]$Type = '{ grade: Grade; label: string }[]', [string]$Import = '') {
+    return "import { Component, OnInit } from '@angular/core';`n" + $Import +
         "import { NgFor } from '@angular/common';`n" +
         "import { Grade } from './grades';`n" +
         "import { OnlyForDirective } from './only-for.directive';`n" +
@@ -24,7 +26,7 @@ function New-KeyLoopsCards([string]$Name, [string]$Class, [string]$Field, [strin
         "})`n" +
         "export class $Class implements OnInit {`n" +
         "  isCart = false;`n" +
-        "  cards: { grade: Grade; label: string }[]$Field;`n" +
+        "  cards: $Type$Field;`n" +
         $Body +
         "}`n"
 }
@@ -68,8 +70,31 @@ Test-Case 'tsrows: a config over an ngFor item reads every element the class can
             "    if (this.isCart) { return [{ grade: Grade.Alpha, label: 'demo.ret.alpha' }]; }`n" +
             "    return [{ grade: Grade.Beta, label: 'demo.ret.beta' }];`n" +
             "  }`n")
+        # A NAMED ELEMENT TYPE - an imported interface filled by a service, a `type` alias, a class - stamps the
+        # item's property read with that type's declaration; it is still the element's own value.
+        'apps/shop/src/tip.model.ts' = "import { Grade } from './grades';`n" +
+            "export interface TipModel { grade: Grade; label: string; }`n" +
+            "export type TipAlias = { grade: Grade; label: string };`n" +
+            "export class TipClass { grade: Grade; label: string; }`n"
+        'apps/shop/src/tips.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "import { Grade } from './grades';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class TipsService {`n" +
+            "  tips() { return [{ grade: Grade.Alpha, label: 'demo.named.alpha' }, { grade: Grade.Beta, label: 'demo.named.beta' }]; }`n" +
+            "}`n"
+        'apps/shop/src/named.component.ts' = New-KeyLoopsCards 'named' 'NamedComponent' '' (
+            "  constructor(private svc: TipsService) {}`n" +
+            "  ngOnInit() { this.cards = this.svc.tips(); }`n") 'TipModel[]' (
+            "import { TipModel } from './tip.model';`nimport { TipsService } from './tips.service';`n")
+        'apps/shop/src/alias.component.ts' = New-KeyLoopsCards 'alias' 'AliasComponent' '' (
+            "  ngOnInit() { this.cards = [{ grade: Grade.Alpha, label: 'demo.alias.alpha' }, { grade: Grade.Beta, label: 'demo.alias.beta' }]; }`n") 'TipAlias[]' (
+            "import { TipAlias } from './tip.model';`n")
+        'apps/shop/src/klass.component.ts' = New-KeyLoopsCards 'klass' 'KlassComponent' '' (
+            "  ngOnInit() { this.cards = [{ grade: Grade.Gamma, label: 'demo.klass.gamma' }]; }`n") 'TipClass[]' (
+            "import { TipClass } from './tip.model';`n")
         'apps/shop/src/assets/locales/en.json' = '{"demo":{"plain":{"alpha":"A"},"spread":{"alpha":"A","beta":"B"},' +
-            '"branch":{"alpha":"A","beta":"B"},"ret":{"alpha":"A","beta":"B"}}}'
+            '"branch":{"alpha":"A","beta":"B"},"ret":{"alpha":"A","beta":"B"},"named":{"alpha":"A","beta":"B"},' +
+            '"alias":{"alpha":"A","beta":"B"},"klass":{"gamma":"C"}}}'
     }
     $made = New-TsRowsDb $tree
     $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || json_extract(v.value, '$.dimension') || ' ' || " +
@@ -83,6 +108,11 @@ Test-Case 'tsrows: a config over an ngFor item reads every element the class can
     Assert-Line $k 'demo.branch.beta | appOnlyFor.grades in ["Beta"]'
     Assert-Line $k 'demo.ret.alpha | appOnlyFor.grades in ["Alpha"]'
     Assert-Line $k 'demo.ret.beta | appOnlyFor.grades in ["Beta"]'
+    Assert-Line $k 'demo.named.alpha | appOnlyFor.grades in ["Alpha"]'
+    Assert-Line $k 'demo.named.beta | appOnlyFor.grades in ["Beta"]'
+    Assert-Line $k 'demo.alias.alpha | appOnlyFor.grades in ["Alpha"]'
+    Assert-Line $k 'demo.alias.beta | appOnlyFor.grades in ["Beta"]'
+    Assert-Line $k 'demo.klass.gamma | appOnlyFor.grades in ["Gamma"]'
     # THE WRITE'S BRANCH, not the callee's: `build`'s `if` tests nothing the caller's gates share.
     $b = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || coalesce((SELECT group_concat(" +
         "json_extract(k.branch_senses, '$.""' || b.value || '""'), ',') FROM json_each(k.always_branches) b " +
