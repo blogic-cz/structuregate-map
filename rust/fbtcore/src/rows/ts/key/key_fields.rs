@@ -59,6 +59,11 @@ pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
 ///
 /// A RETURN THAT IS A TRANSLATE CALL (a method the config's `i18nCalls` names) holds the keys of its
 /// arguments: `return this.translate.get(`a.${Kind[kind]}`)` hands the field the key's text.
+///
+/// A RETURN IS FOLLOWED THROUGH what it hands back unchanged: a call of another method of one plain return
+/// (`hop(k) { return this.inner(k); }`), once per method so a cycle ends, and either side of a `??` or `||`
+/// (`return this.translate.get(k) ?? 'x'`). Neither side carries a condition: `x || 'k'` tests the call's own
+/// result, which is the key's text whenever the key renders, and nothing a gate reads.
 fn callee_keys(
     value: Option<&Value>,
     rows: &super::gate_tsrows::TsRows,
@@ -66,35 +71,82 @@ fn callee_keys(
     keys: &super::key_branches::KeySet,
     i18n: &[String],
 ) -> Vec<(String, Vec<String>)> {
-    let Some(ret) = callee_return(value, rows, one_return) else { return Vec::new() };
     let mut found = Vec::new();
-    value_keys(ret, &[], keys, &mut found);
-    let method = ret.get("$target").and_then(|t| t.get("name")).and_then(Value::as_str);
-    if method.is_some_and(|m| i18n.iter().any(|c| c == m)) {
-        for arg in ret.get("$args").and_then(Value::as_array).into_iter().flatten() {
-            value_keys(arg, &[], keys, &mut found);
-        }
-    }
+    let mut seen = std::collections::HashSet::new();
+    let reader = Returned { rows, one_return, keys, i18n };
+    reader.call(value, &mut seen, &mut found);
     for (_, chain) in found.iter_mut() {
         chain.retain(|link| !link.starts_with("tpl:"));
     }
     found
 }
 
-/// The value of the ONE plain return of the callee a call's `$target` names - what `callee_keys` and
-/// `key_loops` (a list of objects a method returns) both read.
-pub(super) fn callee_return<'a>(
-    value: Option<&Value>,
-    rows: &super::gate_tsrows::TsRows,
-    one_return: &std::collections::HashMap<String, &'a Row>,
-) -> Option<&'a Value> {
-    let target = value?.get("$target")?;
-    let ret = rows.member_named(target).and_then(|m| one_return.get(&m).copied())?;
-    ret.get("value")
+/// What `callee_keys` reads a callee's return with.
+struct Returned<'r, 'a> {
+    rows: &'r super::gate_tsrows::TsRows,
+    one_return: &'r std::collections::HashMap<String, &'a Row>,
+    keys: &'r super::key_branches::KeySet,
+    i18n: &'r [String],
 }
 
-/// Member id -> its ONE `returns` row, when it has no branch and no case.
-pub(super) fn one_returns(returns: &[Row]) -> std::collections::HashMap<String, &Row> {
+impl Returned<'_, '_> {
+    /// The keys of the ONE plain return of the member a call's `$target` names, each member read once.
+    fn call(&self, value: Option<&Value>, seen: &mut std::collections::HashSet<String>, out: &mut Vec<(String, Vec<String>)>) {
+        let Some(target) = value.and_then(|v| v.get("$target")) else { return };
+        let Some(member) = self.rows.member_named(target) else { return };
+        if !seen.insert(member.clone()) {
+            return;
+        }
+        if let Some(ret) = self.one_return.get(&member).and_then(|r| r.get("value")) {
+            self.held(ret, seen, out);
+        }
+    }
+
+    /// A return's own keys, then the keys it hands back through calls.
+    fn held(&self, ret: &Value, seen: &mut std::collections::HashSet<String>, out: &mut Vec<(String, Vec<String>)>) {
+        value_keys(ret, &[], self.keys, out);
+        self.through(ret, seen, out);
+    }
+
+    /// A translate call's arguments, another method's return, either side of a `??` or `||`.
+    fn through(&self, ret: &Value, seen: &mut std::collections::HashSet<String>, out: &mut Vec<(String, Vec<String>)>) {
+        if matches!(ret.get("$logic").and_then(Value::as_str), Some("??" | "||")) {
+            for side in ret.get("$operands").and_then(Value::as_array).into_iter().flatten() {
+                self.through(side, seen, out);
+            }
+            return;
+        }
+        let method = ret.get("$target").and_then(|t| t.get("name")).and_then(Value::as_str);
+        if method.is_some_and(|m| self.i18n.iter().any(|c| c == m)) {
+            for arg in ret.get("$args").and_then(Value::as_array).into_iter().flatten() {
+                value_keys(arg, &[], self.keys, out);
+            }
+            return;
+        }
+        self.call(Some(ret), seen, out);
+    }
+}
+
+/// THE ELEMENTS OF EVERY LIST A CALL'S CALLEE RETURNS, when every return of it is an array literal:
+/// `items(flag) { if (flag) { return [{ label: 'a' }]; } return [{ label: 'b' }]; }` is both elements. A
+/// return that is anything else reads nothing. The branches are not carried - they test the callee's
+/// parameters, which no gate shares, as `callee_keys` drops a `tpl:` link.
+pub(super) fn callee_lists(
+    value: Option<&Value>,
+    rows: &super::gate_tsrows::TsRows,
+    by_member: &std::collections::HashMap<String, Vec<&Row>>,
+) -> Option<Vec<Value>> {
+    let target = value?.get("$target")?;
+    let mut items = Vec::new();
+    for r in by_member.get(&rows.member_named(target)?)? {
+        let Some(Value::Array(xs)) = r.get("value") else { return None };
+        items.extend(xs.iter().cloned());
+    }
+    Some(items)
+}
+
+/// Member id -> every `returns` row of it.
+pub(super) fn returns_by_member(returns: &[Row]) -> std::collections::HashMap<String, Vec<&Row>> {
     let mut per_member: std::collections::HashMap<String, Vec<&Row>> = std::collections::HashMap::new();
     for r in returns.iter() {
         if let Some(member) = id_of(r, "member").filter(|m| !m.is_empty()) {
@@ -102,6 +154,11 @@ pub(super) fn one_returns(returns: &[Row]) -> std::collections::HashMap<String, 
         }
     }
     per_member
+}
+
+/// Member id -> its ONE `returns` row, when it has no branch and no case.
+pub(super) fn one_returns(returns: &[Row]) -> std::collections::HashMap<String, &Row> {
+    returns_by_member(returns)
         .into_iter()
         .filter_map(|(member, rs)| match rs.as_slice() {
             [r] if text(r, "branch").is_none() && text(r, "case").is_none() => Some((member, *r)),

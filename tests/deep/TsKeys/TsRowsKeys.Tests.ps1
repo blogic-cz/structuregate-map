@@ -204,6 +204,60 @@ Test-Case 'tsrows keys: a field holding an injected method call, and a list of o
     Assert-Line $g 'demo.tips.alpha | 1'
 }
 
+
+
+# A SERVICE'S KEY REACHES THE COMPONENT HOLDING ITS CALL THROUGH WHAT THE CALLEE HANDS BACK: a method returning another
+# method's call (`hop` -> `inner`), a translate call under `??` or `||`, and a list of objects returned from
+# both arms of an `if` (`items`) each linked nothing, and the key read as a `literal` in no component. The
+# service is in a file of its own: a key in the component's file links through that file and hides the gap.
+Test-Case 'tsrows keys: a service key reaches its caller through a hop, a ?? or || fallback and branched lists' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/ids.ts' = "export enum Grade { Alpha = 1, Beta = 2 }`n"
+        'apps/shop/src/desc.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "import { Grade } from './ids';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class Words {`n  instant(key: string): string {`n    return key;`n  }`n}`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class DescService {`n" +
+            "  constructor(private words: Words) {}`n" +
+            "  hop(grade: Grade): string {`n    return this.inner(grade);`n  }`n" +
+            "  private inner(grade: Grade): string {`n    return ``demo.hop.`${Grade[grade]}``;`n  }`n" +
+            "  wrapped(grade: Grade): string {`n    return this.words.instant(``demo.wrapped.`${Grade[grade]}``) ?? 'x';`n  }`n" +
+            "  ored(grade: Grade): string {`n    return this.words.instant(``demo.ored.`${Grade[grade]}``) || 'x';`n  }`n" +
+            "  items(flag: boolean) {`n    if (flag) {`n      return [{ label: 'demo.items.a' }];`n    }`n" +
+            "    return [{ label: 'demo.items.b' }];`n  }`n" +
+            "}`n"
+        'apps/shop/src/host.component.ts' = "import { Component, Input, OnInit } from '@angular/core';`n" +
+            "import { Grade } from './ids';`n" +
+            "import { DescService } from './desc.service';`n" +
+            "@Component({ selector: 'app-host', standalone: true,`n" +
+            "  template: '<b [title]=`"b`">b</b><i [title]=`"d`">d</i><s [title]=`"e`">e</s>' +`n" +
+            "    '<u *ngFor=`"let t of items`" [title]=`"t.label`">u</u>' })`n" +
+            "export class HostComponent implements OnInit {`n" +
+            "  @Input() grade: Grade = Grade.Alpha;`n" +
+            "  b!: string;`n  d!: string;`n  e!: string;`n  items!: { label: string }[];`n" +
+            "  constructor(private desc: DescService) {}`n" +
+            "  ngOnInit() {`n    this.b = this.desc.hop(this.grade);`n    this.d = this.desc.wrapped(this.grade);`n" +
+            "    this.e = this.desc.ored(this.grade);`n    this.items = this.desc.items(true);`n  }`n" +
+            "}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},' +
+            '"demo":{"hop":{"Alpha":"a","Beta":"b"},"wrapped":{"Alpha":"c","Beta":"d"},' +
+            '"ored":{"Alpha":"e","Beta":"f"},"items":{"a":"g","b":"h"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["instant"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
+        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    Assert-Line $r 'demo.hop.Alpha | field_binding | HostComponent'
+    Assert-Line $r 'demo.hop.Beta | field_binding | HostComponent'
+    Assert-Line $r 'demo.wrapped.Alpha | field_binding | HostComponent'
+    Assert-Line $r 'demo.wrapped.Beta | field_binding | HostComponent'
+    Assert-Line $r 'demo.ored.Alpha | field_binding | HostComponent'
+    Assert-Line $r 'demo.ored.Beta | field_binding | HostComponent'
+    Assert-Line $r 'demo.items.a | field_binding | HostComponent'
+    Assert-Line $r 'demo.items.b | field_binding | HostComponent'
+}
 }
 
 # A CONSTANT JOINED IN FRONT WITH `+` IS PART OF THE KEY A TEMPLATE SPELLS: `BASE + (child ? `.${name}.tipChild` :

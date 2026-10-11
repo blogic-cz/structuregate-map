@@ -6,7 +6,7 @@
 import { locationOf } from './TsNodes.mjs';
 
 export function makeDeclRows({ ts, store, modifiersOf, localExports, evalNode, paramsOf, typeText,
-  jsdocOf, collectBody }) {
+  jsdocOf, collectBody, resolveRead }) {
   /**
    * One row per declared name - `const a = 1, b = 2` is two consts, not one statement.
    *
@@ -57,5 +57,26 @@ export function makeDeclRows({ ts, store, modifiersOf, localExports, evalNode, p
     return fnId;
   }
 
-  return { constRows, functionRow };
+  /**
+   * AN AUGMENTATION'S BODY - `Array.prototype.overlaps = function (other) { ... }` - as a function row named by
+   * what it assigns, with the `target` a CALL of the method resolves to: the checker gives the assigned name and
+   * every `xs.overlaps(..)` the same declaration (the `declare global` signature), so that is the join, never the
+   * name. Only a `function` expression: an arrow's `this` is not the receiver.
+   */
+  function prototypeRow(statement, fid) {
+    const e = statement.expression;
+    if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return;
+    const { left, right } = e;
+    if (!ts.isPropertyAccessExpression(left) || !ts.isPropertyAccessExpression(left.expression)
+      || left.expression.name.text !== 'prototype' || !ts.isFunctionExpression(right)) return;
+    const target = resolveRead(left.name);
+    const fnId = store.add('functions', 'fn', {
+      file: fid, name: left.getText(), exported: false, form: 'prototype-method',
+      params: paramsOf(right), returns: right.type ? right.type.getText() : typeText(right),
+      ...(target ? { target } : {}), ...locationOf(statement),
+    });
+    if (right.body) collectBody(right.body, fnId, null);
+  }
+
+  return { constRows, functionRow, prototypeRow };
 }

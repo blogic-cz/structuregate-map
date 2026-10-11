@@ -12,6 +12,7 @@
 //! | `route_path`      | a key inside `{{ }}` in a string — a route path that IS a key |
 //! | `literal`         | a string literal equal to a key — the file says it, nothing proves it is used AS one |
 
+use super::key_arms::template_arms;
 use super::key_branches::{literal_ways, value_keys, Branches};
 use super::sourcescan::braced_names;
 use super::store::{Row, Store};
@@ -185,13 +186,33 @@ pub fn key_routes(
         .filter_map(|t| text(t, "key"))
         .collect();
 
+    // A KEY THE EXPRESSION CHOOSES holds the arm it sits in, one way per literal of it - see
+    // `key_arms::template_arms`. No literal of it found is the one way with no arm.
+    let expressions = store.table("expressions");
+    let ast_of: std::collections::HashMap<String, &Value> = expressions
+        .iter()
+        .filter_map(|e| Some((present(e, "id")?, e.get("ast")?)))
+        .collect();
+    let arm_ways = |row: &Row, key: &str| -> Vec<Vec<String>> {
+        let Some((expr, ast)) = present(row, "expression").and_then(|x| ast_of.get(&x).map(|a| (x, *a))) else {
+            return Vec::new();
+        };
+        let mut ways: Vec<Vec<String>> = Vec::new();
+        for (_, chain) in template_arms(&expr, ast).0.into_iter().filter(|(v, _)| v == key) {
+            if !ways.contains(&chain) {
+                ways.push(chain);
+            }
+        }
+        ways
+    };
+
     // 1. A carrier on a template node.
     for r in store.table("i18n_refs").iter() {
         let (Some(key), Some(node)) = (text(r, "key"), present(r, "node")) else {
             continue;
         };
         let Some(n) = node_by_id.get(&node) else { continue };
-        routes.put(&key, "template", text(n, "component"), gate_chain(n), Some(&node));
+        routes.put_ways(&key, "template", text(n, "component"), gate_chain(n), &arm_ways(r, &key), Some(&node));
     }
 
     // 2. A string inside a template expression, on the same kind of node.
@@ -202,7 +223,7 @@ pub fn key_routes(
             continue;
         }
         let Some(n) = node_by_id.get(&node) else { continue };
-        routes.put(&value, "template_string", text(n, "component"), gate_chain(n), Some(&node));
+        routes.put_ways(&value, "template_string", text(n, "component"), gate_chain(n), &arm_ways(s, &value), Some(&node));
     }
 
     let components = store.table("components");
@@ -257,7 +278,6 @@ pub fn key_routes(
         }
     }
     let mut uses: IndexMap<String, Vec<(&Row, String)>> = IndexMap::new();
-    let expressions = store.table("expressions");
     for e in expressions.iter() {
         let Some(n) = present(e, "node").and_then(|x| node_by_id.get(&x).copied()) else { continue };
         for name in e.get("pipes").and_then(|p| p.as_array()).into_iter().flatten().filter_map(|v| v.as_str()) {

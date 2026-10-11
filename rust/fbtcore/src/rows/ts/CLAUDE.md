@@ -70,7 +70,7 @@ requires and which enum members it still permits.
   'b'` holds `c`/`!c`, `x && 'k'` holds `x`, `x || 'k'` holds `!x`, `??` nothing - the link is the condition's
   `expressions` id, `!`-prefixed when negated. A GETTER's returns are its writes; a method's are not (its
   branches may test parameters), except that a field HOLDING ITS CALL reads the method's ONE plain return (`key_fields.rs`; no branch, no
-  second return, its `tpl:` links dropped; a return that is a call of a configured `i18nCalls` method holds its arguments' keys). **A KEY IN A LIST OF OBJECTS** (`tips = [{ tooltip: 'k' }]`, or a call returning one, or either written once with a plain `=` by the field's own class and initialised with nothing) is a site only where an `*ngFor` over the field has its loop variable's property read (`t.tooltip`, `key/key_loops.rs`), at THAT node with ITS `gate_chain`; the whole field's read would drop every condition inside the loop from `always_gates`, and a list no `*ngFor` reads stays a `literal`. A translation call (`ts_call`) takes its own row's chain; a literal the chain
+  second return, its `tpl:` links dropped; a return that is a call of a configured `i18nCalls` method holds its arguments' keys; a return is followed through a call of another one-return method and either side of `??`/`||`, no condition carried). **A KEY IN A LIST OF OBJECTS** (`tips = [{ tooltip: 'k' }]`, a call returning one from every return, a `...` spread of such a call, or the union of every plain `=` the field's own class writes when it is initialised with nothing or `[]` - each element under its write's branches, a callee's branches not carried) is a site only where an `*ngFor` over the field has its loop variable's property read (`t.tooltip`, `key/key_loops.rs`), at THAT node with ITS `gate_chain`; the whole field's read would drop every condition inside the loop from `always_gates`, and a list no `*ngFor` reads stays a `literal`. A translation call (`ts_call`) takes its own row's chain; a literal the chain
   of the innermost assignment, `return` or argument holding it; a PIPE's `transform` key renders at every node
   applying the pipe (route `pipe`). `key_reach` adds `always_branches`/`maybe_branches` and `branch_senses`
   (`then`/`else`/`case`/`loop`/`bind`/`either`; `always_branches`/`maybe_branches` can carry `loop:`, `bind:` and `or:` ids); `always_gates` still names `gates` rows only.
@@ -90,7 +90,7 @@ requires and which enum members it still permits.
   already reads. An arrow property returns like a METHOD (#8: the extractor writes its implicit `returns`).
 - **A PREDICATE A FACTORY BUILDS** (`gate/ts/gate_curried.rs`): `const isA = make([Kind.A])` over `make = (ids) =>
   (k) => ids.includes(k)` - the factory found by the call's `$target`, its one unconditional return an arrow whose one
-  return tests the INNER parameter in the OUTER one's list - or a REST parameter's `rest.some((x) => ids.includes(x))` -
+  return tests the INNER parameter in the OUTER one's list - or a REST parameter's `rest.some((x) => ids.includes(x))`, `ids.includes(rest[0])`, or `rest.m(ids)` over an `Array.prototype.m = function (o) { return this.some((x) => o.includes(x)); }` (joined by the call's `target`: the extractor files the assignment as a `prototype-method` function row; never by the name) -
   is `in [A]` (`not_in` negated), the list being the call's constant argument (`$args`). A variable or a spread handed over, a second parameter or a second return is unread.
 - **AN OR IS THE UNION OF ITS SIDES** (#10, `gate/gate_collapse.rs::either`); `!(a && b)` is `!a || !b`. A
   dimension one side says nothing of is no row, `unknown` on either side is `unknown`, a SET dimension unions
@@ -128,6 +128,9 @@ requires and which enum members it still permits.
   condition becomes the literal `false` is no way. The child writing the flag itself is still unread.
 - **A KEY CHOSEN IN A CONDITIONAL ARM takes the arm** (#11): the extractor stamps `choices` on each statement
   row inside an arm; the i18n ref joins it through `i18n_refs.call` and `key_reach` folds it like a branch.
+  A key a TEMPLATE expression chooses (`[text]="c ? 'a' : 'b'"`, `x && 'k'`, `x || 'k'`, inside a pipe or a
+  call too) holds its arm as `arm:<expression>#<n>` (#16, `key/key_arms.rs`): the condition's
+  subtree is read as a `gates` tree is, so `c` restricts exactly as `*ngIf="c"` does.
 - **A COMPONENT A FACTORY RETURNS UNDER A `case` OR `if` RENDERS UNDER IT** (#13, `key/key_returned.rs`): a
   dynamic render's `renders.return_ways` lists the `returns` rows each way the class came through; the edge
   holds the branches and cases EVERY way holds (one case and no case hold nothing; two or more cases, each alone
@@ -159,3 +162,8 @@ does not move.
 **#15 - several cases returning one class are either of them** (signed off; replaces "two cases hold nothing" of #13).
 Tables that move: `render_path.branches` (an `or:` id) and `key_reach` `always_branches`, `always_values` and
 `branch_senses`, for keys behind such a render. `renders` and `gate_values` do not move.
+
+**#16 - a key a template expression chooses holds its arm** (signed off; the template half of #11). Tables that
+move: `key_reach` `always_values`, `unreadable_values`, `always_features`, `maybe_features`, `always_branches`,
+`maybe_branches`, `branch_senses` and `n_paths` (a key in both arms is two ways), for keys chosen by a ternary, `&&`
+or `||` inside a template expression. `gate_values` and `render_path` do not move.
