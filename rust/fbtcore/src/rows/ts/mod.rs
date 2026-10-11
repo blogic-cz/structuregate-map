@@ -59,6 +59,8 @@ pub mod key_built;
 pub mod key_fields;
 #[path = "key/fields/key_follow.rs"]
 pub mod key_follow;
+#[path = "key/key_lists.rs"]
+pub mod key_lists;
 #[path = "key/key_loops.rs"]
 pub mod key_loops;
 #[path = "key/key_dead.rs"]

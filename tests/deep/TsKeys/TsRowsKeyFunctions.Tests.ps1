@@ -53,3 +53,43 @@ Test-Case 'tsrows keys: a call of a free function hands the keys it returns to t
     Assert-NoLine $r 'demo.fn.gamma.label | field_binding | HostComponent'
 }
 }
+
+if ($script:TsRowsModules -and $script:TsRowsPython) {
+
+Test-Case 'tsrows keys: a list a free function returns is read per element where an ngFor reads the property' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/ids.ts' = "export enum Kind { Alpha = 1, Beta = 2 }`n" +
+            "export interface Box { kind: Kind; label: string; tip: string; note: string }`n"
+        'apps/shop/src/boxes.ts' = "import { Box, Kind } from './ids';`n" +
+            "export const getBoxes = (kind: Kind, on: boolean): Box[] => {`n" +
+            "  const label = (name: string) => ``demo.box.`${name}.label``;`n" +
+            "  const tip = (name: string) => on ? ``demo.box.tips.`${name}`` : '';`n" +
+            "  const boxes: Box[] = [`n" +
+            "    { kind: Kind.Alpha, label: label('alpha'), tip: tip('alphaTip'), note: label('gamma') },`n" +
+            "    { kind: Kind.Beta, label: label('beta'), tip: tip('betaTip'), note: label('delta') },`n" +
+            "  ];`n" +
+            "  return boxes.filter((x) => x.kind !== kind);`n};`n"
+        'apps/shop/src/host.component.ts' = "import { Component, OnInit } from '@angular/core';`n" +
+            "import { Box, Kind } from './ids';`n" +
+            "import { getBoxes } from './boxes';`n" +
+            "@Component({ selector: 'demo-host', standalone: true, template: '<li *ngFor=\`"let b of boxes\`">{{ b.label }} {{ b.tip }}</li>' })`n" +
+            "export class HostComponent implements OnInit {`n" +
+            "  kind = Kind.Alpha;`n  boxes: Box[] = [];`n" +
+            "  ngOnInit() {`n    this.boxes = getBoxes(this.kind, true);`n  }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"box":{"alpha":{"label":"a"},"beta":{"label":"b"},' +
+            '"gamma":{"label":"g"},"delta":{"label":"d"},"tips":{"alphaTip":"x","betaTip":"y"}}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
+        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    Assert-Line $r 'demo.box.alpha.label | field_binding | HostComponent'
+    Assert-Line $r 'demo.box.beta.label | field_binding | HostComponent'
+    Assert-Line $r 'demo.box.tips.alphaTip | field_binding | HostComponent'
+    Assert-Line $r 'demo.box.tips.betaTip | field_binding | HostComponent'
+    # `note` is read by no template
+    Assert-NoLine $r 'demo.box.gamma.label | field_binding | HostComponent'
+    Assert-NoLine $r 'demo.box.delta.label | field_binding | HostComponent'
+}
+}
