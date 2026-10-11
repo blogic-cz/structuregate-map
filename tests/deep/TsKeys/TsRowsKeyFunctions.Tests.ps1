@@ -166,3 +166,111 @@ Test-Case 'tsrows keys: a local arrow handed a string enum member spells its val
     Assert-Line $r 'demo.var.two | literal | HostComponent'
 }
 }
+
+if ($script:TsRowsModules -and $script:TsRowsPython) {
+
+Test-Case 'tsrows keys: a getter returning a call hands the template the keys the callee returns' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/translate.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class TranslateService {`n  getTranslation(key: string): string {`n    return key;`n  }`n}`n"
+        'apps/shop/src/desc.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class DescService {`n" +
+            "  constructor(private t: TranslateService) {}`n" +
+            "  single(): string { return this.t.getTranslation('demo.single'); }`n" +
+            "  unused(): string { return this.t.getTranslation('demo.unused'); }`n}`n"
+        'apps/shop/src/fn.ts' = "import { TranslateService } from './translate.service';`n" +
+            "export function plain(t: TranslateService) { return t.getTranslation('demo.free'); }`n" +
+            "export function other(t: TranslateService) { return t.getTranslation('demo.other'); }`n"
+        'apps/shop/src/host.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "import { DescService } from './desc.service';`n" +
+            "import { plain, other } from './fn';`n" +
+            "@Component({ selector: 'demo-host', standalone: true, template: '{{ a }} {{ b }} {{ c }}' })`n" +
+            "export class HostComponent {`n  @Input() on = false;`n" +
+            "  constructor(private t: TranslateService, private d: DescService) {}`n" +
+            "  get a(): string { return this.d.single(); }`n" +
+            "  get b(): string { return plain(this.t); }`n" +
+            "  get c(): string {`n    if (this.on) { return other(this.t); }`n    return '-';`n  }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"single":"a","unused":"b","free":"c","other":"d"}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
+        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    Assert-Line $r 'demo.single | field_binding | HostComponent'
+    Assert-Line $r 'demo.free | field_binding | HostComponent'
+    Assert-Line $r 'demo.other | field_binding | HostComponent'
+    # a service method no getter or field calls is no site
+    Assert-NoLine $r 'demo.unused | field_binding'
+}
+}
+
+if ($script:TsRowsModules -and $script:TsRowsPython) {
+
+Test-Case 'tsrows keys: a getter returning the translate call itself keeps its component beside one reaching the key through a call' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/translate.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class TranslateService {`n  getTranslation(key: string): string {`n    return key;`n  }`n}`n"
+        'apps/shop/src/alpha.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "@Component({ selector: 'demo-alpha', standalone: true, template: '{{ tip }}' })`n" +
+            "export class AlphaComponent {`n  constructor(private t: TranslateService) {}`n" +
+            "  private pick(n: number): string { if (n) { return this.t.getTranslation('demo.shared'); } return ''; }`n" +
+            "  get tip(): string { return this.pick(1); }`n}`n"
+        'apps/shop/src/beta.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "@Component({ selector: 'demo-beta', standalone: true, template: '<span [title]=\`"tip\`">x</span>' })`n" +
+            "export class BetaComponent {`n  ok = true;`n  constructor(private t: TranslateService) {}`n" +
+            "  get tip(): string {`n    if (!this.ok) { return this.t.getTranslation('demo.shared'); }`n" +
+            "    return this.t.getTranslation('demo.beta');`n  }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"shared":"a","beta":"b"}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
+        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    Assert-Line $r 'demo.shared | field_binding | AlphaComponent'
+    Assert-Line $r 'demo.shared | field_binding | BetaComponent'
+    Assert-Line $r 'demo.beta | field_binding | BetaComponent'
+}
+}
+
+if ($script:TsRowsModules -and $script:TsRowsPython) {
+
+Test-Case 'tsrows keys: a stronger route in one component never drops the components a weaker route reaches' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/translate.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class TranslateService {`n  getTranslation(key: string): string {`n    return key;`n  }`n}`n"
+        'apps/shop/src/alpha.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "@Component({ selector: 'demo-alpha', standalone: true, template: '{{ tip }}' })`n" +
+            "export class AlphaComponent {`n  constructor(private t: TranslateService) {}`n" +
+            "  get tip(): string { return this.t.getTranslation('demo.shared'); }`n}`n"
+        'apps/shop/src/beta.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "@Component({ selector: 'demo-beta', standalone: true, template: '<p>x</p>' })`n" +
+            "export class BetaComponent {`n  constructor(private t: TranslateService) {}`n" +
+            "  run(): void { this.t.getTranslation('demo.shared'); }`n}`n"
+        'apps/shop/src/gamma.component.ts' = "import { Component } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-gamma', standalone: true, template: '<p>x</p>' })`n" +
+            "export class GammaComponent {`n  readonly key = 'demo.shared';`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"shared":"a"}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
+        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    # the route is the strongest present; every component any site reaches stays listed
+    Assert-Line $r 'demo.shared | field_binding | AlphaComponent'
+    Assert-Line $r 'demo.shared | field_binding | BetaComponent'
+    Assert-Line $r 'demo.shared | field_binding | GammaComponent'
+}
+}
