@@ -145,7 +145,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
         // it points at.
         ...(refs && refs.size ? { write_refs: Object.fromEntries(refs) } : {}),
       });
-    }, readRefs.resolveRead, readRefs.resolveName, log);
+    }, readRefs.resolveRead, readRefs.resolveName, log, readRefs.resolveLocal);
     const { evalNode, propName } = makeEvaluator(ts, checker, symbolAt, describe);
     const typeRows = makeTypeRows({
       ts, checker, store, modifiersOf, typeRefAt, evalNode, propName, fileId,
@@ -276,7 +276,41 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
       else if (rereads.checked.has(rel)) store.patch(fid, { surface: rereads.checked.get(rel) });
     }
   }
+  linkFunctions(store);
   return { inAnyProgram, registry, components };
+}
+
+/**
+ * A FUNCTION A CALL IS HANDED NAMES ITS `functions` ROW (`$fn_id`), beside the `$expr_id` of its tree.
+ *
+ * Joined by position the two agreed for an inline arrow and not for `.map(getTotal)`: that `$fn` is the arrow of
+ * the `const`, whose expression starts at the arrow while its `functions` row sits at the const's NAME. So a
+ * function-valued declaration (`consts`, `members`, `locals` holding a `$fn`) lends its own position. After every
+ * project, since a call can hand over a function declared in a file walked later; a row a partial run was handed
+ * is left as it arrived (`Store.verifyUntouched`).
+ */
+function linkFunctions(store) {
+  const at = (r) => `${r.file} ${r.line} ${r.col}`;
+  const fnAt = new Map();
+  for (const f of store.table('functions')) if (!fnAt.has(at(f))) fnAt.set(at(f), f.id);
+  const declAt = new Map();
+  for (const table of ['consts', 'members', 'locals']) {
+    for (const r of store.table(table)) {
+      const x = r.value?.$fn !== undefined ? r.value.$expr_id : undefined;
+      if (x !== undefined && !declAt.has(x)) declAt.set(x, at(r));
+    }
+  }
+  const visit = (v) => {
+    if (Array.isArray(v)) { v.forEach(visit); return; }
+    if (v === null || typeof v !== 'object') return;
+    if (v.$fn !== undefined && v.$expr_id !== undefined && v.$fn_id === undefined) {
+      const x = store.rowOf(v.$expr_id);
+      const id = (x !== undefined ? fnAt.get(at(x)) : undefined) ?? fnAt.get(declAt.get(v.$expr_id));
+      if (id !== undefined) v.$fn_id = id;
+    }
+    for (const k of Object.keys(v)) visit(v[k]);
+  };
+  for (const c of store.table('calls')) if (!store.hydrated.has(c)) visit(c.args);
 }
 
 /**

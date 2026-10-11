@@ -136,22 +136,26 @@ Test-Case 'tsrows: a flag assigned from a service method restricts what the meth
 }
 
 # A LIST HELD IN A FIELD restricts like one held in a module `const`: `this.allowed.includes(...)` reads the
-# field the method is called on, which only a `target` on that inner read names.
+# field the method is called on, which only a `target` on that inner read names. Copied through a `const` local
+# first, the flag reads the local's initializer.
 Test-Case 'tsrows: a flag assigned from includes over a field list restricts like one over a const' {
     $made = New-TsRowsDb (New-TsRowsWorkspace @{
         'apps/shop/src/panel.component.ts' = "import { Component, Input, OnInit } from '@angular/core';`n" +
             "export enum Kind { Alpha = 1, Beta = 2, Gamma = 3, Delta = 4, Omega = 5 }`n" +
             "const SHOWN = [Kind.Gamma];`n" +
             "@Component({ selector: 'app-panel', standalone: true,`n" +
-            "  template: '<b *ngIf=`"visible`">a</b><i *ngIf=`"shown`">b</i>' })`n" +
+            "  template: '<b *ngIf=`"visible`">a</b><i *ngIf=`"shown`">b</i><s *ngIf=`"viaLocal`">c</s>' })`n" +
             "export class PanelComponent implements OnInit {`n" +
             "  private readonly allowed = [Kind.Alpha, Kind.Beta];`n" +
             "  @Input() kind: Kind = Kind.Alpha;`n" +
             "  visible = false;`n" +
             "  shown = false;`n" +
+            "  viaLocal = false;`n" +
             "  ngOnInit() {`n" +
             "    this.visible = this.allowed.includes(this.kind);`n" +
             "    this.shown = SHOWN.includes(this.kind);`n" +
+            "    const hop = this.allowed.includes(this.kind);`n" +
+            "    this.viaLocal = hop;`n" +
             "  }`n" +
             "}`n"
     })
@@ -159,6 +163,7 @@ Test-Case 'tsrows: a flag assigned from includes over a field list restricts lik
     Assert-Exit $r 0
     Assert-Line $r 'shown => Kind kind in ["Gamma"]'
     Assert-Line $r 'visible => Kind kind in ["Alpha","Beta"]'
+    Assert-Line $r 'viaLocal => Kind kind in ["Alpha","Beta"]'
 }
 
 # A PARTIAL RUN reads the edited service alone, and the closure - derived again from every row - moves the
@@ -250,18 +255,21 @@ Test-Case 'tsrows: a list handed to a structural directive restricts what the di
 
 # A PREDICATE BUILT BY A FACTORY (`isAlpha = makeCheck([Grade.Alpha])`, the factory a function returning an arrow
 # over the list it was given) is that list tested for membership, exact both ways. The control is the same test
-# written as the arrow itself, which an earlier reader already takes.
+# written as the arrow itself, which an earlier reader already takes. An inner arrow taking a REST parameter
+# (`(...rest) => rest.some((x) => ids.includes(x))`) is the same test of the one argument the call hands it.
 Test-Case 'tsrows: a predicate constant a factory builds restricts to the list the factory was handed' {
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/curried.component.ts' = "import { Component } from '@angular/core';`n" +
             "export enum Grade { Alpha = 1, Bravo = 2, Delta = 3 }`n" +
             "export const makeCheck = (ids: Grade[]) => (grade: Grade) => ids.includes(grade);`n" +
             "export const isAlpha = makeCheck([Grade.Alpha]);`n" +
+            "export const makeAny = (ids: Grade[]) => (...rest: Grade[]) => rest.some((x) => ids.includes(x));`n" +
+            "export const isAlphaOrDelta = makeAny([Grade.Alpha, Grade.Delta]);`n" +
             "export const isBravoOne = (grade: Grade) => [Grade.Bravo].includes(grade);`n" +
             "@Component({ selector: 'demo-curried', standalone: true,`n" +
-            "  template: '<b *ngIf=`"isAlpha(item.grade)`">a</b><i *ngIf=`"!isAlpha(item.grade)`">n</i><u *ngIf=`"isBravo(item.grade)`">b</u>' })`n" +
+            "  template: '<b *ngIf=`"isAlpha(item.grade)`">a</b><i *ngIf=`"!isAlpha(item.grade)`">n</i><u *ngIf=`"isBravo(item.grade)`">b</u><s *ngIf=`"isAD(item.grade)`">r</s>' })`n" +
             "export class CurriedComponent {`n" +
-            "  isAlpha = isAlpha;`n  isBravo = isBravoOne;`n" +
+            "  isAlpha = isAlpha;`n  isBravo = isBravoOne;`n  isAD = isAlphaOrDelta;`n" +
             "  item: { grade: Grade } = { grade: Grade.Delta };`n" +
             "}`n"
     }
@@ -271,12 +279,13 @@ Test-Case 'tsrows: a predicate constant a factory builds restricts to the list t
     Assert-Line $r 'isAlpha(item.grade) => Grade item.grade in ["Alpha"]'
     Assert-Line $r '!isAlpha(item.grade) => Grade item.grade not_in ["Alpha"]'
     Assert-Line $r 'isBravo(item.grade) => Grade item.grade in ["Bravo"]'
+    Assert-Line $r 'isAD(item.grade) => Grade item.grade not_in ["Bravo"]'
 }
 
 
 # A STRUCTURAL DIRECTIVE'S CONFIG TAKEN FROM AN `*ngFor` ITEM is one branch per element, read like `c ? {..} : {..}`:
 # the gate permits the union, and a key rendered from element i is permitted by element i's value alone. The
-# control is the same config written as a literal.
+# control is the same config written as a literal. A list assigned once in `ngOnInit` is read like an initializer.
 Test-Case 'tsrows: a config listing an ngFor item property restricts each key to its own element' {
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/grades.ts' = "export enum Grade { Alpha = 1, Beta = 2, Gamma = 3 }`n"
@@ -315,7 +324,26 @@ Test-Case 'tsrows: a config listing an ngFor item property restricts each key to
             "    { grade: Grade.Beta, label: 'demo.cards.beta' },`n" +
             "  ];`n" +
             "}`n"
-        'apps/shop/src/assets/locales/en.json' = '{"demo":{"cards":{"alpha":"A","beta":"B","lit":"L"}}}'
+        'apps/shop/src/later-cards.component.ts' = "import { Component, OnInit } from '@angular/core';`n" +
+            "import { NgFor } from '@angular/common';`n" +
+            "import { Grade } from './grades';`n" +
+            "import { OnlyForDirective } from './only-for.directive';`n" +
+            "import { LabelComponent } from './label.component';`n" +
+            "@Component({ selector: 'demo-later-cards', standalone: true, imports: [NgFor, OnlyForDirective, LabelComponent], template: ```n" +
+            "  <ng-container *ngFor=`"let t of cards`">`n" +
+            "    <ng-container *appOnlyFor=`"{ grades: [t.grade] }`"><app-label [text]=`"t.label`"></app-label></ng-container>`n" +
+            "  </ng-container>```n" +
+            "})`n" +
+            "export class LaterCardsComponent implements OnInit {`n" +
+            "  cards: { grade: Grade; label: string }[];`n" +
+            "  ngOnInit() {`n" +
+            "    this.cards = [`n" +
+            "      { grade: Grade.Alpha, label: 'demo.later.alpha' },`n" +
+            "      { grade: Grade.Beta, label: 'demo.later.beta' },`n" +
+            "    ];`n" +
+            "  }`n" +
+            "}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"cards":{"alpha":"A","beta":"B","lit":"L"},"later":{"alpha":"A","beta":"B"}}}'
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT g.source || ' => ' || v.dimension || ' ' || v.op || ' ' || " +
@@ -326,10 +354,12 @@ Test-Case 'tsrows: a config listing an ngFor item property restricts each key to
     Assert-Line $r '{ grades: [Grade.Alpha] } => appOnlyFor.grades in ["Alpha"] listed ["Alpha"]'
     $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || json_extract(v.value, '$.dimension') || ' ' || " +
         "json_extract(v.value, '$.op') || ' ' || json_extract(v.value, '$.values') AS reach " +
-        "FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'demo.cards.%'")
+        "FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'demo.cards.%' OR k.key LIKE 'demo.later.%'")
     Assert-Line $k 'demo.cards.alpha | appOnlyFor.grades in ["Alpha"]'
     Assert-Line $k 'demo.cards.beta | appOnlyFor.grades in ["Beta"]'
     Assert-Line $k 'demo.cards.lit | appOnlyFor.grades in ["Alpha"]'
+    Assert-Line $k 'demo.later.alpha | appOnlyFor.grades in ["Alpha"]'
+    Assert-Line $k 'demo.later.beta | appOnlyFor.grades in ["Beta"]'
     # ONE LINK, the config's: the `*ngFor` gate on the same chain reads no element, so it carries none.
     $b = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || (SELECT count(*) FROM json_each(k.always_branches) " +
         "WHERE value LIKE 'loop:%') AS links FROM key_reach k WHERE k.key = 'demo.cards.alpha'")

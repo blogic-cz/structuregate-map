@@ -138,7 +138,7 @@ export function makeBodyRows({ ts, store, evalNode, describe, declFileOf, declar
     // EVERY argument, not the first four. A call's fifth argument is as much a fact as its first, and the
     // cut was invisible: a consumer saw a complete-looking row that silently dropped the rest.
     const args = [...(node.arguments ?? [])].map((a) => evalNode(a));
-    store.add('calls', 'cl', {
+    const id = store.add('calls', 'cl', {
       ...inCase(),
       member: ownerId,
       callee: callee.getText(),
@@ -146,7 +146,19 @@ export function makeBodyRows({ ts, store, evalNode, describe, declFileOf, declar
       new: ts.isNewExpression(node),
       target, args, ...locationOf(node),
     });
+    // A CHAINED CALL NAMES THE CALL IT IS MADE ON (`receiver_call`): `a.b(1).then(f)` is two rows starting at one
+    // place, and a join on that place is ambiguous on a chain of three. The outer row is minted first - the walk
+    // reaches the receiver after it - so the receiver's node is remembered until its own row exists.
+    const outer = receiverOf.get(node);
+    if (outer !== undefined) {
+      store.rowOf(outer).receiver_call = id;
+      receiverOf.delete(node);
+    }
+    let receiver = ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee) ? callee.expression : null;
+    while (receiver && (ts.isParenthesizedExpression(receiver) || ts.isNonNullExpression(receiver))) receiver = receiver.expression;
+    if (receiver && (ts.isCallExpression(receiver) || ts.isNewExpression(receiver))) receiverOf.set(receiver, id);
   }
+  const receiverOf = new WeakMap();
 
   /**
    * WHAT A CLASS PROPERTY IS ASSIGNED FROM - the edge that turns a template gate into a reason.

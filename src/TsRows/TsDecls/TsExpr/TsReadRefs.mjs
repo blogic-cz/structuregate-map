@@ -59,5 +59,20 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     return { name: node.text, ...first, ...(rest.length ? { also: rest } : {}) };
   }
 
-  return { resolveRead, resolveName };
+  /**
+   * A BARE NAME DECLARED IN A BODY, as where its `locals` row sits: `{file, line, col}` of the declared
+   * name, the row's own `line` and `col`. Not a `target` - every reader takes a `Read` without one for a
+   * local - and only for a declaration that HAS a `locals` row (a named one with an initializer).
+   */
+  function resolveLocal(node) {
+    const decls = checker.getSymbolAtLocation(node)?.declarations ?? [];
+    if (decls.length !== 1) return null;
+    const [d] = decls;
+    if (!ts.isVariableDeclaration(d) || !ts.isIdentifier(d.name) || !d.initializer || moduleLevel(d)) return null;
+    const sf = d.getSourceFile();
+    const pos = sf.getLineAndCharacterOfPosition(d.name.getStart());
+    return { file: canonicalPath(sf.fileName), line: pos.line + 1, col: pos.character + 1 };
+  }
+
+  return { resolveRead, resolveName, resolveLocal };
 }

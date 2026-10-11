@@ -178,9 +178,11 @@ async function main() {
   // returns a component under rides `render_path.branches` into `key_reach` - the last derived in rust.
   // 31: a `this.` field a method is called on (`this.allowed.includes(v)`) carries its `target`.
   // 32: a function expression's tree (`Fn`) names its `params`, for a predicate a factory returns.
+  // 33: an `Fn` names its `rest` parameter, a `Read` of a body's local its declaration (`local`), a `$fn` call
+  // argument its `functions` row (`$fn_id`) and a chained call the call it is made on (`receiver_call`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 32,
+    config: config.file, data: config.data, rows: 33,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

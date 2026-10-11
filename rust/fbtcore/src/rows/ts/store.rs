@@ -267,6 +267,19 @@ impl<'a> Store<'a> {
         })
     }
 
+    /// A list the half's extraction was configured with (`_meta` `options:<half>`, e.g. `i18n_calls`), empty
+    /// when the database holds none - a store handed its rows has no `_meta` to read.
+    pub fn option_list(&self, name: &str) -> Vec<String> {
+        let Some(db) = self.db else { return Vec::new() };
+        let text: String = match db.query_row("SELECT value FROM _meta WHERE key = ?1", [format!("options:{}", self.half)], |r| r.get(0)) {
+            Ok(t) => t,
+            Err(_) => return Vec::new(),
+        };
+        let parsed: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        parsed.get(name).and_then(Value::as_array).into_iter().flatten()
+            .filter_map(|v| v.as_str().map(str::to_string)).collect()
+    }
+
     /// The rows exactly as node built them — already decoded, so nothing is parsed a
     /// second time. The closure cannot tell the two sources apart, which is the point.
     ///

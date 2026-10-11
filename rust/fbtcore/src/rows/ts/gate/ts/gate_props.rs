@@ -202,7 +202,12 @@ impl<'a> Props<'a> {
                         continue;
                     }
                     let exact = !input(m) && before_render(a, cell(m, "class").as_ref(), &lifecycle, &returns);
-                    if let Some(ast) = tree(cell(a, "expression"), cell(a, "member")) {
+                    // A BARE NAME HAS NO TREE (the extractor keeps none for a read chain), so `this.f = hop` is
+                    // spelled back as the read it is, and a `const` local resolves through its initializer.
+                    let named = cell(a, "source").filter(|t| !t.is_empty() && t.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$'));
+                    let bare = named.map(|n| rows.resolve_in(&json!({"k": "Read", "name": n, "receiver": {"k": "Implicit"}}),
+                        cell(a, "member").and_then(|m| bound.get(&m)).unwrap_or(&none), idx, cell(a, "member").as_deref()));
+                    if let Some(ast) = tree(cell(a, "expression"), cell(a, "member")).or(bare.filter(|b| b.get("k").and_then(Value::as_str) != Some("Read"))) {
                         out.insert(id, (ast, exact));
                     }
                 }

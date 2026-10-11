@@ -221,6 +221,9 @@ pub fn build_closure(
     let stage = crate::trace::stage("closure: values");
     let mem = member_enums(store, &idx);
     value_map.extend(case_values(store, &mem, &idx));
+    // SEVERAL CASES RETURNING ONE CLASS: either of them - see `key_returned::either_link`.
+    let either = super::key_returned::either_values(store, &branches, &value_map, &idx);
+    value_map.extend(either);
     // A KEY BUILT FROM AN ENUM MEMBER'S NAME requires that member - see `key_built`.
     let links: IndexSet<String> = routes.values()
         .flat_map(|h| h.sites.values().flatten().flatten())

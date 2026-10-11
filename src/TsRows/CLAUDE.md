@@ -49,7 +49,13 @@ runs) are compared by that, every carried field equal, never by `c:412`.
 
 `value` keeps only the last link of a call chain, so the rust readers need the TREE: `returns.expression`,
 `locals.expression`, `assignments.expression`, `branches.condition_expr`, `switch_cases.discriminant_expr` and
-`label_exprs`, always written, plus a `target` on a bare name that is a module-level const, function or enum.
+`label_exprs`, always written, plus a `target` on a bare name that is a module-level const, function or enum, and
+a `local` (`{file, line, col}`, its `locals` row's own place) on a bare name a body declares. An `Fn` tree names
+its `params` and its `rest` parameter.
+
+- **The rows join by id, not by position** (rows 33): a `$fn` call argument names its `functions` row (`$fn_id`,
+  `TsWalk.mjs::linkFunctions` - a `const` arrow's row sits at the NAME, its tree at the arrow), and a chained call
+  names the call it is made on (`calls.receiver_call`).
 
 - **An arrow-function PROPERTY returns like a METHOD** (divergence #8): `isMain = (id: P) => [P.A].some(...)`
   keeps its `members.value` (`{"$fn": ...}`), gains `members.params` and a `returns` row keyed on the member,
