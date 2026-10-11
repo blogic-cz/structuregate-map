@@ -59,6 +59,8 @@ pub mod key_built;
 pub mod key_fields;
 #[path = "key/fields/key_follow.rs"]
 pub mod key_follow;
+#[path = "key/fields/key_methods.rs"]
+pub mod key_methods;
 #[path = "key/key_lists.rs"]
 pub mod key_lists;
 #[path = "key/key_loops.rs"]
@@ -73,7 +75,7 @@ pub mod keyreach;
 pub mod key_literals;
 #[path = "key/key_returned.rs"]
 pub mod key_returned;
-#[path = "key/key_routes.rs"]
+#[path = "key/routes/key_routes.rs"]
 pub mod key_routes;
 pub mod sourcescan;
 pub mod sourcetrace;

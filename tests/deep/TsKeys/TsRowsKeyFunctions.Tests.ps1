@@ -274,3 +274,42 @@ Test-Case 'tsrows keys: a stronger route in one component never drops the compon
     Assert-Line $r 'demo.shared | field_binding | GammaComponent'
 }
 }
+
+if ($script:TsRowsModules -and $script:TsRowsPython) {
+
+Test-Case 'tsrows keys: a component method its template calls hands the template the keys it returns' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/translate.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class TranslateService {`n  getTranslation(key: string): string {`n    return key;`n  }`n}`n"
+        'apps/shop/src/desc.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class DescService {`n" +
+            "  constructor(private t: TranslateService) {}`n" +
+            "  single(): string { return this.t.getTranslation('demo.single'); }`n}`n"
+        'apps/shop/src/host.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "import { DescService } from './desc.service';`n" +
+            "@Component({ selector: 'demo-host', standalone: true, template: '{{ label() }} {{ direct() }} <span [title]=\`"tip(\'alpha\')\`">x</span>' })`n" +
+            "export class HostComponent {`n" +
+            "  constructor(private t: TranslateService, private d: DescService) {}`n" +
+            "  label(): string { return this.d.single(); }`n" +
+            "  direct(): string { return this.t.getTranslation('demo.direct'); }`n" +
+            "  tip(n: string): string { return this.t.getTranslation(``demo.tip.`${n}``); }`n" +
+            "  unseen(): string { return this.t.getTranslation('demo.unseen'); }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"single":"a","direct":"b","unseen":"c","tip":{"alpha":"d","beta":"e"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
+        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    Assert-Line $r 'demo.single | field_binding | HostComponent'
+    Assert-Line $r 'demo.direct | field_binding | HostComponent'
+    Assert-Line $r 'demo.tip.alpha | field_binding | HostComponent'
+    # the argument spells one key, and a method no template calls is no site
+    Assert-NoLine $r 'demo.tip.beta | field_binding'
+    Assert-NoLine $r 'demo.unseen | field_binding'
+}
+}

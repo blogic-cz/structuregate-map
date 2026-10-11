@@ -70,7 +70,7 @@ fn arms(v: &Value) -> Option<Vec<Value>> {
 
 /// The argument lists a call stands for: the product of each ternary-of-strings argument's arms, or the list
 /// itself when none is one or the product passes `MAX_SPELLINGS`.
-fn spellings(args: &[Value]) -> Vec<Vec<Value>> {
+pub(super) fn spellings(args: &[Value]) -> Vec<Vec<Value>> {
     let mut lists = vec![Vec::new()];
     for arg in args {
         let options = arms(arg).filter(|_| spell(arg).is_none()).unwrap_or_else(|| vec![arg.clone()]);
