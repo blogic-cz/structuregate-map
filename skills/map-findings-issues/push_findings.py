@@ -6,8 +6,8 @@ written in the consumer's own terms. None of that is sent. Only a finding's `pub
 {"title": "...", "body": "...", "attachments": [...]}, written generically - a minimal synthetic repro
 (`Demo.*`, `Alpha/Beta`, a few lines of made-up code), never the consumer's names, paths, ids, values,
 code or data. A finding without a `public` part is SKIPPED, and a public text holding any term of the
-deny list (`--deny`, default `public-deny.txt` beside the findings file: one term per line, matched
-case-insensitively) is REFUSED.
+deny list is REFUSED: every `--deny` file, `public-deny.txt` beside the findings file, and each file
+`STRUCTUREGATE_DENY` names (the tool owner's own list), one term per line, matched case-insensitively.
 
 Each OPEN finding tagged `map-gap` / `tool-gap` (or the tags you pass) becomes one issue, is edited when
 its public part changes, and is closed when the finding is resolved. One issue per finding, found again
@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -98,8 +99,9 @@ def main(argv=None) -> int:
     ap.add_argument("--project", help="name the issues carry (default: the findings file's git checkout)")
     ap.add_argument("--tags", default=",".join(DEFAULT_TAGS), help="comma list; a finding with any of them is filed")
     ap.add_argument("--account", help="gh account to act as (default: the active gh account)")
-    ap.add_argument("--deny", type=Path, help="terms a public text may not contain, one per line "
-                                               "(default: public-deny.txt beside the findings file)")
+    ap.add_argument("--deny", type=Path, action="append", default=[],
+                    help="terms a public text may not contain, one per line; repeatable (always read too: "
+                         "public-deny.txt beside the findings file and every file STRUCTUREGATE_DENY names)")
     ap.add_argument("--label", default=DEFAULT_LABEL,
                     help=f"label every filed issue carries; also the marker's prefix (default {DEFAULT_LABEL})")
     ap.add_argument("--files-branch", default=DEFAULT_FILES_BRANCH,
@@ -111,11 +113,16 @@ def main(argv=None) -> int:
     if not isinstance(findings, list):
         raise SystemExit("the findings file must be a JSON list of findings")
     tags = {t.strip() for t in args.tags.split(",") if t.strip()}
-    deny_file = args.deny or args.findings.parent / "public-deny.txt"
-    deny = [t.strip() for t in deny_file.read_text(encoding="utf-8").splitlines()
-            if t.strip() and not t.strip().startswith("#")] if deny_file.exists() else []
+    deny_files = [*args.deny, args.findings.parent / "public-deny.txt",
+                  *(Path(p) for p in os.environ.get("STRUCTUREGATE_DENY", "").split(os.pathsep) if p)]
+    missing = [str(d) for d in args.deny if not d.exists()]
+    if missing:
+        raise SystemExit(f"--deny file not found: {', '.join(missing)}")
+    deny = [t.strip() for d in deny_files if d.exists() for t in d.read_text(encoding="utf-8").splitlines()
+            if t.strip() and not t.strip().startswith("#")]
     if not deny:
-        print(f"WARNING: no deny list at {deny_file} - only the public texts' own wording keeps the consumer out")
+        print(f"WARNING: no deny list ({', '.join(map(str, deny_files))}) - only the public texts' own wording "
+              "keeps the consumer out")
     tagged = [f for f in findings if f.get("id") and set(f.get("tags") or ()) & tags]
     selected, refused = [], 0
     for f in tagged:
@@ -124,8 +131,7 @@ def main(argv=None) -> int:
         if is_open and not pub:
             print(f"SKIP    {f['id']}: no public part - write `public.title` and `public.body` with nothing concrete")
             continue
-        hits = _denied(" ".join([str(pub.get("title") or ""), str(pub.get("body") or ""),
-                                 *map(str, pub.get("attachments") or [])]), deny) if pub else []
+        hits = _denied(json.dumps(pub, ensure_ascii=False), deny) if pub else []
         if hits:
             print(f"REFUSE  {f['id']}: its public part names {', '.join(sorted(set(hits)))}")
             refused += 1

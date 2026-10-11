@@ -36,9 +36,12 @@ Write the public part as if for a stranger:
   or pasted code - not even "as the consumer writes it". Restate the SHAPE, not the instance.
 - Numbers only when they are the point (a count that is wrong), never ones that identify the consumer.
 
-**The deny list is the safety net.** `public-deny.txt` beside the findings file (or `--deny <file>`)
-holds one term per line - the consumer's name, its projects, domain words, path fragments. A public part
-containing any of them, case-insensitively, is `REFUSE`d. Keep the list in the consumer; it is never sent.
+**The deny list is the safety net.** `public-deny.txt` beside the findings file, every `--deny <file>`
+and every file `STRUCTUREGATE_DENY` names (path-separated; point it at the tool owner's `leak-deny.txt`)
+hold one term per line - the consumer's name, its projects, domain words, path fragments. A public part
+containing any of them in any field, case-insensitively, is `REFUSE`d. Keep the lists local; they are
+never sent. A repro copied from the consumer's code carries its enum and type names: rename them to
+invented ones (`Kind`, `Group`) before the run, or the list refuses it.
 
 ## Flags
 
@@ -47,7 +50,7 @@ containing any of them, case-insensitively, is `REFUSE`d. Keep the list in the c
 | `--repo` | `blogic-cz/structuregate-map` | the repo that owns the map |
 | `--tags` | `map-gap,tool-gap` | a finding carrying any of them is considered |
 | `--account` | the active gh account | the gh account whose token runs `gh` |
-| `--deny` | `public-deny.txt` beside the findings | terms a public part may not contain |
+| `--deny` | none; `public-deny.txt` beside the findings and `STRUCTUREGATE_DENY`'s files are always read | terms a public part may not contain (repeatable) |
 | `--label` | `map-finding` | the label every filed issue carries, and the prefix of its marker |
 | `--project` | the findings file's git checkout name | hashed into the marker only, never shown |
 | `--files-branch` | `findings-files` | the branch of `--repo` that holds attached files |
