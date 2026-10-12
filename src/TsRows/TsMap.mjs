@@ -197,9 +197,10 @@ async function main() {
   // call hands in or a `const` arrow it calls, a hole bound to a string argument.
   // 39: a service key follows a ternary's arms, a `let`'s later writes, an object's values, a concat, a
   // `Promise.resolve`, a free function, and a free function's list (`.filter` too) under an `*ngFor`.
+  // 40: a call of an `i18nDictionaryCalls` method publishes an `i18n_refs` row carrying a `prefix`, no `key`.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 39, build: args.build,
+    config: config.file, data: config.data, rows: 40, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
@@ -516,11 +517,13 @@ async function main() {
   const affectedIds = partial
     ? new Set(store.table('files').filter((f) => affected.has(f.path)).map((f) => f.id))
     : null;
-  const i18nCalls = rollupI18nCalls(store, new Set(names(config, 'i18nCalls')), affectedIds);
+  const i18nCalls = rollupI18nCalls(store, new Set(names(config, 'i18nCalls')), affectedIds, new Set(names(config, 'i18nDictionaryCalls')));
   if (i18nCalls.refs) {
     emit('MAP-NOTE', `the typescript half found ${i18nCalls.refs} translation key(s) in service calls, `
       + `and ${i18nCalls.dynamic} call(s) with no static key`);
   }
+  if (i18nCalls.dictRefs || i18nCalls.dictDynamic) emit('MAP-NOTE', `the typescript half found `
+    + `${i18nCalls.dictRefs} dictionary prefix(es), ${i18nCalls.dictDynamic} call(s) with no static prefix`);
   emit('MAP-NOTE', `the typescript half skipped ${i18nCalls.skipped ?? -1} call(s) whose refs came `
     + `back with the rest (${affectedIds === null ? 'full run' : `${affectedIds.size} file(s) re-read`})`);
 
@@ -681,6 +684,7 @@ async function main() {
     options: {
       ...templatePass.options,
       i18n_calls: names(config, 'i18nCalls'),
+      i18n_dictionary_calls: names(config, 'i18nDictionaryCalls'),
       locales: names(config, 'locales'),
       feature_checks: names(config, 'featureChecks'),
       feature_enum: config.data?.featureEnum ?? '',

@@ -107,8 +107,17 @@ function keyTakingDecls(store, methods, known) {
   return qualified;
 }
 
-export function rollupI18nCalls(store, methods, only = null) {
-  if (!methods.size) return { refs: 0, dynamic: 0 };
+/**
+ * A CALL THAT HANDS BACK EVERY TRANSLATION UNDER A PREFIX (`i18nDictionaryCalls`) REFERENCES THEM ALL.
+ * `getTranslationDictionary('demo.sort.options')` is read as `dict[name]` or handed to a converter, so no
+ * single key is ever spelled at the site; without this every key under the prefix read as unreferenced. The
+ * row carries the PREFIX and no `key` - a key it does not name could not be a key of any locale - and the
+ * rust side expands it against the locale keys, so a key added to the locale later is reached with no
+ * re-extraction. ONLY A STATICALLY KNOWN FIRST ARGUMENT IS CLAIMED: a prefix built at run time is counted
+ * in `dictDynamic` and publishes nothing, exactly as a variable key does.
+ */
+export function rollupI18nCalls(store, methods, only = null, dictMethods = new Set()) {
+  if (!methods.size && !dictMethods.size) return { refs: 0, dynamic: 0, dictRefs: 0, dictDynamic: 0 };
   const fileOf = new Map();
   for (const table of ['members', 'functions']) {
     for (const row of store.table(table)) fileOf.set(row.id, row.file);
@@ -130,8 +139,10 @@ export function rollupI18nCalls(store, methods, only = null) {
     known.set(String(f.abs), f.id);
   }
 
-  const takesKey = keyTakingDecls(store, methods, known);
+  const takesKey = keyTakingDecls(store, new Set([...methods, ...dictMethods]), known);
   let refs = 0;
+  let dictRefs = 0;
+  let dictDynamic = 0;
   let dynamic = 0;
   let skipped = 0;
   for (const call of store.table('calls')) {
@@ -145,9 +156,24 @@ export function rollupI18nCalls(store, methods, only = null) {
     // stop being recognised because the files that call it were not re-read.
     if (only !== null && !only.has(call.owner_file)) { skipped += 1; continue; }
     const name = call.target?.name;
-    if (typeof name !== 'string' || !methods.has(name)) continue;
+    if (typeof name !== 'string' || !(methods.has(name) || dictMethods.has(name))) continue;
     const home = typeof call.target?.file === 'string' ? known.get(call.target.file) : undefined;
     if (home === undefined || !takesKey.has(`${String(home)}#${name}`)) continue;
+    // A NAME IN BOTH LISTS IS A TRANSLATE CALL: the one-key reading is the narrower claim.
+    if (!methods.has(name)) {
+      const args = Array.isArray(call.args) ? call.args : [];
+      const prefixes = args.length ? staticArgStrings(args[0]) : [];
+      if (!prefixes.length) { dictDynamic += 1; continue; }
+      for (const prefix of prefixes) {
+        store.add('i18n_refs', 'k', {
+          prefix, kind: 'dictionary_call', source: 'ts',
+          file: fileOf.get(call.member) ?? null,
+          call: call.id, member: call.member, method: name, line: call.line,
+        });
+        dictRefs += 1;
+      }
+      continue;
+    }
     // EVERY statically known argument, not the first. A notification method takes a title key AND a message
     // key, and a translation method takes a key plus an options object - which is no kind of string and so
     // contributes nothing. Reading one position would drop half of the first.
@@ -162,5 +188,5 @@ export function rollupI18nCalls(store, methods, only = null) {
       refs += 1;
     }
   }
-  return { refs, dynamic, skipped };
+  return { refs, dynamic, skipped, dictRefs, dictDynamic };
 }

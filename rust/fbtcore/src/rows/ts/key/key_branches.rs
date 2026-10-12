@@ -83,7 +83,7 @@ impl KeySet {
     }
 
     /// Every key that starts with `head`, in byte order.
-    fn starting_with(&self, head: &str) -> &[String] {
+    pub fn starting_with(&self, head: &str) -> &[String] {
         let from = self.sorted.partition_point(|k| k.as_str() < head);
         let to = from + self.sorted[from..].partition_point(|k| k.starts_with(head));
         &self.sorted[from..to]

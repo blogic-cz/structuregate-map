@@ -63,6 +63,14 @@ Beside the shared tables it adds the FRAMEWORK tables:
 * Its ids restart from 1 when it is the only half in the database, so the same tree numbers the same way;
   nine prefixes (`f`, `c`, `x`, `fn`, `br`, `p`, `k`, `e`, `i`) are shared with the C# half.
 
+* **`structuregate.ts.json`** (found at the workspace or an ancestor) names what no compiler can: `i18nCalls` lists the
+  methods that take ONE translation key (`translate.get('a.b')`), and `i18nDictionaryCalls` the methods that hand back
+  EVERY key under a prefix (`getTranslationDictionary('demo.sort.options')`, read as `dict[name]` or passed to a
+  converter). A dictionary call whose first argument is a string makes each locale key under `<prefix>.` reachable from
+  the component the call sits in (route `ts_call`), and from every template reading the field or getter that holds the
+  result (`field_binding`); a prefix built at run time is not read. `i18n_refs` carries it as a row with `prefix`
+  and `kind = 'dictionary_call'`, and no `key`. A dictionary call handed on to another function is not followed.
+
 Three outputs are options, off by default: `--ts-html <dir>` (one JSON per template, the tree in document
 order), `--map-row-fts` (`row_fts`: which row ANYWHERE mentions a word), `--map-atlas <dir>` (projects,
 NgModule areas, every route with what it reaches). `src/TsRows/CLAUDE.md` and `rust/fbtcore/src/rows/ts/CLAUDE.md` in the origin repo have the rest.

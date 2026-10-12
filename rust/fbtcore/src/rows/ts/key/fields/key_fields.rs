@@ -58,6 +58,9 @@ pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
 /// return is not read - its branches test its parameters, which no gate shares. A `tpl:` link is dropped
 /// for the same reason: its hole names the CALLEE's parameter, not anything the field's class holds.
 ///
+/// A RETURN THAT IS A DICTIONARY CALL (a method the config's `i18nDictionaryCalls` names, first argument a string) holds EVERY key
+/// under that prefix - `key_follow::dictionary`.
+///
 /// A RETURN THAT IS A TRANSLATE CALL (a method the config's `i18nCalls` names) holds the keys of its
 /// arguments: `return this.translate.get(`a.${Kind[kind]}`)` hands the field the key's text.
 ///
@@ -95,6 +98,12 @@ pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
 fn callee_keys(value: Option<&Value>, reader: &Returned<'_, '_>) -> Vec<(String, Vec<String>)> {
     let mut found = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    // A FIELD OR LOCAL HOLDING A DICTIONARY CALL ITSELF (`opts = this.t.getTranslationDictionary('p')`) holds every key
+    // under the prefix, so the template reading it is a position for each. Only a dictionary call: a single-key
+    // translate call written straight to a field keeps its `ts_call`/`literal` reading.
+    if let Some(under) = value.and_then(|v| super::key_follow::dictionary(v, reader.dict)) {
+        value_keys(&under, &[], reader.keys, &mut found);
+    }
     reader.call(value, &mut seen, &mut found);
     for (_, chain) in found.iter_mut() {
         chain.retain(|link| !link.starts_with("tpl:"));

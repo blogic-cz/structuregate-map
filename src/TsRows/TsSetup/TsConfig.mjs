@@ -8,6 +8,10 @@
  * two lists in it say why - without its visibility inputs in `gateInputs` some gates go uncounted, and without the
  * `i18nCalls` list `i18n_index` loses a large share of its keys.
  *
+ * `i18nCalls` names the methods that take ONE key; `i18nDictionaryCalls` names the methods that return EVERY key
+ * under their first argument as a prefix (`getTranslationDictionary('a.b')`), so a call of one references all of
+ * them - see `TsI18nCalls.mjs`.
+ *
  * WHERE IT IS FOUND. `--config` names it; otherwise every ancestor of the workspace root is tried. The
  * tool this is ported from looks up from its WORKING DIRECTORY, which is the consumer's own tree - this
  * exe is launched from the tree being mapped, so the equivalent is the workspace and its ancestors, and a

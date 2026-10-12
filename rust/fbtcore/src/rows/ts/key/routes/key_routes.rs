@@ -257,27 +257,37 @@ pub fn key_routes(
     let call_by_id: std::collections::HashMap<String, &Row> =
         calls.iter().filter_map(|c| present(c, "id").map(|id| (id, c))).collect();
     for r in store.table("i18n_refs").iter() {
-        let Some(key) = text(r, "key") else { continue };
         if text(r, "source").as_deref() != Some("ts") {
             continue;
         }
-        // A KEY CHOSEN IN THE ARGUMENT (`translate(c ? 'a' : 'b')`) takes its arm's condition on
-        // top of the call's, exactly as a value does - see `key_branches::value_keys`.
-        let mut ways: Vec<Vec<String>> = Vec::new();
-        if let Some(call) = present(r, "call").and_then(|c| call_by_id.get(&c)) {
-            let chain = branches.chain_of(call);
-            let mut found = Vec::new();
-            for arg in call.get("args").and_then(|a| a.as_array()).into_iter().flatten() {
-                value_keys(arg, &chain, &keys, &mut found);
+        // A DICTIONARY CALL (`i18nDictionaryCalls`) CARRIES A PREFIX AND NO KEY: it hands back every locale key under
+        // `<prefix>.`, so each of them is reached at this call exactly as a single-key call would reach it - the same
+        // component sites, the call's own branch chain. Expanded here, against the locale keys, so a key added later
+        // needs no re-extraction. A prefix no key sits under reaches nothing.
+        let under: Vec<String> = match (text(r, "key"), text(r, "prefix")) {
+            (Some(key), _) => vec![key],
+            (None, Some(prefix)) => keys.starting_with(&format!("{prefix}.")).to_vec(),
+            (None, None) => continue,
+        };
+        for key in under {
+            // A KEY CHOSEN IN THE ARGUMENT (`translate(c ? 'a' : 'b')`) takes its arm's condition on
+            // top of the call's, exactly as a value does - see `key_branches::value_keys`.
+            let mut ways: Vec<Vec<String>> = Vec::new();
+            if let Some(call) = present(r, "call").and_then(|c| call_by_id.get(&c)) {
+                let chain = branches.chain_of(call);
+                let mut found = Vec::new();
+                for arg in call.get("args").and_then(|a| a.as_array()).into_iter().flatten() {
+                    value_keys(arg, &chain, &keys, &mut found);
+                }
+                ways.extend(found.into_iter().filter(|(k, _)| *k == key).map(|(_, c)| c));
+                if ways.is_empty() {
+                    ways.push(chain);
+                }
             }
-            ways.extend(found.into_iter().filter(|(k, _)| *k == key).map(|(_, c)| c));
-            if ways.is_empty() {
-                ways.push(chain);
-            }
-        }
-        if let Some(list) = components_by_file.get(&text(r, "file")) {
-            for c in list {
-                routes.put_ways(&key, "ts_call", text(c, "id"), Vec::new(), &ways, None);
+            if let Some(list) = components_by_file.get(&text(r, "file")) {
+                for c in list {
+                    routes.put_ways(&key, "ts_call", text(c, "id"), Vec::new(), &ways, None);
+                }
             }
         }
     }

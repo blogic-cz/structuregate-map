@@ -47,6 +47,7 @@ pub(super) fn callee_lists(
 pub(super) fn with_reader<R>(store: &Store<'_>, f: impl FnOnce(&Returned<'_, '_>) -> R) -> R {
     let keys: KeySet = store.table("translations").iter().filter_map(|t| super::key_fields::text(t, "key")).collect();
     let i18n = store.option_list("i18n_calls");
+    let dict = store.option_list("i18n_dictionary_calls");
     let rows = super::gate_tsrows::TsRows::new(store);
     let returns = store.table("returns");
     let one_return = one_returns(&returns);
@@ -60,7 +61,7 @@ pub(super) fn with_reader<R>(store: &Store<'_>, f: impl FnOnce(&Returned<'_, '_>
         .filter_map(|fun| Some((id_of(fun, "id")?, id_of(fun, "parent").filter(|p| !p.is_empty())?)))
         .collect();
     f(&Returned {
-        rows: &rows, one_return: &one_return, every: &every, keys: &keys, i18n: &i18n, params: &params,
+        rows: &rows, one_return: &one_return, every: &every, keys: &keys, i18n: &i18n, dict: &dict, params: &params,
         fn_of_local: &fn_of_local, writes: &writes, parent: &parent,
     })
 }
