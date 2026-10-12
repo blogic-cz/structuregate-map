@@ -380,8 +380,10 @@ pub fn ways_of(
             // A WAY THROUGH A LITERAL `false` IS NO WAY (`key_dead`): not a path, not a root, not counted.
             // NOR IS ONE THROUGH AN EDGE THAT LEAVES AN INPUT FLAG AT A LITERAL `false` (`key_bound`).
             let Some(plinks) = bind_links(bound, p, p.gates.iter().map(|g| &**g)) else { continue };
+            // AN ELEMENT A CHILD'S INPUT GOT THROUGH ONE RENDER EDGE (`edge:<render>`, `key_inputs`) holds on a path through it alone.
             let chains: Vec<(&Vec<String>, Vec<String>)> = own.iter()
                 .filter(|c| !c.iter().any(|g| dead.contains(g)))
+                .filter(|c| c.iter().filter_map(|g| g.strip_prefix("edge:")).all(|e| p.edges.iter().any(|x| &**x == e)))
                 .filter_map(|c| Some((c, bind_links(bound, p, c.iter().map(String::as_str))?)))
                 .collect();
             if chains.is_empty() || p.gates.iter().any(|g| dead.contains(&**g)) {
@@ -406,7 +408,7 @@ pub fn ways_of(
                 // gate does, and folds with the key's own branches.
                 let mut one: IndexSet<String> =
                     p.gates.iter().chain(p.branches.iter()).map(|g| g.to_string()).collect();
-                one.extend(chain.iter().cloned());
+                one.extend(chain.iter().filter(|g| !g.starts_with("edge:")).cloned());
                 one.extend(plinks.iter().chain(links.iter()).cloned());
                 w.sets.push(one);
             }

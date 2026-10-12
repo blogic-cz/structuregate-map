@@ -113,8 +113,34 @@ export function rollupRefIds(store) {
   }
   // An assignment's target property is the same kind of reference and was the only one left carrying a name
   // where the rest now carry a row.
+  //
+  // A `this.<x>` WRITE A FILE+NAME KEY REFUSES (two classes of one file declare `x`) IS THE WRITING CLASS'S OWN MEMBER,
+  // or the nearest base's that declares it: the class the write sits in says which, so nothing is guessed.
+  const memberOf = new Map();
+  for (const m of store.table('members')) {
+    const key = `${String(m.class)}#${str(m.name) ?? ''}`;
+    if (!memberOf.has(key) || m.kind === 'setter') memberOf.set(key, m.id);
+  }
+  const classAt = new Map();
+  for (const c of store.table('classes')) classAt.set(`${String(c.file)}#${str(c.name) ?? ''}`, c.id);
+  const parentOf = new Map();
+  for (const c of store.table('classes')) {
+    const ext = asRef(c.extends);
+    const fid = str(ext?.file) === null ? undefined : idByPath.get(ext.file);
+    const up = fid === undefined ? undefined : classAt.get(`${fid}#${str(ext.name) ?? ''}`);
+    if (up !== undefined) parentOf.set(c.id, up);
+  }
+  const ownMember = (cls, name) => {
+    for (let at = cls, i = 0; at !== undefined && i < 32; at = parentOf.get(at), i++) {
+      const id = memberOf.get(`${String(at)}#${name}`);
+      if (id !== undefined) return id;
+    }
+    return null;
+  };
   for (const row of store.table('assignments')) {
-    const id = idOf(asRef(row.target_ref));
+    const ref = asRef(row.target_ref);
+    let id = idOf(ref);
+    if (id === null && row.scope === 'this' && row.class !== undefined && str(ref?.name) !== null) id = ownMember(row.class, ref.name);
     if (id !== null) row.target_id = id;
   }
 
