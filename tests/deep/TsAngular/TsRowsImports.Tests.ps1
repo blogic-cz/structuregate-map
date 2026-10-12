@@ -92,4 +92,59 @@ Test-Case 'tsrows: a re-pointed barrel in the middle of the chain is traced agai
     Assert-Line (Get-TsImportNames $again.Db) 'Z|Z|apps/shop/src/lib/inner/z2.ts'
 }
 
+# A BARE `import('...')` / `require('...')` IS AN IMPORT TOO: it left only a `calls` row, so a file reached through a
+# lazy chunk or a required asset had no importer and read as dead.
+Test-Case 'tsrows: a dynamic import and a require leave an imports row with the file they resolve to' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/boot.ts' = "export const boot = 1;`n"
+        'apps/shop/src/dyn.ts' = "declare const require: (p: string) => unknown;`nexport const go = () => import('./boot');`n" +
+            "const data = require('./assets/locales/en.json');`nexport const d = data;`n"
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    # `--width 0`: the line is longer than the default column and would be cut.
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT module || ' | ' || dynamic || ' | ' || coalesce(resolved, '') AS r " +
+        "FROM imports WHERE dynamic IS NOT NULL")
+    Assert-Exit $r 0
+    Assert-Line $r './boot | import | apps/shop/src/boot.ts'
+    Assert-Line $r './assets/locales/en.json | require | apps/shop/src/assets/locales/en.json'
+}
+
+# DECLARATIONS INSIDE `declare module` / `declare global` / a namespace were skipped by the statement loop.
+Test-Case 'tsrows: an interface or alias inside declare module, declare global and a namespace is a row with its module' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/boot.ts' = "export const boot = 1;`n"
+        'apps/shop/src/decl.ts' = "export {};`ndeclare module './boot' { interface PluginOptionsByType { a: number } export interface Extra { b: string } }`n" +
+            "declare global { interface DemoWindow { z: number } }`n" +
+            "export namespace Demo { export interface Inner { y: number } export type Alias = string; }`n"
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $i = Invoke-TsRowsQ $made.Db "SELECT name || ' | ' || in_module AS r FROM interfaces WHERE in_module IS NOT NULL"
+    Assert-Line $i 'PluginOptionsByType | ./boot'
+    Assert-Line $i 'Extra | ./boot'
+    Assert-Line $i 'DemoWindow | global'
+    Assert-Line $i 'Inner | Demo'
+    $a = Invoke-TsRowsQ $made.Db "SELECT name || ' | ' || in_module AS r FROM type_aliases WHERE in_module IS NOT NULL"
+    Assert-Line $a 'Alias | Demo'
+}
+
+# A NAMESPACE'S CLASS, FUNCTION AND CONST ARE ROWS like a file's; an AMBIENT block's only declare, and are not.
+Test-Case 'tsrows: a class, function and const inside a namespace are rows; an ambient block''s are not' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/ns.ts' = "export namespace Demo {`n  export class Order { total(): number { return 1; } }`n" +
+            "  export function makeOrder(): Order { return new Order(); }`n  export const alphaLimit = 3;`n}`n" +
+            "declare global { function ambientAlpha(): void; }`n"
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'class ' || name AS r FROM classes WHERE name = 'Order' UNION ALL " +
+        "SELECT 'function ' || name FROM functions WHERE name IN ('makeOrder', 'ambientAlpha') UNION ALL " +
+        "SELECT 'const ' || name FROM consts WHERE name = 'alphaLimit'")
+    Assert-Line $r 'class Order'
+    Assert-Line $r 'function makeOrder'
+    Assert-Line $r 'const alphaLimit'
+    Assert-NoLine $r 'function ambientAlpha'
+}
+
 }

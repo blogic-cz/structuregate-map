@@ -22,7 +22,10 @@ export function rollupComponentReach(store, { wholeApp }) {
   const classByFileName = new Map(classes.map((c) => [`${String(c.file)}#${String(c.name)}`, c.id]));
   // A CLASS IS RESOLVED BY FILE + NAME, never by name alone: a monorepo can have two `AppComponent`s, two
   // `SharedModule`s and duplicate `TooltipComponent`s answering to one name.
+  // THE ROW ID A ROLLUP ALREADY RESOLVED comes first: a class exported under another name
+  // (`export { A as B }`) answers to `B` in every reference and to `A` in its own file.
   const classOfRef = (ref) => {
+    if (ref?.id != null && classIds.has(ref.id)) return ref.id;
     const name = str(ref?.name);
     const file = str(ref?.file);
     if (name === null || file === null) return null;

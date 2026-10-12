@@ -112,9 +112,40 @@ export function rollupStateGraph(store) {
   };
   for (const c of consts) findReducers(c.value, c, new Set());
 
+  // A SPREAD INTO `createReducer` IS ITS ELEMENTS. `createReducer(init, ...featureOns, ...localOns)` is how a
+  // reducer split across files is written, and the evaluator keeps the spread as a name, so reading only
+  // the direct `on(...)` arguments published such a reducer with no handlers at all. The name is a const of the
+  // same file or an import resolved to one (`declared_id`, set before this pass); its value, when it is a list,
+  // supplies the entries. A name that resolves to anything else stays what it was.
+  const constById = new Map(consts.map((k) => [k.id, k]));
+  const constByFileName = new Map(consts.map((k) => [`${String(k.file)}#${String(k.name)}`, k]));
+  const importedConst = new Map();
+  for (const ib of store.table('import_names')) {
+    if (ib.declared_id != null) importedConst.set(`${String(ib.file)}#${String(ib.local)}`, ib.declared_id);
+  }
+  const expandEntries = (entries, file, seen) => {
+    const out = [];
+    for (const entry of entries) {
+      const names = arr(entry?.$identifiers);
+      if (entry?.$kind !== 'SpreadElement' || names.length !== 1) {
+        out.push(entry);
+        continue;
+      }
+      const key = `${String(file)}#${String(names[0])}`;
+      const named = constByFileName.get(key) ?? constById.get(importedConst.get(key));
+      if (named === undefined || !Array.isArray(named.value) || seen.has(named.id)) {
+        out.push(entry);
+        continue;
+      }
+      seen.add(named.id);
+      out.push(...expandEntries(named.value, named.file, seen));
+    }
+    return out;
+  };
+
   const emittedHandlers = new Set();
   for (const { row: c, call } of reducerCalls) {
-    for (const entry of arr(call?.$args)) {
+    for (const entry of expandEntries(arr(call?.$args), c.file, new Set())) {
       const on = asCall(entry);
       if (!isLibraryCall(on, 'on')) continue;
       const [actionRef, handler] = arr(on?.$args);
@@ -141,9 +172,9 @@ export function rollupStateGraph(store) {
     }
   }
 
-  for (const c of consts) {
-    const call = asCall(c.value);
-    if (!isLibraryCall(call, 'createSelector')) continue;
+  // ONE SELECTOR ROW, from the `createSelector` call and the place that declares it: a const (`const` is its
+  // row) or a factory function (`factory` is its `functions` row). The rest is computed the same way for both.
+  const emitSelector = (call, place) => {
     const args = arr(call?.$args);
     // Every argument but the last is an INPUT selector; the last is the projector. Stated rather than
     // assumed: a selector with one argument is a projector over the whole state.
@@ -167,7 +198,7 @@ export function rollupStateGraph(store) {
       return nested.length ? nested.flat() : null;
     };
     store.add('state_selectors', 'ss', {
-      const: c.id, file: c.file, name: c.name, line: c.line,
+      ...place,
       input_count: inputs.length,
       // What the inputs read IS the state path this selector depends on - the join back to the type members
       // and to a handler's writes.
@@ -176,6 +207,40 @@ export function rollupStateGraph(store) {
       expression: projector?.$expr_id ?? null,
     });
     selectors += 1;
+  };
+
+  for (const c of consts) {
+    const call = asCall(c.value);
+    if (!isLibraryCall(call, 'createSelector')) continue;
+    emitSelector(call, { const: c.id, file: c.file, name: c.name, line: c.line, factory: null });
+  }
+
+  // A SELECTOR FACTORY IS A SELECTOR TOO. `byId = (id) => createSelector(...)` and `function byId(id) { return
+  // createSelector(...) }` build the selector per call, so the const holds a function and no `createSelector`
+  // value - reading only consts published a store's parameterised selectors as none. The call is the function's
+  // `returns` row; the const of the same name, when there is one, is named beside it.
+  // A FACTORY HELD AS A CONST OBJECT'S PROPERTY (`Selectors = { byId: (id) => createSelector(..) }`) is an anonymous
+  // arrow: it takes the const and `<const>.<property>` as its name, through the `$fn_id` the property names.
+  const fnRows = new Map(store.table('functions').map((f) => [f.id, f]));
+  const heldBy = new Map();
+  for (const c of consts) {
+    if (c.value === null || typeof c.value !== 'object' || Array.isArray(c.value)) continue;
+    for (const [prop, v] of Object.entries(c.value)) {
+      const fid = str(v?.$fn_id);
+      if (!prop.startsWith('$') && fid !== null) heldBy.set(fid, { const: c.id, name: `${String(c.name)}.${prop}` });
+    }
+  }
+  for (const r of store.table('returns')) {
+    const call = asCall(r.value);
+    if (!isLibraryCall(call, 'createSelector')) continue;
+    const f = fnRows.get(r.member);
+    if (f === undefined || f.parent) continue;
+    const held = heldBy.get(f.id);
+    if (str(f.name) === null && held === undefined) continue;
+    emitSelector(call, {
+      const: held?.const ?? constByFileName.get(`${String(f.file)}#${String(f.name)}`)?.id ?? null,
+      file: f.file, name: held?.name ?? f.name, line: f.line, factory: f.id,
+    });
   }
 
   return { actions, handlers, selectors };

@@ -43,8 +43,8 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
    * augmentation. The first is the primary answer so joins are unchanged, and the others are listed rather
    * than dropped: "declared here" and "declared here and nowhere else" are different claims.
    */
-  const declFileOf = (node) => {
-    const sym = symbolAt(node);
+  const declFileOf = (node) => declFileOfSymbol(symbolAt(node));
+  const declFileOfSymbol = (sym) => {
     const decls = sym?.declarations ?? [];
     if (!decls.length || !sym) return null;
     // The checker's order is kept - see the note in `TsMap`'s describer.
@@ -92,6 +92,32 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
       }
       return { name: expr.getText(), args: [], fromAngular: fromAngularCore(expr) };
     });
+  };
+
+  /** THE `@Inject(TOKEN)` ARGUMENT of a constructor parameter, or null: the decorator must RESOLVE into
+   *  @angular/core, so a local decorator that is also called `Inject` is never read as Angular's. */
+  const injectTokenOf = (param) => {
+    for (const d of ts.getDecorators(param) ?? []) {
+      const e = d.expression;
+      if (ts.isCallExpression(e) && e.arguments.length && ts.isIdentifier(e.expression)
+        && e.expression.text === 'Inject' && fromAngularCore(e.expression)) return e.arguments[0];
+    }
+    return null;
+  };
+
+  /** EVERY `inject(...)` OF A PROPERTY INITIALIZER, in source order. A function-valued initializer is a
+   *  deferred body, run in whatever context calls it, so it is not walked: `lazy = () => inject(X)` is not a
+   *  dependency of the class. */
+  const injectCallsOf = (init) => {
+    const out = [];
+    const visit = (n) => {
+      if (ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isClassExpression(n)) return;
+      if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'inject'
+        && fromAngularCore(n.expression)) out.push(n);
+      ts.forEachChild(n, visit);
+    };
+    visit(init);
+    return out;
   };
 
   const typeIdentifier = (typeNode) => (ts.isTypeReferenceNode(typeNode) ? typeNode.typeName : null);
@@ -210,7 +236,9 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
       const body = m.body ?? propertyFn;
       if (body) collectBody(body, memberId, classId);
       if (ts.isConstructorDeclaration(m)) {
-        for (const p of paramsOf(m)) {
+        const paramNodes = [...(m.parameters ?? [])];
+        for (const [pi, p] of paramsOf(m).entries()) {
+          const tokenArg = injectTokenOf(paramNodes[pi]);
           // A DIRECTIVE IS STRUCTURAL WHEN IT TAKES THE TEMPLATE, and that is a DECLARATION, not a naming
           // convention: `TemplateRef` resolved to Angular's own `.d.ts`. It is what separates a desugared
           // `<ng-template [demoIf]>` - a real gate - from an attribute directive that happens to
@@ -223,6 +251,27 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
             class: classId, file: fid, param: p.name, type: p.type,
             resolved: p.resolved, type_ref: p.type_ref,
             decorators: p.decorators.map((x) => x.name), optional: p.optional,
+            // THE TOKEN `@Inject(TOKEN)` NAMES - the parameter's type is the interface, and the interface
+            // says nothing about which provider answers.
+            ...(tokenArg ? { token: tokenArg.getText(), token_ref: declFileOf(tokenArg) } : {}),
+          });
+        }
+      }
+      // `inject()` IN A PROPERTY INITIALIZER IS CONSTRUCTOR INJECTION by another spelling: without a row
+      // here a class that takes every dependency through `inject()` looked as if it had none.
+      if (mInit) {
+        for (const call of injectCallsOf(mInit)) {
+          const t = checker.getTypeAtLocation(call);
+          const opts = call.arguments[1];
+          const optional = !!opts && ts.isObjectLiteralExpression(opts) && opts.properties.some((pr) =>
+            ts.isPropertyAssignment(pr) && propName(pr.name) === 'optional'
+            && pr.initializer.kind === ts.SyntaxKind.TrueKeyword);
+          const tokenArg = call.arguments[0];
+          store.add('di', 'd', {
+            class: classId, file: fid, param: propName(m.name), member: memberId, inject: true,
+            type: typeText(call, null), resolved: declFileOfSymbol(t.aliasSymbol ?? t.getSymbol()),
+            type_ref: null, decorators: [], optional,
+            ...(tokenArg ? { token: tokenArg.getText(), token_ref: declFileOf(tokenArg) } : {}),
           });
         }
       }

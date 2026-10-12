@@ -38,6 +38,7 @@ runs) are compared by that, every carried field equal, never by `c:412`.
   alias (`@utils`) is external and resolves in the tree. "In the tree" is
   `JOIN files rf ON rf.id = i.resolved_file WHERE rf.sha IS NOT NULL`.
 - **`imports.resolved`** is the module the specifier NAMES - often a barrel.
+- **`imports.dynamic`** (`import` / `require`) marks a row for a bare `import('./x')` or `require('./x')`: no names, no `import_names`.
 - **`import_names`** (`ib:`, `TsImports.mjs`) is one row per name an import binds, in source order: `local`,
   `imported` (`default`, `*`), `kind`, `type_only`, and where it is DECLARED - `declared`, `declared_file`,
   `declared_id` (a top-level class, function, interface, enum, type alias or const; none when two share the name),
@@ -53,6 +54,8 @@ runs) are compared by that, every carried field equal, never by `c:412`.
 `label_exprs`, always written, plus a `target` on a bare name that is a module-level const, function or enum, and
 a `local` (`{file, line, col}`, its `locals` row's own place) on a bare name a body declares. An `Fn` tree names
 its `params` and its `rest` parameter.
+
+- **A namespace's statements are a file's** (`TsTypeRows.mjs::moduleRows`): a class, function or const in `namespace X { .. }` is a row like a top-level one, and an interface or type alias carries `in_module`; an AMBIENT block (`declare module`, `declare global`, `declare namespace`) yields only its interfaces and aliases.
 
 - **A top-level `X.prototype.m = function` is a `functions` row** with `form: 'prototype-method'`, `name` the assigned text and `target` the declaration a call of `m` resolves to (`TsDeclRows.mjs::prototypeRow`). Also under a top-level `if (!X.prototype.m)` and from `Object.defineProperty(X.prototype, 'm', { value: function })`, targeted through the prototype's type.
 

@@ -10,7 +10,7 @@ import { canonicalPath, relativeTo } from './TsPaths.mjs';
 import { names } from './TsConfig.mjs';
 import { buildMatcher } from './TsTplMatch.mjs';
 import { makeTemplateExtractor } from './TsTplExtract.mjs';
-import { importRow } from './TsImports.mjs';
+import { dynamicImportRow, importRow } from './TsImports.mjs';
 import { jsdocOf, locationOf as nodeLocation, makeSymbolAt } from './TsNodes.mjs';
 import { makeAngularRows } from './TsAngular.mjs';
 import { makeBodyRows } from './TsBody.mjs';
@@ -208,7 +208,9 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
       // ONE STATEMENT FAILING IS NOT THE FILE FAILING. A checker round trip can throw on a construct this
       // compiler version does not expect, and losing the whole file's rows over one of them is how a map
       // goes quietly short.
-      for (const statement of sf.statements) {
+      // A NAMESPACE'S OWN STATEMENTS ARE VISITED AS A FILE'S ARE (`TsTypeRows.mjs::moduleRows`): a class or function in
+      // `namespace X { .. }` is a row like a top-level one.
+      const visit = (statement) => {
         try {
           if (ts.isImportDeclaration(statement)) importRow(ts, store, statement, fid, symbolAt, fe, checker);
           else if (ts.isExportDeclaration(statement) || ts.isExportAssignment(statement)) {
@@ -217,6 +219,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
           else if (ts.isInterfaceDeclaration(statement)) {
             typeRows.interfaceRow(statement, fid, modifiersOf(statement).exported);
           } else if (ts.isTypeAliasDeclaration(statement)) typeRows.typeAliasRow(statement, fid);
+          else if (ts.isModuleDeclaration(statement)) typeRows.moduleRows(statement, fid, null, visit);
           else if (ts.isVariableStatement(statement)) declRows.constRows(statement, fid);
           else if (ts.isClassDeclaration(statement)) {
             const cls = classRows.extractClass(statement, fid);
@@ -258,6 +261,23 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
         } catch {
           diag.note('ts_statement_failed');
         }
+      };
+      for (const statement of sf.statements) visit(statement);
+      // A BARE `import('./x')` OR `require('./x')` ANYWHERE IN THE FILE is an import too: the statement loop above
+      // sees import declarations only, so the file it reaches had no importer (`TsImports.mjs::dynamicImportRow`).
+      try {
+        const options = program.getCompilerOptions();
+        const scan = (node) => {
+          if (ts.isCallExpression(node) && node.arguments.length && ts.isStringLiteralLike(node.arguments[0])) {
+            const form = node.expression.kind === ts.SyntaxKind.ImportKeyword ? 'import'
+              : ts.isIdentifier(node.expression) && node.expression.text === 'require' ? 'require' : null;
+            if (form) dynamicImportRow(ts, store, node, fid, symbolAt, fe, form, options);
+          }
+          ts.forEachChild(node, scan);
+        };
+        scan(sf);
+      } catch {
+        diag.note('dynamic_import_scan_failed');
       }
       try {
         collectStrings(ts, store, sf, { file: fid }, propName, evalNode);
@@ -314,8 +334,9 @@ function linkFunctions(store) {
   };
   for (const c of store.table('calls')) if (!store.hydrated.has(c)) visit(c.args);
   // A RETURN OR A LOCAL HOLDING A FUNCTION names it too: `return this.pick(() => k)` and `const t = (k) => ...` - and so
-  // does a field written one, in place or inside an object (`this.tooltip = { text: (row) => t('k') }`).
-  for (const t of ['returns', 'locals', 'assignments', 'members']) for (const r of store.table(t)) if (!store.hydrated.has(r)) visit(r.value);
+  // does a field written one, in place or inside an object (`this.tooltip = { text: (row) => t('k') }`), and a const
+  // object's property (`Selectors = { byId: (id) => createSelector(..) }`).
+  for (const t of ['returns', 'locals', 'assignments', 'members', 'consts']) for (const r of store.table(t)) if (!store.hydrated.has(r)) visit(r.value);
 }
 
 /**

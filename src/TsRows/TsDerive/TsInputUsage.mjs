@@ -90,7 +90,10 @@ export function rollupInputUsage(store) {
   const boundCount = new Map();
   let bound = 0;
   for (const b of store.table('bindings')) {
-    if (b.kind !== 'input' && b.kind !== 'template_attr') continue;
+    // A STATIC ATTRIBUTE SETS AN INPUT TOO: `<demo-beta title="x" plain>` fills `title` and `plain` as `[title]="'x'"`
+    // would, so skipping `attribute` bindings read every input set only that way as never bound. It has no
+    // expression, so its `source` is the literal text (empty for a bare attribute) and `expression` stays null.
+    if (b.kind !== 'input' && b.kind !== 'template_attr' && b.kind !== 'attribute') continue;
     const name = str(b.name);
     const candidates = targetsOfNode.get(b.node);
     if (name === null || candidates === undefined) continue;
@@ -107,7 +110,7 @@ export function rollupInputUsage(store) {
       store.add('input_usage', 'iu', {
         io: io.id, input: name, to_class: targetClass, component: io.component,
         from_component: b.component, template: b.template, node: b.node, binding: b.id,
-        source: b.source ?? null, expression: expressionOfBinding.get(b.id) ?? null,
+        source: b.kind === 'attribute' ? (b.value ?? '') : (b.source ?? null), expression: expressionOfBinding.get(b.id) ?? null,
         line: b.line ?? null,
       });
       boundCount.set(io.id, (boundCount.get(io.id) ?? 0) + 1);

@@ -60,13 +60,45 @@ export function rollupRefIds(store) {
   }
   for (const key of ambiguous) declared.delete(key);
 
+  // `export { A as B }` NAMES A DECLARATION BY ITS PUBLIC NAME. The checker reports the symbol as `B` where
+  // the file declares `A`, so a file+name key finds nothing and a route's component, a module's declaration
+  // and a `di` type all lost their class. Only a statement WITHOUT a source is a local alias: `from` is the
+  // other file's own naming, and its declaration is reached through that file.
+  const aliasOf = new Map();
+  for (const row of store.table('exports')) {
+    if (row.from !== null && row.from !== undefined) continue;
+    const names = Array.isArray(row.names) ? row.names : [];
+    const outer = Array.isArray(row.exported_as) ? row.exported_as : [];
+    for (let i = 0; i < outer.length; i++) {
+      if (typeof names[i] === 'string' && names[i] !== outer[i]) aliasOf.set(`${String(row.file)}#${outer[i]}`, names[i]);
+    }
+  }
+
   const idOf = (ref) => {
     const file = str(ref?.file);
     const name = str(ref?.name);
     if (file === null || name === null) return null;
     const fid = idByPath.get(file);
-    return fid === undefined ? null : declared.get(`${fid}#${name}`) ?? null;
+    if (fid === undefined) return null;
+    const hit = declared.get(`${fid}#${name}`);
+    if (hit !== undefined) return hit;
+    const local = aliasOf.get(`${fid}#${name}`);
+    return local === undefined ? null : declared.get(`${fid}#${local}`) ?? null;
   };
+
+  // A MODULE'S LISTS CARRY THE ROW ID of each class they name. `reach` and every consumer joining a module to
+  // its declarations otherwise re-derive it from file + name, which an `export { A as B }` alias defeats.
+  for (const row of store.table('ng_modules')) {
+    for (const key of ['declarations', 'imports', 'exports', 'providers', 'bootstrap']) {
+      if (!Array.isArray(row[key])) continue;
+      for (const el of row[key]) {
+        const ref = asRef(el);
+        if (ref === null || str(ref.name) === null || str(ref.file) === null) continue;
+        const id = idOf(ref);
+        if (id !== null) ref.id = id;
+      }
+    }
+  }
 
   for (const row of store.table('di')) {
     const id = idOf(asRef(row.resolved));
@@ -110,6 +142,18 @@ export function rollupRefIds(store) {
     row.declared_file = fid;
     const key = `${fid}#${str(row.declared_name) ?? ''}`;
     if (topLevel.has(key) && !refused.has(key)) row.declared_id = topLevel.get(key).id;
+  }
+  // `@Inject(TOKEN)` AND `inject(TOKEN)` NAME A CONST: the same top-level lookup an import gets. A token that is a
+  // PROPERTY of a const object (`Tokens.Alpha`, the shape most token registries take) is no top-level declaration:
+  // it joins the const that holds it, and `token` still says which property.
+  const topId = (key) => (topLevel.has(key) && !refused.has(key) ? topLevel.get(key).id : null);
+  for (const row of store.table('di')) {
+    const ref = asRef(row.token_ref);
+    const fid = str(ref?.file) === null ? undefined : idByPath.get(ref.file);
+    if (fid === undefined) continue;
+    const head = (str(row.token) ?? '').split('.')[0];
+    const id = topId(`${fid}#${str(ref.name) ?? ''}`) ?? (head && head !== row.token ? topId(`${fid}#${head}`) : null);
+    if (id !== null) row.token_id = id;
   }
   // An assignment's target property is the same kind of reference and was the only one left carrying a name
   // where the rest now carry a row.
