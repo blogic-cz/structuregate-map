@@ -61,6 +61,8 @@ pub mod key_fields;
 pub mod key_follow;
 #[path = "key/fields/key_methods.rs"]
 pub mod key_methods;
+#[path = "key/fields/key_pushes.rs"]
+pub mod key_pushes;
 #[path = "key/key_lists.rs"]
 pub mod key_lists;
 #[path = "key/key_loops.rs"]

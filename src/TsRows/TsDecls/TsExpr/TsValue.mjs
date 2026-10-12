@@ -132,8 +132,16 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
     const target = refs.declTarget(symbolAt(callee)?.getName() ?? callee.getText(), callee) ?? undefined;
     let receiver;
     let receiverExpr;
+    let receiverValue;
     if (ts.isPropertyAccessExpression(node.expression)) {
       const evaluated = evalNode(node.expression.expression);
+      // A STRING METHOD CHAINED ON A CALL (`t('k').trim()`) keeps the receiver's value: `$call` holds it as text
+      // only, and the key it hands back is the receiver's. Only a receiver the checker types as a string, so a chain of
+      // `pipe(..).subscribe(..)` does not copy every link into the next.
+      if (!!evaluated && typeof evaluated === 'object' && evaluated.$call !== undefined
+        && (checker.getTypeAtLocation(node.expression.expression).flags & ts.TypeFlags.StringLike) !== 0) {
+        receiverValue = evaluated;
+      }
       const isChainLink = !!evaluated && typeof evaluated === 'object' && !Array.isArray(evaluated)
         && evaluated.$receiver !== undefined;
       if (Array.isArray(evaluated) || isChainLink) receiver = evaluated;
@@ -147,6 +155,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       $args: node.arguments.map((a) => evalNode(a)),
       ...(receiver !== undefined ? { $receiver: receiver, $method: node.expression.name.getText() } : {}),
       ...(receiverExpr !== undefined ? { $receiver_expr: receiverExpr } : {}),
+      ...(receiverValue !== undefined ? { $receiver_value: receiverValue } : {}),
       ...(target ? { $target: target } : {}),
     };
   }
@@ -182,7 +191,10 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       // THE TREE, as a TERNARY's condition carries one: a hole written `Enum[x]` names the member the built
       // key spells, and only the tree says the hole is that lookup rather than any text.
       const tree = describe ? describe(node, 'template').id : null;
-      return { $template: parts, $holes: holes, ...(tree === null || tree === undefined ? {} : { $expr_id: tree }) };
+      // EACH HOLE EVALUATED (`$hole_values`, beside the source text `$holes` keeps for the key readers): rust cannot read a
+      // call out of text, and `${t('k')}!` hands back that call. A `const` local naming one is followed by the evaluator.
+      const values = node.templateSpans.map((span) => evalNode(span.expression));
+      return { $template: parts, $holes: holes, $hole_values: values, ...(tree === null || tree === undefined ? {} : { $expr_id: tree }) };
     }
     if (ts.isBinaryExpression(node)) {
       if (node.operatorToken.kind === ts.SyntaxKind.PlusToken) {

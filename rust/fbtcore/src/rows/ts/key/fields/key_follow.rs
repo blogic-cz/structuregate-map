@@ -21,6 +21,8 @@ pub(super) struct Returned<'r, 'a> {
     pub(super) writes: &'r std::collections::HashMap<(String, String), Vec<&'a Row>>,
     /// `functions` row id -> the member or function it sits in.
     pub(super) parent: &'r std::collections::HashMap<String, String>,
+    /// Every `.push(..)` of a list, by the local or field it is made on.
+    pub(super) pushes: &'r super::key_pushes::Pushes<'a>,
 }
 
 /// The arguments of a call of a configured `i18nCalls` method, None for any other value.
@@ -42,9 +44,28 @@ pub(super) fn dictionary(v: &Value, dict: &[String]) -> Option<Value> {
     Some(serde_json::json!({"$template": [format!("{prefix}."), ""], "$holes": ["_"]}))
 }
 
+/// THE KEYS OF ONE ARGUMENT OF A TRANSLATE CALL: what the value spells, or - an element of a `const` object of strings
+/// read by an index no one knows (`KEYS[this.kind]`, `$indexed`) - every value of that object. Which element is read
+/// is the run's choice, so no condition is carried, and each value is a key only if the locale holds it.
+pub(super) fn arg_keys(arg: &Value, chain: &[String], keys: &super::key_branches::KeySet, out: &mut Vec<(String, Vec<String>)>) {
+    match arg.get("$indexed").and_then(Value::as_array) {
+        Some(values) => values.iter().for_each(|v| value_keys(v, chain, keys, out)),
+        None => value_keys(arg, chain, keys, out),
+    }
+}
+
 /// An object literal: no key of it is a row marker (`$call`, `$template`, `$cond_expr` ...).
 fn plain_object(v: &Value) -> bool {
     v.as_object().is_some_and(|o| o.keys().all(|k| !k.starts_with('$')))
+}
+
+/// The `String` methods that hand back their receiver's text, reworked: the call's `$target` is the compiler's own lib.
+fn text_method(v: &Value) -> bool {
+    const KEEPS: [&str; 10] = ["replace", "replaceAll", "trim", "trimStart", "trimEnd", "toUpperCase", "toLowerCase", "concat", "slice", "substring"];
+    let Some(target) = v.get("$target") else { return false };
+    let file = target.get("file").and_then(Value::as_str).unwrap_or_default();
+    let name = target.get("name").and_then(Value::as_str).unwrap_or_default();
+    KEEPS.contains(&name) && file.split(['/', '\\']).last().is_some_and(|f| f.starts_with("lib."))
 }
 
 /// `Promise.resolve(x)` of the compiler's own lib: `$target` names `resolve` in `typescript/lib/lib.*.d.ts`, compared
@@ -167,16 +188,19 @@ impl Returned<'_, '_> {
     /// return s;` hands back the call, and reading the `''` alone left the key a `literal` no component reached.
     /// The local is the member's own or one an enclosing member holds (`() => second` reads its method's). No
     /// branch is carried - as a method's several returns, they test its parameters - and a local the method
-    /// never returns is read by nothing, so a key written to it alone stays unreached.
+    /// never returns is read by nothing, so a key written to it alone stays unreached. EVERY `.push(x)` ON THE LOCAL
+    /// IS ONE MORE ELEMENT (`const out = []; out.push(t('a')); return out;`), in whatever branch it sits - none carried.
     fn written(&self, row: &Row, frame: &Frame<'_>, seen: &mut Seen, out: &mut Found) {
         let Some(name) = super::key_fields::text(row, "source").filter(|s| s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$')) else { return };
         let mut at = Some(frame.member.clone());
         while let Some(member) = at {
-            if let Some(writes) = self.writes.get(&(member.clone(), name.clone())) {
-                for write in writes {
-                    if let Some(value) = write.get("value") {
-                        self.held(&self.bind(value, frame), frame, seen, out);
-                    }
+            let (writes, pushed) = (self.writes.get(&(member.clone(), name.clone())), self.pushes.local.get(&(member.clone(), name.clone())));
+            if writes.is_some() || pushed.is_some() {
+                for value in writes.into_iter().flatten().filter_map(|w| w.get("value")) {
+                    self.held(&self.bind(value, frame), frame, seen, out);
+                }
+                for arg in pushed.into_iter().flatten().filter_map(|p| p.get("args")).filter_map(Value::as_array).flatten() {
+                    self.held(&self.bind(arg, frame), frame, seen, out);
                 }
                 return;
             }
@@ -220,6 +244,12 @@ impl Returned<'_, '_> {
                 o.values().for_each(|v| self.through(v, frame, seen, out));
                 return;
             }
+            // A TEMPLATE LITERAL'S HOLES, evaluated (`$hole_values`, one per hole): `${t('k')}!` hands back the call, a
+            // `const` local holding one the same - the evaluator already followed the local to its initializer.
+            Value::Object(o) if o.contains_key("$hole_values") => {
+                o["$hole_values"].as_array().into_iter().flatten().for_each(|v| self.through(v, frame, seen, out));
+                return;
+            }
             Value::Object(o) if o.contains_key("$concat") => {
                 o["$concat"].as_array().into_iter().flatten().for_each(|v| self.through(v, frame, seen, out));
                 return;
@@ -232,8 +262,15 @@ impl Returned<'_, '_> {
         }
         if let Some(args) = translated(ret, self.i18n) {
             for arg in args {
-                value_keys(arg, &[], self.keys, out);
+                arg_keys(arg, &[], self.keys, out);
             }
+            return;
+        }
+        // A STRING METHOD CHAINED ON A CALL HANDS BACK ITS TEXT: `t('k').replace(..)`, `.trim()`. The extractor evaluates
+        // the receiver (`$receiver_value`) when its type is a string; only a method that returns that text reworked is
+        // followed (`split` and `includes` return no key), by the lib's own declaration, never the name alone.
+        if let Some(receiver) = ret.get("$receiver_value").filter(|_| text_method(ret)) {
+            self.through(receiver, frame, seen, out);
             return;
         }
         if let Some(under) = dictionary(ret, self.dict) {

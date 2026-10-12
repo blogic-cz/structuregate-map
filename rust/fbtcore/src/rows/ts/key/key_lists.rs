@@ -55,6 +55,8 @@ pub(super) fn with_reader<R>(store: &Store<'_>, f: impl FnOnce(&Returned<'_, '_>
     let (params, fn_of_local) = callables(store);
     let assignments = store.table("assignments");
     let writes = local_writes(&assignments);
+    let (calls, members) = (store.table("calls"), store.table("members"));
+    let pushes = super::key_pushes::pushes(&calls, &members);
     let parent: HashMap<String, String> = store
         .table("functions")
         .iter()
@@ -62,6 +64,6 @@ pub(super) fn with_reader<R>(store: &Store<'_>, f: impl FnOnce(&Returned<'_, '_>
         .collect();
     f(&Returned {
         rows: &rows, one_return: &one_return, every: &every, keys: &keys, i18n: &i18n, dict: &dict, params: &params,
-        fn_of_local: &fn_of_local, writes: &writes, parent: &parent,
+        fn_of_local: &fn_of_local, writes: &writes, parent: &parent, pushes: &pushes,
     })
 }
