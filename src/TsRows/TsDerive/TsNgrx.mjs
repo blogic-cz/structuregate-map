@@ -243,5 +243,47 @@ export function rollupStateGraph(store) {
     });
   }
 
-  return { actions, handlers, selectors };
+  // ONE ROW PER `createEffect` MEMBER: the actions it listens to (the `ofType` arguments, spelled as a handler's
+  // `action_source` is), whether it dispatches, and what its callbacks return. The effect's body is walked by
+  // `TsDecls/TsClassRows.mjs`, so its calls and returns are rows under the member; without that walk the
+  // `ofType` call was only `$fn` text and the table could not be written.
+  let effects = 0;
+  const parentOf = new Map(store.table('functions').map((f) => [f.id, f.parent ?? null]));
+  const callsOf = new Map();
+  for (const c of store.table('calls')) {
+    if (c.member === undefined || c.member === null) continue;
+    if (!callsOf.has(c.member)) callsOf.set(c.member, []);
+    callsOf.get(c.member).push(c);
+  }
+  const returnsOf = new Map();
+  for (const r of store.table('returns')) {
+    if (!parentOf.has(r.member)) continue;
+    // The chain of enclosing functions, cycle-guarded, ends at the member that holds them: each link owns the return.
+    const seen = new Set();
+    let at = parentOf.get(r.member);
+    while (at !== null && at !== undefined && !seen.has(at)) {
+      seen.add(at);
+      if (!returnsOf.has(at)) returnsOf.set(at, []);
+      returnsOf.get(at).push(r);
+      at = parentOf.get(at) ?? null;
+    }
+  }
+  for (const m of store.table('members')) {
+    const call = asCall(m.value);
+    if (!isLibraryCall(call, 'createEffect')) continue;
+    const listens = arr(callsOf.get(m.id))
+      .filter((c) => str(c.target?.name) === 'ofType' && String(c.target?.file ?? '').includes('@ngrx/'))
+      .flatMap((c) => arr(c.args).map(refText).filter((x) => x !== null));
+    const emits = arr(returnsOf.get(m.id)).map((r) => str(r.value?.$call)).filter((x) => x !== null);
+    store.add('state_effects', 'se', {
+      member: m.id, class: m.class, file: m.file, name: m.name, line: m.line,
+      actions: listens,
+      dispatch: arr(call.$args)[1]?.dispatch !== false,
+      emits,
+      expression: arr(call.$args)[0]?.$expr_id ?? null,
+    });
+    effects += 1;
+  }
+
+  return { actions, handlers, selectors, effects };
 }

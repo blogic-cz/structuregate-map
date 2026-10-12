@@ -58,4 +58,30 @@ Test-Case 'tsrows: a twin enum, a getter alias field and a number each read as t
     Assert-Line $r 'note.Sev !== 0 => Sev note.Sev not_in ["Low"]'
 }
 
+# `[hidden]` is a built-in gate: it HIDES while its condition holds, so the key under it is reached on the
+# members the condition EXCLUDES. `hidden` stays in `gateInputs` on purpose - the built-in wins over the config.
+Test-Case 'tsrows: a [hidden] binding gates its subtree on the negation of its condition' {
+    $tpl = '<span [hidden]="kind === K.Alpha">{{ ''demo.hid.own'' | translate }}</span>' +
+        '<div [hidden]="kind === K.Beta"><b>{{ ''demo.hid.child'' | translate }}</b></div>' +
+        '<i *ngIf="kind === K.Gamma">{{ ''demo.hid.if'' | translate }}</i>'
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/kinds.ts' = "export enum DemoIDs { Alpha = 1, Beta = 2, Gamma = 3 }`n"
+        'apps/shop/src/hid.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "import { DemoIDs } from './kinds';`n" +
+            "@Component({ selector: 'demo-hid', standalone: true, template: '" + $tpl.Replace("'", "\'") + "' })`n" +
+            "export class HidComponent { K = DemoIDs; @Input() kind!: DemoIDs; }`n"
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"hid":{"own":"1","child":"2","if":"3"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"gateInputs":["hidden"]}'
+    }
+    $made = New-TsRowsDb $tree
+    $sql = "SELECT k.key || ' | ' || json_extract(v.value,'`$.dimension') || ' ' || json_extract(v.value,'`$.op') || ' ' || " +
+        "json_extract(v.value,'`$.values') || ' | ' || (SELECT gate_kind FROM gates WHERE id = json_extract(k.always_gates,'`$[0]')) AS r " +
+        "FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'demo.hid.%'"
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql $sql
+    Assert-Exit $r 0
+    Assert-Line $r 'demo.hid.own | kind not_in ["Alpha"] | hidden'
+    Assert-Line $r 'demo.hid.child | kind not_in ["Beta"] | hidden'
+    Assert-Line $r 'demo.hid.if | kind in ["Gamma"] | structural'
+}
+
 }

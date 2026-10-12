@@ -90,7 +90,13 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
       if (ts.isInterfaceDeclaration(s)) interfaceRow(s, fid, modifiersOf(s).exported, name);
       else if (ts.isTypeAliasDeclaration(s)) typeAliasRow(s, fid, name);
       else if (ts.isModuleDeclaration(s)) moduleRows(s, fid, name, rest);
-      else if (rest) rest(s);
+      else if (rest) {
+        // WHAT THE FILE WALK ADDS FOR IT sits in this namespace too: its new rows carry `in_module`.
+        const tables = ['classes', 'functions', 'consts', 'enums'];
+        const before = tables.map((t) => store.table(t).length);
+        rest(s);
+        tables.forEach((t, i) => { for (const r of store.table(t).slice(before[i])) r.in_module = name; });
+      }
     }
   }
 

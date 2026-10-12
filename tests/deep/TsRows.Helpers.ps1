@@ -13,7 +13,8 @@ function Get-TsRowsModules {
     $cache = Join-Path ([System.IO.Path]::GetTempPath()) 'sgtest-tsrows'
     $modules = Join-Path $cache 'node_modules'
     if ((Test-Path (Join-Path $modules 'typescript\package.json')) -and
-        (Test-Path (Join-Path $modules '@angular\compiler\package.json'))) {
+        (Test-Path (Join-Path $modules '@angular\compiler\package.json')) -and
+        (Test-Path (Join-Path $modules '@ngrx\effects\package.json'))) {
         $script:TsRowsCache.Path = $modules
         return $modules
     }
@@ -27,7 +28,7 @@ function Get-TsRowsModules {
     # `@angular/router` and `@ngrx/store` as well: a route's lazy target and every state API are recognised
     # by the declaration the CHECKER resolved, so without the packages a fixture's routes and actions are
     # calls to nothing and the derived tables stay empty.
-    & npm install --no-save --silent --prefix $cache 'typescript@5' '@angular/compiler@17' '@angular/core@17' '@angular/router@17' '@ngrx/store@17' 2>&1 | Out-Null
+    & npm install --no-save --silent --prefix $cache 'typescript@5' '@angular/compiler@17' '@angular/core@17' '@angular/router@17' '@ngrx/store@17' '@ngrx/effects@17' 2>&1 | Out-Null
     if ((Test-Path (Join-Path $modules 'typescript\package.json')) -and
         (Test-Path (Join-Path $modules '@angular\compiler\package.json'))) {
         $script:TsRowsCache.Path = $modules

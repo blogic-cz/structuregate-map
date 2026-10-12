@@ -8,7 +8,7 @@ what the rust closure derives from these rows is
 ## What the half writes
 
 `--map-sqlite` over an Angular workspace writes FRAMEWORK facts no compiler produces alone: bindings, template
-nodes, render edges, input uses, routes and what each can reach - 53 tables with the four the closure derives,
+nodes, render edges, input uses, routes and what each can reach - 54 tables with the four the closure derives,
 plus `diagnostics` (what the extraction could not answer: a count with no names cannot be checked). Every row
 carries `half = "typescript"`.
 
@@ -38,6 +38,7 @@ runs) are compared by that, every carried field equal, never by `c:412`.
   alias (`@utils`) is external and resolves in the tree. "In the tree" is
   `JOIN files rf ON rf.id = i.resolved_file WHERE rf.sha IS NOT NULL`.
 - **`imports.resolved`** is the module the specifier NAMES - often a barrel.
+- **`imports.in_tree`** is whether the resolved file is in the tree (not `node_modules`, not above the root): the LOCATION `external` is not.
 - **`imports.dynamic`** (`import` / `require`) marks a row for a bare `import('./x')` or `require('./x')`: no names, no `import_names`.
 - **`import_names`** (`ib:`, `TsImports.mjs`) is one row per name an import binds, in source order: `local`,
   `imported` (`default`, `*`), `kind`, `type_only`, and where it is DECLARED - `declared`, `declared_file`,
@@ -55,7 +56,7 @@ runs) are compared by that, every carried field equal, never by `c:412`.
 a `local` (`{file, line, col}`, its `locals` row's own place) on a bare name a body declares. An `Fn` tree names
 its `params` and its `rest` parameter.
 
-- **A namespace's statements are a file's** (`TsTypeRows.mjs::moduleRows`): a class, function or const in `namespace X { .. }` is a row like a top-level one, and an interface or type alias carries `in_module`; an AMBIENT block (`declare module`, `declare global`, `declare namespace`) yields only its interfaces and aliases.
+- **A namespace's statements are a file's** (`TsTypeRows.mjs::moduleRows`): a class, function or const in `namespace X { .. }` is a row like a top-level one, and every row a namespace declares carries `in_module`; an AMBIENT block (`declare module`, `declare global`, `declare namespace`) yields only its interfaces and aliases.
 
 - **A top-level `X.prototype.m = function` is a `functions` row** with `form: 'prototype-method'`, `name` the assigned text and `target` the declaration a call of `m` resolves to (`TsDeclRows.mjs::prototypeRow`). Also under a top-level `if (!X.prototype.m)` and from `Object.defineProperty(X.prototype, 'm', { value: function })`, targeted through the prototype's type.
 
@@ -76,6 +77,8 @@ its `params` and its `rest` parameter.
   `TsWalk.mjs::linkFunctions` - a `const` arrow's row sits at the NAME, its tree at the arrow), and a chained call
   names the call it is made on (`calls.receiver_call`).
 
+- **A shorthand property's value is its const's** (rows 46, `TsValueRefs.mjs::evalShorthand`): `{ template }` is `{ template: template }`, in every object literal. A const-held inline template's spans are placed at the const's line (`TsClassRows.mjs::argLinesOf`), same file only - an imported const keeps the decorator's line.
+- **A `createEffect` callback's body is walked** (rows 46, `TsDecls/TsClassRows.mjs`, `fromNgrx`): its `ofType`/`pipe` calls are `calls` rows and its nested arrows `functions` rows under the effect member, which `state_effects` (`TsDerive/TsNgrx.mjs`) reads.
 - **An arrow-function PROPERTY returns like a METHOD** (divergence #8): `isMain = (id: P) => [P.A].some(...)`
   keeps its `members.value` (`{"$fn": ...}`), gains `members.params` and a `returns` row keyed on the member,
   `implicit = 1` for a concise body. A function-valued `const` has the same under its `functions` row.
@@ -104,7 +107,8 @@ carry no `owner_file`.
 - **`class_hides`** (`cssh:`): a `[class.x]` gate (`via = 'class'`) or a literal `[ngClass]` key (`via =
   'ngClass'`) joined to every live, on-element, hiding rule whose subject requires the class - `bare` (the whole
   selector is `.x`) and `scope`: `own` (the component's `styleUrls`), `other` (another component's: reaches only
-  through `::ng-deep` or `ViewEncapsulation.None`), `shared` (no component names the sheet).
+  through `::ng-deep` or `ViewEncapsulation.None`), `shared` (no component names the sheet). `class_hides` is written
+  BEFORE the closure and read by it (`class_polarity`): a class gate restricts only through a row of scope `own` or `shared`.
 
 Not followed, so not claimed: `@extend`, a mixin's body at its `@include`, `@use`/`@import` between sheets, and a
 component's inline `styles: [...]`.

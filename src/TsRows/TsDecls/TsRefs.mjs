@@ -86,20 +86,6 @@ export function rollupRefIds(store) {
     return local === undefined ? null : declared.get(`${fid}#${local}`) ?? null;
   };
 
-  // A MODULE'S LISTS CARRY THE ROW ID of each class they name. `reach` and every consumer joining a module to
-  // its declarations otherwise re-derive it from file + name, which an `export { A as B }` alias defeats.
-  for (const row of store.table('ng_modules')) {
-    for (const key of ['declarations', 'imports', 'exports', 'providers', 'bootstrap']) {
-      if (!Array.isArray(row[key])) continue;
-      for (const el of row[key]) {
-        const ref = asRef(el);
-        if (ref === null || str(ref.name) === null || str(ref.file) === null) continue;
-        const id = idOf(ref);
-        if (id !== null) ref.id = id;
-      }
-    }
-  }
-
   for (const row of store.table('di')) {
     const id = idOf(asRef(row.resolved));
     if (id !== null) row.resolved_id = id;
@@ -108,10 +94,13 @@ export function rollupRefIds(store) {
     const id = idOf(asRef(row.target));
     if (id !== null) row.target_id = id;
   }
+  // `external` IS THE SPELLING (a specifier not starting with `.`); whether the import lands IN THE TREE is
+  // `in_tree`, which most consumers meant by it: a tsconfig alias is external and in the tree.
   for (const row of store.table('imports')) {
     const file = str(row.resolved);
     const fid = file === null ? undefined : idByPath.get(file);
     if (fid !== undefined) row.resolved_file = fid;
+    row.in_tree = fid !== undefined && !file.startsWith('..') && !file.split('/').includes('node_modules');
   }
   for (const row of store.table('exports')) {
     const file = str(row.resolved);
@@ -142,6 +131,27 @@ export function rollupRefIds(store) {
     row.declared_file = fid;
     const key = `${fid}#${str(row.declared_name) ?? ''}`;
     if (topLevel.has(key) && !refused.has(key)) row.declared_id = topLevel.get(key).id;
+  }
+  // A NAME THE FILE IMPORTS UNDER AN ALIAS (`import { A as B }`), or one the evaluator left unresolved (`{expr}`), is
+  // what that file's own import binds it to: the ref still names the alias, which no declaration carries.
+  const importedAs = new Map();
+  for (const row of store.table('import_names')) {
+    if (row.declared_id !== undefined && str(row.local) !== null) importedAs.set(`${String(row.file)}#${row.local}`, row.declared_id);
+  }
+  const refIn = (ref, fileId) => (ref === null ? null
+    : idOf(ref) ?? importedAs.get(`${String(fileId)}#${str(ref.name) ?? str(ref.expr) ?? ''}`) ?? null);
+
+  // A MODULE'S LISTS CARRY THE ROW ID of each class they name. `reach` and every consumer joining a module to
+  // its declarations otherwise re-derive it from file + name, which an alias defeats.
+  for (const row of store.table('ng_modules')) {
+    for (const key of ['declarations', 'imports', 'exports', 'providers', 'bootstrap']) {
+      if (!Array.isArray(row[key])) continue;
+      for (const el of row[key]) {
+        const ref = asRef(el);
+        const id = refIn(ref, row.file);
+        if (id !== null) ref.id = id;
+      }
+    }
   }
   // `@Inject(TOKEN)` AND `inject(TOKEN)` NAME A CONST: the same top-level lookup an import gets. A token that is a
   // PROPERTY of a const object (`Tokens.Alpha`, the shape most token registries take) is no top-level declaration:
@@ -194,7 +204,7 @@ export function rollupRefIds(store) {
   // files with nothing between them.
   const lazyRef = (v) => asRef(asRef(v)?.$module);
   for (const row of store.table('routes')) {
-    const componentId = idOf(asRef(row.component));
+    const componentId = refIn(asRef(row.component), row.file);
     if (componentId !== null) row.component_id = componentId;
     const ids = (Array.isArray(row.can_activate) ? row.can_activate : [])
       .map((g) => idOf(asRef(g))).filter((x) => x !== null);

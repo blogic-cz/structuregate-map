@@ -63,4 +63,29 @@ Test-Case 'tsrows: a static attribute that sets an input is counted as a binding
     Assert-Line $r 'i=never | 0'
 }
 
+
+# AN NGRX EFFECT IS A MEMBER HOLDING `createEffect(() => ...)`: the actions it listens to are the `ofType` arguments inside
+# that callback, which a property initializer that is not itself a function used to leave unwalked.
+Test-Case 'tsrows: a createEffect member names the actions it listens to, whether it dispatches and what it emits' {
+    $files = @{
+        'apps/shop/src/fx.actions.ts' = "import { createAction } from '@ngrx/store';`n" +
+            "export const load = createAction('[Demo] load');`n" +
+            "export const clear = createAction('[Demo] clear');`n" +
+            "export const done = createAction('[Demo] done');`n"
+        'apps/shop/src/fx.effects.ts' = "import { Injectable, inject } from '@angular/core';`n" +
+            "import { Actions, createEffect, ofType } from '@ngrx/effects';`n" +
+            "import { map, tap } from 'rxjs';`n" +
+            "import * as demoActions from './fx.actions';`n" +
+            "@Injectable() export class DemoEffects {`n" +
+            "  private actions`$ = inject(Actions);`n" +
+            "  loadAlpha`$ = createEffect(() => this.actions`$.pipe(ofType(demoActions.load, demoActions.clear), map(() => demoActions.done())));`n" +
+            "  logAlpha`$ = createEffect(() => this.actions`$.pipe(ofType(demoActions.done), tap(() => {})), { dispatch: false });`n" +
+            "}`n"
+    }
+    $made = New-TsRowsDb (New-TsRowsWorkspace $files)
+    Assert-Exit $made.Result 0
+    $e = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT 'e=' || name || ' | ' || actions || ' | ' || dispatch || ' | ' || coalesce(emits,'') AS r FROM state_effects")
+    Assert-Line $e 'e=loadAlpha$ | ["demoActions.load", "demoActions.clear"] | 1 | ["demoActions.done"]'
+    Assert-Line $e 'e=logAlpha$ | ["demoActions.done"] | 0 | []'
+}
 }
