@@ -62,7 +62,14 @@ its `params` and its `rest` parameter.
 
 - **A call or property read through a receiver keeps its declaring class** (rows 43, `TsValueRefs.mjs::ownerTarget`): `$owner` (a name, the file is the call's `$target`) on a `$call`, `$read` `{name, file, owner}` on a `$expr` property access - not on `this.x`. The rust side joins it to `classes` by (file, name) to reach every subtype a `new` builds (`key/fields/key_classes.rs`).
 
-- **The rows join by id, not by position** (rows 33): a `$fn` call argument, return value or local value names its `functions` row (`$fn_id`,
+- **A write to a property of a field names the field** (`assignments.holder`, rows 44: `this.cfg.list = ..` holds `cfg`), and a
+  `this.<x>` write a file+name key refuses - two classes of one file declare `x` - takes the writing class's own member, or its
+  nearest base's (`TsRefs.mjs::ownMember`).
+
+- **A spread call argument keeps what it spreads** (rows 44, `TsBody.mjs::emitCall`): `list.push(...this.make())` carries `$spread`, the
+  evaluated expression, beside the argument's own text - `key/key_lists.rs` reads the callee's list through it.
+
+- **The rows join by id, not by position** (rows 33): a `$fn` call argument, return value, local value, or one an assignment or a member's initializer holds (in place or inside an object, rows 44) names its `functions` row (`$fn_id`,
   `TsWalk.mjs::linkFunctions` - a `const` arrow's row sits at the NAME, its tree at the arrow), and a chained call
   names the call it is made on (`calls.receiver_call`).
 

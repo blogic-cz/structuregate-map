@@ -129,4 +129,54 @@ Test-Case 'tsrows keys: a list of instances a parent pushes and a child loops ov
     Assert-NoLine $r 'demo.spare.tip | field_binding | DemoTableComponent'
     Assert-NoLine $r 'demo.spare.label | field_binding | DemoTableComponent'
 }
+
+Test-Case 'tsrows keys: a method an instance holds hands back every return it spells, and a constructor callback writes the instance' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/tsconfig.app.json' = '{"compilerOptions":{"strict":true,"target":"ES2022"},"include":["src/**/*.ts"]}'
+        'apps/shop/src/translate.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class TranslateService {`n  getTranslation(key: string): string {`n    return key;`n  }`n}`n"
+        'apps/shop/src/row-button.ts' = "import { TranslateService } from './translate.service';`n" +
+            "export interface Row { state: number; paid: boolean; }`n" +
+            "export abstract class RowButton<T> {`n  text = '';`n  tooltip!: { text: (row: T) => string; position?: string };`n}`n" +
+            "export class VoidButton extends RowButton<Row> {`n" +
+            "  constructor() { super(); this.tooltip = { text: this.tipText, position: 'left' }; }`n" +
+            "  private tipText(row: Row): string {`n    const gone = row.state === 1;`n" +
+            "    if (gone) {`n      return 'demo.void.yes';`n    } else {`n      return 'demo.void.no';`n    }`n  }`n}`n" +
+            "export class PayButton extends RowButton<Row> {`n" +
+            "  constructor(private t: TranslateService) {`n    super();`n" +
+            "    Promise.resolve(true).then((on) => {`n      if (on) {`n        this.tooltip = { text: this.stateTip, position: 'left' };`n      }`n    });`n  }`n" +
+            "  private stateTip = (row: Row): string => {`n    let text = '';`n    switch (row.state) {`n" +
+            "      case 1:`n        text = this.t.getTranslation('demo.pay.active');`n        break;`n" +
+            "      case 2:`n        text = this.t.getTranslation('demo.pay.gone');`n        break;`n    }`n" +
+            "    if (row.paid) {`n      return this.t.getTranslation('demo.pay.done');`n    }`n    return text;`n  };`n}`n"
+        'apps/shop/src/demo-table.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "import { NgFor } from '@angular/common';`n" +
+            "import { RowButton } from './row-button';`n" +
+            "@Component({ selector: 'demo-table', standalone: true, imports: [NgFor], template: '<button *ngFor=`"let b of buttons`" [title]=`"b.tooltip.text(row)`">{{ b.text }}</button>' })`n" +
+            "export class DemoTableComponent {`n  @Input() buttons!: RowButton<any>[];`n  row: any;`n}`n"
+        'apps/shop/src/page.component.ts' = "import { Component, OnInit } from '@angular/core';`n" +
+            "import { DemoTableComponent } from './demo-table.component';`n" +
+            "import { PayButton, Row, RowButton, VoidButton } from './row-button';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "@Component({ selector: 'demo-page', standalone: true, imports: [DemoTableComponent], template: '<demo-table [buttons]=`"tableButtons`"></demo-table>' })`n" +
+            "export class PageComponent implements OnInit {`n  tableButtons: RowButton<Row>[] = [];`n" +
+            "  constructor(private t: TranslateService) {}`n" +
+            "  ngOnInit() {`n    const buttons: RowButton<Row>[] = [];`n    buttons.push(new VoidButton());`n" +
+            "    buttons.push(new PayButton(this.t));`n    this.tableButtons = buttons;`n  }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"void":{"yes":"a","no":"b"},"pay":{"active":"c","gone":"d","done":"e"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
+        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    # a METHOD written to `tooltip.text`, its two returns each a key it spells: the template calls it, so either renders
+    Assert-Line $r 'demo.void.yes | field_binding | DemoTableComponent'
+    Assert-Line $r 'demo.void.no | field_binding | DemoTableComponent'
+    # `tooltip` written in a `.then` callback inside the constructor; the returned `let` is what its `case`s assign
+    Assert-Line $r 'demo.pay.active | field_binding | DemoTableComponent'
+    Assert-Line $r 'demo.pay.gone | field_binding | DemoTableComponent'
+    Assert-Line $r 'demo.pay.done | field_binding | DemoTableComponent'
+}
 }

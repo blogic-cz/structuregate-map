@@ -30,7 +30,7 @@ use super::gate_values::EnumIndex;
 use super::key_branches::{value_keys, Branches, KeySet};
 use super::key_follow::Returned;
 use super::key_fields::{id_of, returns_by_member, text};
-use super::key_lists::{callee_lists, with_reader};
+use super::key_lists::{with_reader, ListSource};
 use super::key_routes::FieldSite;
 use super::store::{Row, Store};
 use indexmap::IndexMap;
@@ -67,9 +67,12 @@ fn element_keys(items: &[Element], keys: &KeySet, i18n: &[String], reader: &Retu
             // A CALL AS THE PROPERTY'S VALUE inside a list a callee returns is read as that callee's own return of it is -
             // a local arrow of the callee, a free function, a method - with the string it is handed spelled into its hole
             // (`label('alpha')` over `(n) => `demo.${n}``). No condition is carried: the call's branches test its parameters.
+            // The element's own chain stays on what the call hands back - the branches of the write that put it in the list,
+            // the render edge a child's input got it through - and only the callee's are dropped.
             if let Some(owner) = &item.owner {
-                reader.in_member(value, owner, &mut found);
-                found.iter_mut().for_each(|(_, chain)| chain.retain(|l| !l.starts_with("tpl:")));
+                let mut reached = Vec::new();
+                reader.in_member(value, owner, &mut reached);
+                found.extend(reached.into_iter().map(|(key, chain)| (key, [item.chain.clone(), chain.into_iter().filter(|l| !l.starts_with("tpl:")).collect()].concat())));
             }
             for (key, mut chain) in found {
                 if item.from_call {
@@ -96,24 +99,52 @@ pub struct Element {
     owner: Option<String>,
 }
 
+impl Element {
+    /// An element a member's return hands over (`key_lists::ListSource::member_lists`): its calls resolve inside `owner`.
+    pub(super) fn returned(value: Value, owner: &str) -> Element {
+        Element { value, chain: Vec::new(), from_call: true, owner: Some(owner.to_string()) }
+    }
+
+    /// An element a write put in the list in place, under the write's branches.
+    pub(super) fn written(value: Value, chain: Vec<String>) -> Element {
+        Element { value, chain, from_call: false, owner: None }
+    }
+
+    /// The element as a child receives it through one render edge (`key_inputs`): a way holds it only on a path through it.
+    pub(super) fn through_edge(mut self, edge: &str) -> Element {
+        self.chain.push(format!("edge:{edge}"));
+        self
+    }
+}
+
 /// The elements a list VALUE spells, each under `chain`: an array literal's items, a `...` spread of a call
 /// replaced by what its callee returns (`callee_lists`), a call by the same. None for a value that is no
 /// list. A spread no callee resolves stays ONE item, as an unread item always was, so `Loops::expand`
 /// refuses the list instead of reading it in part.
-fn elements(value: &Value, rows: &super::gate_tsrows::TsRows, by_member: &HashMap<String, Vec<&Row>>, params: &HashMap<String, Vec<String>>, chain: &[String]) -> Option<Vec<Element>> {
+fn elements(value: &Value, src: &ListSource<'_, '_>, chain: &[String]) -> Option<Vec<Element>> {
     let of = |items: Vec<Value>, owner: String| items.into_iter().map(move |value| Element { value, chain: chain.to_vec(), from_call: true, owner: Some(owner.clone()) });
     match value {
         Value::Array(items) => Some(
             items
                 .iter()
-                .flat_map(|item| match callee_lists(item.get("$spread"), rows, by_member, params) {
+                .flat_map(|item| match src.callee_lists(item.get("$spread")) {
                     Some((spread, owner)) => of(spread, owner).collect(),
                     None => vec![Element { value: item.clone(), chain: chain.to_vec(), from_call: false, owner: None }],
                 })
                 .collect(),
         ),
-        other => callee_lists(Some(other), rows, by_member, params).map(|(items, owner)| of(items, owner).collect()),
+        other => src.callee_lists(Some(other)).map(|(items, owner)| of(items, owner).collect()),
     }
+}
+
+/// The elements one `.push(..)` adds, under the push's branches: its arguments, a `...` spread of a call (`push(...this.make())`)
+/// what that callee returns - its elements then resolve their calls inside it.
+fn push_elements(push: &Row, src: &ListSource<'_, '_>, branches: &Branches) -> Vec<Element> {
+    let chain = branches.chain_of(push);
+    src.pushed(push)
+        .into_iter()
+        .map(|(value, callee)| Element { value, chain: chain.clone(), from_call: callee.is_some(), owner: callee.or_else(|| id_of(push, "member")) })
+        .collect()
 }
 
 /// One `*ngFor` over a list of objects: its node, its variable and the list's ELEMENTS.
@@ -161,6 +192,11 @@ impl Loops {
         let params = super::key_fields::callables(store).0;
         let branches = Branches::new(store);
         let members = store.table("members");
+        let calls = store.table("calls");
+        let functions = store.table("functions");
+        let pushes = super::key_pushes::pushes(&calls, &members, &functions);
+        let parent: HashMap<String, String> = functions.iter().filter_map(|f| Some((id_of(f, "id")?, text(f, "parent")?))).collect();
+        let src = ListSource { rows: &rows, by_member: &by_member, params: &params, pushes: &pushes, parent: &parent };
         let mut owner: HashMap<String, Option<String>> = HashMap::new();
         let mut lists: HashMap<String, Vec<Element>> = HashMap::new();
         let mut members_valued: HashSet<String> = HashSet::new();
@@ -173,7 +209,7 @@ impl Loops {
                 Some(Value::Array(items)) if items.is_empty() => {}
                 Some(value) => {
                     members_valued.insert(id.clone());
-                    if let Some(list) = elements(value, &rows, &by_member, &params, &[]) {
+                    if let Some(list) = elements(value, &src, &[]) {
                         lists.insert(id, list);
                     }
                 }
@@ -184,10 +220,6 @@ impl Loops {
         // of several returns. An element keeps the branches of the write that put it there. A write that is
         // not a plain `=` of a list leaves the member unread - a list read in part would hand a directive
         // fewer members than it can hold.
-        let calls = store.table("calls");
-        let functions = store.table("functions");
-        let pushes = super::key_pushes::pushes(&calls, &members, &functions);
-        let parent: HashMap<String, String> = functions.iter().filter_map(|f| Some((id_of(f, "id")?, text(f, "parent")?))).collect();
         let mut written: HashMap<String, Vec<&Row>> = HashMap::new();
         let assignments = store.table("assignments");
         for a in assignments.iter() {
@@ -212,7 +244,7 @@ impl Loops {
             for a in writes {
                 let list = a.get("value")
                     .filter(|_| text(a, "operator").as_deref() == Some("="))
-                    .and_then(|v| elements(v, &rows, &by_member, &params, &branches.chain_of(a)));
+                    .and_then(|v| elements(v, &src, &branches.chain_of(a)));
                 let Some(mut list) = list else {
                     all.clear();
                     unread.insert(target.clone());
@@ -220,8 +252,7 @@ impl Loops {
                 };
                 // A BARE LOCAL HANDED OVER (`const bs = []; bs.push(new X()); this.list = bs`) is its pushes too.
                 for p in super::key_instances::local_pushes(a, &pushes, &parent) {
-                    let args = p.get("args").and_then(Value::as_array).into_iter().flatten();
-                    list.extend(args.map(|a| Element { value: a.clone(), chain: branches.chain_of(p), from_call: false, owner: id_of(p, "member") }));
+                    list.extend(push_elements(p, &src, &branches));
                 }
                 all.extend(list);
             }
@@ -235,14 +266,13 @@ impl Loops {
         for m in members.iter() {
             let (Some(id), Some(class), Some(name)) = (id_of(m, "id"), text(m, "class"), text(m, "name")) else { continue };
             let Some(pushed) = pushes.field.get(&(class.clone(), name)).filter(|_| !unread.contains(&id) && owner.get(&id) == Some(&Some(class))) else { continue };
-            let args = pushed.iter().flat_map(|p| p.get("args").and_then(Value::as_array).into_iter().flatten().map(move |a| (a, *p)));
-            let more: Vec<Element> = args.map(|(a, p)| Element { value: a.clone(), chain: branches.chain_of(p), from_call: false, owner: id_of(p, "member") }).collect();
+            let more: Vec<Element> = pushed.iter().flat_map(|p| push_elements(p, &src, &branches)).collect();
             if !more.is_empty() {
                 lists.entry(id).or_default().extend(more);
             }
         }
         // A LIST EVERY PARENT HANDS TO AN `@Input` is the child's (`key_inputs`).
-        let handed = super::key_inputs::input_lists(store, &lists);
+        let handed = super::key_inputs::input_lists(store, &lists, &src, &branches);
         lists.extend(handed);
         for g in gates.iter().filter(|g| text(g, "name").as_deref() == Some("ngForOf")) {
             let (Some(top), Some(expr)) = (id_of(g, "node"), id_of(g, "expression")) else { continue };
@@ -337,17 +367,23 @@ fn property_of(target: &Value, name: &str) -> bool {
 fn reads_variable(ast: Option<&&Value>, variable: &str) -> bool {
     let mut props = Vec::new();
     if let Some(ast) = ast {
-        property_reads(unwrap(ast), variable, &mut props);
+        property_reads(unwrap(ast), variable, &Default::default(), &mut props);
     }
     !props.is_empty()
 }
 
 /// Every `<variable>.<property>` read in a tree, the receiver a bare `Read` of the variable with no
 /// resolved `target`.
-fn property_reads(ast: &Value, variable: &str, out: &mut Vec<String>) {
+///
+/// A CALL HANDING THE VARIABLE ITSELF TO A METHOD (`tipOf(b, row)`) reads what the method reads off that parameter
+/// (`key_handed`); `handed` is empty where only a direct read counts (a gate's condition).
+fn property_reads(ast: &Value, variable: &str, handed: &super::key_handed::Handed, out: &mut Vec<String>) {
     match ast {
-        Value::Array(items) => items.iter().for_each(|i| property_reads(i, variable, out)),
+        Value::Array(items) => items.iter().for_each(|i| property_reads(i, variable, handed, out)),
         Value::Object(object) => {
+            if let Some((method, at)) = super::key_handed::handed_at(ast, |a| bare_variable(a, variable)) {
+                at.iter().filter_map(|i| handed.get(&(method.clone(), *i))).for_each(|paths| out.extend(paths.iter().cloned()));
+            }
             if is_read(ast)
                 && let Some(name) = object.get("name").and_then(|n| n.as_str())
                 && let Some(receiver) = object.get("receiver")
@@ -361,10 +397,18 @@ fn property_reads(ast: &Value, variable: &str, out: &mut Vec<String>) {
                 // `<variable>.tooltip.text`: a dotted path, the property an INSTANCE's object literal holds (`key_instances`).
                 out.push(path);
             }
-            object.values().for_each(|v| property_reads(v, variable, out));
+            object.values().for_each(|v| property_reads(v, variable, handed, out));
         }
         _ => {}
     }
+}
+
+/// A bare read of the variable: no receiver but the implicit one, no declaration resolved.
+fn bare_variable(a: &Value, variable: &str) -> bool {
+    is_read(a)
+        && a.get("name").and_then(Value::as_str) == Some(variable)
+        && a.get("target").is_none_or(Value::is_null)
+        && a.get("receiver").and_then(|r| r.get("k")).and_then(Value::as_str) == Some("Implicit")
 }
 
 /// `a.b` of a read `<variable>.a.b` (any depth over one), the variable a bare name no declaration resolved.
@@ -433,6 +477,7 @@ pub fn loop_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
         .filter_map(|g| Some((id_of(g, "id")?, expr_by_id.get(&id_of(g, "expression")?)?.get("ast")?)))
         .collect();
 
+    let handed = super::key_handed::handed(store, &super::key_fields::callables(store).0);
     let per_loop: Vec<Elements> = with_reader(store, |reader| loops.list.iter().map(|lp| element_keys(&lp.items, &keyset, &i18n, reader)).collect());
     for (lp, elements) in loops.list.iter().zip(per_loop) {
         if elements.is_empty() {
@@ -447,7 +492,7 @@ pub fn loop_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
             for e in exprs_on.get(&id).into_iter().flatten() {
                 let Some(ast) = e.get("ast").filter(|a| !a.is_null()) else { continue };
                 let mut props = Vec::new();
-                property_reads(unwrap(ast), variable, &mut props);
+                property_reads(unwrap(ast), variable, &handed, &mut props);
                 for prop in props {
                     let Some(keys) = elements.get(&prop) else { continue };
                     if !seen.insert((id.clone(), prop.clone())) {

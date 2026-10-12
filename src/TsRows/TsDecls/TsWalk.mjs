@@ -313,8 +313,9 @@ function linkFunctions(store) {
     for (const k of Object.keys(v)) visit(v[k]);
   };
   for (const c of store.table('calls')) if (!store.hydrated.has(c)) visit(c.args);
-  // A RETURN OR A LOCAL HOLDING A FUNCTION names it too: `return this.pick(() => k)` and `const t = (k) => ...`.
-  for (const t of ['returns', 'locals']) for (const r of store.table(t)) if (!store.hydrated.has(r)) visit(r.value);
+  // A RETURN OR A LOCAL HOLDING A FUNCTION names it too: `return this.pick(() => k)` and `const t = (k) => ...` - and so
+  // does a field written one, in place or inside an object (`this.tooltip = { text: (row) => t('k') }`).
+  for (const t of ['returns', 'locals', 'assignments', 'members']) for (const r of store.table(t)) if (!store.hydrated.has(r)) visit(r.value);
 }
 
 /**

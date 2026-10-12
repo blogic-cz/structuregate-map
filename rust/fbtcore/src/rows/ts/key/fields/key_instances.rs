@@ -88,8 +88,9 @@ fn spelled(value: &Value, reader: &Returned<'_, '_>, found: &mut Found) {
     }
 }
 
-/// THE PUSHES ON THE BARE LOCAL AN ASSIGNMENT HANDS A FIELD (`const bs = []; bs.push(new X(..)); this.list = bs;`): the
-/// assignment's value is the local's initializer, so the local is named by the row's `source`. The local and the assignment
+/// THE PUSHES ON THE BARE LOCAL AN ASSIGNMENT HANDS A FIELD (`const bs = []; bs.push(new X(..)); this.list = bs;`), or a
+/// return hands back (`return bs;`, `key_lists::ListSource`): the row's value is the local's initializer, so the local is
+/// named by the row's `source`. The local and the assignment
 /// sit in one body - a callback (`.then(() => { this.list = bs; })`) is part of the member it is written in.
 pub(super) fn local_pushes<'a>(assignment: &Row, pushes: &super::key_pushes::Pushes<'a>, parent: &HashMap<String, String>) -> Vec<&'a Row> {
     let Some(name) = super::key_fields::text(assignment, "source").filter(|s| s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$')) else { return Vec::new() };

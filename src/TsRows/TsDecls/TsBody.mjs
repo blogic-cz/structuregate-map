@@ -107,7 +107,11 @@ export function makeBodyRows({ ts, store, evalNode, describe, declFileOf, declar
   function targetOf(left) {
     if (ts.isPropertyAccessExpression(left)) {
       if (left.expression.kind === ts.SyntaxKind.ThisKeyword) return { name: left.name.text, scope: 'this' };
-      return { name: left.name.text, scope: 'property' };
+      // A PROPERTY OF ONE OF THE CLASS'S OWN FIELDS (`this.cfg.list = ..`) names that field (`holder`, rows 44): a child
+      // bound to `cfg.list` loops over what is written there.
+      const holder = ts.isPropertyAccessExpression(left.expression) && left.expression.expression.kind === ts.SyntaxKind.ThisKeyword
+        ? left.expression.name.text : undefined;
+      return { name: left.name.text, scope: 'property', ...(holder !== undefined ? { holder } : {}) };
     }
     if (ts.isElementAccessExpression(left)) {
       const receiver = left.expression;
@@ -137,7 +141,13 @@ export function makeBodyRows({ ts, store, evalNode, describe, declFileOf, declar
     const target = declFileOf(ts.isPropertyAccessExpression(callee) ? callee.name : callee);
     // EVERY argument, not the first four. A call's fifth argument is as much a fact as its first, and the
     // cut was invisible: a consumer saw a complete-looking row that silently dropped the rest.
-    const args = [...(node.arguments ?? [])].map((a) => evalNode(a));
+    // A SPREAD ARGUMENT CARRIES WHAT IT SPREADS (`$spread`): `list.push(...this.make())` adds the elements `make` returns,
+    // and the bare `...this.make()` text named no call a reader could enter.
+    const args = [...(node.arguments ?? [])].map((a) => {
+      const value = evalNode(a);
+      if (!ts.isSpreadElement(a) || value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+      return { ...value, $spread: evalNode(a.expression) };
+    });
     const id = store.add('calls', 'cl', {
       ...inCase(),
       member: ownerId,
@@ -176,7 +186,7 @@ export function makeBodyRows({ ts, store, evalNode, describe, declFileOf, declar
     store.add('assignments', 'as', {
       ...inCase(),
       member: ownerId, class: classId,
-      target: lhs.name, scope: lhs.scope,
+      target: lhs.name, scope: lhs.scope, ...(lhs.holder !== undefined ? { holder: lhs.holder } : {}),
       // WHICH PROPERTY IS BEING SET, resolved. Published as text only, the write side of TypeScript had no
       // link where the read side has one.
       target_ref: ts.isPropertyAccessExpression(node.left) ? declFileOf(node.left.name)

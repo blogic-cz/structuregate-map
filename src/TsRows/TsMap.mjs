@@ -205,7 +205,7 @@ async function main() {
   // for the keys a class instance carries - derived in rust (`key/fields/key_classes.rs`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 43, build: args.build,
+    config: config.file, data: config.data, rows: 44, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

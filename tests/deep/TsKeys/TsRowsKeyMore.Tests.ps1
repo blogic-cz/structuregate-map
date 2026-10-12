@@ -102,7 +102,10 @@ Test-Case 'tsrows keys: a +=, an await, a then callback, a copied list, an index
     Assert-NoLine $r 'demo.list.unused | field_binding | MoreComponent'
     Assert-NoLine $r 'demo.arr.unused | field_binding | MoreComponent'
     Assert-NoLine $r 'demo.arrow.idle | field_binding | MoreComponent'
-    # one of the child's parents binds something other than a bare list field
-    Assert-NoLine $r 'demo.child.unused | field_binding | PairComponent'
+    # each render edge hands its own list (#25): the edge binding `idleKids` shows its key, the one binding
+    # `idleKids.slice()` - a call the map does not read as a list here - adds nothing and voids nothing
+    Assert-Line $r 'demo.child.unused | field_binding | PairComponent'
+    $p = Invoke-TsRowsQ $made.Db "SELECT 'paths ' || n_paths AS n FROM key_reach WHERE key = 'demo.child.unused'"
+    Assert-Line $p 'paths 1'
 }
 }

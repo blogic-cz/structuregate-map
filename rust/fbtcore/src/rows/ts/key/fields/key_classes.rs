@@ -43,6 +43,8 @@ pub(super) struct Classes {
     /// (class id, member name) -> member id.
     member: HashMap<(String, String), String>,
     constructors: HashSet<String>,
+    /// `functions` row id -> the member or function it sits in: a callback written inside a constructor is part of it.
+    fn_parent: HashMap<String, String>,
     /// member id (a class's, or an interface's `type_members` row) -> the type declaring it and its name.
     declared_in: HashMap<String, (TypeKey, String)>,
     /// What an instance's properties are made of (`key_instances`), read when the first element asks.
@@ -68,7 +70,7 @@ impl Classes {
         }
         let mut out = Classes {
             by_tail, by_path, by_key: HashMap::new(), key_of: HashMap::new(), parent: HashMap::new(), subs: HashMap::new(), member: HashMap::new(),
-            constructors: HashSet::new(), declared_in: HashMap::new(), inst: OnceCell::new(), tables: Vec::new(), built: OnceCell::new(),
+            constructors: HashSet::new(), fn_parent: HashMap::new(), declared_in: HashMap::new(), inst: OnceCell::new(), tables: Vec::new(), built: OnceCell::new(),
         };
         let classes = store.table("classes");
         for c in classes.iter() {
@@ -113,6 +115,7 @@ impl Classes {
                 out.declared_in.insert(id, (key.clone(), name));
             }
         }
+        out.fn_parent = store.table("functions").iter().filter_map(|f| Some((id_of(f, "id")?, id_of(f, "parent")?))).collect();
         out.tables = ["assignments", "locals", "returns", "calls", "members"].iter().map(|t| store.table(t)).collect();
         out
     }
@@ -176,7 +179,7 @@ impl Classes {
             }
             for a in self.tables[0].iter() {
                 let (Some(member), Some(class), Some(name), Some(value)) = (id_of(a, "member"), id_of(a, "class"), text(a, "target"), a.get("value")) else { continue };
-                if self.constructors.contains(&member) && text(a, "scope").as_deref() == Some("this") && text(a, "operator").as_deref() == Some("=") {
+                if self.is_constructor(&member) && text(a, "scope").as_deref() == Some("this") && text(a, "operator").as_deref() == Some("=") {
                     out.written.entry((class, name)).or_default().push(value.clone());
                 }
             }
@@ -208,8 +211,20 @@ impl Classes {
         self.chain(class).iter().find_map(|c| self.member.get(&(c.clone(), name.to_string()))).map(String::as_str)
     }
 
+    /// `member` is a constructor, or a callback written inside one (`Promise.resolve(x).then(() => { this.a = .. })`):
+    /// what the callback writes to `this` is the instance's too, whenever it runs.
     pub(super) fn is_constructor(&self, member: &str) -> bool {
-        self.constructors.contains(member)
+        let mut at = member;
+        for _ in 0..32 {
+            if self.constructors.contains(at) {
+                return true;
+            }
+            match self.fn_parent.get(at) {
+                Some(up) => at = up,
+                None => return false,
+            }
+        }
+        false
     }
 
     /// (class, member id) for every class a receiver typed `owner` (in `file`) can hold that has `name`: the owner when it
@@ -222,11 +237,17 @@ impl Classes {
     /// The members that can answer a TEMPLATE'S call of `row` - a class member or an interface's: those of the declaring
     /// type's built subtypes. Nothing when the type has none (the row answers itself) so a plain class reads as before.
     pub(super) fn answers_of(&self, row: &str) -> Vec<String> {
+        self.answering_row(row).into_iter().map(|(_, member)| member).collect()
+    }
+
+    /// (class, member id) for every class that can answer a read of `row` - a member or an interface's - when its
+    /// declaring type has subtypes; nothing otherwise.
+    pub(super) fn answering_row(&self, row: &str) -> Vec<(String, String)> {
         let Some((key, name)) = self.declared_in.get(row) else { return Vec::new() };
         if !self.subs.contains_key(key) {
             return Vec::new();
         }
-        self.answering_key(key.clone(), name).into_iter().map(|(_, member)| member).collect()
+        self.answering_key(key.clone(), name)
     }
 
     fn answering_key(&self, key: TypeKey, name: &str) -> Vec<(String, String)> {
@@ -295,20 +316,27 @@ fn read_keys(value: &Value, reader: &Returned<'_, '_>, held: &Held<'_>) -> Vec<S
     let mut keys = Vec::new();
     if value.get("$read").is_some() {
         for (class, member) in reader.classes.through(value) {
-            let own = held.out.get(&member).or_else(|| held.only.get(&member));
-            let written = held.by_writer.get(&(class.clone(), member.clone()));
-            keys.extend(own.into_iter().chain(written).flat_map(|w| w.keys().cloned()));
-            for (writer, ks) in held.direct.get(&member).into_iter().flatten() {
-                if *writer == class || reader.classes.extends(&class, writer) {
-                    keys.extend(ks.iter().cloned());
-                }
-            }
+            keys.extend(answer_keys(&class, &member, reader, held));
         }
     }
     let arms = [value.get("$then"), value.get("$else")].into_iter().flatten();
     let sides = value.get("$operands").and_then(Value::as_array).into_iter().flatten();
     for inner in arms.chain(sides).chain(value.get("$await")) {
         keys.extend(read_keys(inner, reader, held));
+    }
+    keys
+}
+
+/// The keys `member` holds when `class` answers: its own writes, what that class's constructor wrote to a base's field, and
+/// the translate call the class or a base of it wrote to it.
+fn answer_keys(class: &str, member: &str, reader: &Returned<'_, '_>, held: &Held<'_>) -> Vec<String> {
+    let own = held.out.get(member).or_else(|| held.only.get(member));
+    let written = held.by_writer.get(&(class.to_string(), member.to_string()));
+    let mut keys: Vec<String> = own.into_iter().chain(written).flat_map(|w| w.keys().cloned()).collect();
+    for (writer, ks) in held.direct.get(member).into_iter().flatten() {
+        if writer == class || reader.classes.extends(class, writer) {
+            keys.extend(ks.iter().cloned());
+        }
     }
     keys
 }
@@ -355,6 +383,16 @@ pub(super) fn add_reads(
     for r in store.table("returns").iter() {
         let (Some(member), Some(value)) = (id_of(r, "member").filter(|m| getters.contains(m)), r.get("value")) else { continue };
         found.extend(read_keys(value, reader, &held).into_iter().map(|k| (member.clone(), k, branches.chain_of(r))));
+    }
+    // A TEMPLATE READING A PROPERTY OF A BASE OR AN INTERFACE (`{{ b.text }}` over `b: Base`) renders what every built
+    // subtype holds in it, as a template's call of such a method runs every built subtype's (`answers_of`). Added once the
+    // reads above are done, so a receiver typed by one subclass still reads that subclass alone.
+    let type_members = store.table("type_members");
+    let rows = members.iter().filter_map(|m| id_of(m, "id")).chain(type_members.iter().filter_map(|m| id_of(m, "id")));
+    for row in rows {
+        for (class, member) in reader.classes.answering_row(&row) {
+            found.extend(answer_keys(&class, &member, reader, &held).into_iter().map(|k| (row.clone(), k, Vec::new())));
+        }
     }
     for (member, key, chain) in found {
         member_ways(out.entry(member).or_default(), &key, chain);

@@ -70,15 +70,17 @@ fn text_method(v: &Value) -> bool {
     KEEPS.contains(&name) && file.split(['/', '\\']).last().is_some_and(|f| f.starts_with("lib."))
 }
 
-/// `Promise.resolve(x)` of the compiler's own lib: `$target` names `resolve` in `typescript/lib/lib.*.d.ts`, compared
-/// by path pieces.
-fn is_promise_resolve(v: &Value) -> bool {
+/// `Promise.resolve(x)` of the compiler's own lib (`$target` names `resolve` in `typescript/lib/lib.*.d.ts`), or rxjs's
+/// `of(x)` (`of` declared under `rxjs`): a value that hands its argument on. Compared by path pieces.
+fn hands_on(v: &Value) -> bool {
     let Some(target) = v.get("$target") else { return false };
     let file = target.get("file").and_then(Value::as_str).unwrap_or_default();
     let pieces: Vec<&str> = file.split(['/', '\\']).collect();
-    target.get("name").and_then(Value::as_str) == Some("resolve")
-        && pieces.last().is_some_and(|f| f.starts_with("lib."))
-        && pieces.windows(2).any(|w| w == ["typescript", "lib"])
+    match target.get("name").and_then(Value::as_str) {
+        Some("resolve") => pieces.last().is_some_and(|f| f.starts_with("lib.")) && pieces.windows(2).any(|w| w == ["typescript", "lib"]),
+        Some("of") => pieces.contains(&"rxjs"),
+        _ => false,
+    }
 }
 
 /// The text a value spells: a string, or a STRING ENUM's member (`{"$enum": "Codes.A", "value": "A"}`, any marked
@@ -158,8 +160,23 @@ impl Returned<'_, '_> {
 
     /// The keys `member` - a method, an arrow property or a `functions` row - returns, entered with no arguments: a function
     /// a template or an instance holds (`tooltip = { text: this.tipText }`) and calls with what only it knows.
+    ///
+    /// EVERY RETURN'S OWN KEY COUNTS, as a template-called method's does (`key_methods`): the template calls this function
+    /// itself, so `if (gone) { return 'a'; } return 'b';` renders either key. A call made FROM it still reads a callee's
+    /// several returns only through their calls.
     pub(in super::super) fn enter_member(&self, member: &str, out: &mut Found) {
-        self.enter(member.to_string(), &Value::Null, &mut Seen::new(), out);
+        let mut seen = Seen::new();
+        if self.one_return.contains_key(member) {
+            return self.enter(member.to_string(), &Value::Null, &mut seen, out);
+        }
+        let frame = Frame { member: member.to_string(), args: &[] };
+        seen.insert(format!("{member} []"));
+        for row in self.every.get(member).into_iter().flatten() {
+            if let Some(ret) = row.get("value") {
+                self.held(ret, &frame, &mut seen, out);
+            }
+            self.written(row, &frame, &mut seen, out);
+        }
     }
 
     /// The keys of the ONE plain return of `member`, or what each of its several returns hands back through a
@@ -277,7 +294,7 @@ impl Returned<'_, '_> {
             }
             _ => {}
         }
-        if is_promise_resolve(ret) {
+        if hands_on(ret) {
             ret.get("$args").and_then(Value::as_array).into_iter().flatten().for_each(|a| self.through(a, frame, seen, out));
             return;
         }

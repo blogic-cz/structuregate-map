@@ -39,24 +39,54 @@ fn keeps_parameter(function: &str, by_member: &HashMap<String, Vec<&Row>>, param
     ret.get("value").is_some_and(|v| bare(v) || v.get("$spread").is_some_and(bare))
 }
 
-/// THE ELEMENTS OF EVERY LIST A CALL'S CALLEE RETURNS, when every return of it is such a list, and the callee's
-/// id: `items(flag) { if (flag) { return [{ label: 'a' }]; } return [{ label: 'b' }]; }` is both elements. The
-/// callee is a class member, or - when no member of that name sits in the file - a free function (a `function`
-/// or a `const` arrow), found by the call's `$target`. A return that is anything else reads nothing. The
-/// branches are not carried - they test the callee's parameters, which no gate shares.
-pub(super) fn callee_lists(
-    value: Option<&Value>,
-    rows: &super::gate_tsrows::TsRows,
-    by_member: &HashMap<String, Vec<&Row>>,
-    params: &HashMap<String, Vec<String>>,
-) -> Option<(Vec<Value>, String)> {
-    let target = value?.get("$target")?;
-    let callee = rows.member_named(target).or_else(|| rows.function_named(target))?;
-    let mut items = Vec::new();
-    for r in by_member.get(&callee)? {
-        items.extend(list_of(r.get("value")?, by_member, params)?.iter().cloned());
+/// Where a list's elements are read from: the callees' returns, the callbacks' parameters, and every `.push(..)` with the
+/// member each callback sits in.
+pub(super) struct ListSource<'r, 'a> {
+    pub(super) rows: &'r super::gate_tsrows::TsRows,
+    pub(super) by_member: &'r HashMap<String, Vec<&'a Row>>,
+    pub(super) params: &'r HashMap<String, Vec<String>>,
+    pub(super) pushes: &'r super::key_pushes::Pushes<'a>,
+    pub(super) parent: &'r HashMap<String, String>,
+}
+
+impl ListSource<'_, '_> {
+    /// The elements one `.push(..)` adds: each argument, a `...` spread of a call replaced by what its callee returns.
+    pub(super) fn pushed(&self, push: &Row) -> Vec<(Value, Option<String>)> {
+        let mut out = Vec::new();
+        for arg in push.get("args").and_then(Value::as_array).into_iter().flatten() {
+            match self.callee_lists(arg.get("$spread")) {
+                Some((items, owner)) => out.extend(items.into_iter().map(|i| (i, Some(owner.clone())))),
+                None => out.push((arg.clone(), None)),
+            }
+        }
+        out
     }
-    Some((items, callee))
+
+    /// THE ELEMENTS OF EVERY LIST A CALL'S CALLEE RETURNS, when every return of it is such a list, and the callee's
+    /// id: `items(flag) { if (flag) { return [{ label: 'a' }]; } return [{ label: 'b' }]; }` is both elements. The
+    /// callee is a class member, or - when no member of that name sits in the file - a free function (a `function`
+    /// or a `const` arrow), found by the call's `$target`. A return that is anything else reads nothing. The
+    /// branches are not carried - they test the callee's parameters, which no gate shares.
+    ///
+    /// A RETURNED LOCAL IS ITS PUSHES TOO: `const out = []; out.push(new A()); return out;` - in a callback of the callee
+    /// as well (`.then(() => out.push(..))`), which the run may finish later, but whose elements the list still holds.
+    pub(super) fn callee_lists(&self, value: Option<&Value>) -> Option<(Vec<Value>, String)> {
+        let target = value?.get("$target")?;
+        let callee = self.rows.member_named(target).or_else(|| self.rows.function_named(target))?;
+        Some((self.member_lists(&callee)?, callee))
+    }
+
+    /// The elements of every list `member` returns - a method, a getter, a function - when every return is one.
+    pub(super) fn member_lists(&self, member: &str) -> Option<Vec<Value>> {
+        let mut items = Vec::new();
+        for r in self.by_member.get(member)? {
+            items.extend(list_of(r.get("value")?, self.by_member, self.params)?.iter().cloned());
+            for p in super::key_instances::local_pushes(r, self.pushes, self.parent) {
+                items.extend(self.pushed(p).into_iter().map(|(i, _)| i));
+            }
+        }
+        Some(items)
+    }
 }
 
 /// Runs `f` with the reader `key_fields` follows a call with - for a loop's element, whose property may hold one.
