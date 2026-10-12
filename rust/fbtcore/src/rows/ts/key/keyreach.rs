@@ -210,6 +210,9 @@ pub fn build_closure(
     let bound = bound_conds(store);
     let mut conds = conds;
     conds.extend(bound.conds.clone());
+    // A CALLEE'S BRANCH CARRIED THROUGH A CALL, its parameters read as the caller's arguments (`key_args`).
+    let carried = routes.values().flat_map(|h| h.sites.values().flatten().flatten());
+    conds.extend(super::key_args::arg_conds(store, &branches, carried, &idx0));
     let (gv, idx) = gate_values_with(store, &extra, &conds);
     let gv_rows = write_gate_values(store, &gv.map, &idx);
     // THE FOLDS READ GATES AND BRANCHES ALIKE; only the published tables are gates alone.

@@ -341,6 +341,10 @@ impl Branches {
     /// Which side of its condition an id stands for: `then`/`else` for a branch or a choice,
     /// `case` for a switch case.
     pub fn sense(&self, id: &str) -> &'static str {
+        // A CALLEE'S BRANCH CARRIED THROUGH A CALL (`key_args`) is the side of that branch.
+        if let Some(branch) = id.strip_prefix("arg:").and_then(|rest| rest.split('@').next()) {
+            return self.sense(branch);
+        }
         if id.starts_with("tpl:") {
             return "built";
         }
@@ -360,8 +364,14 @@ impl Branches {
 
     pub fn contains(&self, id: &str) -> bool {
         let choice = id.strip_prefix('!').unwrap_or(id);
-        ["tpl:", "loop:", "bind:", "or:"].iter().any(|p| id.starts_with(p)) || self.by_id.contains_key(id) || self.cases.contains_key(id)
+        ["tpl:", "loop:", "bind:", "or:", "arg:"].iter().any(|p| id.starts_with(p)) || self.by_id.contains_key(id) || self.cases.contains_key(id)
             || self.choices.contains_key(choice) || self.arms.contains_key(choice)
+    }
+
+    /// An `if` branch's (negated, condition tree id, member), None for a case, an arm or an unknown id.
+    pub fn condition(&self, id: &str) -> Option<(bool, &str, Option<&str>)> {
+        let (_, negated, tree, member) = self.by_id.get(id)?;
+        Some((*negated, tree.as_deref()?, member.as_deref()))
     }
 
     /// Every branch, every case and every conditional ARM a statement row sits in.
