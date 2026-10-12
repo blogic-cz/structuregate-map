@@ -98,6 +98,11 @@ pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
 /// spells its value (`key_follow::spell`). And a `const` local arrow's OWN template literal naming its parameter is read
 /// per call when every call spells it (`key_branches::literal_ways`); one call that does not keeps it a wildcard.
 fn callee_keys(value: Option<&Value>, reader: &Returned<'_, '_>) -> Vec<(String, Vec<String>)> {
+    callee_keys_at(value, None, reader)
+}
+
+/// `callee_keys` of a value written at the expression row `site`: the callee's own branches ride along (`Returned::call_at`).
+fn callee_keys_at(value: Option<&Value>, site: Option<&str>, reader: &Returned<'_, '_>) -> Vec<(String, Vec<String>)> {
     let mut found = Vec::new();
     let mut seen = std::collections::HashSet::new();
     // A FIELD OR LOCAL HOLDING A DICTIONARY CALL ITSELF (`opts = this.t.getTranslationDictionary('p')`) holds every key
@@ -106,7 +111,7 @@ fn callee_keys(value: Option<&Value>, reader: &Returned<'_, '_>) -> Vec<(String,
     if let Some(under) = value.and_then(|v| super::key_follow::dictionary(v, reader.dict)) {
         value_keys(&under, &[], reader.keys, &mut found);
     }
-    reader.call(value, &mut seen, &mut found);
+    reader.call_at(value, site, &mut seen, &mut found);
     for (_, chain) in found.iter_mut() {
         chain.retain(|link| !link.starts_with("tpl:"));
     }
@@ -225,7 +230,8 @@ fn member_keys(store: &Store<'_>, reader: &Returned<'_, '_>) -> IndexMap<String,
         let mut found = Vec::new();
         let value = super::key_then::resolved(a, &thens).or(a.get("value"));
         value_keys(value.unwrap_or(&Value::Null), &branches.chain_of(a), &keys, &mut found);
-        for (key, chain) in callee_keys(value, reader) {
+        let site = text(a, "expression").filter(|_| a.get("value") == value);
+        for (key, chain) in callee_keys_at(value, site.as_deref(), reader) {
             let mut way = branches.chain_of(a);
             way.extend(chain);
             found.push((key, way));
@@ -270,7 +276,7 @@ fn member_keys(store: &Store<'_>, reader: &Returned<'_, '_>) -> IndexMap<String,
         // `ts_call`, and a key another component's field binding promoted lost this component.
         let mut reached = Vec::new();
         if let Some(value) = r.get("value") {
-            reader.in_member(value, &member, &mut reached);
+            reader.in_member_at(value, &member, text(r, "expression").as_deref(), &mut reached);
         }
         for (key, chain) in reached {
             let mut way = branches.chain_of(r);

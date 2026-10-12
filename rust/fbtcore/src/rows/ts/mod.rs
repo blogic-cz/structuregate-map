@@ -63,6 +63,8 @@ pub mod key_classes;
 pub mod key_instances;
 #[path = "key/fields/key_handed.rs"]
 pub mod key_handed;
+#[path = "key/fields/key_args.rs"]
+pub mod key_args;
 #[path = "key/fields/key_fields.rs"]
 pub mod key_fields;
 #[path = "key/fields/key_follow.rs"]

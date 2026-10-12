@@ -25,6 +25,8 @@ pub(super) struct Returned<'r, 'a> {
     pub(super) pushes: &'r super::key_pushes::Pushes<'a>,
     /// The classes a receiver's declared type stands for - `key_classes`.
     pub(super) classes: &'r super::key_classes::Classes,
+    /// The branches a callee's returns sit in, carried through a call a field holds (`key_args`).
+    pub(super) branches: &'r super::key_branches::Branches,
 }
 
 /// The arguments of a call of a configured `i18nCalls` method, None for any other value.
@@ -126,6 +128,9 @@ pub(super) fn spellings(args: &[Value]) -> Vec<Vec<Value>> {
 struct Frame<'v> {
     member: String,
     args: &'v [Value],
+    /// The value a getter returns or a field holds, and the expression row it is written at: a CALL that value is
+    /// itself carries its callee's branches (`call_at`), never a call nested inside it.
+    site: Option<(&'v Value, &'v str)>,
 }
 
 type Seen = std::collections::HashSet<String>;
@@ -136,25 +141,34 @@ impl Returned<'_, '_> {
     /// arguments. A FREE FUNCTION IS ENTERED LIKE A METHOD: `this.c = label('a')` over `export const label = (n) =>
     /// `demo.${n}`` hands the field `demo.a`, and reading only class members left every key such a function builds
     /// a `literal` no component reached. No condition is carried, and each (callee, arguments) is read once.
-    pub(super) fn call(&self, value: Option<&Value>, seen: &mut Seen, out: &mut Found) {
+    /// Made at the expression row `site`, the callee's own `if` branches are carried as `arg:<branch>@<site>` - the
+    /// branch's condition with the callee's parameters replaced by the arguments written at the site (`key_args`).
+    pub(super) fn call_at(&self, value: Option<&Value>, site: Option<&str>, seen: &mut Seen, out: &mut Found) {
         let Some(value) = value.map(|v| v.get("$await").unwrap_or(v)) else { return };
         let Some(target) = value.get("$target") else { return };
         // A CALL THROUGH A RECEIVER TYPED BY A BASE CLASS OR AN INTERFACE runs the member of every subtype a `new` builds.
         let answering = self.classes.through(value);
         if !answering.is_empty() {
             for (_, member) in answering {
-                self.enter(member, value, seen, out);
+                self.enter(member, value, seen, out, site);
             }
             return;
         }
         let Some(member) = self.rows.member_named(target).or_else(|| self.rows.function_named(target)) else { return };
-        self.enter(member, value, seen, out);
+        self.enter(member, value, seen, out, site);
     }
 
     /// The keys a value holds through the calls in it, read inside `member` (its locals and parameters in scope):
     /// an element's property of a list `member` returns.
     pub(in super::super) fn in_member(&self, value: &Value, member: &str, out: &mut Found) {
-        let frame = Frame { member: member.to_string(), args: &[] };
+        let frame = Frame { member: member.to_string(), args: &[], site: None };
+        self.through(value, &frame, &mut Seen::new(), out);
+    }
+
+    /// `in_member` over a value that IS a call written at the expression row `site` (a getter's `return this.svc.f(x)`):
+    /// the callee's branches are carried (`call_at`). Any other value reads as `in_member` does.
+    pub(in super::super) fn in_member_at(&self, value: &Value, member: &str, site: Option<&str>, out: &mut Found) {
+        let frame = Frame { member: member.to_string(), args: &[], site: site.map(|s| (value, s)) };
         self.through(value, &frame, &mut Seen::new(), out);
     }
 
@@ -167,9 +181,9 @@ impl Returned<'_, '_> {
     pub(in super::super) fn enter_member(&self, member: &str, out: &mut Found) {
         let mut seen = Seen::new();
         if self.one_return.contains_key(member) {
-            return self.enter(member.to_string(), &Value::Null, &mut seen, out);
+            return self.enter(member.to_string(), &Value::Null, &mut seen, out, None);
         }
-        let frame = Frame { member: member.to_string(), args: &[] };
+        let frame = Frame { member: member.to_string(), args: &[], site: None };
         seen.insert(format!("{member} []"));
         for row in self.every.get(member).into_iter().flatten() {
             if let Some(ret) = row.get("value") {
@@ -185,23 +199,23 @@ impl Returned<'_, '_> {
     /// AN ARGUMENT THAT IS A TERNARY OF STRINGS IS EACH OF THEM: `k(on ? 'x' : 'y')` over `(n) => t(`q.${n}`)` reads the
     /// callee once per spelling, no condition carried. Left whole, the hole stayed open and an open hole matches every
     /// key under the prefix. Past `MAX_SPELLINGS` combinations the call is read as it was.
-    fn enter(&self, member: String, call: &Value, seen: &mut Seen, out: &mut Found) {
+    fn enter(&self, member: String, call: &Value, seen: &mut Seen, out: &mut Found, site: Option<&str>) {
         let args = call.get("$args").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
         let spelled = spellings(args);
         if spelled.len() > 1 {
             for combo in &spelled {
-                self.enter_args(member.clone(), combo, seen, out);
+                self.enter_args(member.clone(), combo, seen, out, site);
             }
             return;
         }
-        self.enter_args(member, args, seen, out);
+        self.enter_args(member, args, seen, out, site);
     }
 
-    fn enter_args(&self, member: String, args: &[Value], seen: &mut Seen, out: &mut Found) {
+    fn enter_args(&self, member: String, args: &[Value], seen: &mut Seen, out: &mut Found, site: Option<&str>) {
         if seen.len() > 64 || !seen.insert(format!("{member} {}", Value::from(args.to_vec()))) {
             return;
         }
-        let frame = Frame { member, args };
+        let frame = Frame { member, args, site: None };
         if let Some(row) = self.one_return.get(&frame.member) {
             if let Some(ret) = row.get("value") {
                 self.held(&self.bind(ret, &frame), &frame, seen, out);
@@ -209,10 +223,15 @@ impl Returned<'_, '_> {
             self.written(row, &frame, seen, out);
         } else {
             for row in self.every.get(&frame.member).into_iter().flatten() {
+                // A CALL A FIELD HOLDS CARRIES THE CALLEE'S OWN `if`s (`site`), read with its arguments: a callee's
+                // `if (kinds.includes(kind)) return t('a');` restricts `a` to what the caller hands as `kind`.
+                let links: Vec<String> = site.map(|at| self.branches.chain_of(row).into_iter().filter(|b| self.branches.condition(b).is_some()).map(|b| format!("arg:{b}@{at}")).collect()).unwrap_or_default();
+                let mut found = Found::new();
                 if let Some(ret) = row.get("value") {
-                    self.through(&self.bind(ret, &frame), &frame, seen, out);
+                    self.through(&self.bind(ret, &frame), &frame, seen, &mut found);
                 }
-                self.written(row, &frame, seen, out);
+                self.written(row, &frame, seen, &mut found);
+                out.extend(found.into_iter().map(|(key, chain)| (key, [links.clone(), chain].concat())));
             }
         }
     }
@@ -298,6 +317,17 @@ impl Returned<'_, '_> {
             ret.get("$args").and_then(Value::as_array).into_iter().flatten().for_each(|a| self.through(a, frame, seen, out));
             return;
         }
+        // A LOCAL ARROW OR A FUNCTION THE CALL WAS HANDED IS ENTERED FIRST, even when its name is a configured `i18nCalls`
+        // method: `const t = (k) => this.tr.get(`p.${k}`); return t('a');` spells `p.a`, never a key `a`.
+        if let Some(name) = ret.get("$call").and_then(Value::as_str).filter(|n| !n.contains('.')) {
+            let param = self.params.get(&frame.member).and_then(|ps| ps.iter().position(|p| p == name));
+            let handed = param.and_then(|i| frame.args.get(i)).and_then(|a| a.get("$fn_id")).and_then(Value::as_str);
+            let local = self.rows.local_row(&frame.member, name).and_then(|row| self.fn_of_local.get(row));
+            if let Some(function) = handed.map(str::to_string).or_else(|| local.cloned().filter(|_| param.is_none())) {
+                self.enter(function, ret, seen, out, None);
+                return;
+            }
+        }
         if let Some(args) = translated(ret, self.i18n) {
             for arg in args {
                 arg_keys(arg, &[], self.keys, out);
@@ -315,16 +345,8 @@ impl Returned<'_, '_> {
             value_keys(&under, &[], self.keys, out);
             return;
         }
-        if let Some(name) = ret.get("$call").and_then(Value::as_str).filter(|n| !n.contains('.')) {
-            let param = self.params.get(&frame.member).and_then(|ps| ps.iter().position(|p| p == name));
-            let handed = param.and_then(|i| frame.args.get(i)).and_then(|a| a.get("$fn_id")).and_then(Value::as_str);
-            let local = self.rows.local_row(&frame.member, name).and_then(|row| self.fn_of_local.get(row));
-            if let Some(function) = handed.map(str::to_string).or_else(|| local.cloned().filter(|_| param.is_none())) {
-                self.enter(function, ret, seen, out);
-                return;
-            }
-        }
-        self.call(Some(ret), seen, out);
+        let site = frame.site.filter(|(top, _)| std::ptr::eq(*top, ret)).map(|(_, at)| at);
+        self.call_at(Some(ret), site, seen, out);
     }
 
     /// `v` with every template hole that names a parameter the call handed a string spelled as that string.
