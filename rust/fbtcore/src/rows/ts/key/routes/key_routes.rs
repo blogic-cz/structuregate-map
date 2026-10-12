@@ -160,6 +160,20 @@ fn text(row: &Row, field: &str) -> Option<String> {
     }
 }
 
+fn number(row: &Row, field: &str) -> Option<i64> {
+    match row.get(field) {
+        Some(Value::Number(n)) => n.as_i64(),
+        Some(Value::String(s)) => s.parse().ok(),
+        _ => None,
+    }
+}
+
+/// The class whose span holds (line, col): the latest start at or before it, ending at or after its line.
+fn enclosing_class(spans: &std::collections::HashMap<String, Vec<(i64, i64, i64, String)>>, file: &str, line: Option<i64>, col: Option<i64>) -> Option<String> {
+    let (line, col) = (line?, col.unwrap_or(0));
+    spans.get(file)?.iter().filter(|(sl, sc, el, _)| (*sl, *sc) <= (line, col) && line <= *el).max_by_key(|(sl, sc, _, _)| (*sl, *sc)).map(|t| t.3.clone())
+}
+
 /// A cell that is PRESENT and not null, whatever its type — python's `is None` test.
 fn present(row: &Row, field: &str) -> Option<String> {
     match row.get(field) {
@@ -327,6 +341,17 @@ pub fn key_routes(
     // 5. A bare literal equal to a key. DISTINCT over (key, component): a key written
     //    twice in one file is one literal site.
     let literals = store.table("string_literals");
+    let mut class_spans: std::collections::HashMap<String, Vec<(i64, i64, i64, String)>> = std::collections::HashMap::new();
+    for c in store.table("classes").iter() {
+        let (Some(f), Some(id), Some(end)) = (text(c, "file"), text(c, "id"), number(c, "end_line")) else { continue };
+        let span = match number(c, "decorator_line") {
+            Some(d) => (d, 0),
+            None => (number(c, "line").unwrap_or(0), number(c, "col").unwrap_or(0)),
+        };
+        class_spans.entry(f).or_default().push((span.0, span.1, end, id));
+    }
+    let component_of_class: std::collections::HashMap<String, String> =
+        components.iter().filter_map(|c| Some((text(c, "class")?, text(c, "id")?))).collect();
     let mut seen_literal: std::collections::HashSet<String> = std::collections::HashSet::new();
     for s in literals.iter() {
         let Some(value) = text(s, "value") else { continue };
@@ -334,9 +359,16 @@ pub fn key_routes(
             continue;
         }
         let file = text(s, "file");
-        let ids: Vec<Option<String>> = match components_by_file.get(&file) {
-            Some(list) if !list.is_empty() => list.iter().map(|c| text(c, "id")).collect(),
-            _ => vec![None],
+        // A LITERAL WRITTEN INSIDE A COMPONENT'S CLASS IS A SITE OF THAT COMPONENT ONLY. Every component of
+        // the file took it when several shared one: a child's own `key = 'a.b'` became an ungated site of
+        // each sibling, and the child's template gate no longer restricted the key.
+        let own = file.as_ref().and_then(|f| enclosing_class(&class_spans, f, number(s, "line"), number(s, "col")));
+        let ids: Vec<Option<String>> = match own.and_then(|c| component_of_class.get(&c)) {
+            Some(id) => vec![Some(id.clone())],
+            None => match components_by_file.get(&file) {
+                Some(list) if !list.is_empty() => list.iter().map(|c| text(c, "id")).collect(),
+                _ => vec![None],
+            },
         };
         for cid in ids {
             let pair = format!("{} {}", value, cid.clone().unwrap_or_else(|| "None".to_string()));

@@ -402,6 +402,10 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
         remember_graph(&mut receipt, db_path, &payload.tables, Some(payload.affected.as_slice()), &rebuilt);
         payload.tables = Map::new();
 
+        // THE STYLESHEETS BEFORE THE CLOSURE: `class_hides` says which class gates hide their element, and the
+        // closure reads a class gate on the false side only then. Derived after it, every class gate read as a plain condition.
+        let mut first = first;
+        styles(&mut receipt, &mut first.written, db_path, root, &workspace)?;
         let closure_started = std::time::Instant::now();
         let emitted = {
             let db = Connection::open(db_path)?;
@@ -440,8 +444,6 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
             counts: true,
         })?;
         receipt.phases.insert("write the closure".to_string(), closure_written.elapsed().as_millis() as u64);
-        let mut first = first;
-        styles(&mut receipt, &mut first.written, db_path, root, &workspace)?;
         first
     } else {
         // THE ROWS GO IN FIRST HERE TOO, and the closure reads them back - what a partial run does. Holding the
@@ -473,6 +475,9 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
         payload.tables = Map::new();
         receipt.phases.insert("free the payload".to_string(), freeing.elapsed().as_millis() as u64);
 
+        // THE STYLESHEETS BEFORE THE CLOSURE: `class_hides` says which class gates hide their element, and the
+        // closure reads a class gate on the false side only then. Derived after it, every class gate read as a plain condition.
+        styles(&mut receipt, &mut applied.written, db_path, root, &workspace)?;
         let closure_started = std::time::Instant::now();
         let emitted = {
             let db = Connection::open(db_path)?;
@@ -515,7 +520,6 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
         receipt.phases.insert("write the closure".to_string(), closure_written.elapsed().as_millis() as u64);
         // A FULL RUN'S TALLY HAS ALWAYS NAMED THE CLOSURE'S FOUR TABLES beside the rest.
         applied.written.extend(closure.written);
-        styles(&mut receipt, &mut applied.written, db_path, root, &workspace)?;
         applied
     };
     receipt.written = applied.written;

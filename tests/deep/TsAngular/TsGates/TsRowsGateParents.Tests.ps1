@@ -216,4 +216,26 @@ Test-Case 'tsrows: an input flag two parents bind differently restricts each way
     Assert-Line $n 'pro.notpro paths 2'
 }
 
+
+Test-Case 'tsrows: an input flag read per edge still restricts when the parents share the child''s file' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/demo.ts' = "import { Component, Input, OnInit } from '@angular/core';`n" +
+            "export enum DemoIDs { Alpha = 1, Beta = 2, Gamma = 3 }`n" +
+            "export const isAlphaLike = (kind: DemoIDs) => [DemoIDs.Alpha, DemoIDs.Beta].some((x) => x === kind);`n" +
+            "@Component({ selector: 'demo-child', standalone: true, template: '<div *ngIf=`"isCompany && showExtra`"><translate [text]=`"key`"></translate></div>' })`n" +
+            "export class ChildComponent { @Input() isCompany = false; @Input() showExtra = false; key = 'demo.extra'; }`n" +
+            "@Component({ selector: 'demo-parent-a', standalone: true, imports: [ChildComponent], template: '<demo-child [isCompany]=`"true`" [showExtra]=`"extra`"></demo-child>' })`n" +
+            "export class ParentAComponent implements OnInit { @Input() item!: { kind: DemoIDs }; extra = false; ngOnInit() { this.extra = isAlphaLike(this.item.kind); } }`n" +
+            "@Component({ selector: 'demo-parent-b', standalone: true, imports: [ChildComponent], template: '<demo-child [isCompany]=`"true`"></demo-child>' })`n" +
+            "export class ParentBComponent {}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"extra":"x"}}'
+    }
+    $made = New-TsRowsDb $tree
+    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || json_extract(v.value, '$.dimension') || ' ' || json_extract(v.value, '$.op') || ' ' || " +
+        "json_extract(v.value, '$.values') AS reach FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'demo.%'")
+    Assert-Line $k 'demo.extra | item.kind not_in ["Gamma"]'
+    $n = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT key || ' paths ' || n_paths AS p FROM key_reach WHERE key = 'demo.extra'"
+    Assert-Line $n 'demo.extra paths 1'
+}
+
 }

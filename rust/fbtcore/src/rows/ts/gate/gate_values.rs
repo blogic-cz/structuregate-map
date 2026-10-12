@@ -27,6 +27,7 @@ use super::gate_predicates::{predicate_restriction, predicates};
 use super::store::{Row, Store};
 use indexmap::{IndexMap, IndexSet};
 use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
 
 const EQ: &[&str] = &["===", "=="];
 const NE: &[&str] = &["!==", "!="];
@@ -47,6 +48,18 @@ fn text(row: &Row, field: &str) -> Option<String> {
         Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
         _ => None,
     }
+}
+
+/// A CLASS GATE IS A VISIBILITY CONDITION ONLY WHEN A STYLESHEET PROVES ITS CLASS HIDES (`class_hides`, scope `own` or
+/// `shared`; `other` reaches only through `::ng-deep`/`None` encapsulation, which nothing proves): then the element
+/// renders while the binding is FALSE. A class that only styles is no condition. Absent: not a class gate.
+pub fn class_polarity(store: &Store<'_>) -> HashMap<String, bool> {
+    let hiding: HashSet<String> = store.table("class_hides").iter()
+        .filter(|h| matches!(text(h, "scope").as_deref(), Some("own" | "shared")))
+        .filter_map(|h| id_of(h, "gate")).collect();
+    store.table("gates").iter()
+        .filter(|g| text(g, "gate_kind").as_deref() == Some("class"))
+        .filter_map(|g| id_of(g, "id")).map(|id| { let h = hiding.contains(&id); (id, h) }).collect()
 }
 
 fn id_of(row: &Row, field: &str) -> Option<String> {
@@ -378,12 +391,16 @@ pub fn gate_values_with(
 
     let mut out = GateValues::default();
     let stage = crate::trace::stage("gate_values: gates");
+    let polarity = class_polarity(store);
     for g in store.table("gates").iter() {
         let Some(e) = id_of(g, "expression").and_then(|x| expr_by_id.get(&x)) else { continue };
         let Some(ast) = e.get("ast").filter(|a| !a.is_null()) else { continue };
 
+        // A CLASS GATE reads on the false side when its class hides, and is no condition when it only styles.
+        let negated = match id_of(g, "id").and_then(|id| polarity.get(&id).copied()) { Some(true) => true, Some(false) => continue, None => false };
+
         let mut found = OrderedSet::new();
-        necessary_either(&props.expand(ast), false, &mut leaf, &mut either, &mut found);
+        necessary_either(&props.expand(ast), negated, &mut leaf, &mut either, &mut found);
         if let Some(id) = id_of(g, "id")
             && let Some(more) = extra.get(&id)
         {

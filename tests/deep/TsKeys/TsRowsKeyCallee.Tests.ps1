@@ -180,8 +180,34 @@ Test-Case 'tsrows keys: an argument the caller holds in a const local is read in
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db $script:CalleeQ
-    # `picked` is the getter's own `const`, read in the getter: a plain local is its own dimension, as a gate reads one
-    # (only a decision or an arrow is inlined, `gate/ts/gate_tsrows.rs`); without the caller no condition held at all
-    Assert-Line $r 'demo.shape.oval.a | field_binding | picked in ["Oval"]'
+    # `picked` is the getter's own `const`: the condition reads the chain it holds
+    Assert-Line $r 'demo.shape.oval.a | field_binding | item.shape in ["Oval"]'
+}
+
+Test-Case 'tsrows keys: a parameter a callee hands on to another method carries the caller''s string' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/translate.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class TranslateService {`n  getTranslation(key: string): string {`n    return key;`n  }`n}`n"
+        'apps/shop/src/desc.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class DescService {`n  constructor(private translate: TranslateService) {}`n" +
+            "  description(name: string): string { return this.round(name); }`n" +
+            "  private round(name: string): string { return this.translate.getTranslation(``demo.shape.round.`${name}``); }`n}`n"
+        'apps/shop/src/tip.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { DescService } from './desc.service';`n" +
+            "@Component({ selector: 'demo-tip', standalone: true, template: '<span [innerHTML]=`"text`"></span>' })`n" +
+            "export class TipComponent {`n  constructor(private desc: DescService) {}`n" +
+            "  get text(): string { return this.desc.description('a'); }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"shape":{"round":{"a":"1","b":"2"}}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db "SELECT key || ' | ' || coalesce(route, '') AS reach FROM key_reach WHERE key LIKE 'demo.%'"
+    # `round(name)` inside `description` gets the `'a'` its caller handed, not an open hole spelling every key
+    Assert-Line $r 'demo.shape.round.a | field_binding'
+    Assert-NoLine $r 'demo.shape.round.b | field_binding'
 }
 }
