@@ -7,7 +7,10 @@
 //!
 //! EACH RETURN IS READ LIKE A GETTER'S (`reader.in_member`), with two differences:
 //!   * a method's branches may test its PARAMETERS, which no template gate shares: a method WITH parameters
-//!     carries no branch (and no `tpl:` link, which would name the parameter), one without carries them as a getter.
+//!     carries no `tpl:` link (which would name the parameter), one without carries them as a getter. A METHOD A TEMPLATE
+//!     CALLS CARRIES ITS CALLEE'S BRANCHES TOO, the link holding the template expression, `arg:<branch>@<site>@<template
+//!     expression>`: `key_args` replaces the method's own parameters by the template's arguments at that call, so the
+//!     condition reads the template's names (`row.kind`), never `r.kind`.
 //!   * the call hands ARGUMENTS: a string literal, or a ternary of them, is bound into the holes naming the
 //!     parameter as `key_follow::bind_args` does (`tip('alpha')` over `` `demo.tip.${n}` `` spells `demo.tip.alpha`
 //!     alone, a call at another node its own keys). Any other argument leaves the hole open, as the callee reads it.
@@ -50,16 +53,15 @@ fn arg_value(a: &Value) -> Value {
     }
 }
 
-/// Every call in a tree whose receiver is a read the checker resolved: (declaration row, arguments).
-fn calls(v: &Value, out: &mut Vec<(String, Vec<Value>)>) {
+/// Every call in a tree whose receiver is a read the checker resolved: (declaration row, the arguments' own trees).
+pub(super) fn calls(v: &Value, out: &mut Vec<(String, Vec<Value>)>) {
     match v {
         Value::Array(items) => items.iter().for_each(|i| calls(i, out)),
         Value::Object(o) => {
             if matches!(o.get("k").and_then(Value::as_str), Some("Call" | "SafeCall")) {
                 let row = o.get("receiver").filter(|r| is_read(r)).and_then(|r| r.get("target")?.get("row")?.as_str());
                 if let Some(row) = row {
-                    let args = o.get("args").and_then(Value::as_array).map(|a| a.iter().map(arg_value).collect());
-                    out.push((row.to_string(), args.unwrap_or_default()));
+                    out.push((row.to_string(), o.get("args").and_then(Value::as_array).cloned().unwrap_or_default()));
                 }
             }
             o.values().for_each(|x| calls(x, out));
@@ -69,7 +71,7 @@ fn calls(v: &Value, out: &mut Vec<(String, Vec<Value>)>) {
 }
 
 /// The keys one call of `method` hands its node, each with the ways it is returned in.
-fn method_keys(method: &str, args: &[Value], reader: &Returned<'_, '_>, branches: &Branches) -> IndexMap<String, Vec<Vec<String>>> {
+fn method_keys(method: &str, args: &[Value], at: &str, reader: &Returned<'_, '_>, branches: &Branches) -> IndexMap<String, Vec<Vec<String>>> {
     let no_params = reader.params.get(method).is_none_or(|p| p.is_empty());
     let params = reader.params.get(method).map(Vec::as_slice).unwrap_or_default();
     let mut ways = IndexMap::new();
@@ -81,10 +83,13 @@ fn method_keys(method: &str, args: &[Value], reader: &Returned<'_, '_>, branches
             let mut found = Vec::new();
             value_keys(&value, &base, reader.keys, &mut found);
             let mut reached = Vec::new();
-            reader.in_member(&value, method, &mut reached);
+            reader.in_member_at(&value, method, text(r, "expression").as_deref(), &mut reached);
             for (key, chain) in reached {
                 let mut way = base.clone();
-                way.extend(chain.into_iter().filter(|link| !link.starts_with("tpl:")));
+                // THE TEMPLATE'S OWN CALL RIDES THE CALLEE'S BRANCH LINK, so `key_args` can put the template's arguments where the method's parameters are.
+                way.extend(chain.into_iter().filter(|link| !link.starts_with("tpl:")).map(|link| {
+                    if link.starts_with("arg:") && link.matches('@').count() == 1 { format!("{link}@{at}") } else { link }
+                }));
                 found.push((key, way));
             }
             for (key, mut chain) in found {
@@ -120,6 +125,7 @@ pub(super) fn method_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
             let Some(node_id) = id_of(e, "node") else { continue };
             let Some(n) = node_by_id.get(&node_id) else { continue };
             let Some(ast) = e.get("ast").filter(|a| !a.is_null()) else { continue };
+            let Some(at) = id_of(e, "id") else { continue };
             let mut found = Vec::new();
             calls(unwrap(ast), &mut found);
             let mut done = std::collections::HashSet::new();
@@ -129,10 +135,11 @@ pub(super) fn method_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
                 std::iter::once(row).chain(more).map(move |m| (m, args.clone()))
             });
             for (method, args) in found.filter(|(m, _)| methods.contains(m)) {
+                let args: Vec<Value> = args.iter().map(arg_value).collect();
                 if !done.insert(format!("{method} {}", Value::from(args.clone()))) {
                     continue;
                 }
-                for (key, ways) in method_keys(&method, &args, reader, &branches) {
+                for (key, ways) in method_keys(&method, &args, &at, reader, &branches) {
                     hit_nodes.insert(node_id.clone());
                     out.push(FieldSite { key, comp: text(n, "component"), node: Some(node_id.clone()), gates: gates_of(n), ways });
                 }
