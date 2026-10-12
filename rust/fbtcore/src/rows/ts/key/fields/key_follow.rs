@@ -11,6 +11,8 @@ pub(super) struct Returned<'r, 'a> {
     pub(super) every: &'r std::collections::HashMap<String, Vec<&'a Row>>,
     pub(super) keys: &'r super::key_branches::KeySet,
     pub(super) i18n: &'r [String],
+    /// The config's `i18nDictionaryCalls`: methods that hand back every key under their first argument's prefix.
+    pub(super) dict: &'r [String],
     /// Member or `functions` row id -> its parameters' names.
     pub(super) params: &'r std::collections::HashMap<String, Vec<String>>,
     /// `locals` row id -> the `functions` row of the arrow it holds.
@@ -25,6 +27,19 @@ pub(super) struct Returned<'r, 'a> {
 pub(super) fn translated<'v>(v: &'v Value, i18n: &[String]) -> Option<&'v [Value]> {
     let method = v.get("$target").and_then(|t| t.get("name")).and_then(Value::as_str)?;
     i18n.iter().any(|c| c == method).then(|| v.get("$args").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default())
+}
+
+/// THE KEYS UNDER A PREFIX, as the template value `value_keys` already matches: a call of a configured
+/// `i18nDictionaryCalls` method whose first argument spells a string reads as `` `<prefix>.${rest}` `` - a hole of
+/// one or more characters, dots included, so every key at any depth under the prefix. No `$expr_id`, so no `tpl:`
+/// link. A first argument that spells nothing (a variable) is no prefix and reads as nothing.
+pub(super) fn dictionary(v: &Value, dict: &[String]) -> Option<Value> {
+    let method = v.get("$target").and_then(|t| t.get("name")).and_then(Value::as_str)?;
+    if !dict.iter().any(|c| c == method) {
+        return None;
+    }
+    let prefix = spell(v.get("$args").and_then(Value::as_array)?.first()?)?;
+    Some(serde_json::json!({"$template": [format!("{prefix}."), ""], "$holes": ["_"]}))
 }
 
 /// An object literal: no key of it is a row marker (`$call`, `$template`, `$cond_expr` ...).
@@ -219,6 +234,10 @@ impl Returned<'_, '_> {
             for arg in args {
                 value_keys(arg, &[], self.keys, out);
             }
+            return;
+        }
+        if let Some(under) = dictionary(ret, self.dict) {
+            value_keys(&under, &[], self.keys, out);
             return;
         }
         if let Some(name) = ret.get("$call").and_then(Value::as_str).filter(|n| !n.contains('.')) {

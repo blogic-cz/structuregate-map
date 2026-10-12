@@ -194,3 +194,5 @@ receiver's checker-resolved row, never the name), under the node's own `gate_cha
 no branch; one without carries its `if`/`case`. A string literal or ternary of strings argument spells its hole alone.
 Tables that move: `key_reach` for keys a template-called method returns (a `ts_call`/`literal` gains the
 `field_binding` route and its components); nothing else moves.
+
+**#20 - a dictionary call references every key under its prefix** (signed off; config `i18nDictionaryCalls`): an `i18n_refs` row with `prefix`, no `key`, expanded in `key_routes.rs` against the locale keys under `<prefix>.` (`ts_call`); a field, getter or return HOLDING the call reads as `<prefix>.${rest}` (`key_follow::dictionary`, `field_binding`); a converter's argument is not followed. Moves: `i18n_refs` (new), `key_reach`.
