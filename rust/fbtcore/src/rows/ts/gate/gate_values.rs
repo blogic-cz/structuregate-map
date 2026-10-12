@@ -69,6 +69,8 @@ pub struct EnumIndex {
     pub by_id: IndexMap<String, EnumInfo>,
     /// Name -> the declarations that carry it, so a shared name never merges two domains.
     pub by_decl: IndexMap<String, Vec<(String, String)>>,
+    /// Enum id -> member name -> the value its declaration folded to (`null` when none did).
+    pub values: IndexMap<String, IndexMap<String, Value>>,
 }
 
 pub fn enum_index(store: &Store<'_>) -> EnumIndex {
@@ -101,6 +103,11 @@ pub fn enum_index(store: &Store<'_>) -> EnumIndex {
         );
         let name = text(e, "name");
         if let Some(id) = id_of(e, "id") {
+            let folded = members.iter().filter_map(|m| m.as_object()).filter_map(|m| match m.get("name") {
+                Some(Value::String(n)) if !n.is_empty() => Some((n.clone(), m.get("value").cloned().unwrap_or(Value::Null))),
+                _ => None,
+            });
+            idx.values.insert(id.clone(), folded.collect());
             idx.by_id.insert(id.clone(), EnumInfo { name: name.clone(), domain });
             if let Some(name) = name {
                 idx.by_decl.entry(name).or_default().push((path, id));
@@ -282,6 +289,14 @@ pub fn restriction_of(
         (None, Some((en, _)), Some(dim)) => (en.clone(), dim, None),
         _ => return None,
     };
+    // TWO DECLARATIONS OF ONE ENUM are the same enum, and a NUMBER is the member it equals.
+    let con = con.map(|(e, v)| if super::gate_same_enum::same_enum(idx, &e, &en) { (en.clone(), v) } else { (e, v) });
+    if !relational && con.is_none() {
+        let eq = EQ.contains(&op) != negated;
+        if let Some(r) = super::gate_same_enum::number_restriction(&sides, idx, &en, &dim, &row, eq) {
+            return Some(r);
+        }
+    }
 
     if relational || con.is_none() || con.as_ref().map(|(e, _)| e) != Some(&en) {
         return Some(json!({"enum": en, "dim": dim, "row": row, "op": "unknown"}));

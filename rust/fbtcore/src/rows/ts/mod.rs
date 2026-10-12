@@ -44,6 +44,8 @@ pub mod gate_selectors;
 pub mod gate_input_flags;
 #[path = "gate/gate_switch.rs"]
 pub mod gate_switch;
+#[path = "gate/ts/gate_same_enum.rs"]
+pub mod gate_same_enum;
 #[path = "gate/ts/gate_tsrows.rs"]
 pub mod gate_tsrows;
 #[path = "gate/gate_values.rs"]
