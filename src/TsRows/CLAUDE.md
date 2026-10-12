@@ -102,4 +102,4 @@ component's inline `styles: [...]`.
 Black-box over the CLI: `tests/deep/TsRows.Tests.ps1`, `tests/deep/TsAngular/` (imports, styles, reads,
 gates), `tests/deep/TsKeys/` and `tests/deep/TsPlain/`, helpers in `tests/deep/TsRows.Helpers.ps1`. A case that changes rows must fail with the extractor line
 reverted. **A port that improves rows cannot be told from one that breaks them**: a row that changes what a
-consumer reads is a numbered, signed-off divergence (the list is in the rust file above), never a quiet fix.
+consumer reads is a numbered, signed-off divergence (listed in [DIVERGENCES.md](../../rust/fbtcore/src/rows/ts/DIVERGENCES.md)), never a quiet fix.

@@ -60,6 +60,10 @@ pub struct TsRows {
     members_named: IndexMap<String, Vec<String>>,
     /// `file + " " + name` -> the top-level functions of that name in that file (an arrow `const` is one).
     functions_named: IndexMap<String, Vec<String>>,
+    /// A member id -> its class; and `class + " " + name` -> the ONE field of that class declared
+    /// `typeof <Enum>` (`itemType = ItemType`), the alias a `this.itemType.Member` read goes through.
+    class_of: IndexMap<String, String>,
+    alias_field: IndexMap<String, Option<String>>,
 }
 
 /// A test a local may hold in place of its condition: a comparison, a logical operator, a `!`, or a
@@ -95,7 +99,16 @@ impl TsRows {
         let mut at: IndexMap<String, Vec<(&str, Option<String>, Option<String>)>> = IndexMap::new();
         for m in store.table("members").iter() {
             if let (Some(file), Some(name), Some(id)) = (cell(m.get("file")), cell(m.get("name")), cell(m.get("id"))) {
-                out.members_named.entry(format!("{file} {name}")).or_default().push(id);
+                out.members_named.entry(format!("{file} {name}")).or_default().push(id.clone());
+                if let Some(class) = cell(m.get("class")) {
+                    if cell(m.get("type")).is_some_and(|t| t.starts_with("typeof ")) {
+                        let slot = out.alias_field.entry(format!("{class} {name}")).or_insert(Some(id.clone()));
+                        if *slot != Some(id.clone()) {
+                            *slot = None;
+                        }
+                    }
+                    out.class_of.insert(id, class);
+                }
             }
         }
         for f in store.table("functions").iter() {
@@ -258,6 +271,19 @@ impl TsRows {
         // CHILDREN FIRST: a member read learns its enum from its RECEIVER's row.
         for v in object.values_mut() {
             self.walk(v, bound, idx, member, depth);
+        }
+        // `this.<field>.<Member>`: the checker anchors the outer read and leaves `this.<field>` bare, so the
+        // field an enum OBJECT was assigned to (`itemType = ItemType`) is tied here, as a template's alias is.
+        // ONLY such an alias field: any other `this.` read keeps the rows it always had.
+        if let (Some(m), Some(Value::Object(rec))) = (member, object.get_mut("receiver")) {
+            let this_receiver = rec.get("receiver").and_then(|r| r.get("k")).and_then(Value::as_str) == Some("This");
+            if this_receiver && rec.get("k").and_then(Value::as_str) == Some("Read") && !rec.contains_key("target") {
+                let name = rec.get("name").and_then(Value::as_str).unwrap_or("");
+                let field = self.class_of.get(m).and_then(|c| self.alias_field.get(&format!("{c} {name}")));
+                if let Some(Some(row)) = field {
+                    rec.insert("target".into(), json!({"row": row}));
+                }
+            }
         }
         if bare(object).is_some_and(|name| bound.contains(name)) {
             object.insert("lambda".into(), Value::Bool(true));
