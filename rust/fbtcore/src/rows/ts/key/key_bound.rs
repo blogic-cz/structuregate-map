@@ -104,6 +104,7 @@ fn substitute(ast: &Value, inputs: &IndexMap<String, Value>, hit: &mut bool) -> 
 
 pub fn bound_conds(store: &Store<'_>) -> Bound {
     let mut out = Bound::default();
+    let polarity = super::gate_values::class_polarity(store);
     let written = written_members(store);
     let defined = bound_inputs(store, &written);
     // class -> (input alias -> member id, initializer literal)
@@ -170,6 +171,12 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
         }
         for (gid, g) in gs {
             let Some(ast) = cell(g, "expression").and_then(|x| by_id.get(&x).and_then(|e| e.get("ast")).filter(|a| !a.is_null()).cloned()) else { continue };
+            // A CLASS GATE: the element shows while it is FALSE when its class hides; no condition when it only styles.
+            let ast = match polarity.get(gid).copied() {
+                Some(true) => json!({"k": "Not", "expr": ast}),
+                Some(false) => continue,
+                None => ast,
+            };
             let mut hit = false;
             let folded = fold(&substitute(&ast, &with, &mut hit));
             if !hit {

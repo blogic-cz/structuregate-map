@@ -387,6 +387,14 @@ pub(super) fn bind_args(v: &Value, params: &[String], args: &[Value]) -> Value {
             o.insert("$holes".into(), Value::from(open));
             Value::Object(o)
         }
+        // A BARE READ OF A PARAMETER handed a string is that string: `this.home(name)` inside a method called with
+        // `'a'` hands `home` the `'a'` too, where it once handed an open hole that spelled every `home.*` key.
+        Value::Object(o) if o.get("$kind").and_then(Value::as_str) == Some("Identifier") => {
+            match o.get("$expr").and_then(Value::as_str).and_then(string) {
+                Some(s) => Value::String(s.to_string()),
+                None => v.clone(),
+            }
+        }
         Value::Object(o) => Value::Object(o.iter().map(|(k, x)| (k.clone(), bind_args(x, params, args))).collect()),
         Value::Array(xs) => Value::Array(xs.iter().map(|x| bind_args(x, params, args)).collect()),
         other => other.clone(),

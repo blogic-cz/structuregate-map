@@ -44,6 +44,7 @@ pub fn arg_conds<'l>(store: &Store<'_>, branches: &Branches, links: impl Iterato
     for table in ["returns", "assignments"] {
         returned_by.extend(store.table(table).iter().filter_map(|r| Some((id_of(r, "expression")?, id_of(r, "member")?))));
     }
+    let plain = plain_locals(store);
     let ast = |id: &str| by_id.get(id).and_then(|r| r.get("ast")).filter(|a| !a.is_null()).map(|a| super::astreads::unwrap(a).clone());
     for link in links {
         let Some((branch, rest)) = link.strip_prefix("arg:").and_then(|r| r.split_once('@')) else { continue };
@@ -65,6 +66,12 @@ pub fn arg_conds<'l>(store: &Store<'_>, branches: &Branches, links: impl Iterato
         }
         // THE CALLER IS THE MEMBER THE SITE IS A RETURN OF: its `const` locals are in scope for the arguments it hands.
         let caller = returned_by.get(site);
+        // A PLAIN `const` LOCAL THE CALLER HANDS ON (`const k = this.item.kind; f(k)`) is the chain it holds: left a
+        // local, the condition named `k`, which no gate of the template shares.
+        let replaced = match caller.and_then(|c| plain.get(c)) {
+            Some((names, trees)) => substitute(&replaced, names, trees, &mut false),
+            None => replaced,
+        };
         let none = IndexSet::new();
         let mut resolved = rows.resolve_in(&replaced, inner.get(callee).unwrap_or(&none), idx, caller.map(String::as_str));
         // A METHOD THE TEMPLATE CALLS: its own parameters are the template's arguments at that call, or the condition names `r.kind`
@@ -86,6 +93,51 @@ pub fn arg_conds<'l>(store: &Store<'_>, branches: &Branches, links: impl Iterato
         out.insert(link.clone(), (resolved, negated));
     }
     out
+}
+
+/// Per member, its `const` locals that hold a bare read chain (`this.item.kind`), each as the tree of that chain. The
+/// extractor writes no tree for such a value - its `$expr` text states it in full - so the tree is built from the text,
+/// and only when every link is a plain name. A name declared twice in one member, or destructured, is none of them.
+fn plain_locals(store: &Store<'_>) -> HashMap<String, (Vec<String>, Vec<Value>)> {
+    let mut seen: HashMap<(String, String), Option<Value>> = HashMap::new();
+    for l in store.table("locals").iter() {
+        let (Some(member), Some(name)) = (id_of(l, "member"), text(l, "name")) else { continue };
+        let plain = text(l, "declared").as_deref() == Some("const")
+            && l.get("destructured").is_none_or(|d| d == &Value::Bool(false) || d == &Value::from(0))
+            && l.get("expression").is_none_or(Value::is_null);
+        let chain = l.get("value").and_then(|v| v.get("$expr")).and_then(Value::as_str).filter(|_| plain).and_then(chain_tree);
+        let key = (member, name);
+        let twice = seen.contains_key(&key);
+        seen.insert(key, if twice { None } else { chain });
+    }
+    let mut out: HashMap<String, (Vec<String>, Vec<Value>)> = HashMap::new();
+    for ((member, name), tree) in seen {
+        if let Some(tree) = tree {
+            let slot = out.entry(member).or_default();
+            slot.0.push(name);
+            slot.1.push(tree);
+        }
+    }
+    out
+}
+
+/// The `Read` tree of `this.a.b` or `a.b`, None unless every link is a plain name.
+fn chain_tree(text: &str) -> Option<Value> {
+    let plain = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$');
+    let mut parts = text.split('.');
+    let first = parts.next()?;
+    let mut tree = match first {
+        "this" => serde_json::json!({"k": "This"}),
+        name if plain(name) => serde_json::json!({"k": "Read", "name": name, "receiver": {"k": "Implicit"}}),
+        _ => return None,
+    };
+    for part in parts {
+        if !plain(part) {
+            return None;
+        }
+        tree = serde_json::json!({"k": "Read", "name": part, "receiver": tree});
+    }
+    (tree.get("k").and_then(Value::as_str) == Some("Read")).then_some(tree)
 }
 
 /// `ast` with every bare read of a parameter replaced by the argument at its position - not inside a callback whose own

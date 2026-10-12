@@ -378,6 +378,7 @@ pub fn gate_features_with(
     }
 
     let mut out: IndexMap<String, (Option<String>, Vec<String>)> = IndexMap::new();
+    let polarity = super::gate_values::class_polarity(store);
     for g in store.table("gates").iter() {
         let Some(e) = id_of(g, "expression").and_then(|x| expr_by_id.get(&x)) else { continue };
         let Some(ast) = e.get("ast").filter(|a| !a.is_null()) else { continue };
@@ -387,11 +388,14 @@ pub fn gate_features_with(
             .unwrap_or(false);
         let extra = if iterated { Some(&iter_props) } else { None };
 
+        // A CLASS GATE reads on the false side when its class hides, and is no condition when it only styles.
+        let negated = match id_of(g, "id").and_then(|id| polarity.get(&id).copied()) { Some(true) => true, Some(false) => continue, None => false };
+
         let mut got = OrderedSet::new();
         {
             let mut resolve =
                 make_resolve(&props, extra, &member_class, &member_at, &check_members, root);
-            necessary(ast, false, &mut resolve, &mut got);
+            necessary(ast, negated, &mut resolve, &mut got);
         }
         if !got.is_empty()
             && let Some(id) = id_of(g, "id")

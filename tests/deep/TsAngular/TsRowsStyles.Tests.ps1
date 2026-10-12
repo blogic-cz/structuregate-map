@@ -131,4 +131,28 @@ Test-Case 'tsrows: an edited stylesheet is read again on a partial run, its old 
         "WHERE kind = 'stylesheet_unparsed'")) 'dg=1#'
 }
 
+# A CLASS GATE IS A VISIBILITY CONDITION ONLY WHEN A STYLESHEET PROVES ITS CLASS HIDES, and then it holds on the
+# FALSE side: the element renders while the binding is false. A class that only styles restricts nothing.
+Test-Case 'tsrows: a class gate restricts its key only when its class hides, and on the false side' {
+    $tpl = '<span [class.not-visible]="kind === K.Alpha">{{ ''demo.cls.hid'' | translate }}</span>' +
+        '<b [class.bold-text]="kind === K.Beta">{{ ''demo.cls.style'' | translate }}</b>'
+    $made = New-TsRowsDb (New-TsStylesWorkspace @{
+        'apps/shop/src/kinds.ts' = "export enum DemoIDs { Alpha = 1, Beta = 2, Gamma = 3 }`n"
+        'apps/shop/src/cls.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "import { DemoIDs } from './kinds';`n" +
+            "@Component({ selector: 'demo-cls', standalone: true, styleUrls: ['./cls.component.css'], template: '$($tpl.Replace("'", "\'"))' })`n" +
+            "export class ClsComponent { K = DemoIDs; @Input() kind!: DemoIDs; }`n"
+        'apps/shop/src/cls.component.css' = ".not-visible { display: none; }`n.bold-text { font-weight: bold; }`n"
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"cls":{"hid":"1","style":"2"}}}'
+    })
+    Assert-Exit $made.Result 0
+    $v = Invoke-TsStylesQ $made.Db ("SELECT 'v=' || k.key || ' | ' || json_extract(v.value,'$.dimension') || ' ' || " +
+        "json_extract(v.value,'$.op') || ' ' || json_extract(v.value,'$.values') AS r FROM key_reach k, " +
+        "json_each(k.always_values) v WHERE k.key LIKE 'demo.cls.%'")
+    Assert-Line $v 'v=demo.cls.hid | kind not_in ["Alpha"]'
+    Assert-NoLine $v 'v=demo.cls.style |'
+    Assert-Line (Invoke-TsStylesQ $made.Db ("SELECT 'g=' || key || ' ' || json_array_length(always_gates) AS r " +
+        "FROM key_reach WHERE key = 'demo.cls.style'")) 'g=demo.cls.style 1'
+}
+
 }
