@@ -49,7 +49,7 @@ fn element_keys(items: &[Element], keys: &KeySet, i18n: &[String], reader: &Retu
             value_keys(value, &item.chain, keys, &mut found);
             // A TRANSLATE CALL AS THE PROPERTY'S VALUE holds its arguments' keys, as a method's return of one does.
             for arg in super::key_follow::translated(value, i18n).unwrap_or_default() {
-                value_keys(arg, &item.chain, keys, &mut found);
+                super::key_follow::arg_keys(arg, &item.chain, keys, &mut found);
             }
             // A CALL AS THE PROPERTY'S VALUE inside a list a callee returns is read as that callee's own return of it is -
             // a local arrow of the callee, a free function, a method - with the string it is handed spelled into its hole
@@ -185,6 +185,7 @@ impl Loops {
                 written.entry(target).or_default().push(a);
             }
         }
+        let mut unread: HashSet<String> = members_valued.iter().filter(|m| !lists.contains_key(*m)).cloned().collect();
         for (target, writes) in written {
             if lists.contains_key(&target) || members_valued.contains(&target) {
                 continue;
@@ -196,12 +197,27 @@ impl Loops {
                     .and_then(|v| elements(v, &rows, &by_member, &branches.chain_of(a)));
                 let Some(list) = list else {
                     all.clear();
+                    unread.insert(target.clone());
                     break;
                 };
                 all.extend(list);
             }
             if !all.is_empty() {
                 lists.insert(target, all);
+            }
+        }
+        // EVERY `this.<field>.push(x)` OF ITS OWN CLASS IS ONE MORE ELEMENT, under the branches of the push, as a plain `=` is:
+        // `this.items.push({ label: t('k') })`. A list read in part is no list, so one a write or an initializer left unread
+        // stays unread, and a member another class writes was dropped above.
+        let calls = store.table("calls");
+        let pushes = super::key_pushes::pushes(&calls, &members);
+        for m in members.iter() {
+            let (Some(id), Some(class), Some(name)) = (id_of(m, "id"), text(m, "class"), text(m, "name")) else { continue };
+            let Some(pushed) = pushes.field.get(&(class.clone(), name)).filter(|_| !unread.contains(&id) && owner.get(&id) == Some(&Some(class))) else { continue };
+            let args = pushed.iter().flat_map(|p| p.get("args").and_then(Value::as_array).into_iter().flatten().map(move |a| (a, *p)));
+            let more: Vec<Element> = args.map(|(a, p)| Element { value: a.clone(), chain: branches.chain_of(p), from_call: false, owner: id_of(p, "member") }).collect();
+            if !more.is_empty() {
+                lists.entry(id).or_default().extend(more);
             }
         }
         for g in gates.iter().filter(|g| text(g, "name").as_deref() == Some("ngForOf")) {

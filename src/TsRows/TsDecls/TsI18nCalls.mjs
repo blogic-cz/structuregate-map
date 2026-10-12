@@ -32,6 +32,9 @@ function staticArgStrings(value) {
   if (typeof value === 'string') return value === '' ? [] : [value];
   if (value === null || typeof value !== 'object') return [];
   if ('$cond' in value) return [...staticArgStrings(value.$then), ...staticArgStrings(value.$else)];
+  // A CONST OBJECT OF STRINGS INDEXED BY A VARIABLE is one of its values, and which one is the run's choice: all are
+  // claimed, as both arms of a ternary are.
+  if (Array.isArray(value.$indexed)) return value.$indexed.filter((v) => typeof v === 'string' && v !== '');
   const resolved = value.value;
   return typeof resolved === 'string' && resolved !== '' ? [resolved] : [];
 }

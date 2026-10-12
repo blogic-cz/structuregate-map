@@ -81,6 +81,14 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
         && Object.prototype.hasOwnProperty.call(receiver, key)) {
         return { $index: node.getText(), value: receiver[key] };
       }
+      // A CONST OBJECT OF STRINGS READ BY AN INDEX NO ONE KNOWS (`KEYS[this.kind]`) IS ONE OF ITS VALUES: which, the run
+      // decides, so every one is kept (`$indexed`) beside the access's own text. Not a list, not a value that is no string,
+      // not a key that evaluated - a key that is no member is no value at all.
+      const values = plainObject ? Object.values(receiver) : [];
+      if (plainObject && typeof key !== 'string' && typeof key !== 'number'
+        && values.length > 0 && values.length <= 256 && values.every((v) => typeof v === 'string')) {
+        return { ...api.unresolved(node), $indexed: values };
+      }
     }
     return api.unresolved(node);
   }
