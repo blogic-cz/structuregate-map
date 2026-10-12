@@ -487,7 +487,7 @@ mod tests {
         tables["members"][0]["kind"] = json!("method");
         assert!(run(tables.clone()).0.is_empty(), "a method the template only reads is no site");
         let call = json!({"k": "Call", "args": [], "receiver": {"k": "Read", "target": {"row": "m:1"}}});
-        tables["expressions"] = json!([{"node": "n:1", "ast": call}]);
+        tables["expressions"] = json!([{"id": "x:1", "node": "n:1", "ast": call}]);
         let (sites, _) = run(tables.clone());
         assert_eq!(sites[0].ways, vec![vec!["br:1".to_string()]]);
         // a method WITH parameters carries no branch: they may test the parameters

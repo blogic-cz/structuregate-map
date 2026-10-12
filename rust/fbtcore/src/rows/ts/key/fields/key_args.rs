@@ -8,7 +8,9 @@
 //! (`gate_lists`, an enum comparison, ..) read it as if the caller had written the test itself.
 //!
 //! ONLY THE CALL A FIELD OR GETTER HOLDS ITSELF, and only the callee's own `if`s: a branch of a callee it calls in turn
-//! tests that callee's parameters, which the site's arguments do not name. A condition naming a parameter the call does not
+//! tests that callee's parameters, which the site's arguments do not name. A METHOD A TEMPLATE CALLS carries its callee's
+//! branches too, as `arg:<branch>@<site>@<template expression>`: the method's own parameters are replaced by the
+//! template's arguments at that call, so the condition reads the template's names (`row.kind`). A condition naming a parameter the call does not
 //! hand (a default, a rest) is no link: the way keeps no condition, as before.
 
 use super::gate_features::Conds;
@@ -20,7 +22,7 @@ use indexmap::IndexSet;
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// The condition of every `arg:<branch>@<site>` link in `links`.
+/// The condition of every `arg:<branch>@<site>[@<template expression>]` link in `links`.
 pub fn arg_conds<'l>(store: &Store<'_>, branches: &Branches, links: impl Iterator<Item = &'l String>, idx: &EnumIndex) -> Conds {
     let mut out = Conds::new();
     let links: IndexSet<&String> = links.filter(|l| l.starts_with("arg:")).collect();
@@ -37,9 +39,18 @@ pub fn arg_conds<'l>(store: &Store<'_>, branches: &Branches, links: impl Iterato
         let (Some(parent), Some(id)) = (text(f, "parent"), id_of(f, "id")) else { continue };
         inner.entry(parent).or_default().extend(params.get(&id).into_iter().flatten().cloned());
     }
+    // The member each site is the return or the assignment of: an `expressions` row carries none.
+    let mut returned_by: HashMap<String, String> = HashMap::new();
+    for table in ["returns", "assignments"] {
+        returned_by.extend(store.table(table).iter().filter_map(|r| Some((id_of(r, "expression")?, id_of(r, "member")?))));
+    }
     let ast = |id: &str| by_id.get(id).and_then(|r| r.get("ast")).filter(|a| !a.is_null()).map(|a| super::astreads::unwrap(a).clone());
     for link in links {
-        let Some((branch, site)) = link.strip_prefix("arg:").and_then(|r| r.split_once('@')) else { continue };
+        let Some((branch, rest)) = link.strip_prefix("arg:").and_then(|r| r.split_once('@')) else { continue };
+        let (site, tpl) = match rest.split_once('@') {
+            Some((site, tpl)) => (site, Some(tpl)),
+            None => (rest, None),
+        };
         let Some((negated, tree, Some(callee))) = branches.condition(branch) else { continue };
         let (Some(cond), Some(call)) = (ast(tree), ast(site)) else { continue };
         if !matches!(call.get("k").and_then(Value::as_str), Some("Call" | "SafeCall")) {
@@ -52,9 +63,26 @@ pub fn arg_conds<'l>(store: &Store<'_>, branches: &Branches, links: impl Iterato
         if missing {
             continue;
         }
-        let caller = by_id.get(site).and_then(|r| text(r, "member"));
+        // THE CALLER IS THE MEMBER THE SITE IS A RETURN OF: its `const` locals are in scope for the arguments it hands.
+        let caller = returned_by.get(site);
         let none = IndexSet::new();
-        let resolved = rows.resolve_in(&replaced, inner.get(callee).unwrap_or(&none), idx, caller.as_deref());
+        let mut resolved = rows.resolve_in(&replaced, inner.get(callee).unwrap_or(&none), idx, caller.map(String::as_str));
+        // A METHOD THE TEMPLATE CALLS: its own parameters are the template's arguments at that call, or the condition names `r.kind`
+        // (or a bare `k`) where the template reads `row.kind`.
+        if let (Some(tpl), Some(caller)) = (tpl, caller) {
+            let mut found = Vec::new();
+            if let Some(t) = ast(tpl) {
+                super::key_methods::calls(&t, &mut found);
+            }
+            let hand = found.into_iter().find(|(row, _)| row == caller).map(|(_, a)| a);
+            if let (Some(hand), Some(own)) = (hand, params.get(caller)) {
+                let mut missing = false;
+                resolved = substitute(&resolved, own, &hand, &mut missing);
+                if missing {
+                    continue;
+                }
+            }
+        }
         out.insert(link.clone(), (resolved, negated));
     }
     out
