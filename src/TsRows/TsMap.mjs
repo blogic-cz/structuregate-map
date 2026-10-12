@@ -200,9 +200,10 @@ async function main() {
   // 40: a call of an `i18nDictionaryCalls` method publishes an `i18n_refs` row carrying a `prefix`, no `key`.
   // 41: a template literal's `$hole_values`, a string method's `$receiver_value`, a const object of strings read by an
   // unknown index (`$indexed`, claimed by `i18n_refs`); a service key follows each, and a list's `.push(..)`.
+  // 42: a const ARRAY of strings read by an unknown index (`LIST[i]`) is `$indexed` too, as an object's values are.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 41, build: args.build,
+    config: config.file, data: config.data, rows: 42, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

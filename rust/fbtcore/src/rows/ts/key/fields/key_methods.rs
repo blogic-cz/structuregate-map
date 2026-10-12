@@ -103,7 +103,8 @@ pub(super) fn method_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
     let methods: std::collections::HashSet<String> = store
         .table("members")
         .iter()
-        .filter(|m| text(m, "kind").as_deref() == Some("method"))
+        // AN ARROW PROPERTY (`label = () => t('k')`, a `$fn` value) RETURNS LIKE A METHOD, its returns the extractor's own.
+        .filter(|m| text(m, "kind").as_deref() == Some("method") || m.get("value").is_some_and(|v| v.get("$fn").is_some()))
         .filter_map(|m| id_of(m, "id"))
         .collect();
     let mut out = Vec::new();

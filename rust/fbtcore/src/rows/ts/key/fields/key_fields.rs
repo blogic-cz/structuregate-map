@@ -111,10 +111,11 @@ fn callee_keys(value: Option<&Value>, reader: &Returned<'_, '_>) -> Vec<(String,
     found
 }
 
-/// (member id, local name) -> every `=` written to that local, in source order.
+/// (member id, local name) -> every `=` and `+=` written to that local, in source order: `s += t(k)` appends to what
+/// the local returns, so the key it holds is the return's, as `=`'s is.
 pub(super) fn local_writes(assignments: &[Row]) -> std::collections::HashMap<(String, String), Vec<&Row>> {
     let mut writes: std::collections::HashMap<(String, String), Vec<&Row>> = std::collections::HashMap::new();
-    for a in assignments.iter().filter(|a| text(a, "scope").as_deref() == Some("local") && text(a, "operator").as_deref() == Some("=")) {
+    for a in assignments.iter().filter(|a| text(a, "scope").as_deref() == Some("local") && matches!(text(a, "operator").as_deref(), Some("=" | "+="))) {
         if let (Some(member), Some(target)) = (id_of(a, "member"), text(a, "target")) {
             writes.entry((member, target)).or_default().push(a);
         }
@@ -212,11 +213,14 @@ fn member_keys(store: &Store<'_>, reader: &Returned<'_, '_>) -> IndexMap<String,
         }
     }
 
+    // A `.then` CALLBACK'S PARAMETER written to a field is what the call it follows resolves to (`key_then`).
+    let thens = super::key_then::thens(&store.table("calls"), reader.params);
     for a in assignments.iter() {
         let Some(target) = id_of(a, "target_id").filter(|t| !t.is_empty()) else { continue };
         let mut found = Vec::new();
-        value_keys(a.get("value").unwrap_or(&Value::Null), &branches.chain_of(a), &keys, &mut found);
-        for (key, chain) in callee_keys(a.get("value"), reader) {
+        let value = super::key_then::resolved(a, &thens).or(a.get("value"));
+        value_keys(value.unwrap_or(&Value::Null), &branches.chain_of(a), &keys, &mut found);
+        for (key, chain) in callee_keys(value, reader) {
             let mut way = branches.chain_of(a);
             way.extend(chain);
             found.push((key, way));
