@@ -18,6 +18,8 @@ pub type Way = IndexSet<String>;
 pub type GateMap = IndexMap<String, (Option<String>, Vec<Value>)>;
 /// Per way, per `enum#dimension`, the members that way still permits.
 pub type PerWay = Vec<IndexMap<String, IndexSet<String>>>;
+/// Per way, gate or link id -> the renames its dimension text goes through (`key_scopes`).
+pub type Renames = Vec<IndexMap<String, Vec<super::key_scopes::Step>>>;
 
 fn field(row: &Value, name: &str) -> String {
     row.get(name).and_then(|v| v.as_str()).unwrap_or("").to_string()
@@ -46,9 +48,12 @@ fn split(k: &str) -> (&str, &str) {
 /// dimension both apply. Except two `in`s on a SET, which both hold at once rather than
 /// narrow each other (`gate_collapse` says why): the narrower one is kept, and the set's
 /// `not_in`s still remove their members from it.
-pub fn per_way_allowed(ways: &[Way], gates: &GateMap, idx: &EnumIndex) -> PerWay {
+///
+/// A DIMENSION IS KEYED BY ITS TEXT AS RENAMED ON ITS WAY (`key_scopes`): a child's `item.kind` under
+/// `[item]="vm"` is `vm.kind`, so it meets the parent's gates on that variable instead of beside them.
+pub fn per_way_allowed(ways: &[Way], gates: &GateMap, idx: &EnumIndex, renames: Option<&Renames>) -> PerWay {
     let mut out = Vec::with_capacity(ways.len());
-    for way in ways {
+    for (i, way) in ways.iter().enumerate() {
         let mut here: IndexMap<String, IndexSet<String>> = IndexMap::new();
         // Per SET dimension: the one `in` kept, and every member a `not_in` removed.
         let mut set_kept: IndexMap<String, IndexSet<String>> = IndexMap::new();
@@ -58,7 +63,11 @@ pub fn per_way_allowed(ways: &[Way], gates: &GateMap, idx: &EnumIndex) -> PerWay
             for r in rows {
                 let enum_id = field(r, "enum");
                 let Some(info) = idx.by_id.get(&enum_id) else { continue };
-                let k = format!("{enum_id}#{}", field(r, "dim"));
+                let dim = match renames.and_then(|r| r.get(i)).and_then(|m| m.get(g)) {
+                    Some(s) => super::key_scopes::renamed(&field(r, "dim"), s),
+                    None => field(r, "dim"),
+                };
+                let k = format!("{enum_id}#{dim}");
 
                 // `unknown` is the full domain: it is the honest upper bound.
                 let op = field(r, "op");
@@ -125,7 +134,7 @@ pub fn fold_values(ways: &[Way], gates: &GateMap, idx: &EnumIndex, per_way: Opti
     let per_way = match per_way {
         Some(p) => p,
         None => {
-            computed = per_way_allowed(ways, gates, idx);
+            computed = per_way_allowed(ways, gates, idx, None);
             &computed
         }
     };
@@ -262,7 +271,7 @@ pub fn unreadable_values(
     let per_way = match per_way {
         Some(p) => p,
         None => {
-            computed = per_way_allowed(ways, gates, idx);
+            computed = per_way_allowed(ways, gates, idx, None);
             &computed
         }
     };

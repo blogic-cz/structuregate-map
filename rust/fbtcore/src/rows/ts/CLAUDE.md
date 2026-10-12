@@ -47,6 +47,7 @@ requires and which enum members it still permits.
 - **ONE ENUM TESTED THROUGH DIFFERENTLY WRITTEN EXPRESSIONS FOLDS AS THE ENUM** (`value_folds.rs::fold_enums`): when no
   dimension of an enum is published, each way permits the union of its own dimensions of it (none: the domain), and
   a smaller union is one row whose `dimension` joins the texts (`item.kind | kind`).
+- **A CHILD'S INPUT IS THE PARENT'S EXPRESSION ON A WAY THROUGH THE EDGE THAT BINDS IT** (#33, `key/key_scopes.rs`): `[item]="vm"` makes the child's `item.kind` read as `vm.kind` on that way, renamed before `per_way_allowed` keys the row, so the two meet where one dimension's rows intersect rather than being unioned by `fold_enums`. Only a plain read chain the child never writes (no `this.item =` assignment, no setter) is renamed; an edge with no such binding stops the rename.
 - **NOTHING PERMITTED ON EVERY WAY IS `in []`, AND IT IS THE ANSWER** (`value_folds.rs`): two nested config
   lists sharing no member, or a built key whose hole names no member, render the key for NOBODY. Moving it to
   `unreadable_values` made the key read as unrestricted.

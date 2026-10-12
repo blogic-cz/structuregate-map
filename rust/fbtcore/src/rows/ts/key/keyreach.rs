@@ -52,10 +52,11 @@ use super::key_branches::Branches;
 use super::key_fields::field_sites;
 use super::key_literals::literal_gates;
 use super::key_routes::{key_routes, Route};
+use super::key_scopes::Scopes;
 use super::sourcetrace::{source_trace, Trace};
 use super::store::{Row, Store};
 use super::value_folds::{
-    fold_values, per_way_allowed, unreadable_values, write_gate_features, write_gate_values,
+    fold_values, per_way_allowed, unreadable_values, write_gate_features, write_gate_values, Renames,
 };
 use indexmap::{IndexMap, IndexSet};
 use serde_json::Value;
@@ -250,6 +251,7 @@ pub fn build_closure(
     let mut traces: IndexMap<String, usize> =
         TRACES.iter().map(|t| (t.to_string(), 0usize)).collect();
 
+    let scopes = Scopes::new(store);
     for (key, loc) in &locales {
         let hit = routes.get(key);
         // The map publishes its OWN `referenced` flag over the whole source, counted by an
@@ -277,8 +279,8 @@ pub fn build_closure(
             hit.map(|h| h.sites.keys().flatten().cloned().collect()).unwrap_or_default();
         comps.sort();
 
-        let ways = ways_of(&comps, hit, &paths, &reach, &dead, &bound);
-        let Ways { sets, path_sets, roots, mods, rts, depth, cut } = ways;
+        let ways = ways_of(&comps, hit, &paths, &reach, &dead, &bound, &scopes);
+        let Ways { sets, path_sets, renames, roots, mods, rts, depth, cut } = ways;
 
         let (always, always_br) = split_branches(fold(&sets).0, &branches);
         let (maybe, maybe_br) = split_branches(fold(&sets).1, &branches);
@@ -289,7 +291,7 @@ pub fn build_closure(
         // ONE WALK OVER THE WAYS, read by both folds — they ask the same question of the
         // same sets, and computing them twice per key was nearly twice the walks one does.
         let ways: Vec<IndexSet<String>> = sets.clone();
-        let per_way = per_way_allowed(&ways, &value_map, &idx);
+        let per_way = per_way_allowed(&ways, &value_map, &idx, Some(&renames));
         let values = fold_values(&ways, &value_map, &idx, Some(&per_way));
         // The dimensions the gates narrow but the map cannot read. BESIDE the resolved ones,
         // never inside them: an `unknown` row folds to the whole domain and would otherwise
@@ -348,6 +350,8 @@ pub fn build_closure(
 pub struct Ways {
     pub sets: Vec<IndexSet<String>>,
     pub path_sets: Vec<IndexSet<String>>,
+    /// Per way (parallel to `sets`): the renames each gate or link's dimension goes through.
+    pub renames: Renames,
     pub roots: IndexSet<String>,
     pub mods: IndexSet<String>,
     pub rts: IndexSet<String>,
@@ -368,6 +372,7 @@ pub fn ways_of(
     reach: &IndexMap<String, (Vec<String>, Vec<String>)>,
     dead: &IndexSet<String>,
     bound: &Bound,
+    scopes: &Scopes,
 ) -> Ways {
     let mut w = Ways::default();
     for c in comps {
@@ -413,6 +418,17 @@ pub fn ways_of(
                     p.gates.iter().chain(p.branches.iter()).map(|g| g.to_string()).collect();
                 one.extend(chain.iter().filter(|g| !g.starts_with("edge:")).cloned());
                 one.extend(plinks.iter().chain(links.iter()).cloned());
+                // A CHILD'S INPUT READS AS THE PARENT'S EXPRESSION through the edge that binds it (`key_scopes`).
+                let mut named: IndexMap<String, Vec<super::key_scopes::Step>> = IndexMap::new();
+                let sites = chain.iter().filter(|g| !g.starts_with("edge:") && !g.starts_with("bind:"));
+                let owned = p.gates.iter().filter_map(|g| Some((&**g, scopes.gate_comp.get(&**g)?.as_str())));
+                for (id, at) in owned.chain(sites.map(|g| (g.as_str(), c.as_str()))) {
+                    let steps = scopes.steps(p, at);
+                    if steps.first().is_some_and(|s| !s.is_empty()) {
+                        named.entry(id.to_string()).or_insert(steps);
+                    }
+                }
+                w.renames.push(named);
                 w.sets.push(one);
             }
         }

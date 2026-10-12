@@ -37,7 +37,7 @@ fn way(gates: &[&str]) -> Way {
 #[test]
 fn two_gates_on_one_way_intersect_because_both_must_hold() {
     let gates = map(&[("g:1", gate("in", &["A", "B"])), ("g:2", gate("in", &["B", "C"]))]);
-    let per = per_way_allowed(&[way(&["g:1", "g:2"])], &gates, &idx_of(FOUR));
+    let per = per_way_allowed(&[way(&["g:1", "g:2"])], &gates, &idx_of(FOUR), None);
     assert_eq!(per[0]["e:1#shadeID"], way(&["B"]));
 }
 
@@ -49,13 +49,13 @@ fn two_set_ins_on_one_way_keep_the_narrower_and_never_empty() {
     let set = |v: &[&str]| vec![json!({"enum": "e:1", "dim": "active", "row": null,
                                        "op": "in", "values": v, "set": true})];
     let gates = map(&[("g:1", set(&["B", "C"])), ("g:2", set(&["A"])), ("g:3", set(&["A"]))]);
-    let per = per_way_allowed(&[way(&["g:1", "g:2"])], &gates, &idx_of(FOUR));
+    let per = per_way_allowed(&[way(&["g:1", "g:2"])], &gates, &idx_of(FOUR), None);
     assert_eq!(per[0]["e:1#active"], way(&["A"]), "the narrower, never emptied");
     // One of them alone still narrows.
-    let per = per_way_allowed(&[way(&["g:1"])], &gates, &idx_of(FOUR));
+    let per = per_way_allowed(&[way(&["g:1"])], &gates, &idx_of(FOUR), None);
     assert_eq!(per[0]["e:1#active"], way(&["B", "C"]));
     // Met in the other order, the narrower still wins.
-    let per = per_way_allowed(&[way(&["g:3", "g:1"])], &gates, &idx_of(FOUR));
+    let per = per_way_allowed(&[way(&["g:3", "g:1"])], &gates, &idx_of(FOUR), None);
     assert_eq!(per[0]["e:1#active"], way(&["A"]));
 }
 
@@ -100,7 +100,7 @@ fn a_way_that_permits_NOTHING_is_not_a_way_that_permits_everything() {
     ]);
     // The second way intersects to nothing: A,B then C share no member.
     let ways = [way(&["g:1"]), way(&["g:x", "g:y"])];
-    let per = per_way_allowed(&ways, &gates, &idx_of(FOUR));
+    let per = per_way_allowed(&ways, &gates, &idx_of(FOUR), None);
     assert!(per[1]["e:1#shadeID"].is_empty(), "the way permits nothing");
     let out = fold_values(&ways, &gates, &idx_of(FOUR), None);
     assert_eq!(out[0]["values"], json!(["A"]), "the empty way adds nothing");
@@ -130,7 +130,7 @@ fn a_dimension_first_restricted_on_a_later_way_still_sees_the_earlier_ones() {
 #[test]
 fn an_unknown_is_the_whole_domain_because_that_is_the_honest_upper_bound() {
     let gates = map(&[("g:u", gate("unknown", &[]))]);
-    let per = per_way_allowed(&[way(&["g:u"])], &gates, &idx_of(FOUR));
+    let per = per_way_allowed(&[way(&["g:u"])], &gates, &idx_of(FOUR), None);
     assert_eq!(per[0]["e:1#shadeID"].len(), 4);
     assert!(fold_values(&[way(&["g:u"])], &gates, &idx_of(FOUR), None).is_empty());
 }

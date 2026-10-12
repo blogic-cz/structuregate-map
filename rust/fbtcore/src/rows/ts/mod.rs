@@ -85,6 +85,8 @@ pub mod key_loops;
 pub mod key_dead;
 #[path = "key/key_bound.rs"]
 pub mod key_bound;
+#[path = "key/key_scopes.rs"]
+pub mod key_scopes;
 #[path = "key/keyreach.rs"]
 pub mod keyreach;
 #[path = "key/key_literals.rs"]
