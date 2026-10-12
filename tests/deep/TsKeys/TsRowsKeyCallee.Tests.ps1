@@ -210,4 +210,94 @@ Test-Case 'tsrows keys: a parameter a callee hands on to another method carries 
     Assert-Line $r 'demo.shape.round.a | field_binding'
     Assert-NoLine $r 'demo.shape.round.b | field_binding'
 }
+# A CHILD'S INPUT IS THE PARENT'S EXPRESSION on a way through the edge that binds it (`key/key_scopes.rs`).
+$script:BoundQ = "SELECT k.key || ' | ' || json_extract(v.value, '`$.dimension') || ' ' || json_extract(v.value, '`$.op') || ' ' || " +
+    "json_extract(v.value, '`$.values') AS r FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'demo.kind.%'"
+
+function New-BoundKindTree([string]$ChildBody) {
+    $tip = @'
+import { Component, Input } from '@angular/core';
+import { DemoIDs, DescService } from './svc';
+@Component({ selector: 'demo-tip', standalone: true, template: '<span [innerHTML]="text"></span>' })
+export class TipComponent {
+  @Input() item!: { kind: DemoIDs; name: string };
+  constructor(private desc: DescService) {}
+__BODY__
+  get text(): string { return this.desc.description(this.item.kind, this.item.name); }
+}
+'@
+    return New-TsRowsWorkspace @{
+        'apps/shop/src/svc.ts' = @'
+import { Injectable } from '@angular/core';
+export enum DemoIDs { Home = 1, Flat = 2, Life = 3, Car = 4 }
+export const homeKinds = [DemoIDs.Home, DemoIDs.Flat];
+export const lifeKinds = [DemoIDs.Life];
+@Injectable({ providedIn: 'root' })
+export class TranslateService { getTranslation(key: string): string { return key; } }
+@Injectable({ providedIn: 'root' })
+export class DescService {
+  constructor(private translate: TranslateService) {}
+  description(kind: DemoIDs, name: string): string {
+    if (homeKinds.indexOf(kind) !== -1) {
+      return this.home(name);
+    } else if (lifeKinds.some((e) => e === kind)) {
+      return this.translate.getTranslation(`demo.kind.life.${name}`);
+    }
+    return '-';
+  }
+  private home(name: string): string { return this.translate.getTranslation(`demo.kind.home.${name}`); }
+}
+@Injectable({ providedIn: 'root' })
+export class CtxService { context: { kind: DemoIDs; name: string } = { kind: DemoIDs.Home, name: 'a' }; }
+'@
+        'apps/shop/src/tip.component.ts' = $tip.Replace('__BODY__', $ChildBody)
+        'apps/shop/src/other.component.ts' = @'
+import { Component } from '@angular/core';
+import { DescService, CtxService } from './svc';
+@Component({ selector: 'demo-other', standalone: true, template: '<span [innerHTML]="text"></span>' })
+export class OtherComponent {
+  constructor(private desc: DescService, private ctx: CtxService) {}
+  get text(): string { return this.desc.description(this.ctx.context.kind, this.ctx.context.name); }
+}
+'@
+        'apps/shop/src/root.component.ts' = @'
+import { Component } from '@angular/core';
+import { NgIf } from '@angular/common';
+import { DemoIDs } from './svc';
+import { TipComponent } from './tip.component';
+import { OtherComponent } from './other.component';
+@Component({
+  selector: 'demo-root', standalone: true, imports: [NgIf, TipComponent, OtherComponent],
+  template: '<div *ngIf="vm.kind !== kinds.Car"><demo-tip [item]="vm"></demo-tip></div><demo-other></demo-other>'
+})
+export class RootComponent {
+  kinds = DemoIDs;
+  vm: { kind: DemoIDs; name: string } = { kind: DemoIDs.Home, name: 'a' };
+}
+'@
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"kind":{"home":{"a":"1"},"life":{"a":"2"}}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }
+}
+
+Test-Case 'tsrows keys: a child input bound to a parent read chain is that parent expression, so its gates intersect with the parent own' {
+    $made = New-TsRowsDb (New-BoundKindTree '')
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:BoundQ
+    Assert-Exit $r 0
+    # `[item]="vm"` makes the child's `item.kind` the parent's `vm.kind`: {Home,Flat,Life} meets {Home,Flat}, never a union that leaves only Car out
+    Assert-Line $r 'demo.kind.home.a | ctx.context.kind | vm.kind in ["Flat","Home"]'
+    Assert-Line $r 'demo.kind.life.a | ctx.context.kind | vm.kind in ["Life"]'
+    Assert-NoLine $r 'item.kind'
+}
+
+Test-Case 'tsrows keys: a child that writes its own input is not renamed to the parent expression' {
+    $made = New-TsRowsDb (New-BoundKindTree "  ngOnInit(): void { this.item = { ...this.item }; }")
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:BoundQ
+    Assert-Exit $r 0
+    # the child's `item` is no longer what the parent bound, so the dimension keeps its own text
+    Assert-NoLine $r '| vm.kind in'
+    Assert-Line $r 'demo.kind.home.a | ctx.context.kind | item.kind | vm.kind not_in ["Car"]'
+}
 }
