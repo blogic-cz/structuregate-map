@@ -123,7 +123,12 @@ pub(super) fn method_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
             let mut found = Vec::new();
             calls(unwrap(ast), &mut found);
             let mut done = std::collections::HashSet::new();
-            for (method, args) in found.into_iter().filter(|(m, _)| methods.contains(m)) {
+            // A CALL ON A RECEIVER TYPED BY A BASE OR AN INTERFACE is the call of every built subtype's member (`key_classes`).
+            let found = found.into_iter().flat_map(|(row, args)| {
+                let more = reader.classes.answers_of(&row);
+                std::iter::once(row).chain(more).map(move |m| (m, args.clone()))
+            });
+            for (method, args) in found.filter(|(m, _)| methods.contains(m)) {
                 if !done.insert(format!("{method} {}", Value::from(args.clone()))) {
                     continue;
                 }

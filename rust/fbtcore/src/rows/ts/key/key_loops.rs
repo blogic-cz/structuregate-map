@@ -44,6 +44,19 @@ fn element_keys(items: &[Element], keys: &KeySet, i18n: &[String], reader: &Retu
     let mut out: Elements = IndexMap::new();
     for (i, item) in items.iter().enumerate() {
         let Some(object) = item.value.as_object() else { continue };
+        // AN INSTANCE (`new PayButton(..)`) HOLDS WHAT ITS CLASS SAYS, by dotted path (`key_instances`).
+        if object.contains_key("$new") {
+            for (prop, found) in super::key_instances::properties(&item.value, reader) {
+                for (key, tail) in found {
+                    let chain = [item.chain.clone(), tail].concat();
+                    let ways = out.entry(prop.clone()).or_default().entry(key).or_default();
+                    if !ways.iter().any(|(j, c)| *j == i && *c == chain) {
+                        ways.push((i, chain));
+                    }
+                }
+            }
+            continue;
+        }
         for (prop, value) in object {
             let mut found = Vec::new();
             value_keys(value, &item.chain, keys, &mut found);
@@ -171,6 +184,10 @@ impl Loops {
         // of several returns. An element keeps the branches of the write that put it there. A write that is
         // not a plain `=` of a list leaves the member unread - a list read in part would hand a directive
         // fewer members than it can hold.
+        let calls = store.table("calls");
+        let functions = store.table("functions");
+        let pushes = super::key_pushes::pushes(&calls, &members, &functions);
+        let parent: HashMap<String, String> = functions.iter().filter_map(|f| Some((id_of(f, "id")?, text(f, "parent")?))).collect();
         let mut written: HashMap<String, Vec<&Row>> = HashMap::new();
         let assignments = store.table("assignments");
         for a in assignments.iter() {
@@ -196,11 +213,16 @@ impl Loops {
                 let list = a.get("value")
                     .filter(|_| text(a, "operator").as_deref() == Some("="))
                     .and_then(|v| elements(v, &rows, &by_member, &params, &branches.chain_of(a)));
-                let Some(list) = list else {
+                let Some(mut list) = list else {
                     all.clear();
                     unread.insert(target.clone());
                     break;
                 };
+                // A BARE LOCAL HANDED OVER (`const bs = []; bs.push(new X()); this.list = bs`) is its pushes too.
+                for p in super::key_instances::local_pushes(a, &pushes, &parent) {
+                    let args = p.get("args").and_then(Value::as_array).into_iter().flatten();
+                    list.extend(args.map(|a| Element { value: a.clone(), chain: branches.chain_of(p), from_call: false, owner: id_of(p, "member") }));
+                }
                 all.extend(list);
             }
             if !all.is_empty() {
@@ -210,8 +232,6 @@ impl Loops {
         // EVERY `this.<field>.push(x)` OF ITS OWN CLASS IS ONE MORE ELEMENT, under the branches of the push, as a plain `=` is:
         // `this.items.push({ label: t('k') })`. A list read in part is no list, so one a write or an initializer left unread
         // stays unread, and a member another class writes was dropped above.
-        let calls = store.table("calls");
-        let pushes = super::key_pushes::pushes(&calls, &members);
         for m in members.iter() {
             let (Some(id), Some(class), Some(name)) = (id_of(m, "id"), text(m, "class"), text(m, "name")) else { continue };
             let Some(pushed) = pushes.field.get(&(class.clone(), name)).filter(|_| !unread.contains(&id) && owner.get(&id) == Some(&Some(class))) else { continue };
@@ -337,10 +357,35 @@ fn property_reads(ast: &Value, variable: &str, out: &mut Vec<String>) {
                 && receiver.get("receiver").and_then(|r| r.get("k")).and_then(|k| k.as_str()) == Some("Implicit")
             {
                 out.push(name.to_string());
+            } else if let Some(path) = nested_path(ast, variable) {
+                // `<variable>.tooltip.text`: a dotted path, the property an INSTANCE's object literal holds (`key_instances`).
+                out.push(path);
             }
             object.values().for_each(|v| property_reads(v, variable, out));
         }
         _ => {}
+    }
+}
+
+/// `a.b` of a read `<variable>.a.b` (any depth over one), the variable a bare name no declaration resolved.
+fn nested_path(ast: &Value, variable: &str) -> Option<String> {
+    let mut names = Vec::new();
+    let mut at = ast;
+    loop {
+        if !is_read(at) {
+            return None;
+        }
+        let receiver = at.get("receiver")?;
+        if receiver.get("k").and_then(Value::as_str) == Some("Implicit") {
+            let bottom = at.get("name").and_then(Value::as_str) == Some(variable) && at.get("target").is_none_or(Value::is_null);
+            if !bottom || names.len() < 2 {
+                return None;
+            }
+            names.reverse();
+            return Some(names.join("."));
+        }
+        names.push(at.get("name").and_then(Value::as_str)?);
+        at = receiver;
     }
 }
 

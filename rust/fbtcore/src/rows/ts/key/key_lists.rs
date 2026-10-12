@@ -72,7 +72,7 @@ pub(super) fn with_reader<R>(store: &Store<'_>, f: impl FnOnce(&Returned<'_, '_>
     let assignments = store.table("assignments");
     let writes = local_writes(&assignments);
     let (calls, members) = (store.table("calls"), store.table("members"));
-    let pushes = super::key_pushes::pushes(&calls, &members);
+    let pushes = super::key_pushes::pushes(&calls, &members, &store.table("functions"));
     let parent: HashMap<String, String> = store
         .table("functions")
         .iter()

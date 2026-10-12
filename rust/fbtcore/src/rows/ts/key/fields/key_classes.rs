@@ -23,6 +23,14 @@ use std::rc::Rc;
 /// (file row id, type name) - how a class or interface is told from another of the same name.
 type TypeKey = (String, String);
 
+/// class id -> the names of its own members; member id -> its initializer; (class id, field) -> what its constructors write.
+#[derive(Default)]
+pub(super) struct Inst {
+    pub(super) names: HashMap<String, Vec<String>>,
+    pub(super) initial: HashMap<String, Value>,
+    pub(super) written: HashMap<(String, String), Vec<Value>>,
+}
+
 pub(super) struct Classes {
     by_tail: HashMap<String, Vec<(String, String)>>,
     by_path: HashMap<String, String>,
@@ -35,6 +43,10 @@ pub(super) struct Classes {
     /// (class id, member name) -> member id.
     member: HashMap<(String, String), String>,
     constructors: HashSet<String>,
+    /// member id (a class's, or an interface's `type_members` row) -> the type declaring it and its name.
+    declared_in: HashMap<String, (TypeKey, String)>,
+    /// What an instance's properties are made of (`key_instances`), read when the first element asks.
+    inst: OnceCell<Inst>,
     /// The tables a `new` can sit in, read once when the first receiver asks which classes are built.
     tables: Vec<Rc<Vec<Row>>>,
     built: OnceCell<HashSet<String>>,
@@ -56,7 +68,7 @@ impl Classes {
         }
         let mut out = Classes {
             by_tail, by_path, by_key: HashMap::new(), key_of: HashMap::new(), parent: HashMap::new(), subs: HashMap::new(), member: HashMap::new(),
-            constructors: HashSet::new(), tables: Vec::new(), built: OnceCell::new(),
+            constructors: HashSet::new(), declared_in: HashMap::new(), inst: OnceCell::new(), tables: Vec::new(), built: OnceCell::new(),
         };
         let classes = store.table("classes");
         for c in classes.iter() {
@@ -88,8 +100,17 @@ impl Classes {
                 }
                 Some("setter") => {}
                 _ => {
+                    if let Some(key) = out.key_of.get(&class) {
+                        out.declared_in.insert(id.clone(), (key.clone(), name.clone()));
+                    }
                     out.member.entry((class, name)).or_insert(id);
                 }
+            }
+        }
+        let interfaces: HashMap<String, TypeKey> = store.table("interfaces").iter().filter_map(|i| Some((id_of(i, "id")?, (id_of(i, "file")?, text(i, "name")?)))).collect();
+        for m in store.table("type_members").iter() {
+            if let (Some(id), Some(key), Some(name)) = (id_of(m, "id"), id_of(m, "owner").and_then(|o| interfaces.get(&o)), text(m, "name")) {
+                out.declared_in.insert(id, (key.clone(), name));
             }
         }
         out.tables = ["assignments", "locals", "returns", "calls", "members"].iter().map(|t| store.table(t)).collect();
@@ -140,6 +161,53 @@ impl Classes {
         false
     }
 
+    pub(super) fn inst(&self) -> &Inst {
+        self.inst.get_or_init(|| {
+            let mut out = Inst::default();
+            for m in self.tables[4].iter() {
+                let (Some(id), Some(class), Some(name)) = (id_of(m, "id"), id_of(m, "class"), text(m, "name")) else { continue };
+                if matches!(text(m, "kind").as_deref(), Some("constructor" | "setter")) {
+                    continue;
+                }
+                out.names.entry(class).or_default().push(name);
+                if let Some(v) = m.get("value").filter(|v| !v.is_null()) {
+                    out.initial.insert(id, v.clone());
+                }
+            }
+            for a in self.tables[0].iter() {
+                let (Some(member), Some(class), Some(name), Some(value)) = (id_of(a, "member"), id_of(a, "class"), text(a, "target"), a.get("value")) else { continue };
+                if self.constructors.contains(&member) && text(a, "scope").as_deref() == Some("this") && text(a, "operator").as_deref() == Some("=") {
+                    out.written.entry((class, name)).or_default().push(value.clone());
+                }
+            }
+            out
+        })
+    }
+
+    /// The class a `new`'s `$target` names.
+    pub(super) fn class_built(&self, new: &Value) -> Option<&str> {
+        let t = new.get("$target")?;
+        let file = self.file_of(t.get("file")?.as_str()?)?;
+        self.by_key.get(&(file.to_string(), t.get("name")?.as_str()?.to_string())).map(String::as_str)
+    }
+
+    /// `class` and every base it extends, nearest first.
+    pub(super) fn chain(&self, class: &str) -> Vec<String> {
+        let mut out = vec![class.to_string()];
+        for _ in 0..32 {
+            match self.parent.get(out.last().expect("never empty")).and_then(|k| self.by_key.get(k)) {
+                Some(up) if !out.contains(up) => out.push(up.clone()),
+                _ => break,
+            }
+        }
+        out
+    }
+
+    /// The member of that name `class` declares or inherits.
+    pub(super) fn member_of(&self, class: &str, name: &str) -> Option<&str> {
+        self.chain(class).iter().find_map(|c| self.member.get(&(c.clone(), name.to_string()))).map(String::as_str)
+    }
+
     pub(super) fn is_constructor(&self, member: &str) -> bool {
         self.constructors.contains(member)
     }
@@ -148,7 +216,20 @@ impl Classes {
     /// is a class, and each built subtype - the member its own class declares, or the nearest base's.
     fn answering(&self, owner: &str, file: &str, name: &str) -> Vec<(String, String)> {
         let Some(file) = self.file_of(file) else { return Vec::new() };
-        let key = (file.to_string(), owner.to_string());
+        self.answering_key((file.to_string(), owner.to_string()), name)
+    }
+
+    /// The members that can answer a TEMPLATE'S call of `row` - a class member or an interface's: those of the declaring
+    /// type's built subtypes. Nothing when the type has none (the row answers itself) so a plain class reads as before.
+    pub(super) fn answers_of(&self, row: &str) -> Vec<String> {
+        let Some((key, name)) = self.declared_in.get(row) else { return Vec::new() };
+        if !self.subs.contains_key(key) {
+            return Vec::new();
+        }
+        self.answering_key(key.clone(), name).into_iter().map(|(_, member)| member).collect()
+    }
+
+    fn answering_key(&self, key: TypeKey, name: &str) -> Vec<(String, String)> {
         let mut classes: Vec<String> = self.by_key.get(&key).cloned().into_iter().collect();
         let (mut todo, mut seen) = (vec![key], HashSet::new());
         while let Some(at) = todo.pop() {
@@ -320,5 +401,14 @@ mod tests {
     fn a_class_of_another_file_is_not_the_one_named() {
         let classes = store(json!({"files": [{"id": "f:1", "path": "src/a.ts"}, {"id": "f:2", "path": "src/b.ts"}]}));
         assert!(classes.answering("Base", "/w/src/b.ts", "tip").is_empty());
+    }
+
+    #[test]
+    fn a_template_call_of_a_bases_member_answers_with_the_built_subtypes_members_and_a_plain_class_with_none() {
+        let classes = store(json!({}));
+        let mut got = classes.answers_of("m:1");
+        got.sort();
+        assert_eq!(got, vec!["m:1".to_string(), "m:2".to_string(), "m:2".to_string()]);
+        assert!(classes.answers_of("m:3").is_empty(), "Spare has no subtype of its own: the row answers itself");
     }
 }

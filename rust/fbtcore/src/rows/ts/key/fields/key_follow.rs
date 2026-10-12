@@ -156,6 +156,12 @@ impl Returned<'_, '_> {
         self.through(value, &frame, &mut Seen::new(), out);
     }
 
+    /// The keys `member` - a method, an arrow property or a `functions` row - returns, entered with no arguments: a function
+    /// a template or an instance holds (`tooltip = { text: this.tipText }`) and calls with what only it knows.
+    pub(in super::super) fn enter_member(&self, member: &str, out: &mut Found) {
+        self.enter(member.to_string(), &Value::Null, &mut Seen::new(), out);
+    }
+
     /// The keys of the ONE plain return of `member`, or what each of its several returns hands back through a
     /// call - each (member, arguments) read once.
     ///
