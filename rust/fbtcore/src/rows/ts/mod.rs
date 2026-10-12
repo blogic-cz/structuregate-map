@@ -65,6 +65,10 @@ pub mod key_follow;
 pub mod key_methods;
 #[path = "key/fields/key_pushes.rs"]
 pub mod key_pushes;
+#[path = "key/fields/key_inputs.rs"]
+pub mod key_inputs;
+#[path = "key/fields/key_then.rs"]
+pub mod key_then;
 #[path = "key/key_lists.rs"]
 pub mod key_lists;
 #[path = "key/key_loops.rs"]

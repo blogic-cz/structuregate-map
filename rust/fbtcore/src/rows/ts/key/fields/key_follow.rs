@@ -133,7 +133,7 @@ impl Returned<'_, '_> {
     /// `demo.${n}`` hands the field `demo.a`, and reading only class members left every key such a function builds
     /// a `literal` no component reached. No condition is carried, and each (callee, arguments) is read once.
     pub(super) fn call(&self, value: Option<&Value>, seen: &mut Seen, out: &mut Found) {
-        let Some(value) = value else { return };
+        let Some(value) = value.map(|v| v.get("$await").unwrap_or(v)) else { return };
         let Some(target) = value.get("$target") else { return };
         let Some(member) = self.rows.member_named(target).or_else(|| self.rows.function_named(target)) else { return };
         self.enter(member, value, seen, out);
@@ -216,6 +216,11 @@ impl Returned<'_, '_> {
 
     /// A translate call's arguments, another method's or function's return, either side of a `??` or `||`, a ternary's arms.
     fn through(&self, ret: &Value, frame: &Frame<'_>, seen: &mut Seen, out: &mut Found) {
+        // AN `await` OF A CALL IS THE CALL: `await this.svc.load()` hands back what `load` resolves to, which is what its
+        // returns hold (an `async` method returns the plain value, `Promise.resolve` is read through).
+        if let Some(inner) = ret.get("$await") {
+            return self.through(inner, frame, seen, out);
+        }
         // A TERNARY'S ARMS ARE FOLLOWED LIKE A `??`'S SIDES, no condition carried: `return flag ? t('a') : t('b')`
         // hands back either call, and reading neither left both keys a `literal` no component reached.
         if ret.get("$then").is_some() || ret.get("$else").is_some() {

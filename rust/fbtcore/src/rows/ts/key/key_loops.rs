@@ -87,19 +87,19 @@ pub struct Element {
 /// replaced by what its callee returns (`callee_lists`), a call by the same. None for a value that is no
 /// list. A spread no callee resolves stays ONE item, as an unread item always was, so `Loops::expand`
 /// refuses the list instead of reading it in part.
-fn elements(value: &Value, rows: &super::gate_tsrows::TsRows, by_member: &HashMap<String, Vec<&Row>>, chain: &[String]) -> Option<Vec<Element>> {
+fn elements(value: &Value, rows: &super::gate_tsrows::TsRows, by_member: &HashMap<String, Vec<&Row>>, params: &HashMap<String, Vec<String>>, chain: &[String]) -> Option<Vec<Element>> {
     let of = |items: Vec<Value>, owner: String| items.into_iter().map(move |value| Element { value, chain: chain.to_vec(), from_call: true, owner: Some(owner.clone()) });
     match value {
         Value::Array(items) => Some(
             items
                 .iter()
-                .flat_map(|item| match callee_lists(item.get("$spread"), rows, by_member) {
+                .flat_map(|item| match callee_lists(item.get("$spread"), rows, by_member, params) {
                     Some((spread, owner)) => of(spread, owner).collect(),
                     None => vec![Element { value: item.clone(), chain: chain.to_vec(), from_call: false, owner: None }],
                 })
                 .collect(),
         ),
-        other => callee_lists(Some(other), rows, by_member).map(|(items, owner)| of(items, owner).collect()),
+        other => callee_lists(Some(other), rows, by_member, params).map(|(items, owner)| of(items, owner).collect()),
     }
 }
 
@@ -145,6 +145,7 @@ impl Loops {
         let rows = super::gate_tsrows::TsRows::new(store);
         let returns = store.table("returns");
         let by_member = returns_by_member(&returns);
+        let params = super::key_fields::callables(store).0;
         let branches = Branches::new(store);
         let members = store.table("members");
         let mut owner: HashMap<String, Option<String>> = HashMap::new();
@@ -159,7 +160,7 @@ impl Loops {
                 Some(Value::Array(items)) if items.is_empty() => {}
                 Some(value) => {
                     members_valued.insert(id.clone());
-                    if let Some(list) = elements(value, &rows, &by_member, &[]) {
+                    if let Some(list) = elements(value, &rows, &by_member, &params, &[]) {
                         lists.insert(id, list);
                     }
                 }
@@ -194,7 +195,7 @@ impl Loops {
             for a in writes {
                 let list = a.get("value")
                     .filter(|_| text(a, "operator").as_deref() == Some("="))
-                    .and_then(|v| elements(v, &rows, &by_member, &branches.chain_of(a)));
+                    .and_then(|v| elements(v, &rows, &by_member, &params, &branches.chain_of(a)));
                 let Some(list) = list else {
                     all.clear();
                     unread.insert(target.clone());
@@ -220,6 +221,9 @@ impl Loops {
                 lists.entry(id).or_default().extend(more);
             }
         }
+        // A LIST EVERY PARENT HANDS TO AN `@Input` is the child's (`key_inputs`).
+        let handed = super::key_inputs::input_lists(store, &lists);
+        lists.extend(handed);
         for g in gates.iter().filter(|g| text(g, "name").as_deref() == Some("ngForOf")) {
             let (Some(top), Some(expr)) = (id_of(g, "node"), id_of(g, "expression")) else { continue };
             let Some(ast) = expr_by_id.get(&expr).and_then(|e| e.get("ast")).filter(|a| !a.is_null()) else { continue };
