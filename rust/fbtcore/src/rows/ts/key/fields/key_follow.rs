@@ -23,6 +23,8 @@ pub(super) struct Returned<'r, 'a> {
     pub(super) parent: &'r std::collections::HashMap<String, String>,
     /// Every `.push(..)` of a list, by the local or field it is made on.
     pub(super) pushes: &'r super::key_pushes::Pushes<'a>,
+    /// The classes a receiver's declared type stands for - `key_classes`.
+    pub(super) classes: &'r super::key_classes::Classes,
 }
 
 /// The arguments of a call of a configured `i18nCalls` method, None for any other value.
@@ -135,6 +137,14 @@ impl Returned<'_, '_> {
     pub(super) fn call(&self, value: Option<&Value>, seen: &mut Seen, out: &mut Found) {
         let Some(value) = value.map(|v| v.get("$await").unwrap_or(v)) else { return };
         let Some(target) = value.get("$target") else { return };
+        // A CALL THROUGH A RECEIVER TYPED BY A BASE CLASS OR AN INTERFACE runs the member of every subtype a `new` builds.
+        let answering = self.classes.through(value);
+        if !answering.is_empty() {
+            for (_, member) in answering {
+                self.enter(member, value, seen, out);
+            }
+            return;
+        }
         let Some(member) = self.rows.member_named(target).or_else(|| self.rows.function_named(target)) else { return };
         self.enter(member, value, seen, out);
     }

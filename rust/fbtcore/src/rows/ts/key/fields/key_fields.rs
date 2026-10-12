@@ -75,7 +75,9 @@ pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
 /// A RETURN THAT WRAPS A TRANSLATE CALL hands it back as well: an object's property values (`{ title: t(k) }`), a
 /// list's elements that are no objects, the parts of a `+` chain and the argument of `Promise.resolve`, no condition
 /// carried. The argument of any other call is not followed, and an object inside a list is `key_loops`'s, read where
-/// the loop variable's property is. A template literal's holes and a method chained on the call are not read.
+/// the loop variable's property is. A template literal's hole (`$hole_values`) and a string method chained on the call (`$receiver_value`) are read too (#22, `key_follow::Returned::through`).
+///
+/// A CALL OR PROPERTY READ THROUGH A RECEIVER typed by a class, a base or an interface is the member of every class a `new` builds that can answer - `key_classes`.
 ///
 /// A RETURN OF A BARE `let` LOCAL reads every later `=` of it too (`let s = ''; s = t(k); return s;`), the
 /// local of the method or of the method an arrow sits in, no branch carried - see `key_follow::Returned::written`.
@@ -194,6 +196,9 @@ fn member_keys(store: &Store<'_>, reader: &Returned<'_, '_>) -> IndexMap<String,
     let mut owner: IndexMap<String, Option<String>> = IndexMap::new();
     let mut out: IndexMap<String, IndexMap<String, Vec<Vec<String>>>> = IndexMap::new();
     let mut foreign: Vec<String> = Vec::new();
+    // (writing class, field) -> the keys that class's constructor writes to a field of its base; and those fields.
+    let mut by_writer: IndexMap<(String, String), IndexMap<String, Vec<Vec<String>>>> = IndexMap::new();
+    let mut ctor_sub: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // A VALUE IS READ FOR EVERY KEY IT CAN BE, a ternary's and a logical operator's arms
     // included, each with the choice that picks it - see `key_branches::value_keys`.
@@ -229,7 +234,21 @@ fn member_keys(store: &Store<'_>, reader: &Returned<'_, '_>) -> IndexMap<String,
             continue;
         }
         let writer = text(a, "class");
-        if writer.is_none() || writer != *owner.get(&target).expect("checked above") {
+        let home = owner.get(&target).expect("checked above").clone();
+        // A SUBCLASS'S CONSTRUCTOR WRITING THE BASE'S FIELD (`this.tooltip = ..`) is kept apart, per writer: a receiver typed by
+        // the base reads it only for a subclass a `new` builds (`key_classes`). The field is still not a site of its own.
+        let by_subclass = match (&writer, &home) {
+            (Some(w), Some(h)) => id_of(a, "member").is_some_and(|m| reader.classes.is_constructor(&m)) && reader.classes.extends(w, h),
+            _ => false,
+        };
+        if by_subclass {
+            ctor_sub.insert(target.clone());
+            for (key, chain) in found {
+                member_ways(by_writer.entry((writer.clone().unwrap_or_default(), target.clone())).or_default(), &key, chain);
+            }
+            continue;
+        }
+        if writer.is_none() || writer != home {
             foreign.push(target.clone());
         }
         for (key, chain) in found {
@@ -263,9 +282,16 @@ fn member_keys(store: &Store<'_>, reader: &Returned<'_, '_>) -> IndexMap<String,
         }
     }
 
-    for member in foreign {
-        out.shift_remove(&member);
+    // A FIELD ONLY A SUBCLASS'S CONSTRUCTOR WROTE FROM OUTSIDE keeps its own writes for a receiver typed by its class.
+    let mut class_only: IndexMap<String, IndexMap<String, Vec<Vec<String>>>> = IndexMap::new();
+    for member in foreign.iter().chain(ctor_sub.iter()) {
+        if let Some(keys) = out.shift_remove(member) {
+            if !foreign.contains(member) {
+                class_only.insert(member.clone(), keys);
+            }
+        }
     }
+    super::key_classes::add_reads(store, reader, &branches, &mut out, &class_only, &by_writer, &foreign);
     out
 }
 

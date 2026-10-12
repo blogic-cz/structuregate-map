@@ -36,6 +36,21 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
     return { name, file: first, ...(unique.length ? { also: unique } : {}) };
   }
 
+  /**
+   * THE CLASS OR INTERFACE A MEMBER ACCESS IS DECLARED IN, by the checker: `{ name, file, owner }` of a read or call
+   * through a RECEIVER (`this.btn.text`, `this.strat.tip()`) whose declaration sits in a named class or interface. `this.x`
+   * is its own class's and is left out: it adds a field to a great many rows and says nothing the member row does not.
+   * The rust side reads the receiver's type through it - a base class or an interface stands for every subtype built with
+   * `new` (`key/fields/key_classes.rs`) - never by the member's name alone.
+   */
+  function ownerTarget(access) {
+    if (!ts.isPropertyAccessExpression(access) || access.expression.kind === ts.SyntaxKind.ThisKeyword) return null;
+    const decl = symbolAt(access.name)?.declarations?.[0];
+    const owner = decl?.parent;
+    if (!owner || !(ts.isClassLike(owner) || ts.isInterfaceDeclaration(owner)) || !owner.name) return null;
+    return { name: access.name.text, file: canonicalPath(decl.getSourceFile().fileName), owner: owner.name.text };
+  }
+
   /** `Enum.Member` / const-object member -> its resolved constant value, PLUS the provenance. */
   function evalMemberAccess(node) {
     const constant = checker.getConstantValue(node);
@@ -175,5 +190,5 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
     return { ...picked, recovery: true };
   }
 
-  return { valueDecl, declTarget, evalMemberAccess, evalIdentifier, lazyTarget };
+  return { valueDecl, declTarget, ownerTarget, evalMemberAccess, evalIdentifier, lazyTarget };
 }
