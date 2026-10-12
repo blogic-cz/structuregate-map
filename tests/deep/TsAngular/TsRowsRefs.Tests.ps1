@@ -22,11 +22,14 @@ $script:TsRefsFiles = @{
     'apps/shop/src/alpha.component.ts' = "import { Component } from '@angular/core';`n" +
         "@Component({ selector: 'demo-alpha', template: '' }) class AlphaComponent {}`n" +
         "export { AlphaComponent as DemoAlpha };`n"
+    'apps/shop/src/beta.component.ts' = "import { Component } from '@angular/core';`n" +
+        "@Component({ selector: 'demo-beta', template: '' }) export class BetaComponent {}`n"
     'apps/shop/src/m.module.ts' = "import { NgModule } from '@angular/core';`n" +
         "import { RouterModule, Routes } from '@angular/router';`n" +
         "import { DemoAlpha } from './alpha.component';`n" +
+        "import { BetaComponent as DemoBeta } from './beta.component';`n" +
         "const routes: Routes = [{ path: 'a', component: DemoAlpha }];`n" +
-        "@NgModule({ declarations: [DemoAlpha], imports: [RouterModule.forChild(routes)] }) export class DemoModule {}`n"
+        "@NgModule({ declarations: [DemoAlpha, DemoBeta], imports: [RouterModule.forChild(routes)] }) export class DemoModule {}`n"
 }
 
 Test-Case 'tsrows: di carries the @Inject token and the inject() calls of property initialisers' {
@@ -59,6 +62,9 @@ Test-Case 'tsrows: an export alias still joins a route and a module declaration 
     Assert-Line $decl 'AlphaComponent'
     $reach = Invoke-TsRowsQ $made.Db ("SELECT m.name AS r FROM component_reach cr JOIN ng_modules m ON m.id = json_extract(cr.areas, '`$[0]') WHERE cr.name = 'AlphaComponent'")
     Assert-Line $reach 'DemoModule'
+    # an IMPORT alias: the module names `DemoBeta`, which only its own `import_names` row ties to the class
+    $beta = Invoke-TsRowsQ $made.Db ("SELECT 'beta=' || c.name AS r FROM ng_modules m JOIN classes c ON c.id = json_extract(m.declarations, '`$[1].id') WHERE m.name = 'DemoModule'")
+    Assert-Line $beta 'beta=BetaComponent'
 }
 
 }

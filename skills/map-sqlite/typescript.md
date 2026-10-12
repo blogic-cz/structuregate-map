@@ -35,7 +35,7 @@ Beside the shared tables it adds the FRAMEWORK tables:
 | injection and I/O | `di` `io` `input_usage` |
 | templates | `templates` `template_nodes` `bindings` `renders` `render_graph` `component_reach` `selector_index` |
 | routing and gates | `routes` `gates` `gate_values` `gate_index` |
-| NgRx | `state_actions` `state_handlers` `state_selectors` |
+| NgRx | `state_actions` `state_handlers` `state_selectors` `state_effects` |
 | the closure, derived LAST from every other table | `render_path` `key_reach` `gate_features` (+ `gate_values`): where a translation key can be travelled to from a routed root, what gates every way in, which capability each gate requires |
 
 * **`components.class`** is the class row (`c:...`) that `routes.component_id`, `render_graph.from_class`
@@ -45,7 +45,7 @@ Beside the shared tables it adds the FRAMEWORK tables:
   `renders` itself filters `scope <> 'out_of_scope'` to see what really renders. A render created in code names the method that returned the class
   (`returned_by`) and each way it was returned (`return_ways`, `returns` ids); a `case` or `if` every way sits
   in lands in `render_path.branches`. `templates`/`template_nodes`/`bindings` are the template side; `gates`/
-  `gate_values` what hides a node (`op` in/not_in/unknown; `listed_json` what a config object lists, even an
+  `gate_values` what hides a node (`gates.gate_kind = 'hidden'` is `[hidden]`/`[attr.hidden]`, whose `expression` is a row holding the NEGATED condition) (`op` in/not_in/unknown; `listed_json` what a config object lists, even an
   exclusion the map cannot polarise); `state_*` NgRx; `di`/`injectables` injection.
 * **`template_literals.parts`** are a template's literal pieces, its `holes` what fills them; a string constant joined
   in front with `+` (`BASE + `.${name}.tip``, through `( )` and either arm of `?:`) leads the first piece.
@@ -59,13 +59,16 @@ Beside the shared tables it adds the FRAMEWORK tables:
   **`imports.resolved`** is the module the specifier NAMES - a barrel a third of the time; `import_names`
   follows the barrel to where each name is DECLARED (`declared_file`, `declared_id`, `via`).
   A bare `import('./x')` or `require('./x')` is an `imports` row too, with `dynamic` = `import`/`require` and no names.
+  **`imports.in_tree`** is whether the import lands in the tree (not `node_modules`, not outside the root) - what
+  `external = 0` was often read as.
 * **`di`** is a constructor parameter, or a field initialised by `inject()` (`inject = 1`, `param` the field). `token`,
   `token_ref` and `token_id` name the injection token - an `@Inject(TOKEN)` or `inject()`'s argument - where `resolved`
   stays the declared TYPE; a token that is a property of a const object (`Tokens.X`)
   joins that const in `token_id`. An `export { A as B }` alias resolves to `A` (`routes.component_id`, the `id` on each
   `ng_modules` ref). `in_module` marks an interface or type alias declared inside `declare module`, `declare global` or a
-  namespace. `state_selectors.factory` is set on a function that RETURNS `createSelector`. A static attribute that
+  namespace, and a namespace's class, function, const or enum. `state_selectors.factory` is set on a function that RETURNS `createSelector`. A static attribute that
   matches an input counts in `input_usage` (its `expression` is null) and `io.bound_count`.
+* **`state_effects`** is one row per `createEffect` member: `actions` the `ofType` refs it listens to (as `state_handlers.action_source` spells them), `dispatch` 0 for `{ dispatch: false }`, `emits` the calls its callbacks return, as written.
 * `handlers`: TypeScript names no type a clause catches, so every row is `bare = 1`; the caught name is
   `handlers.name`. The half also writes `raises`, and a `try` row in `branches` (`sense = 'try'`).
 * Its ids restart from 1 when it is the only half in the database, so the same tree numbers the same way;

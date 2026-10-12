@@ -105,7 +105,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
     const out = {};
     for (const p of node.properties) {
       if (ts.isPropertyAssignment(p)) out[propNameOf(p.name)] = evalNode(p.initializer);
-      else if (ts.isShorthandPropertyAssignment(p)) out[p.name.text] = refs.evalIdentifier(p.name);
+      else if (ts.isShorthandPropertyAssignment(p)) out[p.name.text] = refs.evalShorthand(p);
       else if (ts.isSpreadAssignment(p)) {
         const spread = evalNode(p.expression);
         if (spread && typeof spread === 'object' && !Array.isArray(spread) && !('$expr' in spread)) {

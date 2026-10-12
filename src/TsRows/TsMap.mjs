@@ -208,9 +208,14 @@ async function main() {
   // an `export { A as B }` alias resolves (`routes.component_id`, `ng_modules` refs' `id`); a static attribute fills an input
   // (`input_usage`, `io.bound_count`); `imports.dynamic` for `import()`/`require()`; `in_module` on a module block's types;
   // a namespace's class, function and const are rows.
+  // 46: `in_module` on a namespace's class, function, const and enum; `imports.in_tree`; an `ng_modules` ref or a route's
+  // component through the file's own import alias (`import { A as B }`) or an unresolved `{expr}`; a shorthand property (`{ template }`) evaluates to its const's value, and a const-held inline
+  // template's `argLines` is the const's own line (same file); `[hidden]`/`[attr.hidden]` is a `gates` row (`hidden`) over its own
+  // `expressions` row holding the negated condition; `state_effects` (a `createEffect` member's `ofType` actions, `dispatch`, `emits`),
+  // and the body of a `createEffect` callback is walked (its calls, returns and nested arrows are rows under the member).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 45, build: args.build,
+    config: config.file, data: config.data, rows: 46, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
@@ -564,7 +569,7 @@ async function main() {
   // THE STATE GRAPH, from the evaluated values of the consts that declare it.
   const stateGraph = rollupStateGraph(store);
   emit('MAP-NOTE', `the typescript half found ${stateGraph.actions} action(s), ${stateGraph.handlers} `
-    + `reducer handler(s) and ${stateGraph.selectors} selector(s)`);
+    + `reducer handler(s), ${stateGraph.selectors} selector(s), ${stateGraph.effects} effect(s)`);
 
   // THE INVERTED VIEWS, last: each is a join over tables that all have to be complete first.
   rollupSelectors(store);

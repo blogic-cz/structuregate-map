@@ -10,25 +10,29 @@ import { dedupeSummary, summarizeExpr } from './TsExprSummary.mjs';
 import { collectLiteralStrings, dynamicKeyParts, pipeArgStrings, spanOf, transformedByPipe } from './TsTplKeys.mjs';
 
 /**
- * WHICH BINDING TYPES ARE CLASS AND STYLE - asked of the compiler, never written as 2 and 3.
+ * WHICH BINDING TYPES ARE CLASS, STYLE, PROPERTY AND ATTRIBUTE - asked of the compiler, never written as numbers.
  *
  * `BoundAttribute.type` is a `BindingType`, and @angular/compiler does not export that enum, so the numbers
  * cannot be imported. A one-line template is parsed at startup and the values are READ OFF the result:
- * whatever number Angular gives `[class.x]` is the class type here. A version that renumbers the enum is
+ * whatever number Angular gives `[class.x]` is the class type here (`[hidden]` gives the property type,
+ * `[attr.c]` the attribute type, which `[attr.hidden]` shares). A version that renumbers the enum is
  * followed automatically, and there is no literal to defend.
  */
 export function probeBindingTypes(ng) {
   try {
-    const probe = ng.parseTemplate('<i [class.a]="v" [style.b]="v"></i>', 'binding-type-probe.html', {});
+    const probe = ng.parseTemplate('<i [class.a]="v" [style.b]="v" [hidden]="v" [attr.c]="v"></i>', 'binding-type-probe.html', {});
     const element = probe.nodes[0] ?? null;
     const byName = new Map((element?.inputs ?? []).map((i) => [i.name, i.type]));
-    return { classType: byName.get('a'), styleType: byName.get('b') };
+    return {
+      classType: byName.get('a'), styleType: byName.get('b'),
+      propertyType: byName.get('hidden'), attributeType: byName.get('c'),
+    };
   } catch {
-    return { classType: undefined, styleType: undefined };
+    return { classType: undefined, styleType: undefined, propertyType: undefined, attributeType: undefined };
   }
 }
 
-export function makeEmitters({ store, normalizeExpr, carriers, gateInputs, classType, styleType }) {
+export function makeEmitters({ store, normalizeExpr, carriers, gateInputs, classType, styleType, propertyType, attributeType }) {
   const carrierNames = () => new Set(carriers.keys());
 
   function emitRender(m, comp, tplId, nodeId, tag, span) {
@@ -51,8 +55,19 @@ export function makeEmitters({ store, normalizeExpr, carriers, gateInputs, class
       source: src ?? null, ast: norm, ...summary,
     });
     if (gate) {
+      // A `[hidden]` gate reads the NEGATED condition from a row of its own, never the binding's: the binding's
+      // row stays what `input_usage` reads, and no reader has to know `hidden` flips the sense.
+      let gateExpr = exprId;
+      if (gateKind === 'hidden') {
+        const not = norm?.k === 'Source'
+          ? { ...norm, src: `!(${norm.src})`, ast: { k: 'Not', expr: norm.ast } } : { k: 'Not', expr: norm };
+        gateExpr = store.add('expressions', 'x', {
+          template: tplId, node: nodeId, component: comp.id, binding: null, kind, name,
+          source: src == null ? null : `!(${src})`, ast: not, ...dedupeSummary(summarizeExpr(not)),
+        });
+      }
       store.add('gates', 'g', {
-        template: tplId, node: nodeId, component: comp.id, expression: exprId,
+        template: tplId, node: nodeId, component: comp.id, expression: gateExpr,
         kind, gate_kind: gateKind, name, source: src ?? null, reads: summary.reads,
         identifiers: summary.identifiers, calls: summary.calls, strings: summary.strings, ...span,
       });
@@ -128,11 +143,16 @@ export function makeEmitters({ store, normalizeExpr, carriers, gateInputs, class
       name: attr.name, binding_type: attr.type ?? null, source, ...span,
     });
     if (!norm) return { source, exprId: null, keys: [], bindingId };
+    // `[hidden]="c"` HIDES its element and subtree while `c` holds: a gate on `!c`, never on `c` (a `gateInputs`
+    // entry read it so, and the key under it was restricted to the side `c` EXCLUDES).
+    const hides = (attr.name === 'hidden' || attr.name === 'attr.hidden') && attr.type !== undefined
+      && (attr.type === propertyType || attr.type === attributeType);
     const gateKind = (kind === 'template_attr' || structural) ? 'structural'
-      : (classType !== undefined && attr.type === classType) ? 'class'
-        : (styleType !== undefined && attr.type === styleType) ? 'style'
-          : gateInputs.has(attr.name) ? 'declared_input'
-            : null;
+      : hides ? 'hidden'
+        : (classType !== undefined && attr.type === classType) ? 'class'
+          : (styleType !== undefined && attr.type === styleType) ? 'style'
+            : gateInputs.has(attr.name) ? 'declared_input'
+              : null;
     const e = emitExpr({
       tplId, nodeId, comp, kind, name: attr.name, norm, src: source, gate: gateKind !== null, gateKind,
       binding: bindingId, carrier, span,

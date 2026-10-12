@@ -32,9 +32,9 @@ const isTmplNode = (v) => !!v && typeof v === 'object' && typeof v.visit === 'fu
 
 export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carriers, gateInputs }) {
   const { normalizeExpr } = makeExprNormalizer(ng);
-  const { classType, styleType } = probeBindingTypes(ng);
+  const { classType, styleType, propertyType, attributeType } = probeBindingTypes(ng);
   const { emitRender, emitExpr, emitBound } = makeEmitters({
-    store, normalizeExpr, carriers, gateInputs, classType, styleType,
+    store, normalizeExpr, carriers, gateInputs, classType, styleType, propertyType, attributeType,
   });
 
   // Node classes, narrowest first. Everything not listed still gets a row through the generic branch.

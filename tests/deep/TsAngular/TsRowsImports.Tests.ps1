@@ -144,7 +144,54 @@ Test-Case 'tsrows: a class, function and const inside a namespace are rows; an a
     Assert-Line $r 'class Order'
     Assert-Line $r 'function makeOrder'
     Assert-Line $r 'const alphaLimit'
+    $m = Invoke-TsRowsQ $made.Db ("SELECT 'm=' || name || ' | ' || in_module AS r FROM classes WHERE name = 'Order' UNION ALL " +
+        "SELECT 'm=' || name || ' | ' || in_module FROM consts WHERE name = 'alphaLimit'")
+    Assert-Line $m 'm=Order | Demo'
+    Assert-Line $m 'm=alphaLimit | Demo'
     Assert-NoLine $r 'function ambientAlpha'
+}
+
+# `external` IS THE SPELLING; `in_tree` is whether the import lands in the tree, which a package never does.
+Test-Case 'tsrows: an import says whether it lands in the tree, apart from how it is spelled' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/lib/x.ts' = "export const X = 1;`n"
+        'apps/shop/src/uses-core.ts' = "import { Component } from '@angular/core';`nimport { X } from './lib/x';`nexport const c = [Component, X];`n"
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 't=' || module || ' | ' || external || ' | ' || in_tree AS r FROM imports " +
+        "WHERE file = (SELECT id FROM files WHERE path = 'apps/shop/src/uses-core.ts')")
+    Assert-Line $r 't=@angular/core | 1 | 0'
+    Assert-Line $r 't=./lib/x | 0 | 1'
+}
+
+# A CONST-HELD INLINE TEMPLATE reaches its keys however the decorator names it: `template: tpl`, the shorthand `template`, an
+# imported const, a literal - and a same-file const's spans sit at the CONST's line, not the decorator's.
+Test-Case 'tsrows: a template held in a const, written as a shorthand property or not, is parsed and placed at the const' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/tpls.ts' = "export const sharedTpl = '<i>{{ `"demo.c.k`" | translate }}</i>';`n"
+        'apps/shop/src/consts.component.ts' = "import { Component } from '@angular/core';`nimport { sharedTpl } from './tpls';`n" +
+            "const localTpl = '<b>{{ `"demo.a.k`" | translate }}</b>';`n" +
+            "const template = ``<u>{{ 'demo.b.k' | translate }}</u>``;`n" +
+            "@Component({ selector: 'demo-a', standalone: true, template: localTpl })`nexport class AlphaComponent {}`n" +
+            "@Component({ selector: 'demo-b', standalone: true, template })`nexport class BetaComponent {}`n" +
+            "@Component({ selector: 'demo-c', standalone: true, template: sharedTpl })`nexport class GammaComponent {}`n" +
+            "@Component({ selector: 'demo-d', standalone: true, template: '<s>{{ `"demo.d.k`" | translate }}</s>' })`nexport class DeltaComponent {}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"a":{"k":"1"},"b":{"k":"2"},"c":{"k":"3"},"d":{"k":"4"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db "SELECT 'k=' || key || ' | ' || route AS r FROM key_reach WHERE key LIKE 'demo.%'"
+    Assert-Line $r 'k=demo.a.k | template_string'
+    Assert-Line $r 'k=demo.b.k | template_string'
+    Assert-Line $r 'k=demo.c.k | template_string'
+    Assert-Line $r 'k=demo.d.k | template_string'
+    $l = Invoke-TsRowsQ $made.Db ("SELECT 'l=' || name || ' | ' || inline_template_line AS r FROM components " +
+        "WHERE name IN ('AlphaComponent','BetaComponent','DeltaComponent')")
+    Assert-Line $l 'l=AlphaComponent | 3'
+    Assert-Line $l 'l=BetaComponent | 4'
+    Assert-Line $l 'l=DeltaComponent | 11'
 }
 
 }

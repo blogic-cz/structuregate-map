@@ -64,16 +64,30 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     return decls.some((d) => slash(d.getSourceFile().fileName).includes(`node_modules/${ANGULAR_CORE}/`));
   };
 
+  /** Does this identifier RESOLVE into @ngrx? By SYMBOL, as `fromAngularCore` is, so a same-named local helper is never
+   *  mistaken for the library's `createEffect`. */
+  const fromNgrx = (node) => (symbolAt(node)?.declarations ?? [])
+    .some((d) => slash(d.getSourceFile().fileName).includes('/node_modules/@ngrx/'));
+
   /** The 1-based line of each property VALUE in a decorator's object-literal argument. Evaluation throws
    *  positions away, and an inline `template:` string needs its line so its spans can be placed in the .ts
-   *  file: nearly all inline-template binding rows once resolved to the wrong source line. */
+   *  file: nearly all inline-template binding rows once resolved to the wrong source line.
+   *
+   *  A VALUE HELD IN A CONST (`template: tpl`, or the shorthand `template`) IS PLACED AT THE CONST'S INITIALIZER when
+   *  that sits in this file: its text is there, and the decorator's line put every span of it on the wrong line. An
+   *  IMPORTED const keeps the decorator's line - its text is in another file, which a span here cannot point into. */
   const argLinesOf = (arg) => {
     if (!arg || !ts.isObjectLiteralExpression(arg)) return undefined;
     const sf = arg.getSourceFile();
     const out = {};
     for (const p of arg.properties) {
-      if (!ts.isPropertyAssignment(p)) continue;
-      out[propName(p.name)] = sf.getLineAndCharacterOfPosition(p.initializer.getStart()).line + 1;
+      const at = ts.isPropertyAssignment(p) ? p.initializer : ts.isShorthandPropertyAssignment(p) ? p.name : null;
+      if (!at) continue;
+      const sym = ts.isShorthandPropertyAssignment(p) ? checker.getShorthandAssignmentValueSymbol(p)
+        : ts.isIdentifier(at) ? checker.getSymbolAtLocation(at) : undefined;
+      const decl = (sym?.declarations ?? []).find((d) => ts.isVariableDeclaration(d) && d.initializer);
+      const node = decl && decl.getSourceFile() === sf ? decl.initializer : at;
+      out[propName(p.name)] = sf.getLineAndCharacterOfPosition(node.getStart()).line + 1;
     }
     return Object.keys(out).length ? out : undefined;
   };
@@ -235,6 +249,14 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
         ? initializer.body : undefined;
       const body = m.body ?? propertyFn;
       if (body) collectBody(body, memberId, classId);
+      // AN NGRX EFFECT'S CALLBACK IS WALKED: `loadX$ = createEffect(() => actions$.pipe(ofType(a, b), ...))` holds
+      // its whole logic in the arrow handed to the library, and a property walks only when it IS the function -
+      // so the `ofType` calls existed as `$fn` text and `state_effects` could not name the actions an effect hears.
+      const effectFn = initializer && ts.isCallExpression(initializer) && fromNgrx(initializer.expression)
+        ? initializer.arguments[0] : undefined;
+      if (effectFn && (ts.isArrowFunction(effectFn) || ts.isFunctionExpression(effectFn))) {
+        collectBody(effectFn.body, memberId, classId);
+      }
       if (ts.isConstructorDeclaration(m)) {
         const paramNodes = [...(m.parameters ?? [])];
         for (const [pi, p] of paramsOf(m).entries()) {

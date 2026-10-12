@@ -77,6 +77,7 @@ const NAME_COLUMNS: &[(&str, &str)] = &[
     ("io", "binding_name"),
     ("state_actions", "name"),
     ("state_selectors", "name"),
+    ("state_effects", "name"),
     ("selector_index", "name"),
     ("sql_objects", "name"),
     ("sql_columns", "name"),

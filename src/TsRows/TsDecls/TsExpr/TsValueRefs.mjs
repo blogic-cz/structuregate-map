@@ -133,6 +133,17 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
   }
 
   /**
+   * A SHORTHAND PROPERTY'S VALUE IS THE CONST IT NAMES: `{ template }` holds what `{ template: template }` does.
+   * `symbolAt` on the shorthand's NAME answers with the PROPERTY's own symbol, which has no initializer, so the
+   * value stayed an unresolved identifier and a component's `{ selector, template }` never had a template.
+   */
+  function evalShorthand(p) {
+    const sym = checker.getShorthandAssignmentValueSymbol(p);
+    const decl = (sym?.declarations ?? []).find((d) => ts.isVariableDeclaration(d) && d.initializer !== undefined);
+    return decl ? api.follow(decl, decl.initializer, p.name.text) : evalIdentifier(p.name);
+  }
+
+  /**
    * A DYNAMICALLY IMPORTED DECLARATION IS A REFERENCE, NOT A STRING.
    *
    * `import(<specifier>).then((m) => m.Thing)` otherwise publishes its subject as two halves a consumer
@@ -190,5 +201,5 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
     return { ...picked, recovery: true };
   }
 
-  return { valueDecl, declTarget, ownerTarget, evalMemberAccess, evalIdentifier, lazyTarget };
+  return { valueDecl, declTarget, ownerTarget, evalMemberAccess, evalIdentifier, evalShorthand, lazyTarget };
 }
