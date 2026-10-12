@@ -201,9 +201,11 @@ async function main() {
   // 41: a template literal's `$hole_values`, a string method's `$receiver_value`, a const object of strings read by an
   // unknown index (`$indexed`, claimed by `i18n_refs`); a service key follows each, and a list's `.push(..)`.
   // 42: a const ARRAY of strings read by an unknown index (`LIST[i]`) is `$indexed` too, as an object's values are.
+  // 43: a call or a property read through a receiver keeps the class or interface it is declared in (`$owner`, `$read`),
+  // for the keys a class instance carries - derived in rust (`key/fields/key_classes.rs`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 42, build: args.build,
+    config: config.file, data: config.data, rows: 43, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

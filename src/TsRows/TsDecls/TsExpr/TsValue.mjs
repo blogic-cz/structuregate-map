@@ -130,6 +130,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
   function evalCall(node) {
     const callee = ts.isPropertyAccessExpression(node.expression) ? node.expression.name : node.expression;
     const target = refs.declTarget(symbolAt(callee)?.getName() ?? callee.getText(), callee) ?? undefined;
+    const owner = refs.ownerTarget(node.expression)?.owner;
     let receiver;
     let receiverExpr;
     let receiverValue;
@@ -157,6 +158,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       ...(receiverExpr !== undefined ? { $receiver_expr: receiverExpr } : {}),
       ...(receiverValue !== undefined ? { $receiver_value: receiverValue } : {}),
       ...(target ? { $target: target } : {}),
+      ...(target && owner ? { $owner: owner } : {}),
     };
   }
 
@@ -209,7 +211,10 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       return unresolved(node);
     }
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
-      return refs.evalMemberAccess(node);
+      const access = refs.evalMemberAccess(node);
+      // A PROPERTY READ THROUGH A RECEIVER keeps the class it is declared in (`$read`), as a call keeps `$owner`.
+      const read = access?.$kind === 'PropertyAccessExpression' ? refs.ownerTarget(node) : null;
+      return read ? { ...access, $read: read } : access;
     }
     if (ts.isIdentifier(node)) return refs.evalIdentifier(node);
     // TYPE ARGUMENTS ARE NOT PART OF THE VALUE. `Modal<Person>` in a value position is an instantiation

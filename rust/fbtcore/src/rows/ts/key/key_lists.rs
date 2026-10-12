@@ -78,9 +78,10 @@ pub(super) fn with_reader<R>(store: &Store<'_>, f: impl FnOnce(&Returned<'_, '_>
         .iter()
         .filter_map(|fun| Some((id_of(fun, "id")?, id_of(fun, "parent").filter(|p| !p.is_empty())?)))
         .collect();
+    let classes = super::key_classes::Classes::new(store);
     f(&Returned {
         rows: &rows, one_return: &one_return, every: &every, keys: &keys, i18n: &i18n, dict: &dict, params: &params,
-        fn_of_local: &fn_of_local, writes: &writes, parent: &parent, pushes: &pushes,
+        fn_of_local: &fn_of_local, writes: &writes, parent: &parent, pushes: &pushes, classes: &classes,
     })
 }
 

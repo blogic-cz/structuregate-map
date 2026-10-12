@@ -60,6 +60,8 @@ its `params` and its `rest` parameter.
   chained on a call keeps the receiver's value (`$receiver_value`, only a string-typed one); a const object of strings read by
   an unknown index keeps `$indexed`, its values - a `const` array's too, rows 42 (`TsValueRefs.mjs`), which `i18n_refs` claims like a ternary's arms.
 
+- **A call or property read through a receiver keeps its declaring class** (rows 43, `TsValueRefs.mjs::ownerTarget`): `$owner` (a name, the file is the call's `$target`) on a `$call`, `$read` `{name, file, owner}` on a `$expr` property access - not on `this.x`. The rust side joins it to `classes` by (file, name) to reach every subtype a `new` builds (`key/fields/key_classes.rs`).
+
 - **The rows join by id, not by position** (rows 33): a `$fn` call argument, return value or local value names its `functions` row (`$fn_id`,
   `TsWalk.mjs::linkFunctions` - a `const` arrow's row sits at the NAME, its tree at the arrow), and a chained call
   names the call it is made on (`calls.receiver_call`).
