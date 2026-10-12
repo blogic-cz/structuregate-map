@@ -58,6 +58,14 @@ Beside the shared tables it adds the FRAMEWORK tables:
   tree; "in the tree" is `JOIN files rf ON rf.id = i.resolved_file WHERE rf.sha IS NOT NULL`).
   **`imports.resolved`** is the module the specifier NAMES - a barrel a third of the time; `import_names`
   follows the barrel to where each name is DECLARED (`declared_file`, `declared_id`, `via`).
+  A bare `import('./x')` or `require('./x')` is an `imports` row too, with `dynamic` = `import`/`require` and no names.
+* **`di`** is a constructor parameter, or a field initialised by `inject()` (`inject = 1`, `param` the field). `token`,
+  `token_ref` and `token_id` name the injection token - an `@Inject(TOKEN)` or `inject()`'s argument - where `resolved`
+  stays the declared TYPE; a token that is a property of a const object (`Tokens.X`)
+  joins that const in `token_id`. An `export { A as B }` alias resolves to `A` (`routes.component_id`, the `id` on each
+  `ng_modules` ref). `in_module` marks an interface or type alias declared inside `declare module`, `declare global` or a
+  namespace. `state_selectors.factory` is set on a function that RETURNS `createSelector`. A static attribute that
+  matches an input counts in `input_usage` (its `expression` is null) and `io.bound_count`.
 * `handlers`: TypeScript names no type a clause catches, so every row is `bare = 1`; the caught name is
   `handlers.name`. The half also writes `raises`, and a `try` row in `branches` (`sense = 'try'`).
 * Its ids restart from 1 when it is the only half in the database, so the same tree numbers the same way;

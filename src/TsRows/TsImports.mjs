@@ -11,6 +11,8 @@
  * rather than discarded, because "where is this declared" answered with one of several places, and no sign
  * that others exist, reads as a certainty the checker never expressed.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { canonicalPath, relativeTo } from './TsPaths.mjs';
 import { locationOf } from './TsNodes.mjs';
 import { UNRECORDED } from './TsReads.mjs';
@@ -157,4 +159,35 @@ export function importRow(ts, store, statement, fileId, symbolAt, feRoot, checke
     ...locationOf(statement),
   });
   if (checker) nameRows(ts, store, checker, statement, importId, fileId, feRoot);
+}
+
+/**
+ * A BARE `import('./x')` OR `require('./x')` IS AN IMPORT, and the file it names has an importer.
+ *
+ * `importRow` runs on import STATEMENTS only, so a lazy chunk (`() => import('./boot')`) or a required asset left
+ * a `calls` row and nothing else: the file it reached had no importer and read as dead, and a partial run did
+ * not know the caller depended on it. `dynamic` says which form it was; there are no `import_names`, since
+ * nothing is bound by name. `resolved` is the checker's answer when it has one, then the compiler's module
+ * resolution, then the path joined from this file's directory - a `.json` asset is in no program.
+ */
+export function dynamicImportRow(ts, store, call, fileId, symbolAt, feRoot, form, options) {
+  const arg = call.arguments[0];
+  const spec = arg.text;
+  const fromFile = call.getSourceFile().fileName;
+  let resolved = (symbolAt(arg)?.declarations ?? []).map((d) => d.getSourceFile().fileName)[0] ?? null;
+  if (!resolved) resolved = ts.resolveModuleName(spec, fromFile, options, ts.sys).resolvedModule?.resolvedFileName ?? null;
+  if (!resolved && spec.startsWith('.')) {
+    const joined = path.resolve(path.dirname(fromFile), spec);
+    if (fs.existsSync(joined)) resolved = joined;
+  }
+  store.add('imports', 'im', {
+    file: fileId,
+    module: spec,
+    external: !spec.startsWith('.'),
+    resolved: resolved ? relativeTo(feRoot, canonicalPath(resolved)) : null,
+    names: [],
+    type_only: false,
+    dynamic: form,
+    ...locationOf(call),
+  });
 }

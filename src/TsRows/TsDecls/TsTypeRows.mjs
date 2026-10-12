@@ -33,11 +33,12 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
     });
   }
 
-  function interfaceRow(statement, fid, exported) {
+  function interfaceRow(statement, fid, exported, inModule) {
     const ifaceId = store.add('interfaces', 'i', {
       file: fid,
       name: statement.name.text,
       exported,
+      ...(inModule ? { in_module: inModule } : {}),
       extends: (statement.heritageClauses ?? []).flatMap((h) => h.types.map((t) => t.getText())),
       members: statement.members.map((m) => ({
         name: m.name ? propName(m.name) : (ts.SyntaxKind[m.kind] ?? 'unknown'),
@@ -51,11 +52,12 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
     return ifaceId;
   }
 
-  function typeAliasRow(statement, fid) {
+  function typeAliasRow(statement, fid, inModule) {
     const aliasId = store.add('type_aliases', 'ta', {
       file: fid,
       name: statement.name.text,
       exported: modifiersOf(statement).exported,
+      ...(inModule ? { in_module: inModule } : {}),
       type: statement.type.getText(),
       ...locationOf(statement),
     });
@@ -67,6 +69,29 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
     // stopped dead. The checker knows the resulting properties AND where each was originally declared.
     else typeMemberRowsFromType(statement.type, aliasId, fid);
     return aliasId;
+  }
+
+  /**
+   * THE INTERFACES AND ALIASES INSIDE `declare module './x' {}`, `declare global {}` and a `namespace`, each
+   * saying which module it sits in (`in_module`, dotted for a nested namespace). The statement loop stopped at
+   * the module declaration, so an augmentation of a library's options interface left no row at all.
+   */
+  // Any other statement of a NAMESPACE goes to `other` (the file walk's own visit). An AMBIENT block - `declare module`,
+  // `declare global`, `declare namespace` - only declares: its classes and functions have no body to read.
+  function moduleRows(decl, fid, outer, other) {
+    const name = outer ? `${outer}.${decl.name.text}` : decl.name.text;
+    const ambient = !ts.isIdentifier(decl.name) || (ts.getModifiers(decl) ?? []).some((m) => m.kind === ts.SyntaxKind.DeclareKeyword);
+    const rest = ambient ? null : other;
+    const body = decl.body;
+    if (!body) return;
+    if (ts.isModuleDeclaration(body)) { moduleRows(body, fid, name, rest); return; }
+    if (!ts.isModuleBlock(body)) return;
+    for (const s of body.statements) {
+      if (ts.isInterfaceDeclaration(s)) interfaceRow(s, fid, modifiersOf(s).exported, name);
+      else if (ts.isTypeAliasDeclaration(s)) typeAliasRow(s, fid, name);
+      else if (ts.isModuleDeclaration(s)) moduleRows(s, fid, name, rest);
+      else if (rest) rest(s);
+    }
   }
 
   function typeMemberRows(members, owner, fid, prefix, parent) {
@@ -135,5 +160,5 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
     }
   }
 
-  return { enumRow, interfaceRow, typeAliasRow, typeMemberRows, typeMemberRowsFromType };
+  return { enumRow, interfaceRow, typeAliasRow, moduleRows, typeMemberRows, typeMemberRowsFromType };
 }
