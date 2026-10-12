@@ -59,6 +59,8 @@ pub mod key_branches;
 pub mod key_built;
 #[path = "key/fields/key_classes.rs"]
 pub mod key_classes;
+#[path = "key/fields/key_instances.rs"]
+pub mod key_instances;
 #[path = "key/fields/key_fields.rs"]
 pub mod key_fields;
 #[path = "key/fields/key_follow.rs"]

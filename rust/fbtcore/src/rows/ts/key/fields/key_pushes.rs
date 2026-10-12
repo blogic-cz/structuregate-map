@@ -22,8 +22,18 @@ fn name_only(s: &str) -> bool {
 /// THE PUSH IS THE LIB'S (`target.external`), never any method of that name: a service's own `push` adds nothing to a
 /// list. The list is named by the call's receiver text - a bare name is a local of the member, `this.<name>` a field of
 /// its class - and no other receiver (a property of a local, a call's result) is read: nothing says which list it is.
-pub(super) fn pushes<'a>(calls: &'a [Row], members: &[Row]) -> Pushes<'a> {
-    let class_of: HashMap<String, String> = members.iter().filter_map(|m| Some((id_of(m, "id")?, text(m, "class")?))).collect();
+///
+/// A PUSH INSIDE A CALLBACK (`.then(() => { this.items.push(..) })`) is made by the anonymous function, a `functions` row whose
+/// `parent` is the member it sits in: the field is its class's, found through that chain.
+pub(super) fn pushes<'a>(calls: &'a [Row], members: &[Row], functions: &[Row]) -> Pushes<'a> {
+    let mut class_of: HashMap<String, String> = members.iter().filter_map(|m| Some((id_of(m, "id")?, text(m, "class")?))).collect();
+    for _ in 0..4 {
+        let more: Vec<(String, String)> = functions.iter().filter_map(|f| Some((id_of(f, "id")?, class_of.get(&text(f, "parent")?)?.clone()))).filter(|(id, _)| !class_of.contains_key(id)).collect();
+        if more.is_empty() {
+            break;
+        }
+        class_of.extend(more);
+    }
     let mut out = Pushes::default();
     for c in calls.iter() {
         let target = c.get("target");
