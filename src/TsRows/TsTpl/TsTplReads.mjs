@@ -109,6 +109,16 @@ export function rollupTemplateReads(store) {
     if (names.length) boundNames.set(n.id, names);
   }
 
+  // A `@let` IS VISIBLE TO ITS SIBLINGS AND EVERYTHING UNDER THEM, not under itself - it is a leaf. So its name
+  // is filed under its PARENT, or under the template when it sits at the top level.
+  const letsUnder = new Map();
+  for (const n of store.table('template_nodes')) {
+    if (n.kind !== 'LetDeclaration' || str(n.name) === null) continue;
+    const at = n.parent ?? `t:${String(n.template)}`;
+    if (!letsUnder.has(at)) letsUnder.set(at, []);
+    letsUnder.get(at).push(n.name);
+  }
+
   // THE LINK RUNS FROM THE EXPRESSION TO THE BINDING, not the other way: a `bindings` row carries no
   // expression id, so reading one off it yielded nothing and no loop variable ever resolved.
   const iterableBindings = new Set();
@@ -119,6 +129,8 @@ export function rollupTemplateReads(store) {
   }
   const iterableAstOfNode = new Map();
   for (const e of store.table('expressions')) {
+    // An `@for` block's collection is its own expression, on the block's node.
+    if (e.kind === 'block_ForLoopBlock' && e.node != null) { iterableAstOfNode.set(e.node, e.ast); continue; }
     if (e.lang === 'ts' || e.binding == null || !iterableBindings.has(e.binding)) continue;
     const nodeId = nodeOfBinding.get(e.binding);
     if (nodeId !== undefined) iterableAstOfNode.set(nodeId, e.ast);
@@ -176,7 +188,9 @@ export function rollupTemplateReads(store) {
     // A chain bottoming on a PIPE is resolvable - through what the pipe RETURNS. Everything else that is not
     // the component's own context (a call, a literal) is left alone rather than resolved against the wrong
     // scope.
-    const rootedInContext = current === null || current.k === 'Implicit' || current.k === 'This';
+    // An arrow function's parameter is not the component's: `(x) => x.done` resolves no member `x`.
+    const rootedInContext = (current === null || current.k === 'Implicit' || current.k === 'This')
+      && !nodes[0]?.param;
     const pipeBase = current !== null && current.k === 'Pipe' ? current : null;
     if (pipeBase) return { root: null, names, nodes, pipeBase };
     return rootedInContext ? { root, names, nodes, pipeBase: null }
@@ -229,6 +243,8 @@ export function rollupTemplateReads(store) {
    */
   const scopeAt = (nodeId, component) => {
     const out = new Map();
+    // `@let` names, untyped, from the template's top level down - see `letsUnder`.
+    for (const name of letsUnder.get(`t:${String(templateOfNode.get(nodeId))}`) ?? []) out.set(name, null);
     const ancestors = [];
     let current = nodeId;
     const guard = new Set();
@@ -238,6 +254,7 @@ export function rollupTemplateReads(store) {
       current = parentOfNode.get(current) ?? null;
     }
     for (const id of ancestors) {
+      if (id !== nodeId) for (const name of letsUnder.get(id) ?? []) out.set(name, null);
       const iterable = iterableAstOfNode.get(id);
       for (const name of boundNames.get(id) ?? []) {
         // A LOOP VARIABLE, THREE WAYS, in order of how directly the map proves it: the pipe's own declared

@@ -85,6 +85,7 @@ function nodeOf(row, ctx, children) {
   if (row.kind === 'SwitchBlockCase' && !expression) out.default_case = true;
   if (row.kind === 'ForLoopBlock') out.item = row.item;
   if (row.kind === 'DeferredBlock') out.triggers = row.triggers;
+  if (row.kind === 'LetDeclaration') out.name = row.name;
   if (typeof row.tag === 'string') out.tag = row.tag;
   return out;
 }

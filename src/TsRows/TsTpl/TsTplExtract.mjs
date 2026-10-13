@@ -48,6 +48,7 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
     ['DeferredBlockLoading', ng.TmplAstDeferredBlockLoading],
     ['DeferredBlockError', ng.TmplAstDeferredBlockError],
     ['DeferredBlock', ng.TmplAstDeferredBlock], ['UnknownBlock', ng.TmplAstUnknownBlock],
+    ['SwitchBlockCaseGroup', ng.TmplAstSwitchBlockCaseGroup], ['LetDeclaration', ng.TmplAstLetDeclaration],
   ].filter((e) => typeof e[1] === 'function');
 
   // NOT children, though they ARE TmplAst nodes: a bound attribute, event, reference or variable belongs TO
@@ -86,20 +87,40 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
     return null;
   }
 
-  /** The v17 block nodes (`@if` / `@switch` / `@for` / `@defer`) plus any node type this version added. */
+  /** The block nodes (`@if` / `@switch` / `@for` / `@defer` / `@let`) plus any node type this version added. */
   function emitBlock(kind, node, row, tplId, comp, span) {
-    const expr = node.expression;
+    // `@let x = expr` holds its expression in `value`, every other block in `expression`.
+    const isLet = kind === 'LetDeclaration';
+    const expr = isLet ? node.value : node.expression;
     const src = expr?.source ?? null;
-    if (kind === 'IfBlockBranch') {
+    if (isLet) row.name = node.name ?? null;
+    else if (kind === 'IfBlockBranch') {
       row.alias = node.expressionAlias?.name ?? null;
       row.else_branch = !expr;
+      // THE NAMES A BLOCK BINDS ARE `variables`, as a `*ngIf`'s and `*ngFor`'s are on their wrapper: what binds a
+      // name is what resolves a read of it to the template and not to a component member of that name.
+      row.variables = node.expressionAlias ? [{ name: node.expressionAlias.name, value: node.expressionAlias.value }] : [];
     } else if (kind === 'SwitchBlockCase') row.default_case = !expr;
     else if (kind === 'ForLoopBlock') {
       row.item = node.item?.name ?? null;
-      row.context_vars = Object.keys(node.contextVariables ?? {});
+      // A RECORD KEYED BY CONTEXT NAME up to v17, AN ARRAY OF VARIABLES from v18 - where `Object.keys` read the
+      // indices `0`..`6`. Read as variables either way: `value` is the context name, `name` what the author
+      // called it (`let i = $index` is `{name: i, value: $index}`).
+      const cv = node.contextVariables ?? {};
+      const vars = (Array.isArray(cv) ? cv : Object.values(cv)).filter((v) => typeof v?.value === 'string');
+      row.context_vars = [...new Set(vars.map((v) => v.value))];
+      row.context_aliases = vars.filter((v) => v.name !== v.value).map((v) => ({ name: v.name, value: v.value }));
+      // The item is `$implicit`, as `*ngFor`'s `let x` is: what types it from the collection.
+      row.variables = [node.item, ...vars].filter((v) => typeof v?.name === 'string')
+        .map((v) => ({ name: v.name, value: v.value }));
     } else if (kind === 'DeferredBlock') {
       row.triggers = Object.keys(node.triggers ?? {});
       row.prefetch_triggers = Object.keys(node.prefetchTriggers ?? {});
+      row.hydrate_triggers = Object.keys(node.hydrateTriggers ?? {});
+      // `on viewport(ref)` / `on interaction(ref)` / `on hover(ref)` name the element they watch.
+      row.trigger_refs = deferPhases(node).flatMap(([phase, triggers]) => Object.entries(triggers)
+        .filter(([, t]) => typeof t?.reference === 'string')
+        .map(([trigger, t]) => ({ phase, trigger, reference: t.reference })));
     } else if (typeof node.name === 'string') row.tag = node.name;
 
     const nodeId = store.add('template_nodes', 'n', row);
@@ -107,12 +128,27 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
     // expression goes in one generic field, and a consumer reads `kind` to know what the expression means.
     // Whether a block's expression GATES content is structural too: an `@if` branch, a `@switch` and a
     // `@case` decide what renders; a `@for` iterates.
+    // A `@let` neither: it names a value and decides nothing.
     const iterating = kind === 'ForLoopBlock';
+    const gating = !iterating && !isLet;
     if (expr) {
       emitExpr({
-        tplId, nodeId, comp, kind: `block_${kind}`, name: kind,
-        norm: normalizeExpr(expr), src, gate: !iterating, gateKind: iterating ? null : 'block', span,
+        tplId, nodeId, comp, kind: `block_${kind}`, name: isLet ? (node.name ?? kind) : kind,
+        norm: normalizeExpr(expr), src, gate: gating, gateKind: gating ? 'block' : null, span,
       });
+    }
+    // A `when` TRIGGER'S CONDITION IS AN EXPRESSION, NOT A GATE. It decides when the main content first loads,
+    // and the `@placeholder` / `@loading` / `@error` blocks are children of the same node - a gate here would
+    // chain onto the placeholder, which shows exactly while the condition is false.
+    if (kind === 'DeferredBlock') {
+      for (const [phase, triggers] of deferPhases(node)) {
+        const when = triggers.when?.value;
+        if (!when) continue;
+        emitExpr({
+          tplId, nodeId, comp, kind: phase === 'main' ? 'defer_when' : `defer_${phase}_when`, name: 'when',
+          norm: normalizeExpr(when), src: when.source ?? null,
+        });
+      }
     }
     if (iterating && node.trackBy) {
       emitExpr({
@@ -122,6 +158,10 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
     }
     return nodeId;
   }
+
+  /** A `@defer` block's three trigger sets, by the phase each one starts: `hydrate` exists from v19. */
+  const deferPhases = (node) => [['main', node.triggers], ['prefetch', node.prefetchTriggers],
+    ['hydrate', node.hydrateTriggers]].filter(([, t]) => t && typeof t === 'object');
 
   function extract(comp) {
     const t = readTemplate(comp);
@@ -168,9 +208,18 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
     });
 
     let order = 0;
-    const walk = (node, parentId, depth) => {
+    // `adopted`: children another node holds for this one - see the `@switch` group below.
+    const walk = (node, parentId, depth, adopted = []) => {
       if (!node || typeof node !== 'object') return;
       const kind = kindOf(node);
+      // FROM v21 A `@switch` CASE HOLDS NO CHILDREN: `groups` pair the cases with the content they share, so the
+      // case's gate sat on a leaf and gated nothing. A group of ONE case is that case, exactly as up to v20 -
+      // its row stands in for the group and adopts the content. A FALL-THROUGH group (`@case (1) @case (2)`)
+      // keeps its own row: its cases are alternatives, and a chain of gates is read as all of them holding.
+      if (kind === 'SwitchBlockCaseGroup' && node.cases?.length === 1) {
+        walk(node.cases[0], parentId, depth, node.children ?? []);
+        return;
+      }
       const span = shift(spanOf(node));
       const row = {
         template: tplId, component: comp.id, parent: parentId, order: order++, depth, kind, ...span,
@@ -200,8 +249,12 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
       } else nodeId = emitBlock(kind, node, row, tplId, comp, span);
 
       // CHILDREN ARE FOUND BY SHAPE: every own property that holds template nodes. Bindings and attributes
-      // are not template nodes, so they are skipped without being excluded by name.
-      for (const v of Object.values(node)) {
+      // are not template nodes, so they are skipped without being excluded by name. A PLAIN RECORD is looked
+      // into too: an ICU keeps its switch value and the interpolations inside its cases in `vars` and
+      // `placeholders`, objects keyed by placeholder name, and nothing under them was read.
+      const holders = [...Object.values(node), adopted].flatMap((v) => (
+        v && Object.getPrototypeOf(v) === Object.prototype ? Object.values(v) : [v]));
+      for (const v of holders) {
         if (Array.isArray(v)) {
           for (const c of v) if (isChildNode(c)) walk(c, nodeId, depth + 1);
         } else if (isChildNode(v)) walk(v, nodeId, depth + 1);

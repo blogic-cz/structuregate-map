@@ -215,9 +215,14 @@ async function main() {
   // and the body of a `createEffect` callback is walked (its calls, returns and nested arrows are rows under the member).
   // 47: a resolved target (`calls.target` and every `{name, file, external}`) carries `owner`, the class or interface its
   // member is declared in.
+  // 48: the template nodes of later compilers - `@let` (`name`, its expression), an `@switch` case over its content
+  // again from v21, `@for` `context_vars` as names from v18 and `context_aliases`, `@defer` `hydrate_triggers`,
+  // `trigger_refs` and its `when` expressions, an ICU's interpolations; `-a` a `Unary`, a v20 assignment a `Write`, the
+  // v20 expression kinds in the TypeScript side's vocabulary, an arrow parameter's read marked `param`;
+  // `variables` on `@for` and `@if … as` rows.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 47, build: args.build,
+    config: config.file, data: config.data, rows: 48, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

@@ -33,6 +33,16 @@ export function dottedPath(norm) {
   return parts.join('.');
 }
 
+/** The innermost read of a chain: `x` in `x.a.b`. */
+function rootRead(norm) {
+  let n = throughNonNull(norm);
+  for (;;) {
+    const receiver = throughNonNull(n.receiver ?? null);
+    if (!receiver || (receiver.k !== 'Read' && receiver.k !== 'SafeRead')) return n;
+    n = receiver;
+  }
+}
+
 function rootName(norm) {
   let n = throughNonNull(norm) ?? norm;
   for (;;) {
@@ -52,6 +62,9 @@ export function summarizeExpr(norm, acc = { identifiers: [], strings: [], pipes:
   switch (norm.k) {
     case 'Read':
     case 'SafeRead': {
+      // A CHAIN ROOTED AT AN ARROW FUNCTION'S PARAMETER reads the argument, not a member: `items.filter((x) =>
+      // x.done)` reads `items`, never a `x`. Its receiver and arguments are still walked below.
+      if (rootRead(norm)?.param) break;
       acc.reads.push(dottedPath(norm));
       const root = rootName(norm);
       if (root) acc.identifiers.push(root);
