@@ -24,6 +24,12 @@ fn is_false(ast: &Value) -> bool {
     }
 }
 
+/// A GATE WHOSE ELEMENT DOES NOT RENDER WHILE ITS CONDITION IS FALSE: `*ngIf` and an `@if` branch. `[hidden]` and a
+/// class a stylesheet proves hiding are the other two, read through their negated condition (`key_bound`).
+pub fn renders_at_false(kind: Option<&str>, name: Option<&str>) -> bool {
+    matches!((kind, name), (Some("structural"), Some("ngIf")) | (Some("block"), Some("IfBlockBranch")))
+}
+
 /// Every render gate whose condition is the literal `false`.
 pub fn dead_gates(store: &Store<'_>) -> IndexSet<String> {
     let mut asts: IndexSet<String> = IndexSet::new();
@@ -39,10 +45,7 @@ pub fn dead_gates(store: &Store<'_>) -> IndexSet<String> {
         return out;
     }
     for g in store.table("gates").iter() {
-        let renders = matches!(
-            (str_of(g, "gate_kind"), str_of(g, "name")),
-            (Some("structural"), Some("ngIf")) | (Some("block"), Some("IfBlockBranch"))
-        );
+        let renders = renders_at_false(str_of(g, "gate_kind"), str_of(g, "name"));
         if renders
             && str_of(g, "expression").is_some_and(|x| asts.contains(x))
             && let Some(id) = str_of(g, "id")

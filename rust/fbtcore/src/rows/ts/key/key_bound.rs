@@ -171,6 +171,13 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
         }
         for (gid, g) in gs {
             let Some(ast) = cell(g, "expression").and_then(|x| by_id.get(&x).and_then(|e| e.get("ast")).filter(|a| !a.is_null()).cloned()) else { continue };
+            // ONLY A GATE THAT HIDES ITS ELEMENT MAKES A WAY NO WAY: `*ngIf`, an `@if` branch, `[hidden]`, a class a
+            // stylesheet proves hiding. A `gateInputs` property (`[disabled]`), a style, `*ngFor`, `*ngSwitchCase` at
+            // `false` hide nothing - the edge then carries no condition for that gate (#37).
+            let kind = cell(g, "gate_kind");
+            let hides = polarity.get(gid).copied() == Some(true)
+                || kind.as_deref() == Some("hidden")
+                || super::key_dead::renders_at_false(kind.as_deref(), cell(g, "name").as_deref());
             // A CLASS GATE: the element shows while it is FALSE when its class hides; no condition when it only styles.
             let ast = match polarity.get(gid).copied() {
                 Some(true) => json!({"k": "Not", "expr": ast}),
@@ -182,9 +189,13 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
             if !hit {
                 continue;
             }
+            let dead = literal(unwrap(&folded), false);
+            if dead && !hides {
+                continue;
+            }
             let link = format!("bind:{id}#{gid}");
             out.component_of_gate.insert(gid.clone(), to.clone());
-            if literal(unwrap(&folded), false) {
+            if dead {
                 out.dead.insert(link);
             } else {
                 out.conds.insert(link, (folded, false));

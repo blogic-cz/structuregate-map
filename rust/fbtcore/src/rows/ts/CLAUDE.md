@@ -137,8 +137,8 @@ requires and which enum members it still permits.
   element the child renders at binds it to one tree and the child never writes it: that is the `gate_values` row.
   **PARENTS THAT DISAGREE ARE READ PER RENDER EDGE** (#14, `key/key_bound.rs`): no `gate_values` row, but each
   edge into the child resolves the flag by its own binding, or by the input's literal initializer when it binds
-  nothing, and the way through it holds `bind:<render>#<gate>` (sense `bind`). An edge on which the gate's
-  condition becomes the literal `false` is no way. The child writing the flag itself is still unread.
+  nothing, and the way through it holds `bind:<render>#<gate>` (sense `bind`). An edge on which the condition of a gate that HIDES its
+  element (`*ngIf`, an `@if` branch, `[hidden]`, a class a stylesheet proves hiding) becomes the literal `false` is no way; any other gate there (a `gateInputs` property such as `[disabled]`, a style, `*ngFor`, `*ngSwitchCase`) hides nothing and is no condition on that edge (#37). The child writing the flag itself is still unread.
 - **A KEY CHOSEN IN A CONDITIONAL ARM takes the arm** (#11): the extractor stamps `choices` on each statement
   row inside an arm; the i18n ref joins it through `i18n_refs.call` and `key_reach` folds it like a branch.
   A key a TEMPLATE expression chooses (`[text]="c ? 'a' : 'b'"`, `x && 'k'`, `x || 'k'`, inside a pipe or a
