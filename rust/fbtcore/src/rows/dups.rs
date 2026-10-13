@@ -136,12 +136,12 @@ fn canonical(list: &str) -> String {
     format!("{{{}}}", pairs.join(", "))
 }
 
-fn has_columns(conn: &Connection, table: &str, wanted: &[&str]) -> bool {
+pub(crate) fn has_columns(conn: &Connection, table: &str, wanted: &[&str]) -> bool {
     let held = super::schema::existing_columns(conn, table).unwrap_or_default();
     wanted.iter().all(|w| held.iter().any(|c| c == w))
 }
 
-fn text(row: &rusqlite::Row, i: usize) -> rusqlite::Result<String> {
+pub(crate) fn text(row: &rusqlite::Row, i: usize) -> rusqlite::Result<String> {
     Ok(match row.get::<_, rusqlite::types::Value>(i)? {
         rusqlite::types::Value::Text(t) => t,
         rusqlite::types::Value::Integer(n) => n.to_string(),

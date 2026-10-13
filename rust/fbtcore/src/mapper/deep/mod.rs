@@ -32,7 +32,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
-use passes::{atlas, documented, duplicates, pass, search, seeds, tally};
+use passes::{atlas, documented, duplicates, http, pass, search, seeds, tally};
 
 /// What the deep halves are launched with - the options that reach them, and the scripts the caller staged.
 pub struct Deep {
@@ -372,6 +372,7 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
         let answer = serde_json::from_str(&ask(&json!({ "mode": "sql-links", "notes": into.notes, "db": db }))).unwrap_or_default();
         halves::deep(into, &answer);
     }
+    pass("pass: http links", || http(into, db));
     pass("pass: duplicate types", || duplicates(into, db));
     if let Some(facts) = &facts {
         pass("pass: document facts", || documented(into, db, facts));

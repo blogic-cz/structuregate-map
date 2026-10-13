@@ -28,7 +28,7 @@ use std::path::Path;
 // 21: `arguments.template`, and `string.Format` folded.
 // 22: a hole naming a field carries its symbol (a referenced project's readonly folds through `consts`); a
 // `foreach` over a collection initializer is its strings.
-pub(super) const CS_ROWS_VERSION: &str = "22";
+pub(super) const CS_ROWS_VERSION: &str = "23";
 /// The same for the SQL extractor. 7: `sql_dynamic`, an object created by dynamic SQL.
 const SQL_ROWS_VERSION: &str = "7";
 /// Rows held before a batch is sent - both ends pay for it, so it decides whether a large solution fits.

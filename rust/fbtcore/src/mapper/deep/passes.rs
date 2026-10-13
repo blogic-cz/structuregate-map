@@ -15,7 +15,7 @@ pub(super) fn pass(name: &str, work: impl FnOnce()) {
 pub(super) fn tally(into: &mut Collector, db: &str) {
     let Ok(conn) = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return };
     for table in crate::rows::schema::listable_tables(&conn).unwrap_or_default() {
-        if !into.database.contains_key(&table) || ["sql_links", "sql_seeds", "duplicate_types", "doc_facts", "doc_links"].contains(&table.as_str()) {
+        if !into.database.contains_key(&table) || ["sql_links", "sql_seeds", "duplicate_types", "doc_facts", "doc_links", "http_endpoints", "http_calls", "http_links"].contains(&table.as_str()) {
             let rows = crate::rows::schema::count_of(&conn, &table);
             into.database.insert(table, rows);
         }
@@ -54,6 +54,24 @@ pub(super) fn duplicates(into: &mut Collector, db: &str) {
         Ok(0) => {}
         Ok(n) => into.notes.push(format!("{n} type name(s) are declared in more than one place (duplicate_types)")),
         Err(why) => into.errors.push(format!("DUPLICATES were not written — {why}")),
+    }
+}
+
+/// WHICH C# ACTION AN ANGULAR HTTP CALL REACHES - see `rows/http/`.
+pub(super) fn http(into: &mut Collector, db: &str) {
+    let written = rusqlite::Connection::open(db).and_then(|mut conn| {
+        let tx = conn.transaction()?;
+        let counts = crate::rows::http::write(&tx)?;
+        tx.commit()?;
+        Ok(counts)
+    });
+    match written {
+        Ok(c) if c.endpoints + c.calls == 0 => {}
+        Ok(c) => into.notes.push(format!(
+            "the http links: {} endpoint(s), {} call(s), {} linked, {} unmatched, {} ambiguous",
+            c.endpoints, c.calls, c.linked, c.unmatched, c.ambiguous
+        )),
+        Err(why) => into.errors.push(format!("HTTP      links were not written — {why}")),
     }
 }
 

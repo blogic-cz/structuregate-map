@@ -213,9 +213,11 @@ async function main() {
   // template's `argLines` is the const's own line (same file); `[hidden]`/`[attr.hidden]` is a `gates` row (`hidden`) over its own
   // `expressions` row holding the negated condition; `state_effects` (a `createEffect` member's `ofType` actions, `dispatch`, `emits`),
   // and the body of a `createEffect` callback is walked (its calls, returns and nested arrows are rows under the member).
+  // 47: a resolved target (`calls.target` and every `{name, file, external}`) carries `owner`, the class or interface its
+  // member is declared in.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 46, build: args.build,
+    config: config.file, data: config.data, rows: 47, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

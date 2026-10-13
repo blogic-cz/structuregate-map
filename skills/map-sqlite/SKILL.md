@@ -158,6 +158,15 @@ name declared in more than one place, and for an enum whether the copies' member
 each fact against the code: `bound`, `missing in code` or `missing in doc` - the config, `--facts-pull` and
 the token are in [facts.md](facts.md).
 
+**Angular HTTP calls against C# actions** (rewritten each run, needs both halves in one database): `http_endpoints`
+is every attribute-routed action (`verb`, `template` as written with the class route and tokens applied, `route`
+normalized); `http_calls` every `HttpClient` request (not `HttpHeaders`/`HttpParams`), a wrapper's callers standing for the wrapper's own call
+(`url` is the folded pattern - `{}` a parameter, `*` an unknown part, `via` the wrapper); `http_links` which call
+reaches which endpoint (`how` `exact` or `ambiguous`; a call with no row there matched nothing). An unknown base URL
+is a leading `*` and matches any leading segments; of the endpoints a url matches, only those with the most
+segments it names literally are linked, and one it names none of (only parameters in common) is not. Only `@angular/common/http` calls and only attribute-routed
+actions are rows: minimal APIs, python routes and `fetch` are not endpoints or calls yet.
+
 ## Worked queries, across halves
 
 ```sql

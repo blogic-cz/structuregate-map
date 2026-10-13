@@ -448,7 +448,8 @@ internal sealed partial class CsRows : CSharpSyntaxWalker
                 // `[Route]` and `[RouteAttribute]` are the same attribute, and two `[Feature]` in two
                 // namespaces are not. Only the symbol tells either of those apart.
                 ("symbol", CsSemantics.Name(bound)),
-                ("source", CsFacts.Text(attribute)));
+                ("source", CsFacts.Text(attribute)),
+                ("arg_values", CsFolding.Arguments(model, attribute)));
             RegexAttribute(attribute, bound, target);
         }
     }

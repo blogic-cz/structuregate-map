@@ -28,7 +28,8 @@ before concluding a method is dead.
   says why it did not bind.
 * **`objects`**: a construct - `kind` is `tuple`, `array`, `collection`, `initializer` - whose slots are
   `arguments` rows carrying an `object` id instead of a `call` id. `new Foo(x)` stays a CALL.
-* `decorators` are the attributes (`DllImport`, `Fact`, ...); `exports` the public types (`kind` `class`,
+* `decorators` are the attributes (`DllImport`, `Fact`, ...); `arg_values` is the JSON list of what each argument folds to
+  (`Name=text` for a named one, "" for a value that is not constant) - `[Route(Base + "x")]` reads `["api/x"]`; `exports` the public types (`kind` `class`,
   `record`, ...); `imports` the `using`s (`kind = 'using'`); `diagnostics` every compile error, and
   `files.errors` its count.
 * `files`: `project`, `compiled` (0 for a `<Compile Remove>`), `generated` (listed, never walked:
