@@ -13,6 +13,7 @@
 //! | `literal`         | a string literal equal to a key — the file says it, nothing proves it is used AS one |
 
 use super::key_arms::template_arms;
+use super::key_outlets::Outlets;
 use super::key_branches::{literal_ways, value_keys, Branches};
 use super::sourcescan::braced_names;
 use super::store::{Row, Store};
@@ -82,6 +83,28 @@ impl Routes {
 
     fn put(&mut self, key: &str, route: &str, comp: Option<String>, gates: Vec<String>, node: Option<&str>) {
         self.put_ways(key, route, comp, gates, &[], node);
+    }
+
+    /// A SITE INSIDE AN `<ng-template>` ONLY OUTLETS RENDER (#36, `key_outlets`) is one way per outlet, each
+    /// crossed with the site's own ways; anywhere else it is `put_ways` unchanged.
+    #[allow(clippy::too_many_arguments)]
+    fn put_sited(&mut self, outlets: &Outlets, key: &str, route: &str, comp: Option<String>, gates: Vec<String>, ways: &[Vec<String>], node: Option<&str>) {
+        let Some(through) = node.and_then(|n| outlets.rewrite(n, &gates)) else {
+            return self.put_ways(key, route, comp, gates, ways, node);
+        };
+        let mut all: Vec<Vec<String>> = Vec::new();
+        for base in &through {
+            if ways.is_empty() {
+                if !all.contains(base) { all.push(base.clone()); }
+                continue;
+            }
+            for way in ways {
+                let mut one = base.clone();
+                one.extend(way.iter().filter(|b| !base.contains(b)).cloned());
+                if !all.contains(&one) { all.push(one); }
+            }
+        }
+        self.put_ways(key, route, comp, Vec::new(), &all, node);
     }
 
     /// ONE POSITION, AS MANY WAYS AS IT WAS WRITTEN IN: the site's own gates joined to each
@@ -223,6 +246,7 @@ pub fn key_routes(
     fields: &[FieldSite],
 ) -> IndexMap<String, Route> {
     let mut routes = Routes::new();
+    let outlets = Outlets::new(store);
 
     let nodes = store.table("template_nodes");
     let node_by_id: std::collections::HashMap<String, &Row> = nodes
@@ -262,7 +286,7 @@ pub fn key_routes(
             continue;
         };
         let Some(n) = node_by_id.get(&node) else { continue };
-        routes.put_ways(&key, "template", text(n, "component"), gate_chain(n), &arm_ways(r, &key), Some(&node));
+        routes.put_sited(&outlets, &key, "template", text(n, "component"), gate_chain(n), &arm_ways(r, &key), Some(&node));
     }
 
     // 2. A string inside a template expression, on the same kind of node.
@@ -273,7 +297,7 @@ pub fn key_routes(
             continue;
         }
         let Some(n) = node_by_id.get(&node) else { continue };
-        routes.put_ways(&value, "template_string", text(n, "component"), gate_chain(n), &arm_ways(s, &value), Some(&node));
+        routes.put_sited(&outlets, &value, "template_string", text(n, "component"), gate_chain(n), &arm_ways(s, &value), Some(&node));
     }
 
     let components = store.table("components");
@@ -348,14 +372,14 @@ pub fn key_routes(
         let Some((key, file)) = pair.rsplit_once(' ') else { continue };
         for name in pipe_of_file.get(file).into_iter().flatten() {
             for (n, id) in uses.get(name).into_iter().flatten() {
-                routes.put_ways(key, "pipe", text(n, "component"), gate_chain(n), ways, Some(id));
+                routes.put_sited(&outlets, key, "pipe", text(n, "component"), gate_chain(n), ways, Some(id));
             }
         }
     }
 
     // 4. A field binding is a position, one hop past the literal.
     for f in fields {
-        routes.put_ways(&f.key, "field_binding", f.comp.clone(), f.gates.clone(), &f.ways, f.node.as_deref());
+        routes.put_sited(&outlets, &f.key, "field_binding", f.comp.clone(), f.gates.clone(), &f.ways, f.node.as_deref());
     }
 
     // 4b. A LIST A PARENT HANDS TO A CHILD'S `@Input` RENDERS IN THE CHILD (#50, `key_inputs`): each `edge:<render>` a
