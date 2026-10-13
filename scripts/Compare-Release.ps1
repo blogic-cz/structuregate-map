@@ -2,7 +2,7 @@
     Compare-Release.ps1 - what a new build changes in a REAL tree's deep map, before it is released.
 
       pwsh -NoProfile -File scripts/Compare-Release.ps1 -Tree <tree> [-Old <exe>] [-New <exe or dll>] [-Out <dir>]
-           [-OldDb <file>] [-NewDb <file>] [-TsNodeModules <dir>] [-AllowLoss]
+           [-OldDb <file>] [-NewDb <file>] [-TsNodeModules <dir>] [-TsConfig <file>] [-Ext <list>] [-Skip <list>] [-AllowLoss]
 
     The black-box suites are small invented fixtures: a change passes all of them and still breaks a shape no
     case has. v2.1.13 renamed an input bound to an enum CONSTANT as if it were a variable, and every key behind
@@ -26,6 +26,14 @@ param(
     [string]$OldDb = '',
     [string]$NewDb = '',
     [string]$TsNodeModules = '',
+    # THE CONSUMER'S OWN CONFIG: a `gateInputs` or `featureChecks` it declares forms the gates a key is restricted by,
+    # so a tree mapped under another config compares keys nobody reads. v2.1.15 restricted two keys too much through a
+    # declared `[disabled]` gate, and a compare under the tree's default config saw no change at all.
+    [string]$TsConfig = '',
+    # `--ext` for both maps: `.ts` alone skips the C# half, which no key comparison reads.
+    [string]$Ext = '',
+    # `--skip` for both maps, as the tree's own hook passes it (it REPLACES the default list).
+    [string]$Skip = '',
     [switch]$AllowLoss
 )
 $ErrorActionPreference = 'Stop'
@@ -49,6 +57,9 @@ function New-Map([string]$Build, [string]$Db) {
     Write-Host "compare-release: mapping $Tree with $Build"
     $arguments = @('--root', $Tree, '--map-sqlite', $Db)
     if ($TsNodeModules) { $arguments += @('--ts-node-modules', $TsNodeModules) }
+    if ($TsConfig) { $arguments += @('--ts-config', $TsConfig) }
+    if ($Ext) { $arguments += @('--ext', $Ext) }
+    if ($Skip) { $arguments += @('--skip', $Skip) }
     Invoke-Build $Build $arguments | Out-Null
 }
 
