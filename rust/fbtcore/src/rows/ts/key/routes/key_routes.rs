@@ -149,6 +149,26 @@ impl Routes {
             site.push(one);
         }
     }
+
+    /// A COMPONENT THAT ONLY HANDS A KEY ON (#50): the parent of a render edge an input's list element came through
+    /// (`key_inputs`, `edge:<render>`) displays the key at the CHILD's site, so its weaker site of the key - the
+    /// `ts_call` or `literal` that built the list - is no display of its own and goes, as a site of `route`'s rank
+    /// would replace it, and nothing is added. A site of that rank the parent holds itself (it displays the key too) stays.
+    fn claim(&mut self, key: &str, route: &str, comp: Option<String>) {
+        let incoming = rank(route);
+        let Some(hit) = self.inner.get_mut(key) else { return };
+        let held = hit.held.entry(comp.clone()).or_default();
+        if held.rank >= incoming {
+            return;
+        }
+        for node in held.nodes.drain(..) {
+            hit.nodes.shift_remove(&node);
+        }
+        hit.refs -= held.refs;
+        held.refs = 0;
+        held.rank = incoming;
+        hit.sites.shift_remove(&comp);
+    }
 }
 
 /// A cell that is a non-empty string, or nothing. Python's `if comp else None` treats an
@@ -336,6 +356,19 @@ pub fn key_routes(
     // 4. A field binding is a position, one hop past the literal.
     for f in fields {
         routes.put_ways(&f.key, "field_binding", f.comp.clone(), f.gates.clone(), &f.ways, f.node.as_deref());
+    }
+
+    // 4b. A LIST A PARENT HANDS TO A CHILD'S `@Input` RENDERS IN THE CHILD (#50, `key_inputs`): each `edge:<render>` a
+    //     site's way holds names the parent that built the list; its weaker sites of the key go (`Routes::claim`).
+    let parent_of: std::collections::HashMap<String, String> = store.table("renders").iter()
+        .filter_map(|r| Some((present(r, "id")?, present(r, "from_component")?)))
+        .collect();
+    for f in fields {
+        for edge in f.ways.iter().flatten().filter_map(|g| g.strip_prefix("edge:")) {
+            if let Some(parent) = parent_of.get(edge) {
+                routes.claim(&f.key, "field_binding", Some(parent.clone()));
+            }
+        }
     }
 
     // 5. A bare literal equal to a key. DISTINCT over (key, component): a key written

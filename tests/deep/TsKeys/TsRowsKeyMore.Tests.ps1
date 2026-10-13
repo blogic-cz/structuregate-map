@@ -108,4 +108,69 @@ Test-Case 'tsrows keys: a +=, an await, a then callback, a copied list, an index
     $p = Invoke-TsRowsQ $made.Db "SELECT 'paths ' || n_paths AS n FROM key_reach WHERE key = 'demo.child.unused'"
     Assert-Line $p 'paths 1'
 }
+
+Test-Case 'tsrows keys: a list a component builds and only hands to a child input renders through that child alone (#50)' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/tsconfig.app.json' = '{"compilerOptions":{"strict":false},"include":["src/**/*.ts"]}'
+        'apps/shop/src/translate.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class TranslateService {`n  getTranslation(key: string): string {`n    return key;`n  }`n}`n"
+        'apps/shop/src/kinds.ts' = "export enum Kind { Home = 1, Flat = 2, Life = 3 }`n"
+        'apps/shop/src/radio.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "import { NgFor } from '@angular/common';`n" +
+            "@Component({ selector: 'demo-radio', standalone: true, imports: [NgFor], template: '<label *ngFor=`"let item of model`">{{ item.Label }}</label>' })`n" +
+            "export class RadioComponent { @Input() model: { Label: string }[]; }`n"
+        'apps/shop/src/a.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { NgIf } from '@angular/common';`n" +
+            "import { Kind } from './kinds';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "import { RadioComponent } from './radio.component';`n" +
+            "@Component({ selector: 'demo-a', standalone: true, imports: [NgIf, RadioComponent], template: '<div *ngIf=`"vm.kind === Kind.Home`"><demo-radio [model]=`"model`"></demo-radio></div>' })`n" +
+            "export class AComponent {`n  Kind = Kind;`n  vm: { kind: Kind } = { kind: Kind.Life };`n  model: { Label: string }[];`n" +
+            "  constructor(private translate: TranslateService) {`n" +
+            "    this.model = [{ Label: this.translate.getTranslation('demo.choice.yes') }, { Label: this.translate.getTranslation('demo.choice.no') }];`n  }`n}`n"
+        'apps/shop/src/b.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { RadioComponent } from './radio.component';`n" +
+            "@Component({ selector: 'demo-b', standalone: true, imports: [RadioComponent], template: '<demo-radio [model]=`"other`"></demo-radio>' })`n" +
+            "export class BComponent { other: { Label: string }[] = []; }`n"
+        'apps/shop/src/d.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { NgIf, NgFor } from '@angular/common';`n" +
+            "import { Kind } from './kinds';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "import { RadioComponent } from './radio.component';`n" +
+            "@Component({ selector: 'demo-d', standalone: true, imports: [NgIf, NgFor, RadioComponent], template: '<i *ngFor=`"let x of model`">{{ x.Label }}</i><div *ngIf=`"vm.kind === Kind.Flat`"><demo-radio [model]=`"model`"></demo-radio></div>' })`n" +
+            "export class DComponent {`n  Kind = Kind;`n  vm: { kind: Kind } = { kind: Kind.Life };`n  model: { Label: string }[];`n" +
+            "  constructor(private translate: TranslateService) {`n    this.model = [{ Label: this.translate.getTranslation('demo.both.yes') }];`n  }`n}`n"
+        'apps/shop/src/e.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { NgIf } from '@angular/common';`n" +
+            "import { Kind } from './kinds';`n" +
+            "import { RadioComponent } from './radio.component';`n" +
+            "@Component({ selector: 'demo-e', standalone: true, imports: [NgIf, RadioComponent], template: '<div *ngIf=`"vm.kind === Kind.Life`"><demo-radio [model]=`"model`"></demo-radio></div>' })`n" +
+            "export class EComponent {`n  Kind = Kind;`n  vm: { kind: Kind } = { kind: Kind.Life };`n  model = [{ Label: 'demo.lit.yes' }];`n}`n"
+        'apps/shop/src/root.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { AComponent } from './a.component';`n" +
+            "import { BComponent } from './b.component';`n" +
+            "import { DComponent } from './d.component';`n" +
+            "import { EComponent } from './e.component';`n" +
+            "@Component({ selector: 'demo-root', standalone: true, imports: [AComponent, BComponent, DComponent, EComponent], template: '<demo-a></demo-a><demo-b></demo-b><demo-d></demo-d><demo-e></demo-e>' })`n" +
+            "export class RootComponent {}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"choice":{"yes":"Yes","no":"No"},"both":{"yes":"Yes"},"lit":{"yes":"Yes"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.n_paths || ' | ' || (SELECT group_concat(name, ',') FROM (SELECT c.name FROM " +
+        "json_each(k.components) j JOIN components c ON c.id = j.value ORDER BY c.name)) || ' | ' || coalesce(json_extract(k.always_values, '`$[0].dimension') " +
+        "|| ' ' || json_extract(k.always_values, '`$[0].op') || ' ' || json_extract(k.always_values, '`$[0].values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
+    # built by a translate call (A) or a literal (E) and displayed only through the radio under the *ngIf: the parent
+    # is no site of its own, and the ungated radio path through B binds another list
+    Assert-Line $r 'demo.choice.yes | 1 | RadioComponent | vm.kind in ["Home"]'
+    Assert-Line $r 'demo.lit.yes | 1 | RadioComponent | vm.kind in ["Life"]'
+    # a parent that displays the key itself (its own *ngFor) keeps its own, ungated path
+    Assert-Line $r 'demo.both.yes | 2 | DComponent,RadioComponent | -'
+    $g = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || g.name || ' ' || g.source AS always FROM key_reach k, json_each(k.always_gates) j " +
+        "JOIN gates g ON g.id = j.value WHERE k.key LIKE 'demo.%'")
+    Assert-Line $g 'demo.choice.yes | ngIf vm.kind === Kind.Home'
+    Assert-NoLine $g 'demo.both.yes | ngIf'
+}
 }
