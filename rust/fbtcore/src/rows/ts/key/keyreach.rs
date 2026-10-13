@@ -56,7 +56,7 @@ use super::key_scopes::Scopes;
 use super::sourcetrace::{source_trace, Trace};
 use super::store::{Row, Store};
 use super::value_folds::{
-    fold_values, per_way_allowed, unreadable_values, write_gate_features, write_gate_values, Renames,
+    fold_values, merge_aliased, per_way_keyed, relabel, unreadable_values, write_gate_features, write_gate_values, Aliases, Classes, Labels, Renames,
 };
 use indexmap::{IndexMap, IndexSet};
 use serde_json::Value;
@@ -213,7 +213,8 @@ pub fn build_closure(
     conds.extend(bound.conds.clone());
     // A CALLEE'S BRANCH CARRIED THROUGH A CALL, its parameters read as the caller's arguments (`key_args`).
     let carried = routes.values().flat_map(|h| h.sites.values().flatten().flatten());
-    conds.extend(super::key_args::arg_conds(store, &branches, carried, &idx0));
+    let (arg_found, arg_params) = super::key_args::arg_conds(store, &branches, carried, &idx0);
+    conds.extend(arg_found);
     let (gv, idx) = gate_values_with(store, &extra, &conds);
     let gv_rows = write_gate_values(store, &gv.map, &idx);
     // THE FOLDS READ GATES AND BRANCHES ALIKE; only the published tables are gates alone.
@@ -280,7 +281,7 @@ pub fn build_closure(
         comps.sort();
 
         let ways = ways_of(&comps, hit, &paths, &reach, &dead, &bound, &scopes);
-        let Ways { sets, path_sets, renames, roots, mods, rts, depth, cut } = ways;
+        let Ways { sets, path_sets, renames, aliases, roots, mods, rts, depth, cut } = ways;
 
         let (always, always_br) = split_branches(fold(&sets).0, &branches);
         let (maybe, maybe_br) = split_branches(fold(&sets).1, &branches);
@@ -291,12 +292,18 @@ pub fn build_closure(
         // ONE WALK OVER THE WAYS, read by both folds — they ask the same question of the
         // same sets, and computing them twice per key was nearly twice the walks one does.
         let ways: Vec<IndexSet<String>> = sets.clone();
-        let per_way = per_way_allowed(&ways, &value_map, &idx, Some(&renames));
-        let values = fold_values(&ways, &value_map, &idx, Some(&per_way));
+        let mut labels = Labels::new();
+        let mut classes = Classes::new();
+        let per_way = per_way_keyed(&ways, &value_map, &idx, Some(&renames), Some(&aliases), Some(&arg_params), &mut labels, &mut classes);
+        debug_assert_eq!(aliases.len(), ways.len());
+        let mut values = fold_values(&ways, &value_map, &idx, Some(&per_way));
+        merge_aliased(&mut values, &classes);
         // The dimensions the gates narrow but the map cannot read. BESIDE the resolved ones,
         // never inside them: an `unknown` row folds to the whole domain and would otherwise
         // leave no trace at all.
-        let unreadable = unreadable_values(&ways, &value_map, &idx, Some(&per_way));
+        let mut unreadable = unreadable_values(&ways, &value_map, &idx, Some(&per_way));
+        relabel(&mut values, &labels);
+        relabel(&mut unreadable, &labels);
 
         let mut row = Row::new();
         row.insert("key".into(), Value::String(key.clone()));
@@ -352,6 +359,8 @@ pub struct Ways {
     pub path_sets: Vec<IndexSet<String>>,
     /// Per way (parallel to `sets`): the renames each gate or link's dimension goes through.
     pub renames: Renames,
+    /// Per way: the bindings on its edges, one variable under two spellings (`key_scopes::pairs`).
+    pub aliases: Aliases,
     pub roots: IndexSet<String>,
     pub mods: IndexSet<String>,
     pub rts: IndexSet<String>,
@@ -422,6 +431,7 @@ pub fn ways_of(
                 let mut named: IndexMap<String, Vec<super::key_scopes::Step>> = IndexMap::new();
                 let sites = chain.iter().filter(|g| !g.starts_with("edge:") && !g.starts_with("bind:"));
                 let owned = p.gates.iter().filter_map(|g| Some((&**g, scopes.gate_comp.get(&**g)?.as_str())));
+                w.aliases.push(scopes.pairs(p));
                 for (id, at) in owned.chain(sites.map(|g| (g.as_str(), c.as_str()))) {
                     let steps = scopes.steps(p, at);
                     if steps.first().is_some_and(|s| !s.is_empty()) {

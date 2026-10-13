@@ -15,6 +15,7 @@
 
 use super::gate_features::Conds;
 use super::gate_values::EnumIndex;
+use super::value_folds::ArgParams;
 use super::key_branches::Branches;
 use super::key_fields::{id_of, text};
 use super::store::{Row, Store};
@@ -23,11 +24,20 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 /// The condition of every `arg:<branch>@<site>[@<template expression>]` link in `links`.
-pub fn arg_conds<'l>(store: &Store<'_>, branches: &Branches, links: impl Iterator<Item = &'l String>, idx: &EnumIndex) -> Conds {
+///
+/// AND, per link, the ONE callee parameter its condition reads (`param:<callee>#<index>`): the restriction is on that
+/// parameter whatever each caller spelled, so `value_folds` keys it so. A condition reading none or several has no entry.
+pub fn arg_conds<'l>(
+    store: &Store<'_>,
+    branches: &Branches,
+    links: impl Iterator<Item = &'l String>,
+    idx: &EnumIndex,
+) -> (Conds, ArgParams) {
     let mut out = Conds::new();
+    let mut found_params = ArgParams::new();
     let links: IndexSet<&String> = links.filter(|l| l.starts_with("arg:")).collect();
     if links.is_empty() {
-        return out;
+        return (out, found_params);
     }
     let rows = super::gate_tsrows::TsRows::new(store);
     let expressions = store.table("expressions");
@@ -59,6 +69,8 @@ pub fn arg_conds<'l>(store: &Store<'_>, branches: &Branches, links: impl Iterato
         }
         let args = call.get("args").and_then(Value::as_array).cloned().unwrap_or_default();
         let Some(names) = params.get(callee) else { continue };
+        let mut read = IndexSet::new();
+        params_read(&cond, names, &mut read);
         let mut missing = false;
         let replaced = substitute(&cond, names, &args, &mut missing);
         if missing {
@@ -90,9 +102,35 @@ pub fn arg_conds<'l>(store: &Store<'_>, branches: &Branches, links: impl Iterato
                 }
             }
         }
+        if read.len() == 1 {
+            found_params.insert(link.clone(), format!("param:{callee}#{}", read.first().copied().unwrap_or(0)));
+        }
         out.insert(link.clone(), (resolved, negated));
     }
-    out
+    (out, found_params)
+}
+
+/// The positions of the callee's parameters `ast` reads bare, by the test `substitute` replaces them with.
+fn params_read(ast: &Value, names: &[String], out: &mut IndexSet<usize>) {
+    match ast {
+        Value::Array(xs) => xs.iter().for_each(|x| params_read(x, names, out)),
+        Value::Object(o) => {
+            let bare = o.get("k").and_then(Value::as_str) == Some("Read")
+                && o.get("receiver").and_then(|r| r.get("k")).and_then(Value::as_str) == Some("Implicit")
+                && o.get("target").is_none_or(Value::is_null);
+            if let Some(i) = o.get("name").and_then(Value::as_str).filter(|_| bare).and_then(|n| names.iter().position(|p| p == n)) {
+                out.insert(i);
+                return;
+            }
+            let shadowed: Vec<String> = match o.get("params").and_then(Value::as_array) {
+                Some(ps) if o.get("k").and_then(Value::as_str) == Some("Fn") => ps.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+                _ => Vec::new(),
+            };
+            let kept: Vec<String> = names.iter().map(|n| if shadowed.contains(n) { String::new() } else { n.clone() }).collect();
+            o.values().for_each(|v| params_read(v, &kept, out));
+        }
+        _ => {}
+    }
 }
 
 /// Per member, its `const` locals that hold a bare read chain (`this.item.kind`), each as the tree of that chain. The
