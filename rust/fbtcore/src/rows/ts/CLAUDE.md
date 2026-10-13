@@ -16,9 +16,10 @@ requires and which enum members it still permits.
 
 - **THE UNIT IS (REF, PATH)**: a ref's own in-template gates joined to the gates of THAT path, never unioned
   into every path of the component - that made `always_gates` claim conditions that do not always hold.
+- **`key_reach.paths` NAMES THE WAYS** (#53): one `{path, own}` per way, `n_paths` of them, sorted by `(path, own)`. `path` is the `render_path.id` the way runs over, repeated when one row carries several ways (two sites, the outlets of one `ng-template`). `own` holds the ids the way adds to that row's `gates`/`branches`: the site's own chain and its `bind:`/`arg:`/`loop:` links. A way is `gates ∪ branches ∪ own`, and `always_*`/`maybe_*` intersect and union exactly those. An `edge:` filter only picks which rows pair with a chain; it never narrows a row. `components` cannot stand in for it, because a parent that only hands a list on (#50) is not listed.
 - **`render_path`'s unique key is `(component, edges)`**, never `(component, hops)`: one parent rendering a
   child at two sites is two real paths with one component chain. `path_index` is assigned by SORTING on the
-  key, and every id list in `key_reach` (`routes`, `maybe_gates`, `components`, `roots`, `modules`) is sorted
+  key, and every id list in `key_reach` (`routes`, `maybe_gates`, `components`, `roots`, `modules`, `paths`) is sorted
   too: walk order reads as thousands of changed rows with no fact different.
 - **NO PATH CAP** (signed-off divergence #1). A per-component cap hid real paths on one tree and most of the
   map on another. `truncated` stays because a consumer filters on it, and is always 0. `always_*` are

@@ -413,6 +413,8 @@ pub fn fold(sets: &[IndexSet<String>]) -> (Vec<String>, Vec<String>) {
 /// The paths of every component any key reaches, computed once and shared by its keys.
 pub struct Paths {
     pub by_comp: IndexMap<String, (Vec<RenderPath>, bool)>,
+    /// `render_path.id` of each component's first path: path i of c is `first_id[c] + i` (`key_reach.paths`, #53).
+    pub first_id: IndexMap<String, i64>,
     pub rows: usize,
 }
 
@@ -426,10 +428,12 @@ pub fn render_paths(
     ordered.sort();
 
     let mut by_comp = IndexMap::new();
+    let mut first_id = IndexMap::new();
     let mut rows = 0usize;
     let mut memo = Memo::default();
     for comp in ordered {
         let (paths, truncated) = paths_to_memo(edges, &comp, &mut memo);
+        first_id.insert(comp.clone(), rows as i64 + 1);
         for (i, p) in paths.iter().enumerate() {
             let mut row = super::store::Row::new();
             row.insert("id".into(), Value::from(rows as i64 + 1));
@@ -450,7 +454,7 @@ pub fn render_paths(
         }
         by_comp.insert(comp, (paths, truncated));
     }
-    Paths { by_comp, rows }
+    Paths { by_comp, first_id, rows }
 }
 
 #[cfg(test)]

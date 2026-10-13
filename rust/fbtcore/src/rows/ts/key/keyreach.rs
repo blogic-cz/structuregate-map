@@ -281,7 +281,8 @@ pub fn build_closure(
         comps.sort();
 
         let ways = ways_of(&comps, hit, &paths, &reach, &dead, &bound, &scopes);
-        let Ways { sets, path_sets, renames, aliases, roots, mods, rts, depth, cut } = ways;
+        let Ways { sets, path_sets, renames, aliases, roots, mods, rts, depth, cut, on } = ways;
+        let mut on = on;
 
         let (always, always_br) = split_branches(fold(&sets).0, &branches);
         let (maybe, maybe_br) = split_branches(fold(&sets).1, &branches);
@@ -312,6 +313,11 @@ pub fn build_closure(
         row.insert("n_refs".into(), Value::from(hit.map(|h| h.refs as i64).unwrap_or(0)));
         row.insert("components".into(), Value::from(comps.clone()));
         row.insert("n_paths".into(), Value::from(sets.len() as i64));
+        // EACH WAY NAMED (#53): its `render_path.id` and what it adds to that row's gates/branches, sorted like every list here.
+        debug_assert_eq!(on.len(), sets.len());
+        on.sort();
+        row.insert("paths".into(), Value::Array(on.into_iter()
+            .map(|(id, own)| serde_json::json!({ "path": id, "own": own })).collect()));
         row.insert("min_depth".into(), depth.map(Value::from).unwrap_or(Value::Null));
         row.insert("roots".into(), Value::from(sorted(roots)));
         row.insert("modules".into(), Value::from(sorted(mods)));
@@ -356,6 +362,9 @@ pub fn build_closure(
 #[derive(Default)]
 pub struct Ways {
     pub sets: Vec<IndexSet<String>>,
+    /// Per way (parallel to `sets`): the `render_path.id` it runs over and the ids it adds to that row's
+    /// `gates`/`branches` - the site's own chain and its links. Published as `key_reach.paths` (#53).
+    pub on: Vec<(i64, Vec<String>)>,
     pub path_sets: Vec<IndexSet<String>>,
     /// Per way (parallel to `sets`): the renames each gate or link's dimension goes through.
     pub renames: Renames,
@@ -386,6 +395,7 @@ pub fn ways_of(
     let mut w = Ways::default();
     for c in comps {
         let Some((comp_paths, truncated)) = paths.by_comp.get(c) else { continue };
+        let first = paths.first_id.get(c).copied().unwrap_or(0);
         w.cut = w.cut || *truncated;
         let own: &[Vec<String>] = match hit.and_then(|h| h.sites.get(&Some(c.clone()))) {
             Some(chains) if !chains.is_empty() => chains,
@@ -393,7 +403,7 @@ pub fn ways_of(
             // gates are enumerated rather than the whole component dropped.
             _ => std::slice::from_ref(&EMPTY_CHAIN),
         };
-        for p in comp_paths {
+        for (i, p) in comp_paths.iter().enumerate() {
             // A WAY THROUGH A LITERAL `false` IS NO WAY (`key_dead`): not a path, not a root, not counted.
             // NOR IS ONE THROUGH AN EDGE THAT LEAVES AN INPUT FLAG AT A LITERAL `false` (`key_bound`).
             let Some(plinks) = bind_links(bound, p, p.gates.iter().map(|g| &**g)) else { continue };
@@ -439,6 +449,11 @@ pub fn ways_of(
                     }
                 }
                 w.renames.push(named);
+                let mut adds: Vec<String> = one.iter()
+                    .filter(|g| !p.gates.iter().chain(p.branches.iter()).any(|x| &**x == g.as_str()))
+                    .cloned().collect();
+                adds.sort();
+                w.on.push((first + i as i64, adds));
                 w.sets.push(one);
             }
         }

@@ -48,6 +48,7 @@ Beside the shared tables it adds the FRAMEWORK tables:
   in lands in `render_path.branches`. `templates`/`template_nodes`/`bindings` are the template side; `gates`/
   `gate_values` what hides a node (`gates.gate_kind = 'hidden'` is `[hidden]`/`[attr.hidden]`, whose `expression` is a row holding the NEGATED condition) (`op` in/not_in/unknown; `listed_json` what a config object lists, even an
   exclusion the map cannot polarise); `state_*` NgRx; `di`/`injectables` injection.
+* **`key_reach.paths`** lists a key's ways, one `{path, own}` per way (`n_paths` entries). `path` joins `render_path.id`, may repeat, and is renumbered every build, so only join within one DB. `own` holds the ids the way holds beyond that row's `gates`/`branches`. Fold a per-way fact the map does not compute over `json_each(k.paths)` joined to `render_path` (AND along `gates ∪ branches ∪ own`, UNION over entries). Never filter `render_path` by `key_reach.components`.
 * **`template_literals.parts`** are a template's literal pieces, its `holes` what fills them; a string constant joined
   in front with `+` (`BASE + `.${name}.tip``, through `( )` and either arm of `?:`) leads the first piece.
 * **A template's tables have no `file`** - a binding hangs off a template node - so join by the ids; every
