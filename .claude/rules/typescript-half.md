@@ -17,7 +17,9 @@ closure derives and which restrictions a gate is read for is
 [rust/fbtcore/src/rows/ts/CLAUDE.md](../../rust/fbtcore/src/rows/ts/CLAUDE.md).
 
 A tree with NO Angular workspace is not this half's: the Angular half (`rust/fbtcore/src/mapper/deep/ts.rs`) says so
-and the plain half (`src/TsRows/TsPlain/`, `lang = 'ts'`) maps it with syntactic, per-file rows - its columns are the
+and the plain half (`src/TsRows/TsPlain/`, `lang = 'ts'`) maps it - and every script file OUTSIDE a workspace
+(`plain_files` in `mapper/deep/mod.rs`; its paths are root-relative, the Angular half's workspace-relative; it borrows
+`--ts-node-modules`, then the workspace's own `node_modules` - `plain_modules`) - with syntactic, per-file rows - its columns are the
 `map-sqlite` skill's `skills/map-sqlite/typescript.md`. It imports `TsGate.Map.mjs` for the fingerprint, so a change
 there changes both maps' duplicate groups; it bumps its own `ROWS_VERSION` (`TsPlain/TsPlain.mjs`).
 

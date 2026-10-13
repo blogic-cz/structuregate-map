@@ -1,8 +1,9 @@
 # The two TypeScript halves
 
-Everything in [SKILL.md](SKILL.md) holds. A tree gets ONE of these: the Angular half where
-`angular.json`/`nx.json` and `@angular/compiler` are found, the plain half everywhere else. Their
-`files.lang` differ (`typescript` against `ts`) and so does the shape of their rows.
+Everything in [SKILL.md](SKILL.md) holds. The Angular half maps the workspace where
+`angular.json`/`nx.json` and `@angular/compiler` are found; the plain half maps every script file OUTSIDE it
+(the whole tree when there is no workspace), its paths root-relative where the Angular half's are workspace-relative.
+Their `files.lang` differ (`typescript` against `ts`) and so does the shape of their rows.
 
 ## Plain TypeScript / JavaScript (`files.lang = 'ts'`)
 
