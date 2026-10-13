@@ -32,8 +32,8 @@ use std::collections::HashSet;
 const PROPERTY_WRITES: &[&str] = &["this", "property", "this-indexed"];
 
 /// The gates that render ONCE PER ITEM, where an empty collection renders nothing and `[]`
-/// is not truth.
-const ITERATION_GATES: &[&str] = &["ngForOf"];
+/// is not truth: `*ngFor`'s `ngForOf` and the `@for` block's collection (#43).
+const ITERATION_GATES: &[&str] = &["ngForOf", "ForLoopBlock"];
 
 fn text(row: &Row, field: &str) -> Option<String> {
     match row.get(field) {

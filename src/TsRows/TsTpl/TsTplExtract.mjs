@@ -127,10 +127,11 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
     // THE BLOCK'S KIND IS ITS OWN LABEL - no kind-to-field table. A `@switch` node is `SwitchBlock`, its
     // expression goes in one generic field, and a consumer reads `kind` to know what the expression means.
     // Whether a block's expression GATES content is structural too: an `@if` branch, a `@switch` and a
-    // `@case` decide what renders; a `@for` iterates.
+    // `@case` decide what renders; a `@for` renders its content once per item, so an empty collection renders
+    // none of it - a gate, as `*ngFor`'s `ngForOf` is (its `track` is no gate).
     // A `@let` neither: it names a value and decides nothing.
     const iterating = kind === 'ForLoopBlock';
-    const gating = !iterating && !isLet;
+    const gating = !isLet;
     if (expr) {
       emitExpr({
         tplId, nodeId, comp, kind: `block_${kind}`, name: isLet ? (node.name ?? kind) : kind,
@@ -252,13 +253,18 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
       // are not template nodes, so they are skipped without being excluded by name. A PLAIN RECORD is looked
       // into too: an ICU keeps its switch value and the interpolations inside its cases in `vars` and
       // `placeholders`, objects keyed by placeholder name, and nothing under them was read.
-      const holders = [...Object.values(node), adopted].flatMap((v) => (
+      // AN `@empty` IS NOT INSIDE ITS LOOP: it shows exactly when the collection is empty, so under the `@for`
+      // node it would inherit the loop's gate (and be read as the loop's content by `key_loops`). It is walked
+      // as the loop's SIBLING - its parent, its depth - after the loop's own content.
+      const empty = kind === 'ForLoopBlock' && isChildNode(node.empty) ? node.empty : null;
+      const holders = [...Object.values(node), adopted].filter((v) => v !== empty).flatMap((v) => (
         v && Object.getPrototypeOf(v) === Object.prototype ? Object.values(v) : [v]));
       for (const v of holders) {
         if (Array.isArray(v)) {
           for (const c of v) if (isChildNode(c)) walk(c, nodeId, depth + 1);
         } else if (isChildNode(v)) walk(v, nodeId, depth + 1);
       }
+      if (empty) walk(empty, parentId, depth);
     };
 
     for (const n of parsed.nodes ?? []) walk(n, null, 0);

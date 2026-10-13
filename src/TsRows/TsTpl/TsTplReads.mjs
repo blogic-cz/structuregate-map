@@ -95,6 +95,7 @@ export function rollupTemplateReads(store) {
   const parentOfNode = new Map();
   const boundNames = new Map();
   const implicitAt = new Map();
+  const aliasesAt = new Map();
   for (const n of store.table('template_nodes')) {
     templateOfNode.set(n.id, n.template);
     parentOfNode.set(n.id, n.parent ?? null);
@@ -102,6 +103,13 @@ export function rollupTemplateReads(store) {
     for (const v of Array.isArray(n.variables) ? n.variables : []) {
       if (str(v.name) !== null) names.push(v.name);
       if (v.value === '$implicit' && typeof v.name === 'string') implicitAt.set(n.id, v.name);
+      // AN `as` ALIAS HOLDS THE CONDITION'S VALUE: every name an `@if` branch binds, and an `*ngIf` wrapper's
+      // `as u` (`ngIf`) or `let u` (`$implicit`) - the latter two only where an `ngIf` condition sits (below).
+      const alias = n.kind === 'IfBlockBranch' || v.value === 'ngIf' || v.value === '$implicit';
+      if (alias && typeof v.name === 'string') {
+        if (!aliasesAt.has(n.id)) aliasesAt.set(n.id, new Set());
+        aliasesAt.get(n.id).add(v.name);
+      }
     }
     for (const r of Array.isArray(n.references) ? n.references : []) {
       if (str(r.name) !== null) names.push(r.name);
@@ -122,13 +130,22 @@ export function rollupTemplateReads(store) {
   // THE LINK RUNS FROM THE EXPRESSION TO THE BINDING, not the other way: a `bindings` row carries no
   // expression id, so reading one off it yielded nothing and no loop variable ever resolved.
   const iterableBindings = new Set();
+  const conditionBindings = new Set();
   const nodeOfBinding = new Map();
   for (const b of store.table('bindings')) {
     if (b.node != null) nodeOfBinding.set(b.id, b.node);
     if (b.name === 'ngForOf') iterableBindings.add(b.id);
+    if (b.name === 'ngIf') conditionBindings.add(b.id);
   }
   const iterableAstOfNode = new Map();
+  // THE CONDITION AN ALIAS IS BOUND TO, by node: an `@if` branch's own expression, an `*ngIf` wrapper's `ngIf` binding.
+  const conditionAstOfNode = new Map();
   for (const e of store.table('expressions')) {
+    if (e.kind === 'block_IfBlockBranch' && e.node != null) { conditionAstOfNode.set(e.node, e.ast); continue; }
+    if (e.lang !== 'ts' && e.binding != null && conditionBindings.has(e.binding)) {
+      const nodeId = nodeOfBinding.get(e.binding);
+      if (nodeId !== undefined) conditionAstOfNode.set(nodeId, e.ast);
+    }
     // An `@for` block's collection is its own expression, on the block's node.
     if (e.kind === 'block_ForLoopBlock' && e.node != null) { iterableAstOfNode.set(e.node, e.ast); continue; }
     if (e.lang === 'ts' || e.binding == null || !iterableBindings.has(e.binding)) continue;
@@ -229,6 +246,43 @@ export function rollupTemplateReads(store) {
   };
 
   /**
+   * WHAT AN `as` ALIAS IS: the owner of the condition it is bound to - only when the condition IS one read chain
+   * (`user`, `row.user`, `user!`) or one pipe over one (`user$ | async`), every hop resolved. A condition that
+   * tests something (`a && b`, `x.ok === true`), calls, or stops on a name no declaration answers types nothing:
+   * the alias still shadows the component, but holds no owner. A pipe is read as a loop's is - its own
+   * `transform` type, else (a framework pipe) what the piped value unwraps to.
+   */
+  const conditionOf = (ast) => {
+    let at = ast;
+    while (at && (at.k === 'Source' || at.k === 'NonNull')) at = at.k === 'Source' ? at.ast : at.expr;
+    return at ?? null;
+  };
+  const chainEnd = (ast, component, scope) => {
+    const at = conditionOf(ast);
+    if (!at || (at.k !== 'Read' && at.k !== 'SafeRead')) return null;
+    const { root, names } = chainOf(at);
+    if (root === null || !names.length) return null;
+    const isBound = scope.has(root);
+    let owner = isBound ? scope.get(root) ?? null : component;
+    let ref = null;
+    for (const name of isBound ? names.slice(1) : names) {
+      const row = owner === null ? undefined : propOf(owner, name);
+      if (!row) return null;
+      ref = row.type_ref ?? null;
+      owner = ownerOf(ref);
+    }
+    return { owner, ref };
+  };
+  const aliasOwnerOf = (ast, component, scope) => {
+    const at = conditionOf(ast);
+    if (at?.k !== 'Pipe') return chainEnd(at, component, scope)?.owner ?? null;
+    const pipeName = str(at.name);
+    const piped = chainEnd(at.exp, component, scope);
+    if (pipeName === null || piped === null) return null;
+    return ownerOf(transformRefOfPipe.get(pipeName)) ?? (knownPipes.has(pipeName) ? null : unwrappedOwnerOf(piped.ref));
+  };
+
+  /**
    * The names the TEMPLATE binds at a node - a `*ngFor` variable, an `as` alias, a `#ref` - walking up the
    * ancestors that enclose it.
    *
@@ -256,11 +310,16 @@ export function rollupTemplateReads(store) {
     for (const id of ancestors) {
       if (id !== nodeId) for (const name of letsUnder.get(id) ?? []) out.set(name, null);
       const iterable = iterableAstOfNode.get(id);
+      const condition = conditionAstOfNode.get(id);
       for (const name of boundNames.get(id) ?? []) {
+        if (condition !== undefined && aliasesAt.get(id)?.has(name)) {
+          out.set(name, aliasOwnerOf(condition, component, out));
+          continue;
+        }
         // A LOOP VARIABLE, THREE WAYS, in order of how directly the map proves it: the pipe's own declared
         // return type, then what the piped value holds once its wrapper is unwrapped, then - for an unpiped
-        // collection - the element of the collection itself. Anything else the template binds is a name this
-        // rollup cannot type, and it shadows the component either way.
+        // collection - the element of the collection itself. Anything else the template binds (an alias is above) is
+        // a name this rollup cannot type, and it shadows the component either way.
         const pipeName = iterable === undefined ? null : pipeNameOf(iterable);
         const sourceRef = iterable === undefined ? null : ownerRefOfChain(iterable, component, out);
         const bound = implicitAt.get(id) !== name || iterable === undefined ? null

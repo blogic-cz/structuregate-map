@@ -19,6 +19,12 @@
 //! `bindings` rows, no gates). Its arm is the COMPLEMENT of its siblings — a `not_in` — and
 //! stating it needs the extractor to emit a gate for a valueless structural attribute
 //! first. Named so the remaining hole is a known one rather than a clean-looking count.
+//!
+//! THE BLOCK FORM IS THE SAME COMPARISON (#40): `@switch (tier.TierID)` is a `block` gate named
+//! `SwitchBlock` (the dimension) and each `@case (TierIDs.Gamma)` a `block` gate named `SwitchBlockCase`
+//! (the value), the case node a child of its switch - or a grandchild through a fall-through
+//! `SwitchBlockCaseGroup`, whose content no case gates. `@default` takes no value, so it is no gate either,
+//! exactly as `ngSwitchDefault` is not.
 
 use super::astreads::unwrap;
 use super::gate_values::{constant_of, dimension_of, untyped_dimension, EnumIndex, MemberEnums};
@@ -30,6 +36,24 @@ fn text(row: &Row, field: &str) -> Option<String> {
     match row.get(field) {
         Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
         _ => None,
+    }
+}
+
+/// The gates that name a switch's DIMENSION: `[ngSwitch]` and the `@switch` block.
+fn is_switch(g: &Row) -> bool {
+    match text(g, "name").as_deref() {
+        Some("ngSwitch") => true,
+        Some("SwitchBlock") => text(g, "gate_kind").as_deref() == Some("block"),
+        _ => false,
+    }
+}
+
+/// The gates that name one arm's VALUE: `*ngSwitchCase` and an `@case` block.
+fn is_case(g: &Row) -> bool {
+    match text(g, "name").as_deref() {
+        Some("ngSwitchCase") => true,
+        Some("SwitchBlockCase") => text(g, "gate_kind").as_deref() == Some("block"),
+        _ => false,
     }
 }
 
@@ -153,7 +177,7 @@ pub fn switch_restrictions(
     // checker typed it, otherwise the case constant, with `row` left null to say the tie
     // is by TEXT.
     let mut dims: IndexMap<String, Dimension> = IndexMap::new();
-    for g in gates.iter().filter(|g| text(g, "name").as_deref() == Some("ngSwitch")) {
+    for g in gates.iter().filter(|g| is_switch(g)) {
         let Some(ast) = ast_of(g) else { continue };
         let Some(node) = id_of(g, "node") else { continue };
         if let Some((enum_id, dim, row)) = dimension_of(ast, mem) {
@@ -166,7 +190,7 @@ pub fn switch_restrictions(
     let mut out: IndexMap<String, Vec<Value>> = IndexMap::new();
     let mut stats = SwitchStats { switches: dims.len(), ..Default::default() };
 
-    for g in gates.iter().filter(|g| text(g, "name").as_deref() == Some("ngSwitchCase")) {
+    for g in gates.iter().filter(|g| is_case(g)) {
         let Some(node) = id_of(g, "node") else {
             stats.unplaced += 1;
             continue;
@@ -288,9 +312,16 @@ mod tests {
         assert_eq!(enclosing_dimension("n:case", &parent, &IndexMap::new()), None);
     }
 
-    #[test]
-    fn the_whole_pass_reads_a_switch_and_its_arm_out_of_a_store() {
-        let tables: Map<String, Value> = json!({
+    /// One switch and one arm, named `switch`/`case` with `kind`, the case node under `between` (none: directly under the switch).
+    fn store_of(switch: &str, case: &str, kind: &str, between: Option<&str>) -> Map<String, Value> {
+        let mut nodes = vec![json!({"id": "n:switch", "parent": null})];
+        let mut up = "n:switch";
+        if let Some(group) = between {
+            nodes.push(json!({"id": group, "parent": "n:switch"}));
+            up = group;
+        }
+        nodes.push(json!({"id": "n:case", "parent": up}));
+        json!({
             "files": [{"id": "fl:1", "path": "app/t.ts"}],
             "enums": [{"id": "e:1", "name": "TierIDs", "file": "fl:1",
                        "members": [{"name": "Gamma"}, {"name": "Other"}]}],
@@ -301,8 +332,7 @@ mod tests {
                  "type_ref": {"name": "TierIDs", "file": "/repo/app/t.ts"}}
             ],
             "type_members": [],
-            "template_nodes": [{"id": "n:switch", "parent": null},
-                               {"id": "n:case", "parent": "n:switch"}],
+            "template_nodes": nodes,
             "expressions": [
                 {"id": "x:s", "ast": {"k": "Read", "name": "TierID",
                                       "target": {"row": "m:typed"}}},
@@ -310,18 +340,24 @@ mod tests {
                                       "receiver": {"k": "Read", "name": "tierIDs",
                                                    "target": {"row": "m:alias"}}}}
             ],
-            "gates": [{"id": "g:s", "name": "ngSwitch", "node": "n:switch", "expression": "x:s"},
-                      {"id": "g:c", "name": "ngSwitchCase", "node": "n:case", "expression": "x:c"}]
+            "gates": [{"id": "g:s", "name": switch, "gate_kind": kind, "node": "n:switch", "expression": "x:s"},
+                      {"id": "g:c", "name": case, "gate_kind": kind, "node": "n:case", "expression": "x:c"}]
         })
         .as_object()
         .cloned()
-        .unwrap();
+        .unwrap()
+    }
 
+    fn arms_of(tables: Map<String, Value>) -> (IndexMap<String, Vec<Value>>, SwitchStats) {
         let store = Store::from_payload(tables, "typescript");
         let idx = enum_index(&store);
         let mem = member_enums(&store, &idx);
-        let (out, stats) = switch_restrictions(&store, &mem, &idx);
+        switch_restrictions(&store, &mem, &idx)
+    }
 
+    #[test]
+    fn the_whole_pass_reads_a_switch_and_its_arm_out_of_a_store() {
+        let (out, stats) = arms_of(store_of("ngSwitch", "ngSwitchCase", "structural", None));
         assert_eq!(stats.switches, 1);
         assert_eq!(stats.gates, 1);
         assert_eq!(stats.resolved, 1);
@@ -329,5 +365,26 @@ mod tests {
         assert_eq!(arm["op"], json!("in"));
         assert_eq!(arm["values"], json!(["Gamma"]));
         assert_eq!(arm["dim"], json!("TierID"));
+    }
+
+    #[test]
+    fn an_at_switch_block_and_its_case_are_the_same_comparison() {
+        let (out, stats) = arms_of(store_of("SwitchBlock", "SwitchBlockCase", "block", None));
+        assert_eq!((stats.switches, stats.resolved), (1, 1));
+        assert_eq!(out["g:c"][0]["values"], json!(["Gamma"]));
+        assert_eq!(out["g:c"][0]["dim"], json!("TierID"));
+    }
+
+    #[test]
+    fn a_case_inside_a_fall_through_group_finds_the_switch_above_the_group() {
+        let (out, _) = arms_of(store_of("SwitchBlock", "SwitchBlockCase", "block", Some("n:group")));
+        assert_eq!(out["g:c"][0]["op"], json!("in"));
+    }
+
+    #[test]
+    fn a_directive_input_named_like_a_block_is_no_switch() {
+        // Only the compiler's own block node is read by its kind; an attribute gate of that name is not one.
+        let (out, stats) = arms_of(store_of("SwitchBlock", "SwitchBlockCase", "binding", None));
+        assert_eq!((stats.switches, out.len()), (0, 0));
     }
 }
