@@ -50,8 +50,13 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     // The checker's order is kept - see the note in `TsMap`'s describer.
     const paths = [...new Set(decls.map((d) => canonicalPath(d.getSourceFile().fileName)))];
     const [first, ...rest] = paths;
+    // THE CLASS OR INTERFACE A MEMBER IS DECLARED IN: `get` on `HttpClient` and `get` on `HttpHeaders` are one name in
+    // one `.d.ts`, and only the owner tells a request from a header read (`rows/http/calls.rs`).
+    const holder = decls[0].parent;
+    const owner = holder && (ts.isClassDeclaration(holder) || ts.isInterfaceDeclaration(holder)) && holder.name ? holder.name.text : '';
     return {
       name: sym.getName(), file: relativeTo(feRoot, first), external: first.includes('node_modules'),
+      ...(owner ? { owner } : {}),
       ...(rest.length ? { also: rest.map((p) => relativeTo(feRoot, p)) } : {}),
     };
   };

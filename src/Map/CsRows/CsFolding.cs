@@ -44,6 +44,24 @@ internal static class CsFolding
     /// a limit is what stops a cycle in a tree that does not compile from being an infinite walk.</summary>
     private const int MaxDepth = 6;
 
+    /// <summary>
+    /// What an attribute is written WITH, one string per argument in order: the folded text of a positional
+    /// argument, `Name=text` of a named one, and "" for an argument that is not a constant. `[Route(Base + "x")]`
+    /// has only its source text otherwise, and a route is the one argument somebody reads an attribute for.
+    /// </summary>
+    public static List<string> Arguments(SemanticModel? model, AttributeSyntax attribute)
+    {
+        var values = new List<string>();
+        foreach (var argument in attribute.ArgumentList?.Arguments ?? default)
+        {
+            var folded = Of(model, argument.Expression);
+            var text = folded.Kind is "const" or "folded" ? folded.Text : "";
+            var name = argument.NameEquals?.Name.Identifier.ValueText ?? argument.NameColon?.Name.Identifier.ValueText;
+            values.Add(name is null ? text : name + "=" + text);
+        }
+        return values;
+    }
+
     public static Value Of(SemanticModel? model, SyntaxNode? node)
     {
         if (model is null || node is not ExpressionSyntax expression) return Value.None;

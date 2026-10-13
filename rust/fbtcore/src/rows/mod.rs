@@ -19,6 +19,7 @@ pub mod carry;
 #[path = "partial/deps.rs"]
 pub mod deps;
 pub mod dups;
+pub mod http;
 pub mod tsapply;
 pub mod half;
 pub mod pyjson;
