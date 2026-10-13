@@ -173,4 +173,69 @@ Test-Case 'tsrows keys: a list a component builds and only hands to a child inpu
     Assert-Line $g 'demo.choice.yes | ngIf vm.kind === Kind.Home'
     Assert-NoLine $g 'demo.both.yes | ngIf'
 }
+Test-Case 'tsrows keys: key_reach.paths names each way - its render_path row and what the way adds to it (#53)' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/tsconfig.app.json' = '{"compilerOptions":{"strict":false},"include":["src/**/*.ts"]}'
+        'apps/shop/src/translate.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class TranslateService {`n  getTranslation(key: string): string {`n    return key;`n  }`n}`n"
+        'apps/shop/src/kinds.ts' = "export enum Kind { Home = 1, Flat = 2, Life = 3 }`n"
+        'apps/shop/src/radio.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "import { NgFor } from '@angular/common';`n" +
+            "@Component({ selector: 'demo-radio', standalone: true, imports: [NgFor], template: '<label *ngFor=`"let item of model`">{{ item.Label }}</label>' })`n" +
+            "export class RadioComponent { @Input() model: { Label: string }[]; }`n"
+        'apps/shop/src/visible.directive.ts' = "import { Directive, Input } from '@angular/core';`n" +
+            "import { Kind } from './kinds';`n" +
+            "@Directive({ selector: '[demoVisible]', standalone: true })`n" +
+            "export class VisibleDirective { @Input() demoVisible: { kinds: Kind[] }; }`n"
+        'apps/shop/src/a.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { Kind } from './kinds';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "import { RadioComponent } from './radio.component';`n" +
+            "import { VisibleDirective } from './visible.directive';`n" +
+            "@Component({ selector: 'demo-a', standalone: true, imports: [VisibleDirective, RadioComponent], template: '<div *demoVisible=`"alphaConfig`"><demo-radio [model]=`"model`"></demo-radio></div><div *demoVisible=`"betaConfig`"><demo-radio [model]=`"model`"></demo-radio></div>' })`n" +
+            "export class AComponent {`n  alphaConfig = { kinds: [Kind.Home] };`n  betaConfig = { kinds: [Kind.Flat] };`n  model: { Label: string }[];`n" +
+            "  constructor(private translate: TranslateService) {`n    this.model = [{ Label: this.translate.getTranslation('demo.choice.yes') }];`n  }`n}`n"
+        'apps/shop/src/b.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { RadioComponent } from './radio.component';`n" +
+            "@Component({ selector: 'demo-b', standalone: true, imports: [RadioComponent], template: '<demo-radio [model]=`"other`"></demo-radio>' })`n" +
+            "export class BComponent { other: { Label: string }[] = []; }`n"
+        'apps/shop/src/translate.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "@Component({ selector: 'translate', standalone: true, template: '{{ text }}' })`n" +
+            "export class TranslateComponent { @Input() text: string = ''; }`n"
+        'apps/shop/src/list.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { NgIf, NgTemplateOutlet } from '@angular/common';`n" +
+            "import { Kind } from './kinds';`n" +
+            "import { TranslateComponent } from './translate.component';`n" +
+            "@Component({ selector: 'demo-list', standalone: true, imports: [NgIf, NgTemplateOutlet, TranslateComponent], template: '<div *ngIf=`"vm.kind === Kind.Flat`"><ng-container *ngTemplateOutlet=`"bTpl`"></ng-container></div><ng-container [ngTemplateOutlet]=`"bTpl`"></ng-container><ng-template #bTpl><translate [text]=`"\'demo.list.b\'`"></translate></ng-template>' })`n" +
+            "export class ListComponent {`n  Kind = Kind;`n  vm: { kind: Kind } = { kind: Kind.Life };`n}`n"
+        'apps/shop/src/root.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { AComponent } from './a.component';`n" +
+            "import { BComponent } from './b.component';`n" +
+            "import { ListComponent } from './list.component';`n" +
+            "@Component({ selector: 'demo-root', standalone: true, imports: [AComponent, BComponent, ListComponent], template: '<demo-a></demo-a><demo-b></demo-b><demo-list></demo-list>' })`n" +
+            "export class RootComponent {}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"choice":{"yes":"Yes"},"list":{"b":"B"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    # one entry per way: n_paths of them
+    $n = Invoke-TsRowsQ $made.Db "SELECT key || ' ' || n_paths || ' ' || json_array_length(paths) AS n FROM key_reach WHERE key LIKE 'demo.%'"
+    Assert-Line $n 'demo.choice.yes 2 2'
+    Assert-Line $n 'demo.list.b 2 2'
+    # each way: key | its render_path's components | that row's gates | what the way adds (a gate by its source, a link by its prefix)
+    $w = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || (SELECT group_concat(name, '>') FROM (SELECT c.name FROM json_each(p.hops) h " +
+        "JOIN components c ON c.id = h.value ORDER BY h.key)) || ' | ' || coalesce((SELECT group_concat(g.source, ' & ') FROM json_each(p.gates) pg " +
+        "JOIN gates g ON g.id = pg.value), '-') || ' | ' || coalesce((SELECT group_concat(coalesce(g2.source, substr(o.value, 1, instr(o.value, ':') - 1)), ' & ') " +
+        "FROM json_each(json_extract(w.value, '`$.own')) o LEFT JOIN gates g2 ON g2.id = o.value), '-') AS way " +
+        "FROM key_reach k, json_each(k.paths) w JOIN render_path p ON p.id = json_extract(w.value, '`$.path') WHERE k.key LIKE 'demo.%' ORDER BY 1")
+    # the two rows through A that bind the list - never the one through B, whose edge binds another list
+    Assert-Line $w 'demo.choice.yes | RootComponent>AComponent>RadioComponent | alphaConfig | bind & model'
+    Assert-Line $w 'demo.choice.yes | RootComponent>AComponent>RadioComponent | betaConfig | bind & model'
+    Assert-NoLine $w 'demo.choice.yes | RootComponent>BComponent'
+    # two outlets of one ng-template: ONE render_path row carries two ways, told apart by what each adds
+    Assert-Line $w 'demo.list.b | RootComponent>ListComponent | - | vm.kind === Kind.Flat'
+    Assert-Line $w 'demo.list.b | RootComponent>ListComponent | - | -'
+}
 }

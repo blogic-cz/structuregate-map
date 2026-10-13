@@ -15,12 +15,14 @@ fn path(hops: &[&str], gates: &[&str]) -> RenderPath {
 
 fn paths_of(entries: &[(&str, Vec<RenderPath>)]) -> Paths {
     let mut by_comp = IndexMap::new();
+    let mut first_id = IndexMap::new();
     let mut rows = 0;
     for (comp, list) in entries {
+        first_id.insert(comp.to_string(), rows as i64 + 1);
         rows += list.len();
         by_comp.insert(comp.to_string(), (list.clone(), false));
     }
-    Paths { by_comp, rows }
+    Paths { by_comp, first_id, rows }
 }
 
 fn route_of(sites: &[(&str, Vec<Vec<&str>>)]) -> Route {
