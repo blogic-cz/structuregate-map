@@ -97,10 +97,10 @@ Test-Case 'tsrows keys: an input bound to a call or a getter whose returns are l
     $r = Invoke-TsRowsQ $made.Db $script:InstReach
     Assert-Line $r 'demo.a | field_binding | TableComponent'
     Assert-Line $r 'demo.b | field_binding | TableComponent'
-    # three ways into the table; a key the callee's translate call holds keeps the edge it came through - that one,
-    # and the page's own call of `make()`
+    # three ways into the table; a key the callee's translate call holds keeps the edge it came through, and the page
+    # that only hands the list on is no site of its own (#50)
     $p = Invoke-TsRowsQ $made.Db "SELECT 'paths ' || n_paths AS n FROM key_reach WHERE key = 'demo.a'"
-    Assert-Line $p 'paths 2'
+    Assert-Line $p 'paths 1'
 }
 
 Test-Case 'tsrows keys: an input bound to a property of a field reads the lists written to that property' {
