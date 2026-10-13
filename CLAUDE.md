@@ -22,6 +22,7 @@ cargo test --manifest-path rust/fbtcore/Cargo.toml          # the rust unit test
 powershell -NoProfile -File scripts\Connect-Gate.ps1 -Path <tree>  # wire a new consumer (-DryRun first)
 dotnet publish src/StructureGate.csproj -c Release -r win-x64 -p:PublishAot=true
 pwsh -NoProfile -File scripts/Install-Dependencies.ps1 -DryRun  # what this machine lacks to build (-DryRun off to install)
+pwsh -NoProfile -File scripts/Compare-Release.ps1 -Tree <real tree>  # BEFORE every release tag: old vs new map, exit 1 on a lost restriction
 ```
 
 **Off Windows** the same commands run with `pwsh` for `powershell` and `-r linux-x64` for the publish; the exe
