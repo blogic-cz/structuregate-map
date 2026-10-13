@@ -93,6 +93,8 @@ pub mod keyreach;
 pub mod key_literals;
 #[path = "key/key_returned.rs"]
 pub mod key_returned;
+#[path = "key/routes/key_outlets.rs"]
+pub mod key_outlets;
 #[path = "key/routes/key_routes.rs"]
 pub mod key_routes;
 pub mod sourcescan;

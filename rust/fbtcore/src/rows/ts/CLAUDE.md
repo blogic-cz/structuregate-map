@@ -5,7 +5,7 @@ How the closure runs inside the store (partial runs, `Cell`, memory) is
 it reads are [../../../../../src/TsRows/CLAUDE.md](../../../../../src/TsRows/CLAUDE.md). This file is WHAT the
 four derived tables mean and which restrictions a gate is read for. Black-box cases:
 `tests/deep/TsRowsGates.Tests.ps1`, `tests/deep/TsRowsBranches.Tests.ps1`, `tests/deep/TsKeys/` and
-`tests/deep/TsAngular/` (gates in `TsGates/`: `TsRowsGateThrough`, `TsRowsGateParents`, `TsRowsGateSpread`).
+`tests/deep/TsAngular/` (gates in `TsGates/`: `TsRowsGateThrough`, `TsRowsGateParents`, `TsRowsGateSpread`, `TsRowsGateOutlets`).
 
 ## The closure (`closure.rs`, `key/keyreach.rs`, `value_folds.rs`)
 
@@ -144,6 +144,7 @@ requires and which enum members it still permits.
   A key a TEMPLATE expression chooses (`[text]="c ? 'a' : 'b'"`, `x && 'k'`, `x || 'k'`, inside a pipe or a
   call too) holds its arm as `arm:<expression>#<n>` (#16, `key/key_arms.rs`): the condition's
   subtree is read as a `gates` tree is, so `c` restricts exactly as `*ngIf="c"` does.
+- **A KEY IN AN `<ng-template #ref>` ONLY OUTLETS RENDER TAKES EACH OUTLET'S CHAIN AS A WAY** (#36, `key/routes/key_outlets.rs`): when every read of `ref` in its template is a bare `[ngTemplateOutlet]`/`*ngTemplateOutlet`/`*ngIf="..; then ref"` binding, a site inside it (template, template string, pipe, field binding) is one way per outlet: the outlet node's `gate_chain` (an outlet inside another such template: each of ITS ways) without the outlet's hand-over gate rows (`ngTemplateOutlet*`, `ngIfThen`, `ngIfElse`), then the site's own gates below the template. A ref an `else` reads (it renders under the negation, which a gate list cannot hold), that any other expression reads, that is declared twice in the template, or that a `@ViewChild`/`@ContentChild` queries (by name, or by type: every template of the class) keeps the site's own chain. An outlet inside the template it renders is no way. Not read: a COMPONENT rendered inside such a template (`render_path` keeps the edge's own chain).
 - **A COMPONENT A FACTORY RETURNS UNDER A `case` OR `if` RENDERS UNDER IT** (#13, `key/key_returned.rs`): a
   dynamic render's `renders.return_ways` lists the `returns` rows each way the class came through; the edge
   holds the branches and cases EVERY way holds (one case and no case hold nothing; two or more cases, each alone
