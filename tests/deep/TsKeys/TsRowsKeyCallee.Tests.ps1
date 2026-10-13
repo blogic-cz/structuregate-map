@@ -298,6 +298,146 @@ Test-Case 'tsrows keys: a child that writes its own input is not renamed to the 
     Assert-Exit $r 0
     # the child's `item` is no longer what the parent bound, so the dimension keeps its own text
     Assert-NoLine $r '| vm.kind in'
-    Assert-Line $r 'demo.kind.home.a | ctx.context.kind | item.kind | vm.kind not_in ["Car"]'
+    # the callee's parameter is one dimension on every way (#48), read as the caller spells it: the child's own `item.kind`
+    Assert-Line $r 'demo.kind.home.a | ctx.context.kind | item.kind in ["Flat","Home"]'
+}
+
+$script:ArgQ = "SELECT k.key || ' | ' || json_extract(v.value,'$.dimension') || ' ' || json_extract(v.value,'$.op') || ' ' || json_extract(v.value,'$.values') AS r " +
+    "FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'demo.%'"
+
+Test-Case 'tsrows keys: a constant bound to an input through the parent alias is no variable to rename into (#49)' {
+    $tree = New-TsRowsWorkspace @{
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+        'apps/shop/src/item.component.ts' = @'
+import { Component, Input } from '@angular/core';
+import { DemoIDs } from './kinds';
+import { PriceKeyPipe } from './price.pipe';
+@Component({ selector: 'demo-item', standalone: true, imports: [PriceKeyPipe], template: '<span [title]="sum | priceKey : kind"></span>' })
+export class ItemComponent {
+  @Input() sum!: number;
+  @Input() kind!: DemoIDs;
+}
+'@
+        'apps/shop/src/items.component.ts' = @'
+import { Component } from '@angular/core';
+import { NgIf } from '@angular/common';
+import { DemoIDs } from './kinds';
+import { ItemComponent } from './item.component';
+@Component({ selector: 'demo-items', standalone: true, imports: [NgIf, ItemComponent], template: '<demo-item *ngIf="vm.kind !== DemoIDs.Flat" [sum]="1" [kind]="DemoIDs.Home"></demo-item><demo-item *ngIf="vm.kind !== DemoIDs.Home" [sum]="2" [kind]="DemoIDs.Flat"></demo-item>' })
+export class ItemsComponent {
+  DemoIDs = DemoIDs;
+  vm: { kind: DemoIDs } = { kind: DemoIDs.Life };
+}
+'@
+        'apps/shop/src/kinds.ts' = @'
+export enum DemoIDs { Home = 1, Flat = 2, Life = 3 }
+'@
+        'apps/shop/src/price.pipe.ts' = @'
+import { Pipe, PipeTransform } from '@angular/core';
+import { DemoIDs } from './kinds';
+@Pipe({ name: 'priceKey', standalone: true })
+export class PriceKeyPipe implements PipeTransform {
+  transform(value: number, kind: DemoIDs): string {
+    return kind === DemoIDs.Home ? 'demo.price.homeOnly' : 'demo.price.other';
+  }
+}
+'@
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"price":{"homeOnly":"Home","other":"Other"}}}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:ArgQ
+    Assert-Exit $r 0
+    # `[kind]="DemoIDs.Home"` renamed into the child read `DemoIDs.Home in [Home]` on one way and `DemoIDs.Flat` on the other: no common spelling, the fold widened to nothing
+    Assert-Line $r 'demo.price.homeOnly | kind in ["Home"]'
+    Assert-Line $r 'demo.price.other | kind not_in ["Home"]'
+    Assert-NoLine $r 'DemoIDs.'
+}
+
+Test-Case 'tsrows keys: an argument spelled differently on each way is one dimension of the callee parameter (#48)' {
+    $tree = New-TsRowsWorkspace @{
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+        'apps/shop/src/child.component.ts' = @'
+import { Component } from '@angular/core';
+import { DescService } from './svc';
+import { CtxService } from './ctx';
+@Component({ selector: 'demo-child', standalone: true, template: '<span [innerHTML]="text"></span>' })
+export class ChildComponent {
+  constructor(private desc: DescService, private ctx: CtxService) {}
+  get text(): string { return this.desc.description(this.ctx.context.kind, this.ctx.context.name); }
+}
+'@
+        'apps/shop/src/ctx.ts' = @'
+import { Injectable } from '@angular/core';
+import { DemoIDs } from './svc';
+@Injectable({ providedIn: 'root' })
+export class CtxService { context: { kind: DemoIDs; name: string } = { kind: DemoIDs.Home, name: 'a' }; }
+'@
+        'apps/shop/src/root.component.ts' = @'
+import { Component, OnInit } from '@angular/core';
+import { NgIf } from '@angular/common';
+import { DemoIDs } from './svc';
+import { CtxService } from './ctx';
+import { ChildComponent } from './child.component';
+@Component({ selector: 'demo-root', standalone: true, imports: [NgIf, ChildComponent], template: '<demo-child *ngIf="!isOther"></demo-child>' })
+export class RootComponent implements OnInit {
+  vm: { kind: DemoIDs; name: string } = { kind: DemoIDs.Home, name: 'a' };
+  isOther = false;
+  constructor(private ctx: CtxService) {}
+  ngOnInit() {
+    this.ctx.context.kind = this.vm.kind;
+    this.isOther = this.vm.kind === DemoIDs.Other;
+  }
+}
+'@
+        'apps/shop/src/rootb.component.ts' = @'
+import { Component } from '@angular/core';
+import { ChildComponent } from './child.component';
+import { TipComponent } from './tip.component';
+@Component({ selector: 'demo-root-b', standalone: true, imports: [ChildComponent, TipComponent], template: '<demo-child></demo-child><demo-tip [item]="vm"></demo-tip>' })
+export class RootBComponent {
+  vm: { kind: number; name: string } = { kind: 1, name: 'a' };
+}
+'@
+        'apps/shop/src/svc.ts' = @'
+import { Injectable } from '@angular/core';
+export enum DemoIDs { Home = 1, Flat = 2, Life = 3, Car = 4, Other = 5 }
+export const homeKinds = [DemoIDs.Home, DemoIDs.Flat];
+export const lifeKinds = [DemoIDs.Life];
+@Injectable({ providedIn: 'root' })
+export class TranslateService { getTranslation(key: string): string { return key; } }
+@Injectable({ providedIn: 'root' })
+export class DescService {
+  constructor(private translate: TranslateService) {}
+  description(kind: DemoIDs, name: string): string {
+    if (homeKinds.indexOf(kind) !== -1) {
+      return this.translate.getTranslation(`demo.kind.home.${name}`);
+    } else if (lifeKinds.some((e) => e === kind)) {
+      return this.translate.getTranslation(`demo.kind.life.${name}`);
+    }
+    return '-';
+  }
+}
+'@
+        'apps/shop/src/tip.component.ts' = @'
+import { Component, Input } from '@angular/core';
+import { DemoIDs, DescService } from './svc';
+@Component({ selector: 'demo-tip', standalone: true, template: '<span [innerHTML]="text"></span>' })
+export class TipComponent {
+  @Input() item!: { kind: DemoIDs; name: string };
+  constructor(private desc: DescService) {}
+  get text(): string { return this.desc.description(this.item.kind, this.item.name); }
+}
+'@
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"kind":{"home":{"a":"A"},"life":{"a":"B"}}}}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:ArgQ
+    Assert-Exit $r 0
+    # the callee's branch restricts its PARAMETER on every way, so the caller spellings are one dimension and the gate's `vm.kind not_in` does not leak in
+    Assert-Line $r 'demo.kind.home.a | ctx.context.kind | vm.kind in ["Flat","Home"]'
+    Assert-Line $r 'demo.kind.life.a | ctx.context.kind | vm.kind in ["Life"]'
+    Assert-NoLine $r 'not_in ["Other"]'
 }
 }

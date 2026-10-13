@@ -20,6 +20,14 @@ pub type GateMap = IndexMap<String, (Option<String>, Vec<Value>)>;
 pub type PerWay = Vec<IndexMap<String, IndexSet<String>>>;
 /// Per way, gate or link id -> the renames its dimension text goes through (`key_scopes`).
 pub type Renames = Vec<IndexMap<String, Vec<super::key_scopes::Step>>>;
+/// Per way: every (parent source, child member) binding on its edges (`key_scopes::pairs`).
+pub type Aliases = Vec<Vec<(String, String)>>;
+/// Per way: key -> alias class of the present keys.
+pub type Classes = Vec<IndexMap<String, usize>>;
+/// Link id -> `param:<callee>#<index>`: the one callee parameter an `arg:` link's condition reads.
+pub type ArgParams = IndexMap<String, String>;
+/// Identity key (`enum#param:..`) -> the caller texts it was read through.
+pub type Labels = IndexMap<String, IndexSet<String>>;
 
 fn field(row: &Value, name: &str) -> String {
     row.get(name).and_then(|v| v.as_str()).unwrap_or("").to_string()
@@ -52,6 +60,21 @@ fn split(k: &str) -> (&str, &str) {
 /// A DIMENSION IS KEYED BY ITS TEXT AS RENAMED ON ITS WAY (`key_scopes`): a child's `item.kind` under
 /// `[item]="vm"` is `vm.kind`, so it meets the parent's gates on that variable instead of beside them.
 pub fn per_way_allowed(ways: &[Way], gates: &GateMap, idx: &EnumIndex, renames: Option<&Renames>) -> PerWay {
+    per_way_keyed(ways, gates, idx, renames, None, None, &mut Labels::new(), &mut Classes::new())
+}
+
+/// `per_way_allowed`, with an `arg:` link keyed by the callee parameter it restricts where it reads one: the
+/// caller texts it was read through are recorded in `labels`, for `relabel`.
+pub fn per_way_keyed(
+    ways: &[Way],
+    gates: &GateMap,
+    idx: &EnumIndex,
+    renames: Option<&Renames>,
+    aliases: Option<&Aliases>,
+    params: Option<&ArgParams>,
+    labels: &mut Labels,
+    classes: &mut Classes,
+) -> PerWay {
     let mut out = Vec::with_capacity(ways.len());
     for (i, way) in ways.iter().enumerate() {
         let mut here: IndexMap<String, IndexSet<String>> = IndexMap::new();
@@ -60,14 +83,30 @@ pub fn per_way_allowed(ways: &[Way], gates: &GateMap, idx: &EnumIndex, renames: 
         let mut set_out: IndexMap<String, IndexSet<String>> = IndexMap::new();
         for g in way {
             let Some((_, rows)) = gates.get(g) else { continue };
+            let spelled = |r: &Value| match renames.and_then(|r| r.get(i)).and_then(|m| m.get(g)) {
+                Some(s) => super::key_scopes::renamed(&field(r, "dim"), s),
+                None => field(r, "dim"),
+            };
+            let param = params.and_then(|p| p.get(g));
+            let mut dims_of: IndexMap<String, IndexSet<String>> = IndexMap::new();
+            if param.is_some() {
+                for r in rows {
+                    dims_of.entry(field(r, "enum")).or_default().insert(spelled(r));
+                }
+            }
             for r in rows {
                 let enum_id = field(r, "enum");
                 let Some(info) = idx.by_id.get(&enum_id) else { continue };
-                let dim = match renames.and_then(|r| r.get(i)).and_then(|m| m.get(g)) {
-                    Some(s) => super::key_scopes::renamed(&field(r, "dim"), s),
-                    None => field(r, "dim"),
+                let dim = spelled(r);
+                let k = match param {
+                    Some(p) if dims_of.get(&enum_id).is_some_and(|d| d.len() == 1) => {
+                        let k = format!("{enum_id}#{p}");
+                        labels.entry(k.clone()).or_default().insert(dim);
+                        k
+                    }
+                    // A NON-PARAM ROW IS KEYED BY ITS OWN TEXT; aliases are unified after the way is keyed.
+                    _ => format!("{enum_id}#{}", field(r, "dim")),
                 };
-                let k = format!("{enum_id}#{dim}");
 
                 // `unknown` is the full domain: it is the honest upper bound.
                 let op = field(r, "op");
@@ -108,9 +147,114 @@ pub fn per_way_allowed(ways: &[Way], gates: &GateMap, idx: &EnumIndex, renames: 
                 }
             }
         }
+        classes.push(unify_present(&mut here, aliases.and_then(|a| a.get(i)).map(Vec::as_slice).unwrap_or(&[])));
         out.push(here);
     }
     out
+}
+
+/// Spellings of `dim` through the way's bindings, both directions, transitively (bounded).
+fn spellings(dim: &str, pairs: &[(String, String)]) -> IndexSet<String> {
+    let mut out: IndexSet<String> = IndexSet::from([dim.to_string()]);
+    let mut i = 0;
+    while i < out.len() && out.len() < 32 {
+        let d = out[i].clone();
+        for (x, m) in pairs {
+            for (from, to) in [(x, m), (m, x)] {
+                if d == *from || d.starts_with(&format!("{from}.")) {
+                    out.insert(format!("{to}{}", &d[from.len()..]));
+                }
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// PRESENT KEYS OF ONE ENUM ALIASED ON THIS WAY ARE ONE VARIABLE: each gets the intersection of all, and none is
+/// renamed or inserted. Renaming one spelling into the other split the variable where only some rows were renamed.
+/// Returns key -> class.
+fn unify_present(here: &mut IndexMap<String, IndexSet<String>>, pairs: &[(String, String)]) -> IndexMap<String, usize> {
+    let keys: Vec<String> = here.keys().filter(|k| !split(k).1.starts_with("param:")).cloned().collect();
+    let mut class: IndexMap<String, usize> = keys.iter().enumerate().map(|(i, k)| (k.clone(), i)).collect();
+    for k in &keys {
+        let (e, d) = split(k);
+        for s in spellings(d, pairs) {
+            let other = format!("{e}#{s}");
+            if let (Some(&a), Some(&b)) = (class.get(k), class.get(&other))
+                && a != b
+            {
+                for v in class.values_mut() {
+                    if *v == b {
+                        *v = a;
+                    }
+                }
+            }
+        }
+    }
+    let mut groups: IndexMap<usize, Vec<String>> = IndexMap::new();
+    for (k, c) in &class {
+        groups.entry(*c).or_default().push(k.clone());
+    }
+    for ks in groups.values().filter(|ks| ks.len() > 1) {
+        let mut all = here[&ks[0]].clone();
+        for k in &ks[1..] {
+            all.retain(|v| here[k].contains(v));
+        }
+        for k in ks {
+            here.insert(k.clone(), all.clone());
+        }
+    }
+    class
+}
+
+/// Published rows with equal enum/op/values whose texts share one alias class on EVERY way are one row, labelled by both.
+pub fn merge_aliased(rows: &mut Vec<Value>, classes: &Classes) {
+    let same = |a: &str, b: &str| {
+        !classes.is_empty() && classes.iter().all(|c| matches!((c.get(a), c.get(b)), (Some(x), Some(y)) if x == y))
+    };
+    let mut i = 0;
+    while i < rows.len() {
+        let mut j = i + 1;
+        while j < rows.len() {
+            let (a, b) = (&rows[i], &rows[j]);
+            let eq = field(a, "enum") == field(b, "enum") && field(a, "op") == field(b, "op") && a.get("values") == b.get("values");
+            let (da, db) = (field(a, "dimension"), field(b, "dimension"));
+            if eq && !da.contains(" | ") && !db.contains(" | ")
+                && same(&format!("{}#{da}", field(a, "enum")), &format!("{}#{db}", field(b, "enum")))
+            {
+                let mut v = vec![da, db];
+                v.sort();
+                rows[i]["dimension"] = Value::String(v.join(" | "));
+                rows.remove(j);
+            } else {
+                j += 1;
+            }
+        }
+        i += 1;
+    }
+    sort_by_collation(rows);
+}
+
+/// A published row's `dimension` with every `param:` key spelled as the caller texts it was read through.
+pub fn relabel(rows: &mut [Value], labels: &Labels) {
+    for r in rows.iter_mut() {
+        let d = field(r, "dimension");
+        let mut parts: IndexSet<String> = IndexSet::new();
+        for p in d.split(" | ") {
+            let k = format!("{}#{p}", field(r, "enum"));
+            match labels.get(&k) {
+                Some(t) => parts.extend(t.iter().cloned()),
+                None => {
+                    parts.insert(p.to_string());
+                }
+            }
+        }
+        let mut v: Vec<String> = parts.into_iter().collect();
+        v.sort();
+        r["dimension"] = Value::String(v.join(" | "));
+    }
+    sort_by_collation(rows);
 }
 
 /// Every dimension any way restricts, collected BEFORE the union starts.
@@ -197,6 +341,11 @@ pub fn fold_values(ways: &[Way], gates: &GateMap, idx: &EnumIndex, per_way: Opti
 /// mentioning none of them permits the domain, and the ways union as above. Only for an enum no
 /// per-dimension row was published for: one already says more. The dimension names every text
 /// the fold merged, sorted and joined by ` | `.
+///
+/// AN `arg:` ROW WHOSE CONDITION READS ONE CALLEE PARAMETER IS ONE DIMENSION ON EVERY WAY, keyed by (callee, parameter)
+/// (`per_way_keyed`): it restricts that parameter whatever the caller spelled, so its rows intersect within a way and union
+/// across ways. Keyed by text, ways that spelled the argument differently shared no dimension and the fold widened it.
+/// Every other row is keyed by its text, as before.
 fn fold_enums(per_way: &PerWay, idx: &EnumIndex, published: &[Value]) -> Vec<Value> {
     let mut dims: IndexMap<String, IndexSet<String>> = IndexMap::new();
     for k in dimensions(per_way) {

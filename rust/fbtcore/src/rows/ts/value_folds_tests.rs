@@ -261,3 +261,33 @@ fn no_ways_at_all_is_no_restriction_and_nothing_unreadable() {
     assert!(fold_values(&[], &gates, &idx_of(FOUR), None).is_empty());
     assert!(unreadable_values(&[], &gates, &idx_of(FOUR), None).is_empty());
 }
+
+#[test]
+fn an_arg_link_reading_two_dims_of_one_enum_keeps_its_text_keys() {
+    // The link restricts ONE callee parameter only when its condition reads one dimension of the enum: two are
+    // two variables, and keying both by the parameter would merge what the callee never equated.
+    let rows = vec![
+        json!({"enum": "e:1", "dim": "a.kind", "row": null, "op": "in", "values": ["A", "B"]}),
+        json!({"enum": "e:1", "dim": "b.kind", "row": null, "op": "in", "values": ["B", "C"]}),
+    ];
+    let gates = map(&[("arg:1", rows)]);
+    let params: ArgParams = [("arg:1".to_string(), "param:f#0".to_string())].into_iter().collect();
+    let mut labels = Labels::new();
+    let per = per_way_keyed(&[way(&["arg:1"])], &gates, &idx_of(FOUR), None, None, Some(&params), &mut labels, &mut Classes::new());
+    assert!(per[0].contains_key("e:1#a.kind") && per[0].contains_key("e:1#b.kind"));
+    assert!(labels.is_empty(), "no parameter key for two dimensions");
+}
+
+#[test]
+fn aliased_present_keys_on_one_way_intersect() {
+    let rows = vec![
+        json!({"enum": "e:1", "dim": "vm.k", "row": null, "op": "in", "values": ["A", "B"]}),
+        json!({"enum": "e:1", "dim": "k", "row": null, "op": "in", "values": ["B", "C"]}),
+    ];
+    let gates = map(&[("g:1", rows)]);
+    let aliases: Aliases = vec![vec![("vm.k".to_string(), "k".to_string())]];
+    let per = per_way_keyed(&[way(&["g:1"])], &gates, &idx_of(FOUR), None, Some(&aliases), None, &mut Labels::new(), &mut Classes::new());
+    let b: IndexSet<String> = ["B".to_string()].into_iter().collect();
+    assert_eq!(per[0]["e:1#vm.k"], b);
+    assert_eq!(per[0]["e:1#k"], b);
+}

@@ -1,5 +1,9 @@
 //! A CHILD'S INPUT IS THE PARENT'S EXPRESSION ON A WAY THROUGH THE EDGE THAT BINDS IT.
 //!
+//! ALIAS ON THE WAY (`pairs`), RENAME NOTHING: every row keeps its own text, and on a way the bound spellings
+//! (`vm.kind`, `item.kind`) are one variable (`value_folds::unify_present`). Renaming either into the other split one
+//! variable wherever only some rows of a way were renamed, and the key lost its restriction. `renamed` only labels.
+//!
 //! RENAME ON THE WAY, BEFORE A GATE IS KEYED BY ITS DIMENSION TEXT. `[item]="vm"` makes the child's
 //! `item.kind` and the parent's `vm.kind` ONE variable on a way through that render edge, but the two
 //! texts never met, so each was a dimension of its own and `value_folds::fold_enums` UNIONED them
@@ -34,6 +38,15 @@ pub struct Scopes {
     pub gate_comp: IndexMap<String, String>,
 }
 
+/// A literal (`1`, `true`, `null`), or a chain through the parent's `typeof X` alias field (`DemoIDs.Home`), is a CONSTANT:
+/// no variable to rename into, and renaming into it left no spelling common to the ways.
+fn constant(source: &str, parent: &str, aliases: &IndexSet<(String, String)>) -> bool {
+    let root = source.split('.').next().unwrap_or("");
+    matches!(root, "true" | "false" | "null" | "undefined")
+        || root.chars().next().is_some_and(|c| c.is_ascii_digit())
+        || aliases.contains(&(parent.to_string(), root.to_string()))
+}
+
 /// Whether a source text is one plain chain of names: no call, index or operator, no stray `.`.
 fn plain_chain(s: &str) -> bool {
     !s.is_empty()
@@ -63,17 +76,26 @@ impl Scopes {
                 written.insert((class, name));
             }
         }
+        // (class, name) of every `typeof X` field: an enum alias the template reads constants through.
+        let mut aliases: IndexSet<(String, String)> = IndexSet::new();
+        for m in store.table("members").iter() {
+            if cell(m, "type").is_some_and(|t| t.starts_with("typeof "))
+                && let (Some(class), Some(name)) = (cell(m, "class"), cell(m, "name"))
+            {
+                aliases.insert((class, name));
+            }
+        }
         let mut member_of: IndexMap<String, String> = IndexMap::new();
         for io in store.table("io").iter() {
             if let (Some(id), Some(member)) = (cell(io, "id"), cell(io, "member")) {
                 member_of.insert(id, member);
             }
         }
-        // (node, to_class) -> the render ids of it.
-        let mut renders: IndexMap<(String, String), Vec<String>> = IndexMap::new();
+        // (node, to_class) -> the render ids of it, each with the parent class that renders.
+        let mut renders: IndexMap<(String, String), Vec<(String, String)>> = IndexMap::new();
         for r in store.table("renders").iter() {
             if let (Some(id), Some(node), Some(class)) = (cell(r, "id"), cell(r, "node"), cell(r, "to_class")) {
-                renders.entry((node, class)).or_default().push(id);
+                renders.entry((node, class)).or_default().push((id, cell(r, "from_class").unwrap_or_default()));
             }
         }
         let mut binds: IndexMap<String, Step> = IndexMap::new();
@@ -87,7 +109,10 @@ impl Scopes {
             if !plain_chain(&source) || written.contains(&(class.clone(), member.clone())) {
                 continue;
             }
-            for id in renders.get(&(node, class)).into_iter().flatten() {
+            for (id, from_class) in renders.get(&(node, class)).into_iter().flatten() {
+                if constant(&source, from_class, &aliases) {
+                    continue;
+                }
                 binds.entry(id.clone()).or_default().insert(member.clone(), source.clone());
             }
         }
@@ -110,6 +135,11 @@ impl Scopes {
             .rev()
             .map(|e| self.binds.get(&**e).cloned().unwrap_or_default())
             .collect()
+    }
+
+    /// Every binding on the way's edges as (parent source, child member): one variable under two spellings on this way.
+    pub fn pairs(&self, p: &RenderPath) -> Vec<(String, String)> {
+        p.edges.iter().flat_map(|e| self.binds.get(&**e).into_iter().flatten()).map(|(m, x)| (x.clone(), m.clone())).collect()
     }
 }
 
