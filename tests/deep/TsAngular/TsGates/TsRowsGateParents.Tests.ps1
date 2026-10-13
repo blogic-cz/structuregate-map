@@ -238,4 +238,61 @@ Test-Case 'tsrows: an input flag read per edge still restricts when the parents 
     Assert-Line $n 'demo.extra paths 1'
 }
 
+# A `gateInputs` PROPERTY HIDES NOTHING AT `false`. `[disabled]="isDisabled"` is a declared gate in A; the modal binds
+# `[isDisabled]="false"`, which folded to the literal `false` and dropped the modal's way as if `*ngIf="false"` stood
+# there. `demo.shown` is the control: B's `*ngIf="isShown"` bound to `false` by the modal still IS no way.
+Test-Case 'tsrows: a constant false bound into an input only [disabled] reads keeps the way, an *ngIf one drops it' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/kind.ts' = "export enum Kind { Home = 1, Flat = 2, Life = 3 }`n"
+        'apps/shop/src/translate.service.ts' = "export class TranslateService { getTranslation(key: string): string { return key; } }`n"
+        'apps/shop/src/opener.ts' = "import { Injectable, Type, ViewContainerRef } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class Opener { create<T>(component: Type<T>, at: ViewContainerRef) { return at.createComponent(component); } }`n"
+        'apps/shop/src/radio.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-radio', template: '<label *ngFor=`"let item of model`">{{ item.Label }}</label>' })`n" +
+            "export class RadioComponent { @Input() model: { Label: string }[] = []; @Input() disabled = false; }`n"
+        'apps/shop/src/a.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "@Component({ selector: 'demo-a', template: '<demo-radio [model]=`"model`" [disabled]=`"isDisabled`"></demo-radio>' })`n" +
+            "export class AComponent {`n  @Input() isDisabled = false;`n  model: { Label: string }[];`n" +
+            "  constructor(private translate: TranslateService) {`n" +
+            "    this.model = [{ Label: this.translate.getTranslation('demo.choice.yes') }, { Label: this.translate.getTranslation('demo.choice.no') }];`n  }`n}`n"
+        'apps/shop/src/b.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "import { TranslateService } from './translate.service';`n" +
+            "@Component({ selector: 'demo-b', template: '<p *ngIf=`"isShown`">{{ caption }}</p>' })`n" +
+            "export class BComponent {`n  @Input() isShown = true;`n  caption: string;`n" +
+            "  constructor(private translate: TranslateService) { this.caption = this.translate.getTranslation('demo.shown'); }`n}`n"
+        'apps/shop/src/modal.component.ts' = "import { Component } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-modal', template: '<demo-a [isDisabled]=`"false`"></demo-a><demo-b [isShown]=`"false`"></demo-b>' })`n" +
+            "export class ModalComponent {}`n"
+        'apps/shop/src/root.component.ts' = "import { Component, ViewContainerRef } from '@angular/core';`n" +
+            "import { Kind } from './kind';`n" +
+            "import { Opener } from './opener';`n" +
+            "import { ModalComponent } from './modal.component';`n" +
+            "@Component({ selector: 'demo-root',`n" +
+            "  template: '<demo-a *ngIf=`"vm.kind === Kinds.Home`" [isDisabled]=`"locked`"></demo-a><demo-b [isShown]=`"shown`"></demo-b><button (click)=`"open()`">open</button>' })`n" +
+            "export class RootComponent {`n  Kinds = Kind;`n  locked = true;`n  shown = true;`n  vm: { kind: Kind } = { kind: Kind.Life };`n" +
+            "  constructor(private opener: Opener, private at: ViewContainerRef) {}`n" +
+            "  open() { this.opener.create(ModalComponent, this.at); }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"choice":{"yes":"Yes","no":"No"},"shown":"Shown"}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["money"],"i18nCalls":["getTranslation"],' +
+            '"gateInputs":["disabled"],"featureChecks":["FlagService.isOn"],"featureEnum":"FlagCodes"}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $n = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT key || ' paths ' || n_paths AS p FROM key_reach WHERE key LIKE 'demo.%'"
+    Assert-Line $n 'demo.choice.yes paths 2'
+    Assert-Line $n 'demo.shown paths 1'
+    $v = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || json_extract(v.value, '`$.dimension') || ' ' || " +
+        "json_extract(v.value, '`$.op') || ' ' || json_extract(v.value, '`$.values') AS reach FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'demo.%'")
+    Assert-NoLine $v 'demo.choice.yes |'
+    $b = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT k.key || ' branch ' || b.value AS br FROM key_reach k, json_each(k.always_branches) b WHERE k.key LIKE 'demo.%'"
+    Assert-NoLine $b 'demo.choice.yes branch'
+    Assert-Line $b 'demo.shown branch bind:'
+    $g = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' gate ' || g.name AS gate FROM key_reach k, " +
+        "json_each(k.always_gates) j JOIN gates g ON g.id = j.value WHERE k.key = 'demo.choice.yes'")
+    Assert-Line $g 'demo.choice.yes gate disabled'
+    Assert-NoLine $g 'demo.choice.yes gate ngIf'
+}
+
 }
