@@ -93,7 +93,7 @@ pub struct Early {
     /// How long the tree's hashes took, for the run's account (`refresh.rs`).
     hashed_ms: u64,
     python: Option<payload::Early>,
-    /// The plain TypeScript half, started only where there is no Angular workspace - the one tree it answers for.
+    /// The plain TypeScript half, started over every script file outside the Angular workspace (the whole tree when there is none).
     plain: Option<payload::Early>,
 }
 
@@ -106,17 +106,41 @@ pub fn early(deep: &Deep, files: &Files) -> Early {
         payload::early(&python_half(deep, &hashes, files), &files.python, &deep.db, &deep.root,
             move || key(&shared, &crate::embedded::PYROWS, &host, &arguments, &given, "", None))
     }).flatten();
-    let plain = (!files.script.is_empty() && !ts::has_workspace(Path::new(&deep.root))).then(|| {
-        let half = plain_half(deep, &hashes, files);
-        let (shared, host, arguments, given, outside) = (Arc::clone(&hashes), deep.ts_host.clone(), half.extra.clone(), files.script.clone(), typescript(deep, &files.script));
-        payload::early(&half, &files.script, &deep.db, &deep.root,
+    let list = plain_files(deep, files);
+    let plain = (!list.is_empty()).then(|| {
+        let half = plain_half(deep, &hashes, &list);
+        let (shared, host, arguments, given, outside) = (Arc::clone(&hashes), deep.ts_host.clone(), half.extra.clone(), list.clone(), typescript(deep, &list));
+        payload::early(&half, &list, &deep.db, &deep.root,
             move || key(&shared, &crate::embedded::TSPLAIN, &host, &arguments, &given, &outside, None))
     }).flatten();
     Early { hashes, hashed_ms, python, plain }
 }
 
+/// WHAT THE PLAIN TYPESCRIPT HALF MAPS: every script file OUTSIDE the Angular workspace, the whole tree when there is
+/// none. The Angular half maps only its workspace, so a React app or an end-to-end suite beside it got no rows at all.
+fn plain_files(deep: &Deep, files: &Files) -> Vec<(String, String)> {
+    match ts::workspace(Path::new(&deep.root)) {
+        None => files.script.clone(),
+        Some(ws) => files.script.iter().filter(|(_, abs)| !Path::new(abs).starts_with(&ws)).cloned().collect(),
+    }
+}
+
+/// WHERE THE PLAIN HALF BORROWS ITS COMPILER: `--ts-node-modules`, then the Angular workspace's own `node_modules` - a
+/// tree whose only TypeScript install is the workspace's had a plain half that found "no typescript to borrow" beside
+/// a workspace that held one.
+fn plain_modules(deep: &Deep) -> Vec<String> {
+    let mut modules = deep.ts_node_modules.clone();
+    if let Some(ws) = ts::workspace(Path::new(&deep.root)) {
+        let own = ws.join("node_modules");
+        if own.is_dir() {
+            modules.push(own.to_string_lossy().into_owned());
+        }
+    }
+    modules
+}
+
 /// The plain TypeScript half, as it is launched - early or in its turn.
-fn plain_half<'a>(deep: &'a Deep, hashes: &hashes::Hashes, files: &Files) -> payload::Half<'a> {
+fn plain_half<'a>(deep: &'a Deep, hashes: &hashes::Hashes, script: &[(String, String)]) -> payload::Half<'a> {
     payload::Half {
         language: "plain-ts rows",
         lang: "ts",
@@ -124,8 +148,8 @@ fn plain_half<'a>(deep: &'a Deep, hashes: &hashes::Hashes, files: &Files) -> pay
         script: deep.staged("plain-ts rows"),
         host: &deep.ts_host,
         flag: "--ts-host",
-        extra: deep.ts_node_modules.iter().flat_map(|m| ["--node-modules".to_string(), m.clone()]).chain(["--hashes".into(), "hashes.json".into()]).collect(),
-        beside: vec![("hashes.json", handed(hashes, &files.script))],
+        extra: plain_modules(deep).into_iter().flat_map(|m| ["--node-modules".to_string(), m]).chain(["--hashes".into(), "hashes.json".into()]).collect(),
+        beside: vec![("hashes.json", handed(hashes, script))],
         named: "the plain typescript half",
         key: None,
     }
@@ -192,8 +216,9 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
         }
         None => (Arc::new(clock.time("hash the tree", || tree_hashes(deep, files))), None, None),
     };
-    // A TREE WITH SCRIPT FILES AND NO ANGULAR WORKSPACE is the plain half's; anywhere else its rows are
-    // dropped, because they describe a tree it no longer answers for.
+    // EVERY SCRIPT FILE OUTSIDE THE ANGULAR WORKSPACE is the plain half's (all of them where there is none); when
+    // none is left its rows are dropped, because they describe files it no longer answers for.
+    let plain_list = plain_files(deep, files);
     // THE ANGULAR HALF IS KEYED BY ITS WORKSPACE once a run has said where that is (`fe`): node's own plan hashes
     // nothing else, so a C# edit beside the workspace launched it only to hear "unchanged".
     let angular = |fe: Option<&str>| {
@@ -261,11 +286,11 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
     let flight = (!files.script.is_empty()).then(|| flight::run(into, deep, db, root, &angular, fly, &mut beside));
     let (plain_next, flown) = match flight {
         None => (false, false),
-        Some(flight::Flight::Flown { absent, ms: took }) => {
+        Some(flight::Flight::Flown { ms: took }) => {
             ms.insert("typescript", took);
-            (absent, true)
+            (!plain_list.is_empty(), true)
         }
-        Some(flight::Flight::Done(absent)) => (absent, false),
+        Some(flight::Flight::Done) => (!plain_list.is_empty(), false),
         Some(flight::Flight::Grounded(fe_kept)) => {
             let stage = crate::trace::stage("deep: typescript");
             if !fly {
@@ -274,7 +299,8 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
                 into.notes.push(format!("the typescript half runs in its turn, not beside the C# half: that re-reads {moving} file(s), over {}",
                     flight::BESIDE));
             }
-            (ts::grounded(into, deep, db, root, &angular, fe_kept), false)
+            ts::grounded(into, deep, db, root, &angular, fe_kept);
+            (!plain_list.is_empty(), false)
         }
     };
     if !flown && !files.script.is_empty() {
@@ -285,12 +311,12 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
         let stage = crate::trace::stage("deep: plain typescript");
         let started = plain_early.and_then(payload::Early::wait);
         stage.set("structuregate.started_early", started.is_some());
-        let plain = plain_half(deep, &hashes, files);
+        let plain = plain_half(deep, &hashes, &plain_list);
         let key = match &started {
             Some(started) => started.key.clone(),
-            None => key(&hashes, &crate::embedded::TSPLAIN, &deep.ts_host, &plain.extra, &files.script, &typescript(deep, &files.script), None),
+            None => key(&hashes, &crate::embedded::TSPLAIN, &deep.ts_host, &plain.extra, &plain_list, &typescript(deep, &plain_list), None),
         };
-        payload::run(into, &payload::Half { key, ..plain }, &files.script, db, root, started);
+        payload::run(into, &payload::Half { key, ..plain }, &plain_list, db, root, started);
         ms.insert("plain typescript", since(timed));
     } else if Path::new(db).is_file() {
         payload::forget(into, "plain-ts rows", "ts", db, root);
@@ -441,7 +467,7 @@ fn roots_key(deep: &Deep) -> String {
 /// `--ts-node-modules` - hashed, so a compiler upgrade re-runs the half.
 fn typescript(deep: &Deep, files: &[(String, String)]) -> String {
     let mut candidates: Vec<std::path::PathBuf> = Path::new(&deep.root).ancestors().map(|at| at.join("node_modules")).collect();
-    candidates.extend(deep.ts_node_modules.iter().map(std::path::PathBuf::from));
+    candidates.extend(plain_modules(deep).into_iter().map(std::path::PathBuf::from));
     // AND EVERY PACKAGE FOLDER UNDER THE ROOT that a file sits in - where the half also looks for a compiler, so
     // upgrading the one in `web/` runs the half again.
     let mut folders: Vec<std::path::PathBuf> = files.iter()

@@ -35,12 +35,12 @@ pub(super) const LANE: i64 = 10_000_000;
 /// cores; beside a pull's worth of moved files the parse is node's whole time saved.
 pub(super) const BESIDE: usize = 1000;
 
-/// What became of the half: flown beside the others (whether the tree had no workspace - the one outcome after which
-/// the plain half answers instead - and how long it took, the flight and its landing), done without a launch (the
-/// same), or to be launched in its turn, with the workspace the last run reported.
+/// What became of the half: flown beside the others (how long it took, the flight and its landing), done without a
+/// launch, or to be launched in its turn, with the workspace the last run reported. Whether the tree had a workspace
+/// decides nothing after it: the plain half maps what lies OUTSIDE one (`plain_files`).
 pub(super) enum Flight {
-    Flown { absent: bool, ms: u64 },
-    Done(bool),
+    Flown { ms: u64 },
+    Done,
     Grounded(Option<String>),
 }
 
@@ -58,7 +58,7 @@ struct Landed {
 pub(super) fn run(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: &dyn Fn(Option<&str>) -> Option<String>, fly: bool,
     beside: &mut dyn FnMut(&mut Collector)) -> Flight {
     let fe_kept = match ts::skipped(into, deep, db, root, key) {
-        Ok(absent) => return Flight::Done(absent),
+        Ok(_) => return Flight::Done,
         Err(fe) => fe,
     };
     if !fly {
@@ -67,7 +67,7 @@ pub(super) fn run(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: 
     let Some(parse) = deep.scripts.get("tsrows-node").cloned() else { return Flight::Grounded(fe_kept) };
     let handing = crate::trace::stage("typescript: read and hand over the state");
     let (state, recorded) = match laned(into, deep, db) {
-        Err(()) => return Flight::Done(false),
+        Err(()) => return Flight::Done,
         Ok(None) => return Flight::Grounded(fe_kept),
         Ok(Some(laned)) => laned,
     };
@@ -133,7 +133,7 @@ pub(super) fn run(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: 
     let absence = ts::absence(&into.notes[notes..]);
     ts::settle(db, key, absent, fe, fe_kept, clean && into.errors.len() == errors, absence);
     drop(stage);
-    Flight::Flown { absent, ms: landed.ms + landing.elapsed().as_millis() as u64 }
+    Flight::Flown { ms: landed.ms + landing.elapsed().as_millis() as u64 }
 }
 
 /// The state node is handed, in the lane, with the counters the database recorded; None when the half must not fly,
