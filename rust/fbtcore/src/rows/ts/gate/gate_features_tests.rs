@@ -219,3 +219,38 @@ fn nothing_declared_is_said_out_loud_rather_than_answered_silently() {
     assert!(gf.map.is_empty());
     assert_eq!(said.len(), 1, "an empty table would read as a claim about the application");
 }
+
+/// `this.list = this.first ? [..] : []` over a check, read by one gate named `gate`.
+fn iterated_list(gate: &str) -> Value {
+    let mut tables = direct();
+    tables["members"] = json!([
+        {"id": "m:isOn", "name": "isOn", "class": "c:svc", "file": "fl:1", "line": 3},
+        {"id": "m:first", "name": "first", "class": "c:cmp", "file": "fl:1", "line": 9},
+        {"id": "m:list", "name": "list", "class": "c:cmp", "file": "fl:1", "line": 10}
+    ]);
+    tables["assignments"] = json!([
+        {"id": "a:1", "scope": "this", "target": "first", "target_id": "m:first",
+         "class": "c:cmp", "operator": "=",
+         "value": {"$call": true, "$target": {"file": "/repo/app/svc.ts"},
+                   "$member": "FlagCodes.ALPHA"}},
+        {"id": "a:2", "scope": "this", "target": "list", "target_id": "m:list",
+         "class": "c:cmp", "operator": "=",
+         "value": {"$cond_expr": "x:t", "$then": ["a"], "$else": []}}
+    ]);
+    tables["expressions"] = json!([
+        {"id": "x:1", "role": "expr", "file": "fl:1", "line": 20,
+         "ast": {"k": "Read", "name": "list", "target": {"row": "m:list"}}},
+        {"id": "x:t", "role": "ternary", "file": "fl:1", "line": 10,
+         "ast": {"k": "Read", "name": "first", "target": {"row": "m:first"}}}
+    ]);
+    tables["gates"] = json!([{"id": "g:1", "name": gate, "gate_kind": "block", "component": "ng:1", "expression": "x:1"}]);
+    tables
+}
+
+#[test]
+fn an_at_for_block_iterates_like_ng_for_so_an_empty_else_proves_the_feature() {
+    // `[]` renders nothing only where the gate ITERATES: an `@for` as an `*ngFor`, never an `@if` (`[]` is truthy).
+    assert_eq!(features_of(&run(iterated_list("ForLoopBlock")), "g:1"), Some(vec!["ALPHA".to_string()]));
+    assert_eq!(features_of(&run(iterated_list("ngForOf")), "g:1"), Some(vec!["ALPHA".to_string()]));
+    assert_eq!(features_of(&run(iterated_list("IfBlockBranch")), "g:1"), None);
+}

@@ -24,6 +24,10 @@
 //! that reads the loop's variable:
 //! a directive's config over the item is read per element (`Loops::expand`), and the link makes the key
 //! take that element's value instead of the union.
+//!
+//! AN `@for` BLOCK IS THE SAME LOOP (#41), though no gate: its node declares the item (`$implicit`) and its
+//! collection is the `block_ForLoopBlock` expression on that node. The link names the gate that READS the
+//! item, never the loop, so a block loop's link is `loop:<gate>#<index>` exactly as an `*ngFor`'s is.
 
 use super::astreads::{is_read, read_rows, unwrap};
 use super::gate_values::EnumIndex;
@@ -170,10 +174,11 @@ impl Loops {
     pub fn new(store: &Store<'_>) -> Loops {
         let mut out = Loops { list: Vec::new(), by_node: HashMap::new(), parent: HashMap::new(), declared: HashMap::new() };
         let gates = store.table("gates");
-        if !gates.iter().any(|g| text(g, "name").as_deref() == Some("ngForOf")) {
+        let nodes = store.table("template_nodes");
+        let block = |n: &Row| text(n, "kind").as_deref() == Some("ForLoopBlock");
+        if !gates.iter().any(|g| text(g, "name").as_deref() == Some("ngForOf")) && !nodes.iter().any(block) {
             return out;
         }
-        let nodes = store.table("template_nodes");
         for n in nodes.iter() {
             let Some(id) = id_of(n, "id") else { continue };
             if let Some(parent) = id_of(n, "parent") {
@@ -274,8 +279,19 @@ impl Loops {
         // A LIST EVERY PARENT HANDS TO AN `@Input` is the child's (`key_inputs`).
         let handed = super::key_inputs::input_lists(store, &lists, &src, &branches);
         lists.extend(handed);
-        for g in gates.iter().filter(|g| text(g, "name").as_deref() == Some("ngForOf")) {
-            let (Some(top), Some(expr)) = (id_of(g, "node"), id_of(g, "expression")) else { continue };
+        // THE LOOP AND ITS COLLECTION, two ways: an `ngForOf` gate on the `*ngFor` wrapper, its expression the collection;
+        // an `@for` block, which is no gate - its collection is the `block_ForLoopBlock` expression on its own node.
+        // Either node declares the item as its `$implicit` variable.
+        let blocks: HashSet<String> = nodes.iter().filter(|n| block(n)).filter_map(|n| id_of(n, "id")).collect();
+        let iterated = gates
+            .iter()
+            .filter(|g| text(g, "name").as_deref() == Some("ngForOf"))
+            .filter_map(|g| Some((id_of(g, "node")?, id_of(g, "expression")?)))
+            .chain(expressions.iter().filter(|e| text(e, "kind").as_deref() == Some("block_ForLoopBlock")).filter_map(|e| {
+                let node = id_of(e, "node").filter(|n| blocks.contains(n))?;
+                Some((node, id_of(e, "id")?))
+            }));
+        for (top, expr) in iterated {
             let Some(ast) = expr_by_id.get(&expr).and_then(|e| e.get("ast")).filter(|a| !a.is_null()) else { continue };
             let Some(items) = read_rows(unwrap(ast)).iter().find_map(|r| lists.get(r)) else { continue };
             let variable = match nodes.iter().find(|n| id_of(n, "id").as_deref() == Some(top.as_str())).and_then(|n| n.get("variables")) {

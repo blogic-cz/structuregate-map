@@ -53,13 +53,17 @@ Beside the shared tables it adds the FRAMEWORK tables:
   in front with `+` (`BASE + `.${name}.tip``, through `( )` and either arm of `?:`) leads the first piece.
 * **Block nodes** (`template_nodes.kind`): an `@switch` case is the parent of its content; a fall-through group
   (`@case (1) @case (2)`) is a `SwitchBlockCaseGroup` row that no case gates. `@let` carries `name`, its expression
-  `expressions.kind = 'block_LetDeclaration'` and no gate. `@for` lists `context_vars` and `context_aliases`
-  (`{name, value}`). `@defer` lists `triggers`, `prefetch_triggers`, `hydrate_triggers` and `trigger_refs`
+  `expressions.kind = 'block_LetDeclaration'` and no gate. `@for`'s collection is a `block` gate named
+  `ForLoopBlock` (as `*ngFor`'s `ngForOf`; its `track` is no gate), and `@empty` is the loop's SIBLING, outside that
+  gate. `@for` lists `context_vars` and `context_aliases` (`{name, value}`). `@defer` lists `triggers`, `prefetch_triggers`, `hydrate_triggers` and `trigger_refs`
   (`{phase, trigger, reference}`); its `when` conditions are `expressions` (`defer_when`, `defer_prefetch_when`,
   `defer_hydrate_when`), never gates - the placeholder shows while they are false. An ICU's value and inner
   `{{ }}` are rows under it. A read rooted at an arrow function's parameter is no read (`param` on its `Read`).
   `@for` (its item `$implicit`, its context variables) and `@if (x; as u)` list what they bind in `variables`, as
-  `*ngFor` does: a read of such a name, or of a `@let`, never resolves to a component member of that name.
+  `*ngFor` does: a read of such a name, or of a `@let`, never resolves to a component member of that name. An
+  `as` alias (`@if`, `*ngIf`) of a read chain or a pipe over one resolves through its condition's type, as an `@for`
+  item through its collection's. An `@case` restricts its `@switch` in `gate_values` as `*ngSwitchCase` does, and an
+  `@for` over a list of objects carries per-element key sites and `loop:` links as `*ngFor` does.
 * **A template's tables have no `file`** - a binding hangs off a template node - so join by the ids; every
   row carries `owner_file`. A body's `calls`, `locals`, `assignments`, `returns`, `raises`, `branches`,
   `handlers`, `switch_cases` and the literal tables carry `file` too, as every other half does. `_meta` publishes what SQLite cannot record: the 43 id prefixes, 129 joins and which
