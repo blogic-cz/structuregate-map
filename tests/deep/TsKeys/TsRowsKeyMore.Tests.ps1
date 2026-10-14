@@ -331,4 +331,85 @@ Test-Case 'tsrows keys: a field only written in a method and a getter nothing re
     Assert-Line $r 'demo.kept | 1 | CComponent | -'
     Assert-Line $r 'demo.alt | 1 | CComponent | -'
 }
+
+# Two components of one shape, each its own templateUrl: the count template reads `showRange` (the getter calling the
+# private writer) and `floorTitle`, the floor template `rangeCode` alone. Each FILE writes `rangeCode`, so another file's
+# `prop_reads` spelling the name is no read of it when every one is a write; and a getter's `return` of a ternary of
+# keys holds both arms.
+Test-Case 'tsrows keys: a field another file only writes and a getter returning a ternary nothing reads are no sites of their keys' {
+    $class = {
+        param([string]$name)
+        "import { Component, Input } from '@angular/core';`n" +
+        "import { Kind } from './kinds';`n" +
+        "@Component({ selector: 'demo-$($name.ToLower())', templateUrl: './$($name.ToLower()).component.html' })`n" +
+        "export class $($name)Component {`n  @Input() model!: { kind: Kind };`n" +
+        "  @Input() a = false;`n  @Input() b = false;`n  @Input() flat = false;`n" +
+        "  get showRange(): boolean {`n    this.changeCodes();`n    return this.a || this.b;`n  }`n" +
+        "  rangeCode = 'demo.range';`n" +
+        "  get floorTitle(): string { return this.flat ? 'demo.floors' : 'demo.houseFloors'; }`n" +
+        "  private changeCodes(): void {`n    if (this.model.kind === Kind.Flat) {`n      this.rangeCode = 'demo.range';`n" +
+        "    } else if (this.model.kind === Kind.Home) {`n      this.rangeCode = 'demo.houseRange';`n    }`n  }`n}`n"
+    }
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/kinds.ts' = "export enum Kind { Home = 1, Flat = 2, Life = 3 }`n"
+        'apps/shop/src/count.component.ts' = (& $class 'Count')
+        'apps/shop/src/count.component.html' = "<div *ngIf=`"showRange`">r</div><b [title]=`"floorTitle`">f</b>`n"
+        'apps/shop/src/floor.component.ts' = (& $class 'Floor')
+        'apps/shop/src/floor.component.html' = "<div [title]=`"rangeCode`">r</div>`n"
+        'apps/shop/src/root.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { Kind } from './kinds';`n" +
+            "@Component({ selector: 'demo-root', template: '<demo-count [model]=`"m`"></demo-count><demo-floor [model]=`"m`"></demo-floor>' })`n" +
+            "export class RootComponent { m = { kind: Kind.Life }; }`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"range":"R","houseRange":"H","floors":"F","houseFloors":"G"}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || coalesce((SELECT group_concat(name, ',') FROM (SELECT c.name FROM json_each(k.components) j " +
+        "JOIN components c ON c.id = j.value ORDER BY c.name)), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
+    # the floor template reads `rangeCode`: its initializer and both writes stay; the count one reads it nowhere
+    Assert-Line $r 'demo.range | FloorComponent'
+    Assert-Line $r 'demo.houseRange | FloorComponent'
+    # the count template reads `floorTitle`: both arms of its return stay; the floor one reads it nowhere
+    Assert-Line $r 'demo.floors | CountComponent'
+    Assert-Line $r 'demo.houseFloors | CountComponent'
+    # the floor's ways keep their branch: the initializer's ungated one and the `if`'s
+    $w = Invoke-TsRowsQ $made.Db "SELECT key || ' ' || n_paths AS n FROM key_reach WHERE key IN ('demo.range', 'demo.houseRange')"
+    Assert-Line $w 'demo.range 2'
+    Assert-Line $w 'demo.houseRange 1'
+}
+
+# A write through ANOTHER receiver is no class's own write: `notice.infoMessage = 'k'` on an instance a factory made, in a
+# component's method and in a free function, keeps its literal a site of the component under its gate, though nothing
+# reads `infoMessage` by name but those two writes.
+Test-Case 'tsrows keys: a key written to a member of a made instance stays a site of the component writing it' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/kinds.ts' = "export enum Step { Start = 1, Result = 2 }`n"
+        'apps/shop/src/factory.ts' = "export class Factory {`n  create<T>(type: new () => T): T { return new type(); }`n}`n"
+        'apps/shop/src/notice.component.ts' = "import { Component } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-notice', template: '<p>n</p>' })`n" +
+            "export class NoticeComponent {`n  titleInfo = '';`n  infoMessage = '';`n}`n"
+        'apps/shop/src/result.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { Factory } from './factory';`nimport { NoticeComponent } from './notice.component';`n" +
+            "@Component({ selector: 'demo-result', template: '<button (click)=`"showNotice()`">q</button>' })`n" +
+            "export class ResultComponent {`n  constructor(private factory: Factory) {}`n" +
+            "  showNotice(): void {`n    const notice = this.factory.create(NoticeComponent);`n" +
+            "    notice.titleInfo = 'demo.notification';`n    notice.infoMessage = 'demo.notSupported';`n  }`n}`n"
+        'apps/shop/src/notices.ts' = "import { Factory } from './factory';`nimport { NoticeComponent } from './notice.component';`n" +
+            "export function showUnsupported(factory: Factory): void {`n  setTimeout(() => {`n" +
+            "    const notice = factory.create(NoticeComponent);`n    notice.titleInfo = 'demo.notification';`n" +
+            "    notice.infoMessage = 'demo.notSupported';`n  }, 10);`n}`n"
+        'apps/shop/src/root.component.ts' = "import { Component } from '@angular/core';`nimport { Step } from './kinds';`n" +
+            "@Component({ selector: 'demo-root', template: '<demo-result *ngIf=`"step === Step.Result`"></demo-result>' })`n" +
+            "export class RootComponent { Step = Step; step: Step = Step.Start; }`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"notification":"N","notSupported":"S"}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.n_paths || ' | ' || coalesce((SELECT group_concat(c.name, ',') FROM json_each(k.components) j " +
+        "JOIN components c ON c.id = j.value), '-') || ' | ' || coalesce(json_extract(k.always_values, '$[0].values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
+    Assert-Line $r 'demo.notSupported | 1 | ResultComponent | ["Result"]'
+    Assert-Line $r 'demo.notification | 1 | ResultComponent | ["Result"]'
+}
 }
