@@ -193,6 +193,7 @@ pub fn run(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::A
         refresh::said(into, &deep.db, clock, replayed);
     }
     refresh::roots(into, &deep.db, &deep.roots);
+    refresh::outputs(into, &deep.db, deep.map_out.as_slice());
 }
 
 /// Every half and pass, in order. Whether the passes over the finished rows were said again rather than run; None
