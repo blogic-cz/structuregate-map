@@ -97,6 +97,10 @@ pub mod key_returned;
 pub mod key_outlets;
 #[path = "key/routes/key_routes.rs"]
 pub mod key_routes;
+#[path = "key/routes/key_unread.rs"]
+pub mod key_unread;
+#[path = "key/routes/key_called.rs"]
+pub mod key_called;
 pub mod sourcescan;
 pub mod sourcetrace;
 pub mod store;

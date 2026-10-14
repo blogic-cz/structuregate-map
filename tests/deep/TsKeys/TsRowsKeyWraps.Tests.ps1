@@ -2,7 +2,8 @@
     A return that WRAPS a translate call hands its key to the field holding the call
     (`rust/fbtcore/src/rows/ts/key/fields/key_follow.rs`, `Returned::through`): an object's property value, a
     `+` chain's part, the argument of `Promise.resolve`; a list's element property is a site only where an `*ngFor`
-    reads it (`key/key_loops.rs`). The argument of any other call renders nothing in the field.
+    reads it (`key/key_loops.rs`); a `filter`/`slice` of a list hands back what its receiver does. The argument of any
+    other call renders nothing in the field.
     Its helpers are `TsRows.Helpers.ps1`.
 #>
 
@@ -53,5 +54,32 @@ Test-Case 'tsrows keys: a translate call wrapped in an object, a concat, a Promi
     # the list's other property is read by no template, and an argument of another call renders nothing in the field
     Assert-NoLine $r 'demo.list.other | field_binding | HostComponent'
     Assert-NoLine $r 'demo.arg.x | field_binding | HostComponent'
+}
+
+Test-Case 'tsrows keys: a key a callee returns inside a filtered list reaches the template that loops over it' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/kinds.ts' = "export enum Kind { Home = 1, Flat = 2, Life = 3 }`nexport function isHome(kind: Kind): boolean { return kind === Kind.Home; }`n"
+        'apps/shop/src/translate.service.ts' = "export class TranslateService { getTranslation(key: string): string { return key; } }`n"
+        'apps/shop/src/label-helper.service.ts' = "import { Injectable } from '@angular/core';`nimport { TranslateService } from './translate.service';`n" +
+            "@Injectable({ providedIn: 'root' })`nexport class LabelHelperService {`n  constructor(private translate: TranslateService) {}`n" +
+            "  text(): { title: string } { return { title: this.translate.getTranslation('demo.a.title') }; }`n}`n"
+        'apps/shop/src/facade.service.ts' = "import { Injectable } from '@angular/core';`nimport { Kind, isHome } from './kinds';`n" +
+            "import { LabelHelperService } from './label-helper.service';`n@Injectable({ providedIn: 'root' })`nexport class FacadeService {`n" +
+            "  constructor(private helper: LabelHelperService) {}`n" +
+            "  sections(model: { kind: Kind }): ({ title: string } | null)[] { return [this.homeSection(model)].filter((s) => s !== null); }`n" +
+            "  homeSection(model: { kind: Kind }): { title: string } | null {`n    if (isHome(model.kind)) {`n      return this.helper.text();`n    }`n    return null;`n  }`n}`n"
+        'apps/shop/src/root.component.ts' = "import { Component } from '@angular/core';`nimport { Kind } from './kinds';`nimport { FacadeService } from './facade.service';`n" +
+            "@Component({ selector: 'demo-root', template: '<span *ngFor=`"let s of sections`">{{ s?.title }}</span>' })`n" +
+            "export class RootComponent {`n  model = { kind: Kind.Life };`n  constructor(private facade: FacadeService) {}`n" +
+            "  get sections() { return this.facade.sections(this.model); }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"a":{"title":"T"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || k.n_paths || ' | ' || c.name AS reach FROM key_reach k, " +
+        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    # a `filter` keeps some of the receiver's elements, so it hands back what they do
+    Assert-Line $r 'demo.a.title | field_binding | 1 | RootComponent'
 }
 }

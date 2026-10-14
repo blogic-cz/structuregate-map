@@ -281,7 +281,11 @@ internal sealed class CsModels
         var walked = new HashSet<string>(wanted.Select(w => w.Abs), StringComparer.OrdinalIgnoreCase);
         foreach (var generated in project.Generated.Where(g => !walked.Contains(g)))
         {
-            try { parsed.Add(CSharpSyntaxTree.ParseText(File.ReadAllText(generated), options, generated)); }
+            try
+            {
+                parsed.Add(CSharpSyntaxTree.ParseText(File.ReadAllText(generated), options, generated));
+                CsRows.GeneratedOnDisk.TryAdd(generated, 0);
+            }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { /* not authored */ }
         }
         // The global usings a BUILD would have written, when none did - see CsProject.Usings.

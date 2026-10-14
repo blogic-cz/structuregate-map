@@ -38,8 +38,13 @@ internal sealed partial class CsRows
                 var kind = field is EventFieldDeclarationSyntax ? "event"
                     : field.Modifiers.Any(m => m.IsKind(SyntaxKind.ConstKeyword)) ? "const" : "field";
                 foreach (var declarator in field.Declaration.Variables)
+                {
                     Member(declarator, declarator.Identifier.ValueText, kind, field.Declaration.Type, field.Modifiers, [],
                         declarator.Initializer?.Value, field);
+                    // A FIELD'S ATTRIBUTES ARE `decorators` ROWS as a property's are (a property is a `functions` row
+                    // and gets them there): only their names reached `members.attributes`, never `symbol` or `arg_values`.
+                    Attributes(field.AttributeLists, declarator.Identifier.ValueText, kind);
+                }
                 break;
         }
     }

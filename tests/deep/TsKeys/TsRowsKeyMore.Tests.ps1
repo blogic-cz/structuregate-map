@@ -238,4 +238,47 @@ Test-Case 'tsrows keys: key_reach.paths names each way - its render_path row and
     Assert-Line $w 'demo.list.b | RootComponent>ListComponent | - | vm.kind === Kind.Flat'
     Assert-Line $w 'demo.list.b | RootComponent>ListComponent | - | -'
 }
+
+Test-Case 'tsrows keys: a component field nothing reads is no site of the key its initializer holds' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/kinds.ts' = "export enum Kind { Home = 1, Flat = 2, Life = 3 }`n"
+        'apps/shop/src/translate.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "@Component({ selector: 'translate', standalone: true, template: '<span>{{ text }}</span>' })`n" +
+            "export class TranslateComponent { @Input() text!: string; }`n"
+        # A shows every key, under a kind condition
+        'apps/shop/src/a.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "import { Kind } from './kinds';`n" +
+            "@Component({ selector: 'demo-a', template: '<div *ngIf=`"kind === Kind.Home`">" +
+            "<translate [text]=`"labelCode`"></translate><translate [text]=`"keptCode`"></translate>" +
+            "<translate [text]=`"selfCode`"></translate></div>' })`n" +
+            "export class AComponent { Kind = Kind; @Input() kind!: Kind;`n" +
+            "  labelCode = 'demo.label'; keptCode = 'demo.kept'; selfCode = 'demo.self'; }`n"
+        # B declares a field of the same key and binds only another: nothing reads `labelCode` of B
+        'apps/shop/src/b.component.ts' = "import { Component } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-b', template: '<translate [text]=`"otherCode`"></translate>' })`n" +
+            "export class BComponent { labelCode = 'demo.label'; otherCode = 'demo.other'; }`n"
+        # C's own TypeScript reads its field, and D hands `this` away: both may still use the key
+        'apps/shop/src/c.component.ts' = "import { Component } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-c', template: '<i></i>' })`n" +
+            "export class CComponent { keptCode = 'demo.kept'; log(): string { return this.keptCode; } }`n"
+        'apps/shop/src/d.component.ts' = "import { Component } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-d', template: '<i></i>' })`n" +
+            "export class DComponent { selfCode = 'demo.self'; pick(k: string): string { return (this as any)[k]; } }`n"
+        'apps/shop/src/root.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { Kind } from './kinds';`n" +
+            "@Component({ selector: 'demo-root', template: '<demo-a [kind]=`"kind`"></demo-a><demo-b></demo-b><demo-c></demo-c><demo-d></demo-d>' })`n" +
+            "export class RootComponent { kind: Kind = Kind.Life; }`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"label":"L","other":"O","kept":"K","self":"S"}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["translate:text"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.n_paths || ' | ' || (SELECT group_concat(c.name, ',') FROM json_each(k.components) j " +
+        "JOIN components c ON c.id = j.value) || ' | ' || coalesce(json_extract(k.always_values, '$[0].values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
+    # B's field is never read, so A's `*ngIf` is the only way to the key
+    Assert-Line $r 'demo.label | 1 | AComponent | ["Home"]'
+    # read in C's own TypeScript, or reachable through D's `this[k]`: each keeps its ungated literal site
+    Assert-Line $r 'demo.kept | 2 | AComponent,CComponent | -'
+    Assert-Line $r 'demo.self | 2 | AComponent,DComponent | -'
+}
 }

@@ -260,7 +260,7 @@ Test-Case 'tsrows keys: a stronger route in one component never drops the compon
             "  run(): void { this.t.getTranslation('demo.shared'); }`n}`n"
         'apps/shop/src/gamma.component.ts' = "import { Component } from '@angular/core';`n" +
             "@Component({ selector: 'demo-gamma', standalone: true, template: '<p>x</p>' })`n" +
-            "export class GammaComponent {`n  readonly key = 'demo.shared';`n}`n"
+            "export class GammaComponent {`n  readonly key = 'demo.shared';`n  label(): string { return this.key; }`n}`n"
         'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"shared":"a"}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
     }
@@ -268,7 +268,8 @@ Test-Case 'tsrows keys: a stronger route in one component never drops the compon
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
         "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
-    # the route is the strongest present; every component any site reaches stays listed
+    # the route is the strongest present; every component any site reaches stays listed - Gamma's field is READ
+    # (`label`): a field nothing reads is no site at all (divergence #44)
     Assert-Line $r 'demo.shared | field_binding | AlphaComponent'
     Assert-Line $r 'demo.shared | field_binding | BetaComponent'
     Assert-Line $r 'demo.shared | field_binding | GammaComponent'

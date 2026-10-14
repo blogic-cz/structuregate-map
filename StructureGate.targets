@@ -82,6 +82,8 @@
       <_StructureGateInput Include="define%09$([MSBuild]::Escape('$(DefineConstants)'))" />
       <_StructureGateInput Include="@(ReferencePathWithRefAssemblies->'ref%09%(FullPath)')" />
       <_StructureGateInput Include="@(Compile->'compile%09%(FullPath)')" />
+      <_StructureGateInput Include="analyzers%09listed" />
+      <_StructureGateInput Include="@(Analyzer->'analyzer%09%(FullPath)')" />
     </ItemGroup>
     <WriteLinesToFile File="$(ProjectDir)$(IntermediateOutputPath)structuregate.inputs.tsv"
                       Lines="@(_StructureGateInput)" Overwrite="true" WriteOnlyWhenDifferent="true" />

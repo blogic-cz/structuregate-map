@@ -75,6 +75,13 @@ The C# rows are SEMANTIC where a compilation can be built: files are sent PROJEC
 binds. No project, no references, no framework pack → `model` is null, every resolved column is "" and
 `files.semantic` is 0. Never let a resolved column be filled by a guess — an empty one is the honest answer.
 
+A GENERATOR'S LEFT-OVER OUTPUT IS NOT ALWAYS PROVABLE (#58): MSBuild never deletes `obj/**/generated`, so a removed
+generator's last `.g.cs` stays and is compiled beside the current one. The build record lists its `Analyzer` items
+(`analyzer\t<path>`, after `analyzers\tlisted`), and `generated/<assembly>/..` of an assembly it does not list is dropped
+(`project.rs::current`); a generator TYPE removed from an assembly still loaded leaves nothing that proves it, so an
+error any declaration of such a file takes part in is `diagnostics.kind = 'generated'` (`CsRows.InvolvesGenerated`),
+never guessed further. Never drop by age: the build rewrites only what ran.
+
 A RESTORED, NEVER-BUILT TREE is the common case, and three rules keep it bound (`csproj/project.rs`, `CsProject.Winners`, `fingerprint` in `mapper/deep/driven.rs`):
 an assembly name shipped by both a package and the framework goes to the HIGHER assembly version, the framework
 on a tie (a `System.Runtime/4.3.0` facade once shadowed the framework's own - thousands of errors, many calls

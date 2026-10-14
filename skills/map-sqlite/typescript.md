@@ -49,6 +49,14 @@ Beside the shared tables it adds the FRAMEWORK tables:
   `gate_values` what hides a node (`gates.gate_kind = 'hidden'` is `[hidden]`/`[attr.hidden]`, whose `expression` is a row holding the NEGATED condition) (`op` in/not_in/unknown; `listed_json` what a config object lists, even an
   exclusion the map cannot polarise); `state_*` NgRx; `di`/`injectables` injection.
 * **`key_reach.paths`** lists a key's ways, one `{path, own}` per way (`n_paths` entries). `path` joins `render_path.id`, may repeat, and is renumbered every build, so only join within one DB. `own` holds the ids the way holds beyond that row's `gates`/`branches`. Fold a per-way fact the map does not compute over `json_each(k.paths)` joined to `render_path` (AND along `gates ∪ branches ∪ own`, UNION over entries). Never filter `render_path` by `key_reach.components`.
+* **A component field NOTHING reads is no site of the key its initializer holds**: `labelCode = 'k'` in a class whose
+  template binds only another field adds no way to `key_reach`. `files.prop_reads` (`{name: count}`, every property name the file reads,
+  unresolved) and `files.this_indexed` (1 when the file hands `this` to anything but `this.x`/`.bind`) are what proves it.
+* **A branch around the call of a PRIVATE method holds inside it**: a component the method creates in code
+  (`render_path.branches`) and a key it translates (`key_reach.always_branches`) carry the `if` every call of it sits in,
+  when every read of the method is such a call. A public method carries only the creating call's own `if`.
+* **A gate through a guarded method or a ternary**: a field set from `this.isA()` over `if (C) { return E; } return false;`
+  restricts as `C && E`, and `c ? isHome(..) : isFlat(..)` as the union of both arms (`gate_values`).
 * **`template_literals.parts`** are a template's literal pieces, its `holes` what fills them; a string constant joined
   in front with `+` (`BASE + `.${name}.tip``, through `( )` and either arm of `?:`) leads the first piece.
 * **Block nodes** (`template_nodes.kind`): an `@switch` case is the parent of its content; a fall-through group

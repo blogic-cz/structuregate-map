@@ -72,13 +72,14 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
     }
     let (classes, by_symbol) = classes(conn, csharp)?;
     // A CLASS'S OWN ROUTE: its attribute is on the class row's target, and its `cls` is the class AROUND it.
-    let mut routes: HashMap<(String, String), String> = HashMap::new();
+    // EVERY `[Route]` ON A CLASS IS A PREFIX OF ITS OWN (#59): `[Route("api/v1/x")] [Route("api/v2/x")]` serves both.
+    let mut routes: HashMap<(String, String), Vec<String>> = HashMap::new();
     let mut methods: BTreeMap<(String, String, String), Method> = BTreeMap::new();
     for d in &decorators {
         let name = attribute(&d.name);
         match d.kind.as_str() {
             "class" | "struct" | "record" | "interface" if name == "Route" => {
-                routes.insert((d.file.clone(), d.target.clone()), d.template.clone().unwrap_or_default());
+                routes.entry((d.file.clone(), d.target.clone())).or_default().push(d.template.clone().unwrap_or_default());
             }
             "method" => {
                 let slot = methods.entry((d.file.clone(), d.cls.clone(), d.target.clone())).or_default();
@@ -102,22 +103,30 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
             (true, None) => continue,
             _ => m.verbs.clone(),
         };
-        let class_route = class_route(&(file.clone(), cls.clone()), &routes, &classes, &by_symbol, 0).unwrap_or_default();
+        let class_routes = class_route(&(file.clone(), cls.clone()), &routes, &classes, &by_symbol, 0).unwrap_or_else(|| vec![String::new()]);
         for (verb, own) in verbs {
             let written = own.filter(|t| !t.is_empty()).or_else(|| m.route.clone()).unwrap_or_default();
-            let template = combine(&class_route, &written, cls, method);
-            out.push(Endpoint {
-                file: paths.get(file).map(|p| p.to_string()).unwrap_or_default(),
-                cls: cls.clone(),
-                method: method.clone(),
-                line: m.line,
-                verb: verb.to_string(),
-                route: endpoint_route(&template),
-                template,
-            });
+            let mut made: Vec<String> = Vec::new();
+            for class_route in &class_routes {
+                let template = combine(class_route, &written, cls, method);
+                // an absolute method template ignores every class route: one endpoint, not one per prefix
+                if made.contains(&template) {
+                    continue;
+                }
+                made.push(template.clone());
+                out.push(Endpoint {
+                    file: paths.get(file).map(|p| p.to_string()).unwrap_or_default(),
+                    cls: cls.clone(),
+                    method: method.clone(),
+                    line: m.line,
+                    verb: verb.to_string(),
+                    route: endpoint_route(&template),
+                    template,
+                });
+            }
         }
     }
-    out.sort_by(|a, b| (&a.file, a.line, &a.verb).cmp(&(&b.file, b.line, &b.verb)));
+    out.sort_by(|a, b| (&a.file, a.line, &a.verb, &a.template).cmp(&(&b.file, b.line, &b.verb, &b.template)));
     Ok(out)
 }
 
@@ -145,8 +154,8 @@ fn classes(conn: &Connection, csharp: &HashMap<String, String>) -> rusqlite::Res
     Ok((held, by_symbol))
 }
 
-/// A class's own `[Route]`, or the nearest base class's.
-fn class_route(key: &(String, String), routes: &HashMap<(String, String), String>, classes: &Classes, by_symbol: &HashMap<String, (String, String)>, depth: usize) -> Option<String> {
+/// A class's own `[Route]`s, or the nearest base class's.
+fn class_route(key: &(String, String), routes: &HashMap<(String, String), Vec<String>>, classes: &Classes, by_symbol: &HashMap<String, (String, String)>, depth: usize) -> Option<Vec<String>> {
     if let Some(own) = routes.get(key) {
         return Some(own.clone());
     }

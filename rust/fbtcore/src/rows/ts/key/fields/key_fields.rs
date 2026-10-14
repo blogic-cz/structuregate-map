@@ -104,7 +104,7 @@ fn callee_keys(value: Option<&Value>, reader: &Returned<'_, '_>) -> Vec<(String,
 /// `callee_keys` of a value written at the expression row `site`: the callee's own branches ride along (`Returned::call_at`).
 fn callee_keys_at(value: Option<&Value>, site: Option<&str>, reader: &Returned<'_, '_>) -> Vec<(String, Vec<String>)> {
     let mut found = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = super::key_follow::Seen::default();
     // A FIELD OR LOCAL HOLDING A DICTIONARY CALL ITSELF (`opts = this.t.getTranslationDictionary('p')`) holds every key
     // under the prefix, so the template reading it is a position for each. Only a dictionary call: a single-key
     // translate call written straight to a field keeps its `ts_call`/`literal` reading.

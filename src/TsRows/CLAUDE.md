@@ -86,6 +86,11 @@ its `params` and its `rest` parameter.
   and `c && this.add(...)` stamp each `calls`, `assignments`, `returns` and `locals` row in an arm with the
   condition's `expressions` id, `!`-prefixed on the false side; a condition in statement position gets its own
   `logic`/`ternary` `expressions` row.
+- **What property names a file reads** (rows 51, `TsDecls/TsPropReads.mjs`): `files.prop_reads` is `{name: count}` of every name a property
+  access, a destructuring or a shorthand property spells - by NAME, never resolved, so it only over-counts - and
+  `files.this_indexed` is 1 when `this` is anything but the receiver of `this.x`/`this['x']` or a `.bind`/`.call`/`.apply`
+  argument. The closure reads them to prove a component field unread (`key/routes/key_unread.rs`, divergence #44) and every read
+  of a private method a call (`key/routes/key_called.rs`, #45).
 - **`template_shared_by_components`** is a fact about the TREE, read off the `templates` rows whether or not the
   `--ts-html` mirror is asked for. A `@for`'s TRACK expression (`block_track`, `TsTpl/TsTplExtract.mjs`) sits on
   the block's own node and must not overwrite the block's expression.

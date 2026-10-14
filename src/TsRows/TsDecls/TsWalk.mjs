@@ -27,6 +27,7 @@ import { collectComments, collectStrings, exportRow } from './TsText.mjs';
 import { createProgram, programFilePaths, projectSourceFiles } from './TsProgram.mjs';
 import { emit } from './TsRunIo.mjs';
 import { makeReadLog, surfaceOf } from './TsReads.mjs';
+import { propReads } from './TsPropReads.mjs';
 import { shapeOf } from './TsShape.mjs';
 
 /**
@@ -283,6 +284,11 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
         collectStrings(ts, store, sf, { file: fid }, propName, evalNode);
       } catch {
         diag.note('string_scan_failed');
+      }
+      try {
+        store.patch(fid, propReads(ts, sf));
+      } catch {
+        diag.note('prop_read_scan_failed');
       }
       const read = log.end(abs);
       store.patch(fid, { reads: read.reads, reads_deep: read.deep });

@@ -223,9 +223,11 @@ async function main() {
   // 49: an `@if … as u` / `*ngIf="x as u"` alias is typed from its condition (a read chain, or a pipe over one), so a
   // read through it carries a `target`.
   // 50: an `@for` collection is a `block` gate named `ForLoopBlock`, and `@empty` is the loop's sibling, not its child.
+  // 51: `files.prop_reads` (every property name a file reads) and `files.this_indexed` (it hands `this` away), for a
+  // component field nothing reads (`TsDecls/TsPropReads.mjs`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 50, build: args.build,
+    config: config.file, data: config.data, rows: 51, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

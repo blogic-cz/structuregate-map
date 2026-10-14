@@ -60,6 +60,8 @@ fn falsy(v: Option<&Value>) -> bool {
 /// Property id -> its definition, and whether it holds in both polarities.
 pub struct Props<'a> {
     defs: IndexMap<String, (Value, bool)>,
+    /// The definitions that are a METHOD's: read at a call of it, never at a bare read (a function is truthy).
+    methods: IndexSet<String>,
     calls: Calls<'a>,
 }
 
@@ -107,7 +109,10 @@ impl<'a> Props<'a> {
     pub fn new(store: &Store<'_>, idx: &'a EnumIndex, claimed: &dyn Fn(&str) -> bool) -> Props<'a> {
         let calls = Calls::new(store, idx, TsRows::new(store), claimed);
         let defs = Self::defs(store, idx, calls.rows());
-        Props { defs, calls }
+        let methods = store.table("members").iter()
+            .filter(|m| cell(m, "kind").as_deref() == Some("method"))
+            .filter_map(|m| cell(m, "id")).filter(|id| defs.contains_key(id)).collect();
+        Props { defs, methods, calls }
     }
 
     fn defs(store: &Store<'_>, idx: &EnumIndex, rows: &TsRows) -> IndexMap<String, (Value, bool)> {
@@ -141,6 +146,11 @@ impl<'a> Props<'a> {
                 returns.entry(m).or_default().push(r);
             }
         }
+        let locals = store.table("locals");
+        let local_init: IndexMap<String, String> = locals.iter()
+            .filter(|l| cell(l, "declared").as_deref() == Some("const") && l.get("value").is_none_or(|v| v.get("$fn").is_none()))
+            .filter_map(|l| Some((cell(l, "id")?, cell(l, "expression")?)))
+            .collect();
         let mut writes: IndexMap<String, Vec<&Row>> = IndexMap::new();
         let assignments = store.table("assignments");
         for a in assignments.iter() {
@@ -175,11 +185,18 @@ impl<'a> Props<'a> {
             let two_way = cell(m, "class")
                 .zip(cell(m, "name"))
                 .is_some_and(|(c, n)| written_by_template.contains(&format!("{c} {n}")));
+            // A METHOD OF NO PARAMETER returning `E` under a top-level `if (C)` and `false` everywhere else is
+            // `C && E` as such a getter is (#65): its call reads it (`walk`). One plain return is `gate_calls`'.
+            let bare_method = cell(m, "kind").as_deref() == Some("method")
+                && m.get("params").and_then(Value::as_array).is_none_or(|p| p.is_empty());
             match cell(m, "kind").as_deref() {
-                Some("getter") => {
+                Some("getter") | Some("method") if bare_method || cell(m, "kind").as_deref() == Some("getter") => {
                     let rs = returns.get(&id).map(|v| v.as_slice()).unwrap_or_default();
                     let plain = |r: &Row| ["branch", "case"].iter().all(|f| cell(r, f).is_none());
                     if let [r] = rs {
+                        if bare_method {
+                            continue;
+                        }
                         if let Some(ast) = tree(cell(r, "expression"), Some(id.clone())).filter(|_| plain(r)) {
                             out.insert(id, (ast, true));
                         }
@@ -192,6 +209,13 @@ impl<'a> Props<'a> {
                     let (Some(_), [r]) = (falses.first(), kept.as_slice()) else { continue };
                     let Some(b) = cell(r, "branch").and_then(|b| guards.get(&b)).filter(|_| cell(r, "case").is_none()) else { continue };
                     let cond = tree(cell(b, "condition_expr"), Some(id.clone()));
+                    // A `const` LOCAL TESTED AS THE CONDITION is its initializer: the read is a truth position, and a
+                    // const holds that value wherever it is read (#65: `const isA = isHome(...k); if (isA)`).
+                    let cond = match cond.as_ref().and_then(|c| c.get("target")).and_then(|t| t.get("row")).and_then(Value::as_str) {
+                        Some(row) if cond.as_ref().and_then(|c| c.get("k")).and_then(Value::as_str) == Some("Read") =>
+                            local_init.get(row).and_then(|x| tree(Some(x.clone()), Some(id.clone()))).or(cond),
+                        _ => cond,
+                    };
                     if let (Some(c), Some(e)) = (cond, tree(cell(r, "expression"), Some(id.clone()))) {
                         out.insert(id, (json!({"k": "Binary", "op": "&&", "left": c, "right": e}), true));
                     }
@@ -228,12 +252,25 @@ impl<'a> Props<'a> {
     /// `ast` with every read of a defined property replaced by its definition, to a small
     /// depth: a definition may read another defined property.
     pub fn expand(&self, ast: &Value) -> Value {
-        if self.defs.is_empty() && self.calls.is_empty() {
-            return ast.clone();
-        }
         let mut out = ast.clone();
         self.walk(&mut out, true, &mut Vec::new());
         out
+    }
+
+    /// `this.isA()` over a method of no parameter defined as `C && E` (`defs`): that definition, both ways.
+    fn guarded_call(&self, n: &Value, seen: &mut Vec<String>) -> Option<Value> {
+        if !n.get("args").and_then(Value::as_array).is_none_or(|a| a.is_empty()) {
+            return None;
+        }
+        let callee = n.get("receiver")?;
+        let own = matches!(callee.get("receiver").and_then(|r| r.get("k")).and_then(|k| k.as_str()), Some("This" | "Implicit"));
+        let row = callee.get("target")?.get("row")?.as_str()?.to_string();
+        let (def, _) = self.defs.get(&row).filter(|_| own && self.methods.contains(&row) && !seen.contains(&row))?;
+        seen.push(row);
+        let mut inner = def.clone();
+        self.walk(&mut inner, true, seen);
+        seen.pop();
+        Some(inner)
     }
 
     /// A call in truth position, replaced by its callee's return (`gate_calls`).
@@ -259,6 +296,8 @@ impl<'a> Props<'a> {
                 for (key, v) in o.iter_mut() {
                     let child_truth = match (kind.as_deref(), key.as_str()) {
                         (Some("Source"), "ast") | (Some("Not"), "expr") | (Some("Cond"), "cond") => truth || key == "cond",
+                        // A TERNARY'S ARMS ARE ITS VALUE, so in truth position they are too (#65).
+                        (Some("Cond"), "then" | "else") => truth,
                         (Some("Binary"), "left" | "right") => truth && logic,
                         _ => false,
                     };
@@ -270,13 +309,26 @@ impl<'a> Props<'a> {
         if !truth || seen.len() > 4 {
             return;
         }
+        if kind.as_deref() == Some("Cond") {
+            // `c ? a : b` IN TRUTH POSITION IS `(c && a) || (!c && b)`, exact both ways: an OR is the union of its
+            // sides (`gate_collapse::either`), so the arms' union is what holds only where `c` restricts nothing.
+            let (Some(c), Some(a), Some(b)) = (n.get("cond").cloned(), n.get("then").cloned(), n.get("else").cloned()) else { return };
+            *n = json!({"k": "Binary", "op": "||",
+                "left": {"k": "Binary", "op": "&&", "left": c.clone(), "right": a},
+                "right": {"k": "Binary", "op": "&&", "left": {"k": "Not", "expr": c}, "right": b}});
+            return;
+        }
         if matches!(kind.as_deref(), Some("Call" | "SafeCall")) {
+            if let Some(def) = self.guarded_call(n, seen) {
+                *n = def;
+                return;
+            }
             return self.inline(n, seen);
         }
         let read =matches!(n.get("k").and_then(|k| k.as_str()), Some("Read") | Some("SafeRead"));
         let own = matches!(n.get("receiver").and_then(|r| r.get("k")).and_then(|k| k.as_str()), Some("This") | Some("Implicit"));
         let Some(row) = n.get("target").and_then(|t| t.get("row")).and_then(|r| r.as_str()).map(str::to_string) else { return };
-        if !read || !own || seen.contains(&row) {
+        if !read || !own || seen.contains(&row) || self.methods.contains(&row) {
             return;
         }
         let Some((def, exact)) = self.defs.get(&row) else { return };
@@ -316,6 +368,20 @@ mod tests {
             "assignments": writes,
             "expressions": [{"id": "x:1", "ast": cmp()}],
         })
+    }
+
+    #[test]
+    fn a_ternary_in_truth_position_is_either_arm_under_its_side_of_the_condition() {
+        let p = props(json!({}));
+        let c = json!({"k": "Read", "name": "c", "receiver": {"k": "Implicit"}});
+        let (a, b) = (cmp(), json!({"k": "Literal", "v": true}));
+        let got = p.expand(&json!({"k": "Not", "expr": {"k": "Cond", "cond": c, "then": a, "else": b}}));
+        assert_eq!(got, json!({"k": "Not", "expr": {"k": "Binary", "op": "||",
+            "left": {"k": "Binary", "op": "&&", "left": c, "right": a},
+            "right": {"k": "Binary", "op": "&&", "left": {"k": "Not", "expr": c}, "right": b}}}));
+        // a ternary whose value is compared is no truth position, and is left alone
+        let compared = json!({"k": "Binary", "op": "===", "left": {"k": "Cond", "cond": c, "then": a, "else": b}, "right": b});
+        assert_eq!(p.expand(&compared), compared);
     }
 
     #[test]

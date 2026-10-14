@@ -141,6 +141,9 @@ impl Ids {
 /// The render DAG: child -> the sites that render it.
 pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Rc<str>, Vec<Edge>> {
     let returned = super::key_returned::returned_under(store, branches);
+    // A RENDER CREATED IN CODE runs under its creating call's chain, and under what every call of a private method
+    // holding it holds (#56, `key_called`).
+    let called = super::key_called::called_under(store, branches);
     let nodes = store.table("template_nodes");
     let mut chains: IndexMap<String, Vec<String>> = IndexMap::new();
     for n in nodes.iter() {
@@ -180,8 +183,13 @@ pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Rc<str>, V
             .collect();
         let to = ids.of(&to);
         let id = id_of(r, "id").unwrap_or_default();
-        let branches: Vec<Rc<str>> =
-            returned.get(&id).into_iter().flatten().map(|b| ids.of(b)).collect();
+        let mut branches: Vec<Rc<str>> = Vec::new();
+        for b in returned.get(&id).into_iter().chain(called.get(&id)).flatten() {
+            let b = ids.of(b);
+            if !branches.contains(&b) {
+                branches.push(b);
+            }
+        }
         edges.entry(to).or_default().push(Edge { id: ids.of(&id), parent: ids.of(&parent), gates, branches });
     }
     edges

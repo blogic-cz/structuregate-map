@@ -5,7 +5,9 @@
       * the model's enum and the component's are TWO declarations with the same name, members and values -
         one enum for a comparison; a twin with a different member or value stays `unknown`;
       * a getter reads an enum through a field holding the enum OBJECT (`this.shapeRef.Round`), as a template does;
-      * a NUMBER compared with an enum-typed value is the member it equals (none: `in []`); `>` stays `unknown`.
+      * a NUMBER compared with an enum-typed value is the member it equals (none: `in []`); `>` stays `unknown`;
+      * a private method of no parameter `if (C) { return E; } return false;` CALLED where a gate reads it is `C && E`,
+        and a ternary in truth position is `(c && a) || (!c && b)` (`gate/ts/gate_props.rs`).
     Its helpers are `TsRows.Helpers.ps1`.
 #>
 
@@ -82,6 +84,40 @@ Test-Case 'tsrows: a [hidden] binding gates its subtree on the negation of its c
     Assert-Line $r 'demo.hid.own | kind not_in ["Alpha"] | hidden'
     Assert-Line $r 'demo.hid.child | kind not_in ["Beta"] | hidden'
     Assert-Line $r 'demo.hid.if | kind in ["Gamma"] | structural'
+}
+
+Test-Case 'tsrows: a guarded method a field holds and a ternary of two predicates restrict as a getter does' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/kinds.ts' = "export enum Kind { Home = 1, Flat = 2, Life = 3 }`n" +
+            "export const isKind = (ids: Kind[]) => (...kinds: Kind[]) => kinds.some((k) => ids.includes(k));`n" +
+            "export const isHome = isKind([Kind.Home]);`nexport const isFlat = isKind([Kind.Flat]);`n" +
+            "export function isLocalEnv(): boolean { return true; }`n"
+        'apps/shop/src/a.component.ts' = "import { Component, Input, OnInit } from '@angular/core';`n" +
+            "import { Kind, isHome, isFlat, isLocalEnv } from './kinds';`n" +
+            "@Component({ selector: 'demo-a', template: '<i *ngIf=`"either`">a</i><b *ngIf=`"homeOnly`">b</b>" +
+            "<u *ngIf=`"arms`">c</u><s *ngIf=`"twice`">d</s><p *ngIf=`"isFlatGift`">e</p>' })`n" +
+            "export class AComponent implements OnInit {`n  @Input() modelKinds: Kind[] = [];`n  @Input() detail!: { Gift?: boolean };`n" +
+            "  either = false;`n  homeOnly = false;`n  arms = false;`n  twice = false;`n" +
+            "  ngOnInit() {`n" +
+            "    this.either = isLocalEnv() ? this.isHomeGift() : this.isFlatGift();`n" +
+            "    this.homeOnly = this.isHomeGift();`n" +
+            "    this.arms = isLocalEnv() ? isHome(...this.modelKinds) : isFlat(...this.modelKinds);`n" +
+            "    this.twice = this.isTwice();`n  }`n" +
+            "  private isHomeGift(): boolean {`n    const isHomeSelected = isHome(...this.modelKinds);`n" +
+            "    if (isHomeSelected) {`n      return !!this.detail?.Gift;`n    }`n    return false;`n  }`n" +
+            "  private isFlatGift(): boolean {`n    if (isFlat(...this.modelKinds)) {`n      return !!this.detail?.Gift;`n    }`n    return false;`n  }`n" +
+            "  private isTwice(): boolean {`n    if (isFlat(...this.modelKinds)) {`n      return true;`n    }`n    return !!this.detail?.Gift;`n  }`n}`n"
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db $script:TsEnumFormsSql
+    # each guarded method is `C && E`; the ternary's arms union while its condition restricts nothing
+    Assert-Line $r 'either => Kind modelKinds in ["Flat","Home"]'
+    Assert-Line $r 'homeOnly => Kind modelKinds in ["Home"]'
+    Assert-Line $r 'arms => Kind modelKinds in ["Flat","Home"]'
+    # a second return that is not `false`, and a method READ rather than called (a function is truthy): no row
+    Assert-NoLine $r 'twice =>'
+    Assert-NoLine $r 'isFlatGift =>'
 }
 
 }

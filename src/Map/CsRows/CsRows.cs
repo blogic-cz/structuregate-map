@@ -132,6 +132,31 @@ internal sealed partial class CsRows : CSharpSyntaxWalker
     /// </summary>
     private static readonly string[] GeneratorIds = ["CS8795", "CS0762"];
 
+    /// <summary>The generated files read off `obj` and compiled beside the authored ones (`CsModels`): a build's output the
+    /// map cannot prove current - a generator since removed leaves its last output on disk (#58).</summary>
+    internal static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> GeneratedOnDisk = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// AN ERROR A GENERATED FILE ON DISK TAKES PART IN - a candidate of the name that failed, or another location of the
+    /// error, declared in one: `CS0229` between an authored `Status` and one a removed generator left in `obj`. The map
+    /// cannot tell a left-over output from a current one, so the error is labelled `generated`, never told apart further.
+    /// </summary>
+    private static bool InvolvesGenerated(SemanticModel model, Diagnostic diagnostic)
+    {
+        if (GeneratedOnDisk.IsEmpty) return false;
+        bool onDisk(Location l) => l.SourceTree is { } t && GeneratedOnDisk.ContainsKey(t.FilePath);
+        if (onDisk(diagnostic.Location) || diagnostic.AdditionalLocations.Any(onDisk)) return true;
+        if (diagnostic.Location.SourceTree != model.SyntaxTree) return false;
+        try
+        {
+            var node = model.SyntaxTree.GetRoot().FindNode(diagnostic.Location.SourceSpan, getInnermostNodeForTie: true);
+            var info = model.GetSymbolInfo(node);
+            return info.CandidateSymbols.Append(info.Symbol).OfType<ISymbol>()
+                .Any(s => s.Locations.Any(onDisk));
+        }
+        catch (ArgumentException) { return false; }
+    }
+
     /// <summary>How many `generator` diagnostics this run recorded - said once, with what to set.</summary>
     internal static int GeneratorGaps;
 
@@ -163,7 +188,7 @@ internal sealed partial class CsRows : CSharpSyntaxWalker
                 ("func", ""),
                 ("line", line),
                 ("name", diagnostic.Id),
-                ("kind", generator ? "generator" : "error"),
+                ("kind", generator ? "generator" : InvolvesGenerated(model, diagnostic) ? "generated" : "error"),
                 ("source", diagnostic.GetMessage()));
         }
         if (errors > 0) rows.Count(file, errors);

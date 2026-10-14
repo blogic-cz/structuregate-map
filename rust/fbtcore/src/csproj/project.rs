@@ -46,7 +46,7 @@ pub fn read(csproj: &str, consumer: Option<&str>) -> Option<Value> {
         let mut built = from_record(csproj, &folder, &name, &framework, record, exclude, projects);
         // A BUILD'S Compile ITEMS NEVER HOLD A GENERATOR'S OUTPUT - it is added inside the compiler.
         if let Some(listed) = built["generated"].as_array_mut() {
-            listed.extend(emitted(&folder, &framework, &document).into_iter().map(Value::from));
+            listed.extend(emitted(csproj, &folder, &framework, &document).into_iter().map(Value::from));
         }
         return Some(built);
     }
@@ -60,7 +60,7 @@ pub fn read(csproj: &str, consumer: Option<&str>) -> Option<Value> {
     };
 
     let mut generated = written(&folder, &framework);
-    generated.extend(emitted(&folder, &framework, &document));
+    generated.extend(emitted(csproj, &folder, &framework, &document));
     let usings = if generated.iter().any(|g| g.to_ascii_lowercase().ends_with("globalusings.g.cs")) {
         String::new()
     } else {
@@ -416,7 +416,7 @@ const RAZOR_GENERATOR: &str = "Microsoft.NET.Sdk.Razor.SourceGenerators";
 /// project's `<CompilerGeneratedFilesOutputPath>` - present only when the project sets
 /// `<EmitCompilerGeneratedFiles>`. A generator cannot run here (NativeAOT loads no analyzer assembly), so its output
 /// read off disk is the only way a Mapperly `[Mapper]` partial gets the body it binds to.
-fn emitted(folder: &str, framework: &str, document: &roxmltree::Document) -> Vec<String> {
+fn emitted(csproj: &str, folder: &str, framework: &str, document: &roxmltree::Document) -> Vec<String> {
     let custom = disk::property(document, "CompilerGeneratedFilesOutputPath").filter(|p| !p.contains("$(") && !p.trim().is_empty());
     // NOTHING IS EMITTED UNLESS A PROJECT ASKS - the project or a `Directory.Build.props` above it - so `obj` is not
     // walked for a project that did not: every project's `obj` was, on every run, tens of seconds of a cold run on a large solution.
@@ -437,7 +437,27 @@ fn emitted(folder: &str, framework: &str, document: &roxmltree::Document) -> Vec
     if !disk::is_dir(&root) {
         return Vec::new();
     }
-    disk::files_below(&root, ".cs", RAZOR_GENERATOR)
+    let files = disk::files_below(&root, ".cs", RAZOR_GENERATOR);
+    // OUTPUT OF A GENERATOR ASSEMBLY THE BUILD NO LONGER LOADS IS LEFT-OVER (#58): MSBuild never deletes it, and compiled
+    // beside the current output it declares members twice (CS0229 on every use). Proven only by the build's own record
+    // listing its `Analyzer` items; without one, every file stays - nothing else says which generator ran.
+    match super::recorded::find(csproj, folder, framework).and_then(|r| r.analyzers) {
+        Some(analyzers) => current(files, &root, &analyzers),
+        None => files,
+    }
+}
+
+/// The files under `root` whose first folder - the generator's ASSEMBLY, `generated/<assembly>/<generator type>/x.g.cs` - is
+/// an assembly in `analyzers`. A file directly under `root` names no assembly and stays.
+fn current(files: Vec<String>, root: &str, analyzers: &[String]) -> Vec<String> {
+    let loaded: Vec<String> = analyzers.iter().map(|a| disk::stem(a).to_ascii_lowercase()).collect();
+    files.into_iter().filter(|file| {
+        let rel = Path::new(file).strip_prefix(root).ok().map(|p| p.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect::<Vec<_>>());
+        match rel.as_deref() {
+            Some([assembly, _, ..]) => loaded.contains(&assembly.to_ascii_lowercase()),
+            _ => true,
+        }
+    }).collect()
 }
 
 /// A project's emitted generator output, for its fingerprint: the same files `read` compiles, for the framework the
@@ -447,5 +467,22 @@ pub fn emitted_of(csproj: &str) -> Vec<String> {
     let Some(document) = disk::parse(&text) else { return Vec::new() };
     let targets: Vec<String> = disk::property(&document, "TargetFramework").or_else(|| disk::property(&document, "TargetFrameworks"))
         .unwrap_or_default().split(';').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect();
-    emitted(&folder, &framework::pick(&targets, None), &document)
+    emitted(csproj, &folder, &framework::pick(&targets, None), &document)
+}
+
+#[cfg(test)]
+mod emitted_tests {
+    use super::current;
+
+    #[test]
+    fn output_of_a_generator_assembly_the_build_no_longer_loads_is_dropped() {
+        let root = "/p/obj/Debug/net10.0/generated";
+        let files = vec![
+            format!("{root}/Demo.Gen/Demo.Gen.AlphaGenerator/Alpha.g.cs"),
+            format!("{root}/Demo.Beta/Demo.Beta.BetaGenerator/Beta.g.cs"),
+            format!("{root}/Loose.g.cs"),
+        ];
+        let kept = current(files, root, &["/nuget/demo.beta/1.0/analyzers/dotnet/cs/Demo.Beta.dll".to_string()]);
+        assert_eq!(kept, vec![format!("{root}/Demo.Beta/Demo.Beta.BetaGenerator/Beta.g.cs"), format!("{root}/Loose.g.cs")]);
+    }
 }

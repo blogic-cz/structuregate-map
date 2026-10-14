@@ -52,6 +52,8 @@ pub(super) struct Classes {
     /// The tables a `new` can sit in, read once when the first receiver asks which classes are built.
     tables: Vec<Rc<Vec<Row>>>,
     built: OnceCell<HashSet<String>>,
+    /// The members a subclass declares again, read when the first call asks.
+    overridden: OnceCell<HashSet<String>>,
 }
 
 fn tail(s: &str) -> String {
@@ -71,6 +73,7 @@ impl Classes {
         let mut out = Classes {
             by_tail, by_path, by_key: HashMap::new(), key_of: HashMap::new(), parent: HashMap::new(), subs: HashMap::new(), member: HashMap::new(),
             constructors: HashSet::new(), fn_parent: HashMap::new(), declared_in: HashMap::new(), inst: OnceCell::new(), tables: Vec::new(), built: OnceCell::new(),
+            overridden: OnceCell::new(),
         };
         let classes = store.table("classes");
         for c in classes.iter() {
@@ -209,6 +212,15 @@ impl Classes {
     /// The member of that name `class` declares or inherits.
     pub(super) fn member_of(&self, class: &str, name: &str) -> Option<&str> {
         self.chain(class).iter().find_map(|c| self.member.get(&(c.clone(), name.to_string()))).map(String::as_str)
+    }
+
+    /// A SUBCLASS DECLARES A MEMBER OF THE SAME NAME (#48): a call of `member` may run that body instead, so nothing its
+    /// own body proves holds for every call of it.
+    pub(super) fn overridden(&self, member: &str) -> bool {
+        self.overridden.get_or_init(|| {
+            let bases = |class: &String, name: &String| self.chain(class).into_iter().skip(1).filter_map(|b| self.member.get(&(b, name.clone())).cloned()).collect::<Vec<_>>();
+            self.member.keys().flat_map(|(class, name)| bases(class, name)).collect()
+        }).contains(member)
     }
 
     /// `member` is a constructor, or a callback written inside one (`Promise.resolve(x).then(() => { this.a = .. })`):
@@ -433,6 +445,15 @@ mod tests {
         got.sort();
         // Base itself, Built, and Inherits (which has no `tip` of its own, so Built's) - never Spare
         assert_eq!(got, vec![("c:1".into(), "m:1".into()), ("c:2".into(), "m:2".into()), ("c:4".into(), "m:2".into())]);
+    }
+
+    #[test]
+    fn a_member_a_subclass_declares_again_is_overridden_and_the_last_one_is_not() {
+        let classes = store(json!({}));
+        // Base's `tip` is declared again by Built and Spare; Built's by nobody (Inherits has none of its own)
+        assert!(classes.overridden("m:1"));
+        assert!(!classes.overridden("m:2"));
+        assert!(!classes.overridden("m:3"));
     }
 
     #[test]
