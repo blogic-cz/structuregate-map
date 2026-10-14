@@ -5,7 +5,7 @@ replaced per FILE, from python's own `ast` run in the tree's interpreter.
 
 **One `--root` per import root.** A tree that puts several folders on `sys.path` resolves `from core
 import x` inside each; a single root above them finds nothing, and the database answers wrongly about
-every module under them. Pass the roots the entry point passes (`_meta` `roots:python` lists them).
+every module under them. Pass the roots the entry point passes (`_meta` `roots` lists them; `roots:python` adds the prefix each one's paths carry).
 
 ## Its own tables
 

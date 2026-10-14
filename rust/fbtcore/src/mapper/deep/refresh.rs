@@ -83,6 +83,44 @@ pub fn said(into: &mut Collector, db: &str, clock: Clock, replayed: bool) {
     }
 }
 
+/// `_meta.roots`: EVERY `--root` the map was built from, as a JSON array of absolute folders in the order given. `root`
+/// is the first alone, written by every half's store (`rows/store.rs`), and a map of `src` and `test` read as a map of
+/// `src`. Kept beside it, never instead: every reader already takes `root`. WRITTEN ONLY WHEN IT DIFFERS, so a run that
+/// did nothing leaves the database untouched (see `said`); a file holding no `_meta` is not a map yet and is left alone.
+pub fn roots(into: &mut Collector, db: &str, roots: &[(String, String)]) {
+    if !Path::new(db).is_file() {
+        return;
+    }
+    let wanted = roots_value(roots);
+    let written = rusqlite::Connection::open(db).and_then(|conn| {
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        let meta: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = '_meta'", [], |r| r.get(0))?;
+        if meta == 0 {
+            return Ok(());
+        }
+        let held: Option<String> = conn
+            .query_row("SELECT value FROM _meta WHERE key = 'roots'", [], |r| r.get(0))
+            .or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })?;
+        if held.as_deref() == Some(wanted.as_str()) {
+            return Ok(());
+        }
+        conn.execute("DELETE FROM _meta WHERE key = 'roots'", [])?;
+        conn.execute("INSERT INTO _meta (key, value) VALUES ('roots', ?1)", [&wanted]).map(|_| ())
+    });
+    if let Err(why) = written {
+        into.notes.push(format!("the map's roots were not kept in _meta.roots - {why}"));
+    }
+}
+
+/// The roots as `_meta.roots` holds them: absolute, as `root` is written.
+fn roots_value(roots: &[(String, String)]) -> String {
+    let dirs: Vec<String> = roots
+        .iter()
+        .map(|(_, dir)| std::path::absolute(dir).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| dir.clone()))
+        .collect();
+    Value::from(dirs).to_string()
+}
+
 /// Milliseconds as seconds with one decimal - `0.4 s`, `125.3 s`.
 fn seconds(ms: u64) -> String {
     format!("{}.{} s", ms / 1000, (ms % 1000) / 100)
@@ -114,6 +152,37 @@ mod tests {
         assert_eq!(utc(UNIX_EPOCH), "1970-01-01T00:00:00Z");
         assert_eq!(utc(UNIX_EPOCH + Duration::from_secs(1_791_385_560)), "2026-10-07T15:06:00Z");
         assert_eq!(utc(UNIX_EPOCH + Duration::from_secs(951_782_400)), "2000-02-29T00:00:00Z");
+    }
+
+    #[test]
+    fn every_root_is_kept_in_order_and_rewritten_only_when_it_moved() {
+        let dir = std::env::temp_dir().join(format!("sg-roots-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("map.sqlite");
+        let _ = std::fs::remove_file(&db);
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch("CREATE TABLE _meta (key TEXT, value TEXT); INSERT INTO _meta VALUES ('root', '/t/src');").unwrap();
+        drop(conn);
+        let given = vec![("src/".to_string(), "/t/src".to_string()), ("test/".to_string(), "/t/test".to_string())];
+        let mut into = Collector::new();
+        let held = |db: &Path| -> Vec<String> {
+            let conn = rusqlite::Connection::open(db).unwrap();
+            let mut stmt = conn.prepare("SELECT value FROM _meta WHERE key = 'roots'").unwrap();
+            stmt.query_map([], |r| r.get(0)).unwrap().flatten().collect()
+        };
+        let db_text = db.to_string_lossy().into_owned();
+        roots(&mut into, &db_text, &given);
+        roots(&mut into, &db_text, &given);
+        let once = held(&db);
+        assert_eq!(once.len(), 1, "{once:?}");
+        let listed: Vec<String> = serde_json::from_str(&once[0]).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed[0].ends_with("src") && listed[1].ends_with("test"), "{listed:?}");
+        roots(&mut into, &db_text, &given[..1]);
+        let moved: Vec<String> = serde_json::from_str(&held(&db)[0]).unwrap();
+        assert_eq!(moved.len(), 1);
+        assert!(into.notes.is_empty(), "{:?}", into.notes);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
