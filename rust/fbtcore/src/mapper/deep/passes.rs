@@ -15,7 +15,7 @@ pub(super) fn pass(name: &str, work: impl FnOnce()) {
 pub(super) fn tally(into: &mut Collector, db: &str) {
     let Ok(conn) = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return };
     for table in crate::rows::schema::listable_tables(&conn).unwrap_or_default() {
-        if !into.database.contains_key(&table) || ["sql_links", "sql_seeds", "duplicate_types", "doc_facts", "doc_links", "http_endpoints", "http_calls", "http_links"].contains(&table.as_str()) {
+        if !into.database.contains_key(&table) || ["sql_links", "sql_seeds", "duplicate_types", "doc_facts", "doc_links", "http_endpoints", "http_calls", "http_links", "dispatch"].contains(&table.as_str()) {
             let rows = crate::rows::schema::count_of(&conn, &table);
             into.database.insert(table, rows);
         }
@@ -72,6 +72,21 @@ pub(super) fn http(into: &mut Collector, db: &str) {
             c.endpoints, c.calls, c.linked, c.unmatched, c.ambiguous
         )),
         Err(why) => into.errors.push(format!("HTTP      links were not written — {why}")),
+    }
+}
+
+/// Which handler a mediator `Send`/`Publish` runs - see `rows/dispatch.rs`.
+pub(super) fn dispatch(into: &mut Collector, db: &str) {
+    let written = rusqlite::Connection::open(db).and_then(|mut conn| {
+        let tx = conn.transaction()?;
+        let n = crate::rows::dispatch::write(&tx)?;
+        tx.commit()?;
+        Ok(n)
+    });
+    match written {
+        Ok(0) => {}
+        Ok(n) => into.notes.push(format!("the mediator dispatch: {n} call-to-handler row(s)")),
+        Err(why) => into.errors.push(format!("DISPATCH  rows were not written — {why}")),
     }
 }
 

@@ -217,7 +217,7 @@ export function makeRereads({ ts, fe, changed, gone, readers, deepReaders, surfa
 
 // What a pass MEASURES of a file, as opposed to what names it.
 const MEASURED = ['bytes', 'chars', 'lines', 'content_hash', 'tier', 'parsed', 'reachable', 'reads', 'reads_deep',
-  'surface', 'shape'];
+  'surface', 'shape', 'prop_reads', 'this_indexed'];
 
 /**
  * A CHANGED FILE'S ROW STARTS EMPTY, as a full run's does. `files` rows are handed back for every file - they

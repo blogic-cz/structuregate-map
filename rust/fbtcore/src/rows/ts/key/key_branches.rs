@@ -483,10 +483,12 @@ pub fn literal_ways(store: &Store<'_>, branches: &Branches) -> IndexMap<String, 
     // template is not a wildcard over every key its pieces match - see `key_follow::spelled_arrows`.
     let (params, _) = super::key_fields::callables(store);
     let spelled = super::key_follow::spelled_arrows(store, &params);
+    let lift = super::key_called::CallLift::new(store);
     for (row, values) in statements {
         let (Some(file), Some(line), Some(end)) = (cell(row, "owner_file"), number(row, "line"), number(row, "end_line")) else { continue };
         let mut found = Vec::new();
-        let chain = branches.chain_of(row);
+        // A PRIVATE METHOD runs under what every call of it holds (#64, `key_called::CallLift`).
+        let chain = lift.chain_of(row, branches);
         let own = cell(row, "member").and_then(|m| Some((params.get(&m)?, spelled.get(&m)?)));
         for v in values {
             match own {

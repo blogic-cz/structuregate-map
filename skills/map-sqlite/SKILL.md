@@ -158,9 +158,10 @@ name declared in more than one place, and for an enum whether the copies' member
 each fact against the code: `bound`, `missing in code` or `missing in doc` - the config, `--facts-pull` and
 the token are in [facts.md](facts.md).
 
-**Angular HTTP calls against C# actions** (rewritten each run, needs both halves in one database): `http_endpoints`
-is every attribute-routed action (`verb`, `template` as written with the class route and tokens applied, `route`
-normalized); `http_calls` every `HttpClient` request (not `HttpHeaders`/`HttpParams`), a wrapper's callers standing for the wrapper's own call
+**Angular HTTP calls against C# actions** (rewritten each run): `http_endpoints` is every attribute-routed C#
+action, written for a C#-only tree too (`cls`, `method`, `line`, `verb` - `ANY` for a `[Route]` with no verb -,
+`template` as written with the class route and tokens applied, one row per class `[Route]`, `route` normalized);
+the two tables below need the TypeScript half in the same database, and are empty without it: `http_calls` every `HttpClient` request (not `HttpHeaders`/`HttpParams`), a wrapper's callers standing for the wrapper's own call
 (`url` is the folded pattern - `{}` a parameter, `*` an unknown part, `via` the wrapper); `http_links` which call
 reaches which endpoint (`how` `exact` or `ambiguous`; a call with no row there matched nothing). An unknown base URL
 is a leading `*` and matches any leading segments; of the endpoints a url matches, only those with the most

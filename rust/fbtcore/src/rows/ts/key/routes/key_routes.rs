@@ -14,6 +14,7 @@
 
 use super::key_arms::template_arms;
 use super::key_outlets::Outlets;
+use super::key_unread::{MemberReads, Unread};
 use super::key_branches::{literal_ways, value_keys, Branches};
 use super::sourcescan::braced_names;
 use super::store::{Row, Store};
@@ -311,6 +312,7 @@ pub fn key_routes(
     //    `translate('k')` inside an `if` produces `k` only when that `if` holds. The ref names
     //    its own `calls` row, which names its branch and case.
     let branches = Branches::new(store);
+    let lift = super::key_called::CallLift::new(store);
     let calls = store.table("calls");
     let call_by_id: std::collections::HashMap<String, &Row> =
         calls.iter().filter_map(|c| present(c, "id").map(|id| (id, c))).collect();
@@ -332,7 +334,7 @@ pub fn key_routes(
             // top of the call's, exactly as a value does - see `key_branches::value_keys`.
             let mut ways: Vec<Vec<String>> = Vec::new();
             if let Some(call) = present(r, "call").and_then(|c| call_by_id.get(&c)) {
-                let chain = branches.chain_of(call);
+                let chain = lift.chain_of(call, &branches);
                 let mut found = Vec::new();
                 for arg in call.get("args").and_then(|a| a.as_array()).into_iter().flatten() {
                     value_keys(arg, &chain, &keys, &mut found);
@@ -410,6 +412,7 @@ pub fn key_routes(
     let component_of_class: std::collections::HashMap<String, String> =
         components.iter().filter_map(|c| Some((text(c, "class")?, text(c, "id")?))).collect();
     let mut seen_literal: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let unread = Unread::new(store, &MemberReads::new(store));
     for s in literals.iter() {
         let Some(value) = text(s, "value") else { continue };
         if !keys.contains(&value) {
@@ -420,8 +423,10 @@ pub fn key_routes(
         // the file took it when several shared one: a child's own `key = 'a.b'` became an ungated site of
         // each sibling, and the child's template gate no longer restricted the key.
         let own = file.as_ref().and_then(|f| enclosing_class(&class_spans, f, number(s, "line"), number(s, "col")));
-        let ids: Vec<Option<String>> = match own.and_then(|c| component_of_class.get(&c)) {
-            Some(id) => vec![Some(id.clone())],
+        let ids: Vec<Option<String>> = match own.as_ref().and_then(|c| Some((c, component_of_class.get(c)?))) {
+            // AN INITIALIZER OF A FIELD NOTHING READS never leaves the field (#54, `key_unread`): no site.
+            Some((class, _)) if unread.initializes(s, class) => continue,
+            Some((_, id)) => vec![Some(id.clone())],
             None => match components_by_file.get(&file) {
                 Some(list) if !list.is_empty() => list.iter().map(|c| text(c, "id")).collect(),
                 _ => vec![None],

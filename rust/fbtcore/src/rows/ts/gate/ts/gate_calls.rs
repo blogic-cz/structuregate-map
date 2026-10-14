@@ -147,6 +147,7 @@ impl<'a> Calls<'a> {
         Calls { fns, alias, exprs, rows, idx }
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.fns.is_empty() && self.alias.is_empty()
     }

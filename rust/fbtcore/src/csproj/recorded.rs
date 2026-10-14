@@ -14,6 +14,9 @@ pub struct Recorded {
     pub references: Vec<String>,
     /// Every `Compile` item, as the build listed it - authored and generated alike.
     pub compile: Vec<String>,
+    /// Every `Analyzer` item - the assemblies a source generator can come from - or `None` for a record written before
+    /// the targets listed them (`analyzers\tlisted`): then nothing proves a generator gone.
+    pub analyzers: Option<Vec<String>>,
 }
 
 /// The newest record for this framework, when it is newer than the project file.
@@ -32,7 +35,7 @@ pub fn find(csproj: &str, folder: &str, framework: &str) -> Option<Recorded> {
         return None;
     }
     let text = disk::text(&newest)?;
-    let mut record = Recorded { lang: String::new(), defines: Vec::new(), references: Vec::new(), compile: Vec::new() };
+    let mut record = Recorded { lang: String::new(), defines: Vec::new(), references: Vec::new(), compile: Vec::new(), analyzers: None };
     let mut named = false;
     for line in text.lines() {
         let Some((kind, value)) = line.split_once('\t') else { continue };
@@ -43,6 +46,8 @@ pub fn find(csproj: &str, folder: &str, framework: &str) -> Option<Recorded> {
             "define" => record.defines = value.split(';').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect(),
             "ref" if !value.is_empty() => record.references.push(value.to_string()),
             "compile" if !value.is_empty() => record.compile.push(value.to_string()),
+            "analyzers" => record.analyzers = Some(record.analyzers.take().unwrap_or_default()),
+            "analyzer" if !value.is_empty() => record.analyzers.get_or_insert_with(Vec::new).push(value.to_string()),
             _ => {}
         }
     }

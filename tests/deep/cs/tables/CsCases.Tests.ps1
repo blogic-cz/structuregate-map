@@ -129,3 +129,59 @@ Test-Case 'cscases: a row inside a case section or an arm carries the case it si
     # (a double-quoted name with no such column is a STRING in SQLite - the column is asked of the schema instead).
     Assert-Equal (Get-CsCasesValue $db "SELECT count(*) FROM pragma_table_info('branches') WHERE name = 'case'") '0' 'a switch in a case'
 }
+
+Test-Case 'cscases: an attribute on an enum member is a decorators row of that member and named on its entry' {
+    $source = @'
+using System;
+namespace Demo.Models
+{
+    [AttributeUsage(AttributeTargets.Field)]
+    public class ExternalIdAttribute : Attribute
+    {
+        public ExternalIdAttribute(int id) { Id = id; }
+        public int Id { get; }
+    }
+    public enum HueKind : short
+    {
+        [ExternalId(7001)]
+        Alpha = 0,
+        [ExternalId(7002)]
+        Beta = 1,
+        Gamma = 9999,
+    }
+}
+'@
+    $db = New-CsCasesDb @{ 'Hue.cs' = $source; 'Demo.csproj' = $script:CsCasesProject }
+    $row = "SELECT name || '|' || target_kind || '|' || arg_values FROM decorators WHERE target = '{0}'"
+    Assert-Equal (Get-CsCasesValue $db ($row -f 'Alpha')) 'ExternalId|enum_member|["7001"]' 'Alpha'
+    Assert-Equal (Get-CsCasesValue $db ($row -f 'Beta')) 'ExternalId|enum_member|["7002"]' 'Beta'
+    # bound: the attribute's constructor, as every `decorators.symbol`
+    Assert-Equal (Get-CsCasesValue $db "SELECT symbol FROM decorators WHERE target = 'Alpha'") 'Demo.Models.ExternalIdAttribute.ExternalIdAttribute' 'symbol'
+    Assert-Equal (Get-CsCasesValue $db "SELECT count(*) FROM decorators WHERE target = 'Gamma'") '0' 'Gamma has none'
+    $entry = "SELECT coalesce(json_extract(m.value, '$.attributes'), 'null') FROM enums e, json_each(e.members) m " +
+        "WHERE e.name = 'HueKind' AND json_extract(m.value, '$.name') = '{0}'"
+    Assert-Equal (Get-CsCasesValue $db ($entry -f 'Alpha')) '["ExternalId"]' 'Alpha entry'
+    Assert-Equal (Get-CsCasesValue $db ($entry -f 'Gamma')) '[]' 'Gamma entry'
+}
+
+Test-Case 'cscases: an attribute on a field, a const and an event field is a decorators row of each declarator' {
+    $source = @'
+using System;
+namespace Demo.Models
+{
+    public class TagAttribute : Attribute { public TagAttribute(string t) { } }
+    public class Order
+    {
+        [Tag("f")] public int Alpha, Beta;
+        [Tag("c")] public const int Gamma = 1;
+        [Tag("e")] public event EventHandler Changed;
+    }
+}
+'@
+    $db = New-CsCasesDb @{ 'Order.cs' = $source; 'Demo.csproj' = $script:CsCasesProject }
+    $row = "SELECT target_kind || '|' || arg_values || '|' || (symbol = 'Demo.Models.TagAttribute.TagAttribute') FROM decorators WHERE name = 'Tag' AND target = '{0}'"
+    Assert-Equal (Get-CsCasesValue $db ($row -f 'Alpha')) 'field|["f"]|1' 'Alpha'
+    Assert-Equal (Get-CsCasesValue $db ($row -f 'Beta')) 'field|["f"]|1' 'Beta'
+    Assert-Equal (Get-CsCasesValue $db ($row -f 'Gamma')) 'const|["c"]|1' 'Gamma'
+    Assert-Equal (Get-CsCasesValue $db ($row -f 'Changed')) 'event|["e"]|1' 'Changed'
+}

@@ -119,3 +119,35 @@ Test-Case 'httplinks: a call through a wrapper and a direct call each reach thei
 }
 
 }
+
+if (Get-Command dotnet -ErrorAction SilentlyContinue) {
+
+Test-Case 'httplinks: a C#-only tree has its endpoints, one per class route' {
+    $nl = [string][char]10
+    $tree = Use-Tree @{
+        'api/Api.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+        'api/Orders.cs' = "namespace Demo.Api;$nl" +
+            "public class RouteAttribute : System.Attribute { public RouteAttribute(string t) {} }$nl" +
+            "public class HttpGetAttribute : System.Attribute { public HttpGetAttribute(string t) {} }$nl" +
+            "public class HttpPostAttribute : System.Attribute { public HttpPostAttribute() {} }$nl" +
+            "[Route(`"api/v1/orders`")]$nl[Route(`"api/v2/orders`")]$nl" +
+            "public class OrdersController {$nl" +
+            "    [HttpGet(`"archived`")] public object Archived(int page) => page;$nl" +
+            "    [HttpPost] public object Create() => 1;$nl" +
+            "    [HttpGet(`"/health`")] public object Health() => 1;$nl}$nl"
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext '.cs' --map-sqlite $db) 0
+    $r = Get-HttpLinksRows $tree "SELECT 'ep=' || verb || '|' || template || '|' || method AS e FROM http_endpoints"
+    Assert-Line $r 'ep=GET|api/v1/orders/archived|Archived'
+    Assert-Line $r 'ep=GET|api/v2/orders/archived|Archived'
+    Assert-Line $r 'ep=POST|api/v1/orders|Create'
+    Assert-Line $r 'ep=POST|api/v2/orders|Create'
+    # an absolute template ignores the class routes: one endpoint, not one per prefix
+    $n = Get-HttpLinksRows $tree "SELECT 'n=' || count(*) AS c FROM http_endpoints"
+    Assert-Line $n 'n=5'
+    $c = Get-HttpLinksRows $tree "SELECT 'calls=' || (SELECT count(*) FROM http_calls) || '|' || (SELECT count(*) FROM http_links) AS c"
+    Assert-Line $c 'calls=0|0'
+}
+
+}

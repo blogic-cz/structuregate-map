@@ -3,7 +3,7 @@
 //! `http_endpoints` is every attribute-routed action (`endpoints.rs`), `http_calls` every `@angular/common/http`
 //! call, a wrapper's callers standing for the wrapper's own call (`calls.rs`), and `http_links` which call reaches
 //! which endpoint (`matching.rs`). Rewritten whole each run: it reads nothing but the rows the halves stored.
-//! A database with no C# or no TypeScript has nothing to join, and gets the three tables empty.
+//! A database with no TypeScript still gets its C# endpoints; `http_calls` and `http_links` are then empty.
 
 mod calls;
 mod endpoints;
@@ -53,11 +53,10 @@ pub fn write(conn: &Connection) -> rusqlite::Result<Counts> {
          CREATE TABLE http_links (call, endpoint, how);",
     )?;
     let (csharp, typescript) = (files_of(conn, "csharp")?, files_of(conn, "typescript")?);
-    if csharp.is_empty() || typescript.is_empty() {
-        return Ok(Counts::default());
-    }
+    // THE ENDPOINTS ARE A FACT ABOUT THE C# TREE ALONE (#59): a C#-only consumer asks which action serves a URL
+    // too. Only the calls and the links need the TypeScript half.
     let endpoints = endpoints::load(conn, &csharp)?;
-    let sites = calls::load(conn, &typescript)?;
+    let sites = if typescript.is_empty() { Vec::new() } else { calls::load(conn, &typescript)? };
     let linked = matching::link(&endpoints, &sites);
     let mut counts = Counts { endpoints: endpoints.len(), calls: sites.len(), ..Counts::default() };
     {

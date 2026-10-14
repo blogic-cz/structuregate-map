@@ -129,20 +129,53 @@ struct Frame<'v> {
     member: String,
     args: &'v [Value],
     /// The value a getter returns or a field holds, and the expression row it is written at: a CALL that value is
-    /// itself carries its callee's branches (`call_at`), never a call nested inside it.
+    /// itself is placed at that row (`call_at`).
     site: Option<(&'v Value, &'v str)>,
+    /// The expression row of the return (or local write) being followed: a call INSIDE it is placed as `^<at>` (#48),
+    /// found again there by the member it enters (`key_args`). None: the call has no place, so no callee condition rides.
+    at: Option<String>,
 }
 
-type Seen = std::collections::HashSet<String>;
+/// Most times one read enters a member it is still reading with OTHER arguments (a recursion handing on what it was
+/// handed): each may spell other keys, and nothing else ends a recursion whose arguments keep changing.
+const MAX_REENTRIES: usize = 64;
+
+/// WHAT ONE READ HAS ENTERED (#48). Each (member, arguments) is read ONCE, its keys kept with its callees' branch links
+/// RELATIVE to its own entry (`arg:<branch>@` for its own branch, `arg:<branch>@^E1~^E2` for one below), and every call
+/// of it replays them with its own place prepended (`compose`) - linear in the calls, with no bound on how deep they go.
+/// A MEMBER REACHED AGAIN WHILE IT IS STILL BEING READ is in a cycle: it, and every member read between, carries no
+/// branch link of its own or below - a recursion's ways are not all read, so none of them is claimed.
+#[derive(Default)]
+pub(super) struct Seen {
+    done: std::collections::HashMap<String, Found>,
+    /// The members being read, outermost first, each with its (member, arguments) entry.
+    active: Vec<(String, String)>,
+    cyclic: std::collections::HashSet<String>,
+    reentries: usize,
+}
+
 type Found = Vec<(String, Vec<String>)>;
+
+/// `found` read through a call placed at `hop` (`E` the call is that expression, `^E` it sits inside it): every
+/// relative `arg:` link gains the hop in front. A call with no place keeps no `arg:` link - its arguments are unknown.
+fn compose(found: &Found, hop: Option<&str>) -> Found {
+    let place = |link: &String| -> Option<String> {
+        let Some(rest) = link.strip_prefix("arg:") else { return Some(link.clone()) };
+        let (branch, below) = rest.split_once('@')?;
+        let hop = hop?;
+        Some(if below.is_empty() { format!("arg:{branch}@{hop}") } else { format!("arg:{branch}@{hop}~{below}") })
+    };
+    found.iter().map(|(key, chain)| (key.clone(), chain.iter().filter_map(place).collect())).collect()
+}
 
 impl Returned<'_, '_> {
     /// The member - or, failing that, the free function - a call's `$target` names, entered with the call's
     /// arguments. A FREE FUNCTION IS ENTERED LIKE A METHOD: `this.c = label('a')` over `export const label = (n) =>
     /// `demo.${n}`` hands the field `demo.a`, and reading only class members left every key such a function builds
-    /// a `literal` no component reached. No condition is carried, and each (callee, arguments) is read once.
-    /// Made at the expression row `site`, the callee's own `if` branches are carried as `arg:<branch>@<site>` - the
-    /// branch's condition with the callee's parameters replaced by the arguments written at the site (`key_args`).
+    /// a `literal` no component reached. Each (callee, arguments) is read once (`Seen`).
+    /// Placed at `site` (`E`, or `^E` inside it), the callee's own `if` branches are carried as `arg:<branch>@<site>` - and
+    /// a deeper callee's as `arg:<branch>@<site>~^E1~..`, one place per call between (#48) - each condition being the
+    /// branch's with every hop's arguments put in place of the parameters below it (`key_args`).
     pub(super) fn call_at(&self, value: Option<&Value>, site: Option<&str>, seen: &mut Seen, out: &mut Found) {
         let Some(value) = value.map(|v| v.get("$await").unwrap_or(v)) else { return };
         let Some(target) = value.get("$target") else { return };
@@ -161,15 +194,15 @@ impl Returned<'_, '_> {
     /// The keys a value holds through the calls in it, read inside `member` (its locals and parameters in scope):
     /// an element's property of a list `member` returns.
     pub(in super::super) fn in_member(&self, value: &Value, member: &str, out: &mut Found) {
-        let frame = Frame { member: member.to_string(), args: &[], site: None };
-        self.through(value, &frame, &mut Seen::new(), out);
+        let frame = Frame { member: member.to_string(), args: &[], site: None, at: None };
+        self.through(value, &frame, &mut Seen::default(), out);
     }
 
     /// `in_member` over a value that IS a call written at the expression row `site` (a getter's `return this.svc.f(x)`):
     /// the callee's branches are carried (`call_at`). Any other value reads as `in_member` does.
     pub(in super::super) fn in_member_at(&self, value: &Value, member: &str, site: Option<&str>, out: &mut Found) {
-        let frame = Frame { member: member.to_string(), args: &[], site: site.map(|s| (value, s)) };
-        self.through(value, &frame, &mut Seen::new(), out);
+        let frame = Frame { member: member.to_string(), args: &[], site: site.map(|s| (value, s)), at: site.map(str::to_string) };
+        self.through(value, &frame, &mut Seen::default(), out);
     }
 
     /// The keys `member` - a method, an arrow property or a `functions` row - returns, entered with no arguments: a function
@@ -179,12 +212,12 @@ impl Returned<'_, '_> {
     /// itself, so `if (gone) { return 'a'; } return 'b';` renders either key. A call made FROM it still reads a callee's
     /// several returns only through their calls.
     pub(in super::super) fn enter_member(&self, member: &str, out: &mut Found) {
-        let mut seen = Seen::new();
+        let mut seen = Seen::default();
         if self.one_return.contains_key(member) {
             return self.enter(member.to_string(), &Value::Null, &mut seen, out, None);
         }
-        let frame = Frame { member: member.to_string(), args: &[], site: None };
-        seen.insert(format!("{member} []"));
+        let frame = Frame { member: member.to_string(), args: &[], site: None, at: None };
+        seen.active.push((member.to_string(), format!("{member} []")));
         for row in self.every.get(member).into_iter().flatten() {
             if let Some(ret) = row.get("value") {
                 self.held(ret, &frame, &mut seen, out);
@@ -212,28 +245,48 @@ impl Returned<'_, '_> {
     }
 
     fn enter_args(&self, member: String, args: &[Value], seen: &mut Seen, out: &mut Found, site: Option<&str>) {
-        if seen.len() > 64 || !seen.insert(format!("{member} {}", Value::from(args.to_vec()))) {
-            return;
+        let entry = format!("{member} {}", Value::from(args.to_vec()));
+        if let Some(found) = seen.done.get(&entry) {
+            return out.extend(compose(found, site));
         }
-        let frame = Frame { member, args, site: None };
-        if let Some(row) = self.one_return.get(&frame.member) {
-            if let Some(ret) = row.get("value") {
-                self.held(&self.bind(ret, &frame), &frame, seen, out);
+        if let Some(i) = seen.active.iter().position(|(m, _)| *m == member) {
+            let ring: Vec<String> = seen.active[i..].iter().map(|(m, _)| m.clone()).collect();
+            seen.cyclic.extend(ring);
+            if seen.reentries >= MAX_REENTRIES || seen.active.iter().any(|(_, e)| *e == entry) {
+                return;
             }
-            self.written(row, &frame, seen, out);
+            seen.reentries += 1;
+        }
+        seen.active.push((member.clone(), entry.clone()));
+        let mut found = Found::new();
+        let frame = Frame { member: member.clone(), args, site: None, at: None };
+        if let Some(row) = self.one_return.get(&member) {
+            let frame = Frame { at: super::key_fields::text(row, "expression"), ..frame };
+            if let Some(ret) = row.get("value") {
+                self.held(&self.bind(ret, &frame), &frame, seen, &mut found);
+            }
+            self.written(row, &frame, seen, &mut found);
         } else {
             for row in self.every.get(&frame.member).into_iter().flatten() {
-                // A CALL A FIELD HOLDS CARRIES THE CALLEE'S OWN `if`s (`site`), read with its arguments: a callee's
+                let frame = Frame { member: frame.member.clone(), args: frame.args, site: None, at: super::key_fields::text(row, "expression") };
+                // A CALLED METHOD'S OWN `if`s RIDE WHAT IT RETURNS under them, placed by its caller (`compose`): a callee's
                 // `if (kinds.includes(kind)) return t('a');` restricts `a` to what the caller hands as `kind`.
-                let links: Vec<String> = site.map(|at| self.branches.chain_of(row).into_iter().filter(|b| self.branches.condition(b).is_some()).map(|b| format!("arg:{b}@{at}")).collect()).unwrap_or_default();
-                let mut found = Found::new();
+                let links: Vec<String> = self.branches.chain_of(row).into_iter().filter(|b| self.branches.condition(b).is_some()).map(|b| format!("arg:{b}@")).collect();
+                let mut held = Found::new();
                 if let Some(ret) = row.get("value") {
-                    self.through(&self.bind(ret, &frame), &frame, seen, &mut found);
+                    self.through(&self.bind(ret, &frame), &frame, seen, &mut held);
                 }
-                self.written(row, &frame, seen, &mut found);
-                out.extend(found.into_iter().map(|(key, chain)| (key, [links.clone(), chain].concat())));
+                self.written(row, &frame, seen, &mut held);
+                found.extend(held.into_iter().map(|(key, chain)| (key, [links.clone(), chain].concat())));
             }
         }
+        seen.active.pop();
+        // IN A CYCLE, OR A BODY A SUBCLASS REPLACES: no condition of this member or below is proved.
+        if seen.cyclic.contains(&member) || self.classes.overridden(&member) {
+            found.iter_mut().for_each(|(_, chain)| chain.retain(|l| !l.starts_with("arg:")));
+        }
+        out.extend(compose(&found, site));
+        seen.done.insert(entry, found);
     }
 
     /// A RETURN OF A BARE LOCAL READS EVERY `=` WRITTEN TO IT, not only its initializer: `let s = ''; s = t(k);
@@ -248,11 +301,15 @@ impl Returned<'_, '_> {
         while let Some(member) = at {
             let (writes, pushed) = (self.writes.get(&(member.clone(), name.clone())), self.pushes.local.get(&(member.clone(), name.clone())));
             if writes.is_some() || pushed.is_some() {
-                for value in writes.into_iter().flatten().filter_map(|w| w.get("value")) {
-                    self.held(&self.bind(value, frame), frame, seen, out);
+                for w in writes.into_iter().flatten() {
+                    let Some(value) = w.get("value") else { continue };
+                    let here = Frame { member: frame.member.clone(), args: frame.args, site: None, at: super::key_fields::text(w, "expression") };
+                    self.held(&self.bind(value, &here), &here, seen, out);
                 }
+                // A PUSHED ARGUMENT HAS NO EXPRESSION ROW OF ITS OWN: a call in it carries no callee branch.
+                let unplaced = Frame { member: frame.member.clone(), args: frame.args, site: None, at: None };
                 for arg in pushed.into_iter().flatten().filter_map(|p| p.get("args")).filter_map(Value::as_array).flatten() {
-                    self.held(&self.bind(arg, frame), frame, seen, out);
+                    self.held(&self.bind(arg, &unplaced), &unplaced, seen, out);
                 }
                 return;
             }
@@ -313,6 +370,13 @@ impl Returned<'_, '_> {
             }
             _ => {}
         }
+        // A FILTER OR A SLICE OF A LIST KEEPS A SUBSET OF ITS ELEMENTS (#55), as `key_lists::list_of` reads it: what the
+        // receiver hands back is what the call may - `[this.home(m)].filter((s) => s !== null)` left the key unreached.
+        if matches!(ret.get("$method").and_then(Value::as_str), Some("filter" | "slice")) {
+            if let Some(receiver @ Value::Array(_)) = ret.get("$receiver") {
+                return self.through(receiver, frame, seen, out);
+            }
+        }
         if hands_on(ret) {
             ret.get("$args").and_then(Value::as_array).into_iter().flatten().for_each(|a| self.through(a, frame, seen, out));
             return;
@@ -345,8 +409,12 @@ impl Returned<'_, '_> {
             value_keys(&under, &[], self.keys, out);
             return;
         }
-        let site = frame.site.filter(|(top, _)| std::ptr::eq(*top, ret)).map(|(_, at)| at);
-        self.call_at(Some(ret), site, seen, out);
+        // THE CALL A FIELD HOLDS ITSELF is placed at its row (#26); A CALL INSIDE what a return holds as `^<row>` (#48).
+        let site = match frame.site.filter(|(top, _)| std::ptr::eq(*top, ret)) {
+            Some((_, at)) => Some(at.to_string()),
+            None => frame.at.as_ref().map(|at| format!("^{at}")),
+        };
+        self.call_at(Some(ret), site.as_deref(), seen, out);
     }
 
     /// `v` with every template hole that names a parameter the call handed a string spelled as that string.
