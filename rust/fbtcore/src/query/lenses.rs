@@ -105,7 +105,7 @@ pub(super) fn lens_find(db: &Connection, out: &mut String, needle: &str, limit: 
         let (_, found) = query(db, &sql, &[table, &like])?;
         rows.extend(found);
     }
-    show(out, &rows, &named(&["table", "name", "file", "line"]), limit, width);
+    show_keeping(out, &rows, &named(&["table", "name", "file", "line"]), limit, width, &["file"]);
     Ok(())
 }
 
@@ -405,5 +405,25 @@ mod tests {
         assert!(members.contains("loadCart") && members.contains("shop.component.ts") && members.contains("41"), "{out}");
         let routes = out.lines().find(|l| l.starts_with("routes")).expect("the route row");
         assert!(routes.contains("shop.component.ts"), "{out}");
+    }
+
+    /// `--find` answers WHERE: its `file` column is printed whole at the default width, while a long name is still cut.
+    #[test]
+    fn find_prints_the_file_whole_and_still_cuts_a_long_name() {
+        let db = Connection::open_in_memory().unwrap();
+        let path = format!("demo/{}/order_validator.py", "nested/".repeat(12));
+        let name = format!("Order{}Validator", "Long".repeat(30));
+        db.execute_batch(&format!(
+            "CREATE TABLE files (id TEXT, path TEXT);
+             INSERT INTO files VALUES ('f:1', '{path}');
+             CREATE TABLE classes (id TEXT, name TEXT, qualname TEXT, file TEXT, line INTEGER);
+             INSERT INTO classes VALUES ('c:1', '{name}', '{name}', 'f:1', 3);",
+        ))
+        .unwrap();
+        let mut out = String::new();
+        lens_find(&db, &mut out, "Validator", 50, 70).unwrap();
+        let row = out.lines().find(|l| l.starts_with("classes")).expect("the class row");
+        assert!(row.contains(&path), "{out}");
+        assert!(row.contains("...[+") && !row.contains(&name), "{out}");
     }
 }

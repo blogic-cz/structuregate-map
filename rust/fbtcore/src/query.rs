@@ -18,6 +18,7 @@ mod cat;
 mod dead;
 mod decorators;
 mod defaults;
+pub mod fresh;
 mod lenses;
 mod magic;
 mod unused;
@@ -153,6 +154,12 @@ pub(crate) fn clip(text: &str, width: usize) -> String {
 
 /// A result as a table.
 fn show(out: &mut String, rows: &[Vec<Value>], columns: &[String], limit: usize, width: usize) {
+    show_keeping(out, rows, columns, limit, width, &[]);
+}
+
+/// A result as a table whose `whole` columns are NEVER cut, whatever `--width` says: the column a lens exists to
+/// answer. `--find` is asked WHERE a name is, and a path cut at 70 characters was not an answer to that.
+fn show_keeping(out: &mut String, rows: &[Vec<Value>], columns: &[String], limit: usize, width: usize, whole: &[&str]) {
     if rows.is_empty() {
         let _ = writeln!(out, "(no rows)");
         return;
@@ -162,8 +169,10 @@ fn show(out: &mut String, rows: &[Vec<Value>], columns: &[String], limit: usize,
         .take(limit)
         .map(|row| {
             row.iter()
-                .map(|c| {
-                    clip(&cell(c).replace('\n', " "), width)
+                .enumerate()
+                .map(|(i, c)| {
+                    let kept = columns.get(i).is_some_and(|name| whole.contains(&name.as_str()));
+                    clip(&cell(c).replace('\n', " "), if kept { 0 } else { width })
                 })
                 .collect()
         })

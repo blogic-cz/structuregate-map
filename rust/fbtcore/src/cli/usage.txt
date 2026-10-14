@@ -174,7 +174,10 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         path goes to the lens: --tables, --schema T, --find NAME, --id ROW,
                         --file FRAGMENT, --cat FRAGMENT [--lines a-b], --text FTS,
                         --grep TEXT [--table T], --magic [FRAGMENT] (numbers, strings and
-                        split/join separators nothing names), --sql QUERY, --limit N.
+                        split/join separators nothing names), --sql QUERY, --limit N (0: every
+                        row), --width N (a cell is cut at 70 characters with ...[+N chars]; 0:
+                        every cell whole - --find's file column is never cut). A note on stderr
+                        says when the tree moved on since the map was written.
   --map-sqlite <file>   the DEEP map, as SQLite - WITH --map, or on its own, which writes the rows
                         and skips the whole-tree re-parse the graph needs (what a per-turn hook
                         runs; it exits 1 by itself if a half could not run). The JSON map is
