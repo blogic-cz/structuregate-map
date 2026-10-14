@@ -88,10 +88,25 @@ pub fn said(into: &mut Collector, db: &str, clock: Clock, replayed: bool) {
 /// `src`. Kept beside it, never instead: every reader already takes `root`. WRITTEN ONLY WHEN IT DIFFERS, so a run that
 /// did nothing leaves the database untouched (see `said`); a file holding no `_meta` is not a map yet and is left alone.
 pub fn roots(into: &mut Collector, db: &str, roots: &[(String, String)]) {
+    keep(into, db, "roots", &roots_value(roots));
+}
+
+/// `_meta.outputs`: what the run WROTE INSIDE ITS OWN TREE besides the database - the `--map` JSON - as a JSON array of
+/// absolute paths. A later run maps that file like any other, and it is rewritten after the database every time, so
+/// the stale note (`query/fresh.rs`) would call it changed after every run; it reads this list and skips them.
+pub fn outputs(into: &mut Collector, db: &str, outputs: &[String]) {
+    let paths: Vec<String> = outputs
+        .iter()
+        .map(|out| std::path::absolute(out).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| out.clone()))
+        .collect();
+    keep(into, db, "outputs", &Value::from(paths).to_string());
+}
+
+/// One `_meta` key set to `wanted`, WRITTEN ONLY WHEN IT DIFFERS (see `roots`).
+fn keep(into: &mut Collector, db: &str, key: &str, wanted: &str) {
     if !Path::new(db).is_file() {
         return;
     }
-    let wanted = roots_value(roots);
     let written = rusqlite::Connection::open(db).and_then(|conn| {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let meta: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = '_meta'", [], |r| r.get(0))?;
@@ -99,16 +114,16 @@ pub fn roots(into: &mut Collector, db: &str, roots: &[(String, String)]) {
             return Ok(());
         }
         let held: Option<String> = conn
-            .query_row("SELECT value FROM _meta WHERE key = 'roots'", [], |r| r.get(0))
+            .query_row("SELECT value FROM _meta WHERE key = ?1", [key], |r| r.get(0))
             .or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })?;
-        if held.as_deref() == Some(wanted.as_str()) {
+        if held.as_deref() == Some(wanted) {
             return Ok(());
         }
-        conn.execute("DELETE FROM _meta WHERE key = 'roots'", [])?;
-        conn.execute("INSERT INTO _meta (key, value) VALUES ('roots', ?1)", [&wanted]).map(|_| ())
+        conn.execute("DELETE FROM _meta WHERE key = ?1", [key])?;
+        conn.execute("INSERT INTO _meta (key, value) VALUES (?1, ?2)", [key, wanted]).map(|_| ())
     });
     if let Err(why) = written {
-        into.notes.push(format!("the map's roots were not kept in _meta.roots - {why}"));
+        into.notes.push(format!("the map's {key} were not kept in _meta.{key} - {why}"));
     }
 }
 

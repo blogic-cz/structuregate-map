@@ -51,6 +51,16 @@ pub fn check(db: &Path, budget: Duration) -> Option<Moved> {
         return None;
     }
     let workspace = workspace_of(&conn).map(|fe| roots[0].join(fe));
+    // THE RUN'S OWN OUTPUTS are rewritten after the database every time - never a sign the tree moved.
+    let outputs: Vec<PathBuf> = conn
+        .query_row("SELECT value FROM _meta WHERE key = 'outputs'", [], |r| r.get::<_, String>(0))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+    let own = |path: &Path| outputs.iter().any(|out| out == path);
     let mut stmt = conn.prepare("SELECT DISTINCT path, lang FROM files").ok()?;
     let mapped: Vec<(String, String)> = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default())))
@@ -92,7 +102,9 @@ pub fn check(db: &Path, budget: Duration) -> Option<Moved> {
         for (name, path) in held {
             match listing.get(name) {
                 None => moved.gone.push(path.clone()),
-                Some((disk, at)) if *at > built && !seen.saw(&folder.join(disk), *at) => moved.changed.push(path.clone()),
+                Some((disk, at)) if *at > built && !seen.saw(&folder.join(disk), *at) && !own(&folder.join(disk)) => {
+                    moved.changed.push(path.clone())
+                }
                 Some(_) => {}
             }
         }
@@ -103,6 +115,7 @@ pub fn check(db: &Path, budget: Duration) -> Option<Moved> {
                     && *at > built
                     && extension(disk).is_some_and(|e| extensions.contains(&e))
                     && !seen.saw(&folder.join(disk), *at)
+                    && !own(&folder.join(disk))
             })
             .map(|(_, (disk, _))| disk)
             .collect();

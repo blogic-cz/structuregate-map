@@ -170,7 +170,7 @@ impl Unread {
 #[cfg(test)]
 mod tests {
     use super::identifiers;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
 
     #[test]
     fn every_identifier_of_any_length_is_read() {
