@@ -281,4 +281,54 @@ Test-Case 'tsrows keys: a component field nothing reads is no site of the key it
     Assert-Line $r 'demo.kept | 2 | AComponent,CComponent | -'
     Assert-Line $r 'demo.self | 2 | AComponent,DComponent | -'
 }
+
+Test-Case 'tsrows keys: a field only written in a method and a getter nothing reads are no sites of their keys' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/kinds.ts' = "export enum Kind { Home = 1, Flat = 2, Life = 3 }`n"
+        'apps/shop/src/translate.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "@Component({ selector: 'translate', standalone: true, template: '<span>{{ text }}</span>' })`n" +
+            "export class TranslateComponent { @Input() text!: string; }`n"
+        'apps/shop/src/a.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "import { Kind } from './kinds';`n" +
+            "@Component({ selector: 'demo-a', template: '<div *ngIf=`"kind === Kind.Home`">" +
+            "<translate [text]=`"labelCode`"></translate><translate [text]=`"title`"></translate></div>' })`n" +
+            "export class AComponent { Kind = Kind; @Input() kind!: Kind;`n" +
+            "  labelCode = 'demo.label'; get title(): string { return 'demo.title'; } }`n"
+        # B only WRITES `labelCode` (in a method ngOnInit calls) and never reads its getter `title`
+        'apps/shop/src/b.component.ts' = "import { Component, Input, OnInit } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-b', template: '<translate [text]=`"otherCode`"></translate>' })`n" +
+            "export class BComponent implements OnInit {`n  @Input() flat = false;`n" +
+            "  labelCode = 'demo.label';`n  otherCode = 'demo.other';`n" +
+            "  ngOnInit(): void { this.changeCodes(); }`n" +
+            "  get title(): string { return 'demo.title'; }`n" +
+            "  private changeCodes(): void {`n    if (this.flat) {`n      this.labelCode = 'demo.label';`n" +
+            "    } else {`n      this.labelCode = 'demo.labelAlt';`n    }`n  }`n}`n"
+        # C reads its getter through another getter and its written field in a method: both keep their sites
+        'apps/shop/src/c.component.ts' = "import { Component, OnInit } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-c', template: '<translate [text]=`"shown`"></translate><i>{{ pick() }}</i>' })`n" +
+            "export class CComponent implements OnInit {`n  altCode = '';`n" +
+            "  ngOnInit(): void { this.altCode = 'demo.alt'; }`n" +
+            "  get shown(): string { return this.keptTitle; }`n" +
+            "  get keptTitle(): string { return 'demo.kept'; }`n" +
+            "  pick(): string { return this.altCode; }`n}`n"
+        'apps/shop/src/root.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { Kind } from './kinds';`n" +
+            "@Component({ selector: 'demo-root', template: '<demo-a [kind]=`"kind`"></demo-a><demo-b></demo-b><demo-c></demo-c>' })`n" +
+            "export class RootComponent { kind: Kind = Kind.Life; }`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"label":"L","labelAlt":"A","other":"O","title":"T","kept":"K","alt":"V"}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["translate:text"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.n_paths || ' | ' || coalesce((SELECT group_concat(c.name, ',') FROM json_each(k.components) j " +
+        "JOIN components c ON c.id = j.value), '-') || ' | ' || coalesce(json_extract(k.always_values, '$[0].values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
+    # B neither reads `labelCode` nor `title`: A's `*ngIf` is the only way to either key
+    Assert-Line $r 'demo.label | 1 | AComponent | ["Home"]'
+    Assert-Line $r 'demo.title | 1 | AComponent | ["Home"]'
+    # and the key B only writes into its unread field has no way at all
+    Assert-Line $r 'demo.labelAlt | 0 | - | -'
+    # a getter read through a getter the template reads, and a field a template-called method reads
+    Assert-Line $r 'demo.kept | 1 | CComponent | -'
+    Assert-Line $r 'demo.alt | 1 | CComponent | -'
+}
 }

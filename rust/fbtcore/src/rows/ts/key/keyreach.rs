@@ -56,7 +56,7 @@ use super::key_scopes::Scopes;
 use super::sourcetrace::{source_trace, Trace};
 use super::store::{Row, Store};
 use super::value_folds::{
-    fold_values, merge_aliased, per_way_keyed, relabel, unreadable_values, write_gate_features, write_gate_values, Aliases, Classes, Labels, Renames,
+    fold_sided, merge_aliased, per_way_keyed, relabel, unreadable_values, write_gate_features, write_gate_values, Aliases, Classes, Labels, Renames, SetSides,
 };
 use indexmap::{IndexMap, IndexSet};
 use serde_json::Value;
@@ -295,9 +295,10 @@ pub fn build_closure(
         let ways: Vec<IndexSet<String>> = sets.clone();
         let mut labels = Labels::new();
         let mut classes = Classes::new();
-        let per_way = per_way_keyed(&ways, &value_map, &idx, Some(&renames), Some(&aliases), Some(&arg_params), &mut labels, &mut classes);
+        let mut sides = SetSides::new();
+        let per_way = per_way_keyed(&ways, &value_map, &idx, Some(&renames), Some(&aliases), Some(&arg_params), &mut labels, &mut classes, &mut sides);
         debug_assert_eq!(aliases.len(), ways.len());
-        let mut values = fold_values(&ways, &value_map, &idx, Some(&per_way));
+        let mut values = fold_sided(&per_way, &idx, &sides);
         merge_aliased(&mut values, &classes);
         // The dimensions the gates narrow but the map cannot read. BESIDE the resolved ones,
         // never inside them: an `unknown` row folds to the whole domain and would otherwise

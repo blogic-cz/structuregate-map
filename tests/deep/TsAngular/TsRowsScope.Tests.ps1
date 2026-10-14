@@ -7,8 +7,8 @@
 
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
-# A TAG MATCHES A SELECTOR ONLY WHERE THE COMPONENT IS IN SCOPE. `renders` keeps every candidate, the
-# out-of-scope one stamped so; `render_graph` is the edge Angular really instantiates. Summed over every
+# A TAG MATCHES A SELECTOR ONLY WHERE THE COMPONENT IS IN SCOPE. Every candidate is kept, the out-of-scope one
+# stamped so and set aside in `renders_out_of_scope`; `render_graph` is the edge Angular really instantiates. Summed over every
 # candidate, a native `<header>` in a standalone component was an edge to an unrelated `header` component,
 # and every walk of the graph showed it rendered on a screen it never appears on.
 Test-Case 'tsrows: render_graph leaves out an element whose component is not in the template scope' {
@@ -29,7 +29,8 @@ Test-Case 'tsrows: render_graph leaves out an element whose component is not in 
     Assert-Exit $made.Result 0
     # BOTH CANDIDATES ARE STILL ROWS - the alternative stays visible, never silently dropped. Without these
     # two, a build that wrote no render for `<header>` at all passes the graph assertions below.
-    $rows = Invoke-TsRowsQ $made.Db ("SELECT p.name || '=' || r.scope AS edge FROM renders r " +
+    $rows = Invoke-TsRowsQ $made.Db ("SELECT p.name || '=' || r.scope AS edge FROM (SELECT from_class, scope, to_name " +
+        "FROM renders UNION ALL SELECT from_class, scope, to_name FROM renders_out_of_scope) r " +
         "JOIN classes p ON p.id = r.from_class WHERE r.to_name = 'BannerComponent'")
     Assert-Line $rows 'AlphaStartComponent=declared'
     Assert-Line $rows 'DemoPanelComponent=out_of_scope'
@@ -40,7 +41,7 @@ Test-Case 'tsrows: render_graph leaves out an element whose component is not in 
 }
 
 # TWO LAZY MODULES EACH DECLARE THEIR OWN `demo-box`, and a host in each renders `<demo-box>`. `renders` keeps all
-# four candidates, the other module's box stamped `out_of_scope`; the closure walks only what Angular instantiates,
+# four candidates, the other module's box stamped `out_of_scope` (set aside since #40); the closure walks only what Angular instantiates,
 # so each box's key is reached from its own route alone, as `component_reach` already says. A third host in NO
 # module (`scope = unknown`) still reaches both: nothing proves which one it renders, and an edge resolving today
 # must not vanish for a scope the map cannot read. `SharedModule` exports its box to `CModule`, which imports it.
@@ -81,7 +82,8 @@ Test-Case 'tsrows: a key behind an out-of-scope render is not reached through it
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     # THE CANDIDATES STAY ROWS, stamped - without these a build writing no render for the tag passes below.
-    $edges = Invoke-TsRowsQ $made.Db ("SELECT p.name || '>' || r.to_name || '=' || r.scope AS edge FROM renders r " +
+    $edges = Invoke-TsRowsQ $made.Db ("SELECT p.name || '>' || r.to_name || '=' || r.scope AS edge FROM (SELECT from_class, " +
+        "to_name, scope, tag FROM renders UNION ALL SELECT from_class, to_name, scope, tag FROM renders_out_of_scope) r " +
         "JOIN classes p ON p.id = r.from_class WHERE r.tag LIKE 'demo-%'")
     Assert-Line $edges 'HostAComponent>BBoxComponent=out_of_scope'
     Assert-Line $edges 'HostCComponent>SBoxComponent=imported'
@@ -95,6 +97,43 @@ Test-Case 'tsrows: a key behind an out-of-scope render is not reached through it
     Assert-NoLine $r 'demo.b.title <- HostAComponent'
     Assert-Line $r 'demo.a.title <- LooseComponent'
     Assert-Line $r 'demo.b.title <- LooseComponent'
+}
+
+# `renders` IS WHAT ANGULAR INSTANTIATES, the same edges `render_path` walks. Two modules each declaring a
+# `demo-box` gave four rows for the tag - each host to BOTH boxes - while the closure walked two, so a query over
+# `renders` contradicted `render_path` (#40). The foreign candidate is set aside in `renders_out_of_scope`; a host no
+# module declares (`unknown`) keeps an edge to every candidate, as `render_path` does.
+Test-Case 'tsrows: renders holds only the edges the module scope allows, the rest set aside' {
+    $box = { param($Class, $Key) "@Component({ selector: 'demo-box', template: '<b>{{ `"$Key`" | money }}</b>' })`nexport class $Class {}`n" }
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/a.module.ts' = "import { Component, NgModule } from '@angular/core';`n" + (& $box 'ABoxComponent' 'demo.a.title') +
+            "@Component({ selector: 'demo-host-a', template: '<demo-box></demo-box>' })`nexport class HostAComponent {}`n" +
+            "@NgModule({ declarations: [ABoxComponent, HostAComponent] })`nexport class AModule {}`n"
+        'apps/shop/src/b.module.ts' = "import { Component, NgModule } from '@angular/core';`n" + (& $box 'BBoxComponent' 'demo.b.title') +
+            "@Component({ selector: 'demo-host-b', template: '<demo-box></demo-box>' })`nexport class HostBComponent {}`n" +
+            "@NgModule({ declarations: [BBoxComponent, HostBComponent] })`nexport class BModule {}`n"
+        'apps/shop/src/loose.ts' = "import { Component } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-loose', template: '<demo-box></demo-box>' })`nexport class LooseComponent {}`n"
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $edge = "SELECT p.name || '>' || r.to_name AS edge FROM {0} r JOIN classes p ON p.id = r.from_class WHERE r.tag = 'demo-box'"
+    $kept = Invoke-TsRowsQ $made.Db ($edge -f 'renders')
+    Assert-Line $kept 'HostAComponent>ABoxComponent'
+    Assert-Line $kept 'HostBComponent>BBoxComponent'
+    Assert-NoLine $kept 'HostAComponent>BBoxComponent'
+    Assert-NoLine $kept 'HostBComponent>ABoxComponent'
+    Assert-Line $kept 'LooseComponent>ABoxComponent'
+    Assert-Line $kept 'LooseComponent>BBoxComponent'
+    # THE CANDIDATE IS NOT LOST: a build writing no foreign edge at all would pass the lines above.
+    $aside = Invoke-TsRowsQ $made.Db ($edge -f 'renders_out_of_scope')
+    Assert-Line $aside 'HostAComponent>BBoxComponent'
+    Assert-Line $aside 'HostBComponent>ABoxComponent'
+    Assert-NoLine $aside 'HostAComponent>ABoxComponent'
+    # THE SAME EDGES `render_path` WALKS: every hop it takes out of a host is a `renders` row.
+    $walked = Invoke-TsRowsQ $made.Db ("SELECT COUNT(*) AS foreign_hops FROM render_path p, json_each(p.edges) e " +
+        "WHERE e.value NOT IN (SELECT id FROM renders)")
+    Assert-Line $walked '0'
 }
 
 }

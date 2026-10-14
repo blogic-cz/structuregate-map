@@ -39,9 +39,17 @@ Test-Case 'tsrows: an id prefix that serves two tables names both' {
 # THE OBVIOUS GRAPH WALK IS WRONG, which is the whole reason each step is PROVEN. A `renders` row carries
 # `from_class`, so a walk files the edge under the component's `.ts` when the row was read from its
 # `.html` - and the containment test catches exactly that, because the render's line is not inside the
-# class's.
+# class's. A host whose scope REACHES the tag, so the row is a `renders` one: the base fixture's only render is out of
+# scope, and since #40 that row is set aside in `renders_out_of_scope`.
 Test-Case 'tsrows: a join that reaches the wrong file is refused, however well it resolves' {
-    $tree = New-TsRowsWorkspace
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/shelf.component.html' = "<app-cart></app-cart>`n"
+        'apps/shop/src/shelf.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { CartComponent } from './cart.component';`n" +
+            "@Component({ selector: 'app-shelf', standalone: true, imports: [CartComponent], " +
+            "templateUrl: './shelf.component.html' })`n" +
+            "export class ShelfComponent {}`n"
+    }
     $made = New-TsRowsDb $tree
     $r = Invoke-TsRowsQ $made.Db ("SELECT group_concat(json_extract(j.value, '`$.field')) AS route " +
         "FROM _meta, json_each(json_extract(_meta.value, '`$.anchors.renders')) j " +

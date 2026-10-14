@@ -31,7 +31,7 @@ use std::path::Path;
 // 24: an enum member's attributes - a `decorators` row (`target_kind = 'enum_member'`) and `enums.members[].attributes`;
 // a field's, a const's and an event field's attributes are `decorators` rows (`target_kind` the member kind);
 // an error a generated file on disk takes part in is a `diagnostics` row of `kind = 'generated'`.
-pub(super) const CS_ROWS_VERSION: &str = "24";
+pub(super) const CS_ROWS_VERSION: &str = "25";
 /// The same for the SQL extractor. 7: `sql_dynamic`, an object created by dynamic SQL.
 const SQL_ROWS_VERSION: &str = "7";
 /// Rows held before a batch is sent - both ends pay for it, so it decides whether a large solution fits.

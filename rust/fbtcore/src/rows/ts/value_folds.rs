@@ -28,6 +28,8 @@ pub type Classes = Vec<IndexMap<String, usize>>;
 pub type ArgParams = IndexMap<String, String>;
 /// Identity key (`enum#param:..`) -> the caller texts it was read through.
 pub type Labels = IndexMap<String, IndexSet<String>>;
+/// SET key -> the side each way that restricts it was written on: `true` an `in` (holds SOME of), `false` only `not_in`s.
+pub type SetSides = IndexMap<String, IndexSet<bool>>;
 
 fn field(row: &Value, name: &str) -> String {
     row.get(name).and_then(|v| v.as_str()).unwrap_or("").to_string()
@@ -60,7 +62,7 @@ fn split(k: &str) -> (&str, &str) {
 /// A DIMENSION IS KEYED BY ITS TEXT AS RENAMED ON ITS WAY (`key_scopes`): a child's `item.kind` under
 /// `[item]="vm"` is `vm.kind`, so it meets the parent's gates on that variable instead of beside them.
 pub fn per_way_allowed(ways: &[Way], gates: &GateMap, idx: &EnumIndex, renames: Option<&Renames>) -> PerWay {
-    per_way_keyed(ways, gates, idx, renames, None, None, &mut Labels::new(), &mut Classes::new())
+    per_way_keyed(ways, gates, idx, renames, None, None, &mut Labels::new(), &mut Classes::new(), &mut SetSides::new())
 }
 
 /// `per_way_allowed`, with an `arg:` link keyed by the callee parameter it restricts where it reads one: the
@@ -74,6 +76,7 @@ pub fn per_way_keyed(
     params: Option<&ArgParams>,
     labels: &mut Labels,
     classes: &mut Classes,
+    sides: &mut SetSides,
 ) -> PerWay {
     let mut out = Vec::with_capacity(ways.len());
     for (i, way) in ways.iter().enumerate() {
@@ -146,6 +149,9 @@ pub fn per_way_keyed(
                     }
                 }
             }
+        }
+        for k in set_kept.keys().chain(set_out.keys()) {
+            sides.entry(k.clone()).or_default().insert(set_kept.contains_key(k));
         }
         classes.push(unify_present(&mut here, aliases.and_then(|a| a.get(i)).map(Vec::as_slice).unwrap_or(&[])));
         out.push(here);
@@ -274,15 +280,15 @@ fn dimensions(per_way: &PerWay) -> IndexSet<String> {
 
 /// The values every way in still permits between them, where that is less than the domain.
 pub fn fold_values(ways: &[Way], gates: &GateMap, idx: &EnumIndex, per_way: Option<&PerWay>) -> Vec<Value> {
-    let computed;
-    let per_way = match per_way {
-        Some(p) => p,
-        None => {
-            computed = per_way_allowed(ways, gates, idx, None);
-            &computed
-        }
-    };
+    let mut sides = SetSides::new();
+    match per_way {
+        Some(p) => fold_sided(p, idx, &sides),
+        None => fold_sided(&per_way_keyed(ways, gates, idx, None, None, None, &mut Labels::new(), &mut Classes::new(), &mut sides), idx, &sides),
+    }
+}
 
+/// `fold_values` over ways already keyed, a SET dimension published on the side its rows were written on (`sides`).
+pub fn fold_sided(per_way: &PerWay, idx: &EnumIndex, sides: &SetSides) -> Vec<Value> {
     let mut out = Vec::new();
     for k in dimensions(per_way) {
         let (enum_id, dim) = split(&k);
@@ -316,7 +322,10 @@ pub fn fold_values(ways: &[Way], gates: &GateMap, idx: &EnumIndex, per_way: Opti
         }
         let excluded: Vec<String> =
             info.domain.iter().filter(|v| !union.contains(*v)).cloned().collect();
-        let in_side = union.len() <= excluded.len();
+        // A SET KEEPS THE SIDE IT WAS WRITTEN ON, as `gate_values` does: "holds some of A, B" is not "holds no C".
+        // Ways written on different sides say neither, and keep the shorter side.
+        let side = sides.get(&k).filter(|s| s.len() == 1).and_then(|s| s.first().copied());
+        let in_side = side.unwrap_or(union.len() <= excluded.len());
         let mut values: Vec<String> =
             if in_side { union.into_iter().collect() } else { excluded };
         values.sort();

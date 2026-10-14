@@ -105,6 +105,24 @@ fn called(value: Option<&Value>, rows: &TsRows) -> Option<Value> {
                 "target": {"row": row}}, "args": []}))
 }
 
+/// The tree of `this.a?.b` or `a.b`: a `Read` per link, a `SafeRead` after `?.`. None unless every link is a plain name.
+fn read_chain(text: &str) -> Option<Value> {
+    let plain = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$');
+    let mut tree: Option<Value> = None;
+    let mut safe = false;
+    for part in text.split('.') {
+        let (name, next_safe) = part.strip_suffix('?').map_or((part, false), |p| (p, true));
+        tree = Some(match tree {
+            None if name == "this" => json!({"k": "This"}),
+            None if plain(name) => json!({"k": "Read", "name": name, "receiver": {"k": "Implicit"}}),
+            Some(t) if plain(name) => json!({"k": if safe { "SafeRead" } else { "Read" }, "name": name, "receiver": t}),
+            _ => return None,
+        });
+        safe = next_safe;
+    }
+    tree.filter(|t| t.get("k").and_then(Value::as_str) != Some("This") && !safe)
+}
+
 impl<'a> Props<'a> {
     pub fn new(store: &Store<'_>, idx: &'a EnumIndex, claimed: &dyn Fn(&str) -> bool) -> Props<'a> {
         let calls = Calls::new(store, idx, TsRows::new(store), claimed);
@@ -216,7 +234,10 @@ impl<'a> Props<'a> {
                             local_init.get(row).and_then(|x| tree(Some(x.clone()), Some(id.clone()))).or(cond),
                         _ => cond,
                     };
-                    if let (Some(c), Some(e)) = (cond, tree(cell(r, "expression"), Some(id.clone()))) {
+                    // A READ CHAIN HAS NO TREE (#66: `return this.detail?.Gift;`), so it is spelled back: dropping it
+                    // dropped the whole definition, and `C` with it.
+                    let e = tree(cell(r, "expression"), Some(id.clone())).or_else(|| read_chain(&cell(r, "source")?));
+                    if let (Some(c), Some(e)) = (cond, e) {
                         out.insert(id, (json!({"k": "Binary", "op": "&&", "left": c, "right": e}), true));
                     }
                 }
@@ -430,6 +451,17 @@ mod tests {
         assert_eq!(props(guarded(other, "false")).expand(&read("isX", "m:g")), read("isX", "m:g"));
         let nested = json!({"id": "br:1", "sense": "then", "condition_expr": "x:c", "parent": "br:0"});
         assert_eq!(props(guarded(nested, "false")).expand(&read("isX", "m:g")), read("isX", "m:g"));
+    }
+
+    #[test]
+    fn a_guarded_return_of_a_bare_read_chain_is_spelled_back() {
+        // the extractor keeps no tree for a read chain (#66): `return this.e?.f;` is still `C && this.e?.f`
+        let mut t = guarded(json!({"id": "br:1", "sense": "then", "condition_expr": "x:c"}), "false");
+        t["returns"][0] = json!({"member": "m:g", "source": "this.e?.f", "branch": "br:1", "line": 3});
+        let e = json!({"k": "SafeRead", "name": "f", "receiver": {"k": "Read", "name": "e", "receiver": {"k": "This"}}});
+        assert_eq!(props(t).expand(&read("isX", "m:g")), json!({"k": "Binary", "op": "&&", "left": cmp(), "right": e}));
+        assert_eq!(read_chain("a.b()"), None);
+        assert_eq!(read_chain("this"), None);
     }
 
     #[test]

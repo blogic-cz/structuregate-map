@@ -269,3 +269,42 @@ export function rollupModuleScope(store, diag) {
   }
   return counts;
 }
+
+/** Where an `out_of_scope` candidate is published - beside `renders`, never in it. */
+export const ASIDE = 'renders_out_of_scope';
+
+/**
+ * `renders` IS WHAT ANGULAR INSTANTIATES (#40): an `out_of_scope` candidate - a tag matched to a component the
+ * host's scope cannot see - is moved to `renders_out_of_scope`, so a query over `renders` agrees with `render_graph`
+ * and `render_path` (`closure.rs::load_edges` drops the same rows). Kept in `renders`, two modules each declaring
+ * one `demo-box` gave each host an edge to both. `unknown` stays: nothing proves which candidate renders.
+ *
+ * LAST, after every pass that reads `renders.scope`, and IN PLACE: the rows keep their ids, and a row handed back
+ * from this table is loaded into `renders` again (`TsMap.mjs`), so the scope is decided over every candidate on
+ * every run. A row moves only when its `scope` says so, so an unchanged row lands where it was stored.
+ */
+export function setAsideOutOfScope(store) {
+  const all = store.table('renders');
+  const aside = store.table(ASIDE);
+  let at = 0;
+  for (const r of all) {
+    if (r.scope === 'out_of_scope') aside.push(r);
+    else all[at++] = r;
+  }
+  all.length = at;
+  if (aside.length) store.note(ASIDE, 'rd');
+  return aside.length;
+}
+
+/** The claims handed back, the set-aside table's folded into `renders`, where this run holds its rows. */
+export function claimsBack(claims) {
+  const out = { ...(claims ?? {}) };
+  if (out[ASIDE]) out.renders = { ...(out.renders ?? {}), ...out[ASIDE] };
+  delete out[ASIDE];
+  return out;
+}
+
+/** A WHOLE `renders` takes its set-aside candidates with it: they are one table split by `scope`. */
+export function withAside(whole) {
+  return whole.includes('renders') && !whole.includes(ASIDE) ? [...whole, ASIDE].sort() : whole;
+}

@@ -11,7 +11,10 @@
 //! destructuring, a shorthand), no string literal equals it (`x['name']`, a host binding), the member carries no
 //! decorator (`@Input`, `@HostBinding` read it for the framework), and its file reads no instance of its own by a
 //! name no source spells (`files.this_indexed`: `this[k]`, `...this`, `Object.values(this)`).
-//! Not read, so never dropped: a write in a method (`this.f = 'k'`); only an initializer is the field's whole value.
+//! A plain `=` to a property of its name in its own file is a write, not a read (#68): `this.f = 'k'` in a method
+//! counts against nothing, and the literal it writes is no site either - nor is a `return` of an unread GETTER.
+//! A literal is dropped only when the statement it sits in (by file, class, value and line) is such a write or
+//! return; one inside a call, a condition or a ternary arm stays a site.
 
 use super::store::{Row, Store};
 use serde_json::Value;
@@ -141,29 +144,95 @@ impl MemberReads {
     }
 }
 
-/// The (class id, field name) pairs whose initializer nothing reads.
+fn number(row: &Row, field: &str) -> Option<i64> {
+    match row.get(field) {
+        Some(Value::Number(n)) => n.as_i64(),
+        Some(Value::String(s)) => s.parse().ok(),
+        _ => None,
+    }
+}
+
+/// A statement that may hold a literal: a plain `=` write to a member, or a getter's `return` (#68). Matched to a
+/// literal by file, class, value and line span; `unread` when the member it feeds is.
+struct Holder {
+    file: String,
+    class: String,
+    value: String,
+    lines: (i64, i64),
+    unread: bool,
+}
+
+/// The (class id, member name) pairs nothing reads - a field or a getter - and the writes and returns that feed them.
 pub struct Unread {
     fields: HashSet<(String, String)>,
+    assigned: Vec<Holder>,
+    returned: Vec<Holder>,
 }
 
 impl Unread {
     pub fn new(store: &Store<'_>, reads: &MemberReads) -> Unread {
-        let mut fields = HashSet::new();
-        for m in store.table("members").iter() {
-            let (Some(class), Some(name)) = (text(m, "class"), text(m, "name")) else { continue };
-            if text(m, "kind").as_deref() == Some("property") && reads.own_reads(m) == Some(0) {
-                fields.insert((class, name));
+        // A PLAIN `=` TO A PROPERTY IS A WRITE, NOT A READ, though `prop_reads` counts its `x.name` (#68): each one in
+        // the member's own file is taken off its count. A `+=` reads; `this.f[k] = ..` (`this-indexed`) reads `f`.
+        let plain = |a: &Row| text(a, "operator").as_deref() == Some("=")
+            && matches!(text(a, "scope").as_deref(), Some("this") | Some("property"));
+        let mut writes: HashMap<(String, String), i64> = HashMap::new();
+        let assignments = store.table("assignments");
+        for a in assignments.iter() {
+            if let (true, Some(file), Some(target)) = (plain(a), text(a, "file"), text(a, "target")) {
+                *writes.entry((file, target)).or_default() += 1;
             }
         }
-        Unread { fields }
+        let mut fields = HashSet::new();
+        let mut getters: HashSet<String> = HashSet::new();
+        let mut field_ids: HashSet<String> = HashSet::new();
+        for m in store.table("members").iter() {
+            let (Some(id), Some(class), Some(name), Some(file)) = (text(m, "id"), text(m, "class"), text(m, "name"), text(m, "file")) else { continue };
+            let kind = text(m, "kind");
+            if !matches!(kind.as_deref(), Some("property") | Some("getter")) {
+                continue;
+            }
+            let written = writes.get(&(file, name.clone())).copied().unwrap_or(0);
+            if reads.own_reads(m).is_some_and(|own| own <= written) {
+                if kind.as_deref() == Some("getter") {
+                    getters.insert(id);
+                } else {
+                    field_ids.insert(id);
+                    fields.insert((class, name));
+                }
+            }
+        }
+        let holder = |r: &Row, unread: bool| -> Option<Holder> {
+            let line = number(r, "line")?;
+            Some(Holder { file: text(r, "file")?, class: text(r, "class")?, value: text(r, "value")?,
+                lines: (line, number(r, "end_line").unwrap_or(line)), unread })
+        };
+        let assigned = assignments.iter()
+            .filter(|a| plain(a))
+            .filter_map(|a| holder(a, text(a, "target_id").is_some_and(|t| field_ids.contains(&t))))
+            .collect();
+        let returned = store.table("returns").iter()
+            .filter_map(|r| holder(r, text(r, "member").is_some_and(|m| getters.contains(&m))))
+            .collect();
+        Unread { fields, assigned, returned }
     }
 
-    /// Whether the literal `s` is the initializer of an unread field of `class`.
-    pub fn initializes(&self, s: &Row, class: &str) -> bool {
-        if text(s, "context").as_deref() != Some("PropertyDeclaration") {
-            return false;
-        }
-        text(s, "property").is_some_and(|p| self.fields.contains(&(class.to_string(), p)))
+    /// Whether the literal `s`, inside `class`, only feeds members nothing reads: the initializer of an unread field,
+    /// or the whole value of a `=` write to one or of an unread getter's `return` - every such statement it may sit
+    /// in feeding an unread member, so a literal two statements on one line could hold is kept unless both do.
+    pub fn holds(&self, s: &Row, class: &str) -> bool {
+        let holders = match text(s, "context").as_deref() {
+            Some("PropertyDeclaration") => {
+                return text(s, "property").is_some_and(|p| self.fields.contains(&(class.to_string(), p)));
+            }
+            Some("BinaryExpression") => &self.assigned,
+            Some("ReturnStatement") => &self.returned,
+            _ => return false,
+        };
+        let (Some(file), Some(value), Some(line)) = (text(s, "file"), text(s, "value"), number(s, "line")) else { return false };
+        let mut at = holders.iter()
+            .filter(|h| h.file == file && h.class == class && h.value == value && h.lines.0 <= line && line <= h.lines.1)
+            .peekable();
+        at.peek().is_some() && at.all(|h| h.unread)
     }
 }
 

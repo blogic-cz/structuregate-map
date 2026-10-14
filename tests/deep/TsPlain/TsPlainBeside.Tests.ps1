@@ -70,6 +70,19 @@ Test-Case 'tsplain beside: a script file outside the Angular workspace gets plai
     Assert-Line $inside 'i=0'
 }
 
+Test-Case 'tsplain beside: an XML document named .ts is a skipped file, not a parse error' {
+    # A RECORDED TEST SUITE (or a Qt Linguist translation) uses `.ts` for XML. Parsed as TypeScript it was an
+    # UNPARSED error, and the deep map of the whole tree exited 1.
+    $tree = New-TsBesideTree
+    Set-Content -LiteralPath (Join-Path $tree 'admin/src/suite.ts') -Value "<?xml version=`"1.0`" encoding=`"UTF-8`"?>`n<TestSuiteEntity>`n   <name>Demo</name>`n</TestSuiteEntity>`n"
+    $run = Invoke-TsBesideMap $tree
+    Assert-NoLine $run 'UNPARSED'
+    $row = Get-TsBesideRows $tree "SELECT 's=' || skipped FROM files WHERE lang = 'ts' AND path = 'admin/src/suite.ts'"
+    Assert-Line $row 's=an XML document, not a script'
+    $count = Get-TsBesideRows $tree "SELECT 'n=' || count(*) FROM files WHERE lang = 'ts' AND coalesce(skipped, '') = ''"
+    Assert-Line $count 'n=2'
+}
+
 Test-Case 'tsplain beside: the plain rows go when the last file outside the workspace goes' {
     $tree = New-TsBesideTree
     Invoke-TsBesideMap $tree | Out-Null

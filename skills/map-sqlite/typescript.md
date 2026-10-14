@@ -34,16 +34,18 @@ Beside the shared tables it adds the FRAMEWORK tables:
 |---|---|
 | declarations | `components` `directives` `pipes` `injectables` `ng_modules` `class_decorators` `members` `locals` `enums` `interfaces` `type_aliases` `type_members` `switch_cases` `template_literals` `template_strings` `projects` |
 | injection and I/O | `di` `io` `input_usage` |
-| templates | `templates` `template_nodes` `bindings` `renders` `render_graph` `component_reach` `selector_index` |
+| templates | `templates` `template_nodes` `bindings` `renders` `renders_out_of_scope` `render_graph` `component_reach` `selector_index` |
 | routing and gates | `routes` `gates` `gate_values` `gate_index` |
 | NgRx | `state_actions` `state_handlers` `state_selectors` `state_effects` |
 | the closure, derived LAST from every other table | `render_path` `key_reach` `gate_features` (+ `gate_values`): where a translation key can be travelled to from a routed root, what gates every way in, which capability each gate requires |
 
 * **`components.class`** is the class row (`c:...`) that `routes.component_id`, `render_graph.from_class`
-  and `renders` point at. `renders` keeps every selector candidate with its `scope` (`declared`, `imported`,
-  `out_of_scope`, `unknown`, `direct_reference`); `render_graph`, `component_reach`, `render_path` and
-  `key_reach` leave out the `out_of_scope` ones - a tag Angular never instantiates there - so a query over
-  `renders` itself filters `scope <> 'out_of_scope'` to see what really renders. A render created in code names the method that returned the class
+  and `renders` point at. `renders` holds the edges Angular instantiates, each with its `scope` (`declared`,
+  `imported`, `unknown`, `direct_reference`) - the same edges `render_graph`, `component_reach` and `render_path`
+  walk. A selector candidate the host's NgModule or standalone `imports` cannot see is a `renders_out_of_scope`
+  row instead (same columns, `scope = 'out_of_scope'`), so every candidate a tag matched is `renders UNION ALL
+  renders_out_of_scope` (a table no row was written to does not exist). A host no module declares (`unknown`) keeps an
+  edge to every candidate. A render created in code names the method that returned the class
   (`returned_by`) and each way it was returned (`return_ways`, `returns` ids); a `case` or `if` every way sits
   in lands in `render_path.branches`. `templates`/`template_nodes`/`bindings` are the template side; `gates`/
   `gate_values` what hides a node (`gates.gate_kind = 'hidden'` is `[hidden]`/`[attr.hidden]`, whose `expression` is a row holding the NEGATED condition) (`op` in/not_in/unknown; `listed_json` what a config object lists, even an
