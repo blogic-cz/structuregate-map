@@ -120,4 +120,59 @@ Test-Case 'tsrows: a guarded method a field holds and a ternary of two predicate
     Assert-NoLine $r 'isFenGift =>'
 }
 
+# #66: the guard returns the bare optional read `this.detail?.Glen` (not `!!`) and the key sits under a carrier,
+# so what is asserted is `key_reach.always_values`, through a parent that binds the list.
+Test-Case 'tsrows: a key under a guarded method returning a bare optional read is reached under the guard' {
+    $tpl = '<div *ngIf="heathOnly"><translate [text]="\''demo.gm.field\''"></translate></div>' +
+        '<div *ngIf="viaLocal"><translate [text]="\''demo.gm.local\''"></translate></div>' +
+        '<div *ngIf="either"><translate [text]="\''demo.gm.either\''"></translate></div>' +
+        '<div *ngIf="isHeathGift()"><translate [text]="\''demo.gm.called\''"></translate></div>' +
+        '<div *ngIf="control"><translate [text]="\''demo.gm.control\''"></translate></div>'
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/kinds.ts' = "export enum Kind { Heath = 1, Fen = 2, Lea = 3 }`n" +
+            "export const isKind = (ids: Kind[]) => (...kinds: Kind[]) => kinds.some((k) => ids.includes(k));`n" +
+            "export const isHeath = isKind([Kind.Heath]);`nexport const isFen = isKind([Kind.Fen]);`n" +
+            "export function isLocalEnv(): boolean { return true; }`n"
+        'apps/shop/src/translate.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "@Component({ selector: 'translate', standalone: true, template: '<span>{{ text }}</span>' })`n" +
+            "export class TranslateComponent { @Input() text!: string; }`n"
+        'apps/shop/src/a.component.ts' = "import { Component, Input, OnInit } from '@angular/core';`n" +
+            "import { Kind, isHeath, isFen, isLocalEnv } from './kinds';`n" +
+            "@Component({ selector: 'demo-a', template: '" + $tpl + "' })`n" +
+            "export class AComponent implements OnInit {`n  @Input() modelKinds: Kind[] = [];`n  @Input() detail!: { Glen?: boolean };`n" +
+            "  heathOnly = false;`n  viaLocal = false;`n  either = false;`n  control = false;`n" +
+            "  ngOnInit() {`n" +
+            "    this.heathOnly = this.isHeathGift();`n" +
+            "    this.viaLocal = this.isHeathLocal();`n" +
+            "    this.either = isLocalEnv() ? this.isHeathGift() : this.isFenGift();`n" +
+            "    this.control = isHeath(...this.modelKinds);`n  }`n" +
+            "  isHeathGift(): boolean {`n    if (isHeath(...this.modelKinds)) {`n      return this.detail?.Glen;`n    }`n    return false;`n  }`n" +
+            "  private isHeathLocal(): boolean {`n    const sel = isHeath(...this.modelKinds);`n" +
+            "    if (sel) {`n      return this.detail?.Glen;`n    }`n    return false;`n  }`n" +
+            "  private isFenGift(): boolean {`n    if (isFen(...this.modelKinds)) {`n      return this.detail?.Glen;`n    }`n    return false;`n  }`n}`n"
+        'apps/shop/src/root.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { Kind } from './kinds';`n" +
+            "@Component({ selector: 'demo-root', template: '<demo-a [modelKinds]=`"kinds`" [detail]=`"detail`"></demo-a>' })`n" +
+            "export class RootComponent { kinds: Kind[] = [Kind.Lea]; detail = { Glen: true }; }`n"
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"gm":{"field":"1","local":"2","either":"3","called":"4","control":"5"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["translate:text"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $sql = "SELECT k.key || ' | ' || coalesce((SELECT group_concat(json_extract(v.value,'`$.dimension') || ' ' || " +
+        "json_extract(v.value,'`$.op') || ' ' || json_extract(v.value,'`$.values'), ' & ') FROM json_each(k.always_values) v), '-') AS r " +
+        "FROM key_reach k WHERE k.key LIKE 'demo.gm.%'"
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql $sql
+    Assert-Exit $r 0
+    Assert-Line $r 'demo.gm.control | modelKinds in ["Home"]'
+    Assert-Line $r 'demo.gm.field | modelKinds in ["Home"]'
+    Assert-Line $r 'demo.gm.local | modelKinds in ["Home"]'
+    Assert-Line $r 'demo.gm.called | modelKinds in ["Home"]'
+    # `modelKinds` is a SET: "holds some of Fen, Heath" is not "holds no Lea", so the `in` side is kept
+    Assert-Line $r 'demo.gm.either | modelKinds in ["Flat","Home"]'
+    $g = Invoke-TsRowsQ $made.Db $script:TsEnumFormsSql
+    Assert-Line $g 'either => Kind modelKinds in ["Flat","Home"]'
+    Assert-Line $g 'isHeathGift() => Kind modelKinds in ["Home"]'
+}
+
 }

@@ -31,7 +31,7 @@ before concluding a method is dead.
 * `decorators` are the attributes (`DllImport`, `Fact`, ...) - `target_kind` the declaration's kind (`class`, `method`,
   `parameter`, `field`, `const`, `event`, `enum_member` for `[ExternalId(7001)] Alpha`, `target` the member's name -
   one row per declarator of `int a, b;`); `arg_values` is the JSON list of what each argument folds to
-  (`Name=text` for a named one, "" for a value that is not constant) - `[Route(Base + "x")]` reads `["api/x"]`; `exports` the public types (`kind` `class`,
+  (`Name=text` for a named one, an enum member by its qualified name, a `typeof` by its type, "" for a value that is not constant) - `[Route(Base + "x")]` reads `["api/x"]`; `exports` the public types (`kind` `class`,
   `record`, ...); `imports` the `using`s (`kind = 'using'`); `diagnostics` every compile error, and
   `files.errors` its count. `diagnostics.kind` is `error`, `generator` (a partial a source generator was going to
   write - not counted), or `generated` (counted): an error a generator's output on disk takes part in - a `CS0229`

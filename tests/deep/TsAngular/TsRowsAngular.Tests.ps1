@@ -273,17 +273,19 @@ Test-Case 'tsrows: a template becomes nodes, with the tag, the order and the par
 }
 
 # AN ELEMENT MATCHING A COMPONENT'S SELECTOR IS A RENDER EDGE - the graph the whole map is built to answer
-# questions over.
+# questions over. The fixture's host is a standalone component importing nothing, so Angular would not render the tag
+# there: the candidate is the same row, set aside in `renders_out_of_scope` (#40).
 Test-Case 'tsrows: an element that matches a component selector is a render edge to it' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT r.to_name, r.kind, r.tag, r.via FROM renders r WHERE r.tag = 'app-cart'")
+    $every = 'renders_out_of_scope'
+    $r = Invoke-TsRowsQ $made.Db ("SELECT r.to_name, r.kind, r.tag, r.via FROM $every r WHERE r.tag = 'app-cart'")
     Assert-Line $r 'CartComponent'
     Assert-Line $r 'element'
     # ONCE. `*ngIf` desugars into a synthetic wrapper that KEEPS the pre-desugar tag, so the component
     # selector matches the wrapper as well as the real element - a sizeable share of one map's render rows sat on a
     # wrapper, and an assertion on the name alone passes against every one of them.
-    $counted = Invoke-TsRowsQ $made.Db "SELECT count(*) AS edges FROM renders WHERE tag = 'app-cart'"
+    $counted = Invoke-TsRowsQ $made.Db "SELECT count(*) AS edges FROM $every WHERE tag = 'app-cart'"
     Assert-Line $counted '1'
 }
 

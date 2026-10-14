@@ -424,8 +424,8 @@ pub fn key_routes(
         // each sibling, and the child's template gate no longer restricted the key.
         let own = file.as_ref().and_then(|f| enclosing_class(&class_spans, f, number(s, "line"), number(s, "col")));
         let ids: Vec<Option<String>> = match own.as_ref().and_then(|c| Some((c, component_of_class.get(c)?))) {
-            // AN INITIALIZER OF A FIELD NOTHING READS never leaves the field (#54, `key_unread`): no site.
-            Some((class, _)) if unread.initializes(s, class) => continue,
+            // A VALUE ONLY A MEMBER NOTHING READS HOLDS never leaves it (#54, #68, `key_unread`): no site.
+            Some((class, _)) if unread.holds(s, class) => continue,
             Some((_, id)) => vec![Some(id.clone())],
             None => match components_by_file.get(&file) {
                 Some(list) if !list.is_empty() => list.iter().map(|c| text(c, "id")).collect(),

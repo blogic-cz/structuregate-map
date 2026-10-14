@@ -66,3 +66,30 @@ export function deriveJoins(store, idScheme, tables) {
   }
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => a.localeCompare(b)));
 }
+
+/** Which columns of each table held a STRUCTURE and which a BOOLEAN - what SQLite cannot record. */
+export function columnKinds(store, tableNames) {
+  // WHICH COLUMNS HELD A STRUCTURE. SQLite has no array and no object, so a cell that was a list or a
+  // map is stored as JSON text - and a reader cannot tell it from a string that happens to start with a
+  // bracket. Guessing it back cost the consumer an `AttributeError` deep in a derivation: `enums.members`
+  // came back as text and every member read as a character. The map says so instead.
+  const jsonColumns = {};
+  // AND WHICH HELD A BOOLEAN, for the same reason and with the same cost. SQLite has no boolean
+  // either: `true` comes back an integer 1, and a pass asking `call.new === true` of a row that was
+  // handed back gets false. One `ComponentPortal` render edge disappeared that way, and with it every
+  // render path that went through it - a whole component unreachable, from a cell that still said 1.
+  const boolColumns = {};
+  for (const table of tableNames) {
+    const structured = new Set();
+    const boolean = new Set();
+    for (const row of store.tables[table]) {
+      for (const [column, value] of Object.entries(row)) {
+        if (value !== null && typeof value === 'object') structured.add(column);
+        if (typeof value === 'boolean') boolean.add(column);
+      }
+    }
+    if (structured.size) jsonColumns[table] = [...structured].sort();
+    if (boolean.size) boolColumns[table] = [...boolean].sort();
+  }
+  return { jsonColumns, boolColumns };
+}

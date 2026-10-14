@@ -158,6 +158,8 @@ namespace Demo.Models
     # bound: the attribute's constructor, as every `decorators.symbol`
     Assert-Equal (Get-CsCasesValue $db "SELECT symbol FROM decorators WHERE target = 'Alpha'") 'Demo.Models.ExternalIdAttribute.ExternalIdAttribute' 'symbol'
     Assert-Equal (Get-CsCasesValue $db "SELECT count(*) FROM decorators WHERE target = 'Gamma'") '0' 'Gamma has none'
+    # an enum argument is a constant too: it once read [""] beside the int arguments that folded
+    Assert-Equal (Get-CsCasesValue $db "SELECT arg_values FROM decorators WHERE name = 'AttributeUsage'") '["System.AttributeTargets.Field"]' 'enum argument'
     $entry = "SELECT coalesce(json_extract(m.value, '$.attributes'), 'null') FROM enums e, json_each(e.members) m " +
         "WHERE e.name = 'HueKind' AND json_extract(m.value, '$.name') = '{0}'"
     Assert-Equal (Get-CsCasesValue $db ($entry -f 'Alpha')) '["ExternalId"]' 'Alpha entry'

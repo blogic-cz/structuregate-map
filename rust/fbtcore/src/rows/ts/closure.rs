@@ -162,7 +162,8 @@ pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Rc<str>, V
         // AN OUT-OF-SCOPE CANDIDATE IS NO WAY IN (divergence #17): a tag matched a selector the host's module
         // cannot see, so Angular never renders it there - `render_graph` and `component_reach` already drop
         // it. `unknown` stays: nothing proves which candidate renders, and an edge resolving today must not
-        // vanish for a scope the map cannot read.
+        // vanish for a scope the map cannot read. Since #40 node stores such a row in `renders_out_of_scope`,
+        // never in `renders` (`TsModuleScope.mjs::setAsideOutOfScope`); the filter stays for a store built before.
         .filter(|r| {
             id_of(r, "from_component").is_some()
                 && r.get("scope").and_then(Value::as_str) != Some("out_of_scope")

@@ -70,6 +70,23 @@ fn the_fold_across_ways_is_a_union_because_any_way_in_renders_the_key() {
 }
 
 #[test]
+fn a_set_dimension_is_published_on_the_side_it_was_written_on() {
+    // "holds some of A, B, C" is not "holds no D": a SET's `in` stays `in` however long it is
+    let set = |op: &str, v: &[&str]| vec![json!({"enum": "e:1", "dim": "kinds", "row": null, "op": op, "values": v, "set": true})];
+    let gates = map(&[("g:1", set("in", &["A", "B"])), ("g:2", set("in", &["C"])), ("g:3", set("not_in", &["A"])),
+                      ("g:4", gate("in", &["A", "B"])), ("g:5", gate("in", &["C"]))]);
+    let out = fold_values(&[way(&["g:1"]), way(&["g:2"])], &gates, &idx_of(FOUR), None);
+    assert_eq!((&out[0]["op"], &out[0]["values"]), (&json!("in"), &json!(["A", "B", "C"])));
+    // a set written only as `not_in` stays `not_in`, however short its `in` side would be
+    let out = fold_values(&[way(&["g:3"])], &gates, &idx_of(&["A", "B"]), None);
+    assert_eq!((&out[0]["op"], &out[0]["values"]), (&json!("not_in"), &json!(["A"])));
+    // ways written on different sides keep the shorter side (here: {A,B} and {B,C} cover the domain); a scalar always does
+    assert!(fold_values(&[way(&["g:1"]), way(&["g:3"])], &gates, &idx_of(&["A", "B", "C"]), None).is_empty());
+    let out = fold_values(&[way(&["g:4"]), way(&["g:5"])], &gates, &idx_of(FOUR), None);
+    assert_eq!((&out[0]["op"], &out[0]["values"]), (&json!("not_in"), &json!(["D"])));
+}
+
+#[test]
 fn the_union_takes_every_way_until_it_is_as_large_as_the_domain() {
     // The walk stops early only once the union cannot be published; before that every way counts.
     let gates = map(&[("g:1", gate("in", &["A"])), ("g:2", gate("in", &["B"])), ("g:3", gate("in", &["C"]))]);
@@ -273,7 +290,7 @@ fn an_arg_link_reading_two_dims_of_one_enum_keeps_its_text_keys() {
     let gates = map(&[("arg:1", rows)]);
     let params: ArgParams = [("arg:1".to_string(), "param:f#0".to_string())].into_iter().collect();
     let mut labels = Labels::new();
-    let per = per_way_keyed(&[way(&["arg:1"])], &gates, &idx_of(FOUR), None, None, Some(&params), &mut labels, &mut Classes::new());
+    let per = per_way_keyed(&[way(&["arg:1"])], &gates, &idx_of(FOUR), None, None, Some(&params), &mut labels, &mut Classes::new(), &mut SetSides::new());
     assert!(per[0].contains_key("e:1#a.kind") && per[0].contains_key("e:1#b.kind"));
     assert!(labels.is_empty(), "no parameter key for two dimensions");
 }
@@ -286,7 +303,7 @@ fn aliased_present_keys_on_one_way_intersect() {
     ];
     let gates = map(&[("g:1", rows)]);
     let aliases: Aliases = vec![vec![("vm.k".to_string(), "k".to_string())]];
-    let per = per_way_keyed(&[way(&["g:1"])], &gates, &idx_of(FOUR), None, Some(&aliases), None, &mut Labels::new(), &mut Classes::new());
+    let per = per_way_keyed(&[way(&["g:1"])], &gates, &idx_of(FOUR), None, Some(&aliases), None, &mut Labels::new(), &mut Classes::new(), &mut SetSides::new());
     let b: IndexSet<String> = ["B".to_string()].into_iter().collect();
     assert_eq!(per[0]["e:1#vm.k"], b);
     assert_eq!(per[0]["e:1#k"], b);

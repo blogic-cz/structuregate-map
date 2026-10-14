@@ -35,9 +35,9 @@ import { rollupDynamicRenders } from './TsDynRender.mjs';
 import { rollupRoutes } from './TsRoutes.mjs';
 import { rollupRouteTree } from './TsRouteTree.mjs';
 import { rollupInputUsage } from './TsInputUsage.mjs';
-import { rollupModuleScope } from './TsModuleScope.mjs';
+import { ASIDE, claimsBack, rollupModuleScope, setAsideOutOfScope, withAside } from './TsModuleScope.mjs';
 import { rollupStateGraph } from './TsNgrx.mjs';
-import { deriveJoins } from './TsSpecJoins.mjs';
+import { columnKinds, deriveJoins } from './TsSpecJoins.mjs';
 import { writeHtmlMirror } from './TsHtml.mjs';
 import { deriveAnchors } from './TsSpecAnchors.mjs';
 import { rollupComponentReach } from './TsReach.mjs';
@@ -225,9 +225,10 @@ async function main() {
   // 50: an `@for` collection is a `block` gate named `ForLoopBlock`, and `@empty` is the loop's sibling, not its child.
   // 51: `files.prop_reads` (every property name a file reads) and `files.this_indexed` (it hands `this` away), for a
   // component field nothing reads (`TsDecls/TsPropReads.mjs`).
+  // 52: an `out_of_scope` candidate is a `renders_out_of_scope` row, no longer a `renders` one (#40).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 51, build: args.build,
+    config: config.file, data: config.data, rows: 52, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
@@ -360,7 +361,9 @@ async function main() {
     const booleans = state.bool_columns ?? {};
     // THE IDS THE RE-EXTRACTED FILES' ROWS ALREADY HAVE. Handed over beside the rows, because the
     // rows themselves are the ones being replaced and these are all that is kept of them.
-    const reclaimable = store.loadClaims(carried.claims, state.identity ?? {});
+    // AN OUT-OF-SCOPE CANDIDATE IS A RENDER WHILE THIS RUN HOLDS IT (#40): back into `renders`, its claims and its rows
+    // below, so the scope is decided over every candidate again - `setAsideOutOfScope` moves it out on the way to the store.
+    const reclaimable = store.loadClaims(claimsBack(carried.claims), state.identity ?? {});
     let heldProjects = [];
     let loaded = 0;
     let skipped = 0;
@@ -384,7 +387,7 @@ async function main() {
         }
       }
       // `files` is the one INTERNED table, keyed by the absolute path - see `makeFileId`.
-      store.load(name, rows, name === 'files' ? (row) => row.abs : null);
+      store.load(name === ASIDE ? 'renders' : name, rows, name === 'files' ? (row) => row.abs : null);
       loaded += rows.length;
     }
     emptyChanged(store, planned.changed);
@@ -646,6 +649,9 @@ async function main() {
   // already has one and a query beats a second file.
   for (const item of diag.items) store.emit('diagnostics', item);
 
+  // `renders` IS WHAT ANGULAR INSTANTIATES - after every pass reading `renders.scope`, before the spec reads the tables.
+  emit('MAP-NOTE', `the typescript half set ${setAsideOutOfScope(store)} out-of-scope render candidate(s) aside in ${ASIDE}`);
+
   // THE SHA MAP IS WHAT THE DATABASE RECORDS THIS HALF BY. It is the file's own content hash, taken in the
   // same streamed read the line count already costs - see TsInventory. A file whose bytes could not be
   // read carries none, and is therefore not claimed as recorded.
@@ -664,28 +670,7 @@ async function main() {
   // and the one resolving fewer rows looked exactly like a map that lacked them. Derived LAST, because
   // both are read off the finished rows rather than declared anywhere.
   const tableNames = Object.keys(store.tables).sort();
-  // WHICH COLUMNS HELD A STRUCTURE. SQLite has no array and no object, so a cell that was a list or a
-  // map is stored as JSON text - and a reader cannot tell it from a string that happens to start with a
-  // bracket. Guessing it back cost the consumer an `AttributeError` deep in a derivation: `enums.members`
-  // came back as text and every member read as a character. The map says so instead.
-  const jsonColumns = {};
-  // AND WHICH HELD A BOOLEAN, for the same reason and with the same cost. SQLite has no boolean
-  // either: `true` comes back an integer 1, and a pass asking `call.new === true` of a row that was
-  // handed back gets false. One `ComponentPortal` render edge disappeared that way, and with it every
-  // render path that went through it - a whole component unreachable, from a cell that still said 1.
-  const boolColumns = {};
-  for (const table of tableNames) {
-    const structured = new Set();
-    const boolean = new Set();
-    for (const row of store.tables[table]) {
-      for (const [column, value] of Object.entries(row)) {
-        if (value !== null && typeof value === 'object') structured.add(column);
-        if (typeof value === 'boolean') boolean.add(column);
-      }
-    }
-    if (structured.size) jsonColumns[table] = [...structured].sort();
-    if (boolean.size) boolColumns[table] = [...boolean].sort();
-  }
+  const { jsonColumns, boolColumns } = columnKinds(store, tableNames);
   const idScheme = store.idScheme();
   const joins = deriveJoins(store, idScheme, tableNames);
   const { anchors, unanchored } = deriveAnchors(store, idScheme, joins, tableNames);
@@ -747,9 +732,10 @@ async function main() {
   // named, and `verifyUntouched` is what proves the list complete - it fails the run on the fourth one
   // nobody noticed rather than storing a change that would never be written. It found `io` this way.
   const rewritten = ['translations', 'components', 'io'];
-  const whole = [...new Set([...rewritten, ...store.rollupTables, ...Object.entries(store.tables)
+  // A WHOLE `renders` takes its set-aside candidates with it: they are one table split by `scope`.
+  const whole = withAside([...new Set([...rewritten, ...store.rollupTables, ...Object.entries(store.tables)
     .filter(([, rows]) => rows.length && rows.some((r) => r.owner_file === undefined))
-    .map(([name]) => name)])].sort();
+    .map(([name]) => name)])].sort());
 
   if (partial) {
     const touched = store.verifyUntouched(whole);

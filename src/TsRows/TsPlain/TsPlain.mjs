@@ -50,7 +50,7 @@ const LANG = 'ts';
 
 /** WHAT A ROW MEANS, folded into every file's sha with the compiler's version. Bump it with every change to
  *  what TsPlainRows.mjs writes, or files that did not move keep the old rows - PyRows' ROWS_VERSION. */
-const ROWS_VERSION = '5';
+const ROWS_VERSION = '6';
 
 /** A file this large is a bundle or a generated table, not a source anybody edits; it gets its `files`
  *  row, saying so, and no other. One minified vendor file would otherwise outweigh the tree. */
@@ -245,6 +245,12 @@ function main() {
         read.push([rel, abs]);
         if (text.length > MAX_CHARS) {
             skippedFile(rows, rel, shas[rel], text, `larger than ${MAX_CHARS} characters - a bundle, not a source`);
+            continue;
+        }
+        // AN XML DOCUMENT NAMED `.ts` IS NOT A SCRIPT: a Qt Linguist translation and a recorded test suite both
+        // use the extension. Parsed, it was an error that failed the whole deep map of a tree beside a workspace.
+        if (text.trimStart().startsWith('<?xml')) {
+            skippedFile(rows, rel, shas[rel], text, 'an XML document, not a script');
             continue;
         }
         const sourceFile = ts.createSourceFile(abs, text, ts.ScriptTarget.Latest, true, scriptKind(ts, rel));
