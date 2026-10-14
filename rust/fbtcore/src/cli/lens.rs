@@ -24,6 +24,10 @@ pub fn run(db: &str, arguments: &[String], out: &mut Out) -> i64 {
             return 2;
         }
     };
+    // A MAP THE TREE MOVED ON FROM IS SAID ONCE, ON STDERR: stdout is the answer, and a script parses it.
+    if let Some(note) = crate::query::fresh::note(Path::new(db)) {
+        out.error(note);
+    }
     match crate::query::render(Path::new(db), &ask) {
         Err(e) => {
             out.error(format!("structuregate: the query failed — {e:#}"));
