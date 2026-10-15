@@ -94,12 +94,7 @@ fn a_carried_row_takes_its_structures_back_from_their_nodes_and_no_node_table_go
 /// What the last full run measured about which ids must survive, stored where it stores it.
 fn with_identity(db: &Path, identity: Value) {
     let conn = Connection::open(db).unwrap();
-    conn.execute("DELETE FROM _meta WHERE key = 'spec:typescript'", []).unwrap();
-    conn.execute(
-        "INSERT INTO _meta (key, value) VALUES ('spec:typescript', ?1)",
-        [serde_json::json!({"identity": identity}).to_string()],
-    )
-    .unwrap();
+    crate::rows::meta::put_value(&conn, "spec:typescript", &serde_json::json!({"identity": identity})).unwrap();
 }
 
 #[test]

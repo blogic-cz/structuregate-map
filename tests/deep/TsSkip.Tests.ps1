@@ -5,6 +5,8 @@
     Its helpers are its own - `-Only` runs this suite alone. The compiler cache is the one TsRows fills.
 #>
 
+. (Join-Path $PSScriptRoot 'nodes/NodeSql.Helpers.ps1')
+
 function Get-TsSkipModules {
     $modules = Join-Path ([System.IO.Path]::GetTempPath()) 'sgtest-tsrows\node_modules'
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return $null }
@@ -109,8 +111,7 @@ Test-Case 'tsskip: a run that starts node says why, and the last run''s trace be
     $edited = Invoke-TsSkipDeep $tree
     Assert-Line $edited 'the typescript half reads '
     Assert-Line $edited ': 1 file(s) moved since its rows were written (.ts 1)'
-    $r = Invoke-Gate --map-query (Join-Path $tree 'map.sqlite') --width 0 --sql "SELECT 'v=' || value FROM _meta WHERE key = 'last_refresh'"
-    $kept = ($r.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | Select-Object -First 1).Trim().Substring(2) | ConvertFrom-Json
+    $kept = Get-MetaText (Join-Path $tree 'map.sqlite') 'last_refresh' | ConvertFrom-Json
     Assert-Equal $kept.typescript.changed 1 'files the typescript half saw move'
     Assert-Equal ($null -ne $kept.steps_ms.typescript) $true 'the typescript half is timed'
 }

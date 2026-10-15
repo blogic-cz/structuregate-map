@@ -52,9 +52,7 @@ pub fn check(db: &Path, budget: Duration) -> Option<Moved> {
     }
     let workspace = workspace_of(&conn).map(|fe| roots[0].join(fe));
     // THE RUN'S OWN OUTPUTS are rewritten after the database every time - never a sign the tree moved.
-    let outputs: Vec<PathBuf> = conn
-        .query_row("SELECT value FROM _meta WHERE key = 'outputs'", [], |r| r.get::<_, String>(0))
-        .ok()
+    let outputs: Vec<PathBuf> = crate::rows::meta::get(&conn, "outputs")
         .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
         .unwrap_or_default()
         .into_iter()
@@ -158,7 +156,7 @@ pub fn said(moved: &Moved) -> Option<String> {
 
 /// `_meta.roots` (every root), or `_meta.root` for a map written before it was kept.
 fn roots_of(conn: &Connection) -> Vec<PathBuf> {
-    let meta = |key: &str| conn.query_row("SELECT value FROM _meta WHERE key = ?1", [key], |r| r.get::<_, String>(0)).ok();
+    let meta = |key: &str| crate::rows::meta::get(conn, key);
     if let Some(listed) = meta("roots").and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
         && !listed.is_empty()
     {
@@ -169,7 +167,7 @@ fn roots_of(conn: &Connection) -> Vec<PathBuf> {
 
 /// The Angular workspace the last run mapped, relative to the first root - kept with its key (`mapper/deep/ts.rs`).
 fn workspace_of(conn: &Connection) -> Option<String> {
-    let kept: String = conn.query_row("SELECT value FROM _meta WHERE key = 'skip:typescript'", [], |r| r.get(0)).ok()?;
+    let kept = crate::rows::meta::get(conn, "skip:typescript")?;
     let first = kept.split('\n').next()?;
     serde_json::from_str::<serde_json::Value>(first).ok()?["fe"].as_str().map(String::from)
 }
@@ -258,9 +256,9 @@ mod tests {
         let db = dir.join("map.sqlite");
         let conn = Connection::open(&db).unwrap();
         let listed: Vec<String> = roots.iter().map(|r| dir.join(r).to_string_lossy().into_owned()).collect();
-        conn.execute_batch("CREATE TABLE _meta (key TEXT, value TEXT); CREATE TABLE files (id TEXT, path TEXT, lang TEXT);").unwrap();
-        conn.execute("INSERT INTO _meta VALUES ('root', ?1)", [&listed[0]]).unwrap();
-        conn.execute("INSERT INTO _meta VALUES ('roots', ?1)", [&serde_json::Value::from(listed.clone()).to_string()]).unwrap();
+        conn.execute_batch("CREATE TABLE files (id TEXT, path TEXT, lang TEXT);").unwrap();
+        crate::rows::meta::put(&conn, "root", &listed[0]).unwrap();
+        crate::rows::meta::put_value(&conn, "roots", &serde_json::Value::from(listed.clone())).unwrap();
         for (i, path) in paths.iter().enumerate() {
             conn.execute("INSERT INTO files VALUES (?1, ?2, 'python')", [&format!("f:{i}"), &path.to_string()]).unwrap();
         }
@@ -289,7 +287,7 @@ mod tests {
         std::fs::File::options().write(true).open(&db).unwrap().set_modified(SystemTime::now() + Duration::from_secs(60)).unwrap();
         assert!(said(&check(&db, BUDGET).unwrap()).is_none());
         let conn = Connection::open(&db).unwrap();
-        conn.execute("UPDATE _meta SET value = '[\"/no/such/root\"]' WHERE key = 'roots'", []).unwrap();
+        crate::rows::meta::put(&conn, "roots", "[\"/no/such/root\"]").unwrap();
         drop(conn);
         assert!(check(&db, BUDGET).is_none());
         let _ = std::fs::remove_dir_all(&dir);

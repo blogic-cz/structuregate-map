@@ -332,7 +332,7 @@ Test-Case 'tsrows: the map records which files a change reaches' {
     Assert-Exit $made.Result 0
 
     # IT IS STORED, not derived on demand: deriving it re-read a database of hundreds of MB and cost about a minute.
-    $deps = Get-TsRowsMeta $made.Db 'deps:typescript'
+    $deps = Get-TsRowsDeps $made.Db
     $held = New-TsRowsLines @("targets=$(@($deps.PSObject.Properties).Count)")
     Assert-NoLine $held 'targets=0'
 
@@ -355,7 +355,7 @@ Test-Case 'tsrows: the map records which files a change reaches' {
     # `cart.component.ts` AND NOT `basket.component.ts`, which declares a Component, a Directive, a Pipe
     # and an NgModule in one file - it reaches the set through four tables at once, so dropping two of them
     # left it in and the case passed while proving nothing. The cart declares only a component.
-    $inScope = @(Get-TsRowsMeta $made.Db 'scope:typescript')
+    $inScope = @(Get-TsRowsScope $made.Db)
     $scope = New-TsRowsLines @("declares=$(@($inScope | Where-Object { $_ -eq 'apps/shop/src/cart.component.ts' }).Count)")
     Assert-Line $scope 'declares=1'
     $notScope = New-TsRowsLines @("template=$(@($inScope | Where-Object { $_ -eq 'apps/shop/src/basket.component.html' }).Count)")
@@ -384,7 +384,7 @@ Test-Case 'tsrows: a partial run records the import it just added in the graph' 
     Set-Content -LiteralPath (Join-Path $tree 'apps/shop/src/helpers.ts') -Value "import { Cart } from './cart';`nexport const help = new Cart();"
     $again = New-TsRowsDb $tree
     Assert-Line $again.Result 'put back'
-    $deps = Get-TsRowsMeta $again.Db 'deps:typescript'
+    $deps = Get-TsRowsDeps $again.Db
     $edge = New-TsRowsLines @("edge=$(@(@($deps.'apps/shop/src/cart.ts') | Where-Object { $_ -eq 'apps/shop/src/helpers.ts' }).Count)")
     Assert-Line $edge 'edge=1'
 }

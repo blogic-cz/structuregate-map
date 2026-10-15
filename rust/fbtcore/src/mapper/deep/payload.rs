@@ -35,7 +35,7 @@ pub struct Half<'a> {
 /// The key recorded after this half's last clean run.
 pub(super) fn recorded(db: &str, lang: &str) -> Option<String> {
     let conn = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
-    conn.query_row("SELECT value FROM _meta WHERE key = ?1", [format!("skip:{lang}")], |r| r.get(0)).ok()
+    crate::rows::meta::get(&conn, &format!("skip:{lang}"))
 }
 
 /// WHY THE LAST CLEAN RUN STORED NOTHING travels with its key, one line after it: a half with no compiler to borrow
@@ -57,9 +57,7 @@ pub(super) fn record(db: &str, lang: &str, key: &str) {
     let name = format!("skip:{lang}");
     // THE FIRST HALF OF A COLD RUN WRITES BEFORE ANY STORE HAS: with no `_meta` the key was dropped without a word,
     // and every first turn after a cold run started node again to hear "nothing to do" (`store::write` carries it).
-    let _ = conn.execute_batch("CREATE TABLE IF NOT EXISTS _meta (key TEXT, value TEXT)");
-    let _ = conn.execute("DELETE FROM _meta WHERE key = ?1", [&name]);
-    let _ = conn.execute("INSERT INTO _meta (key, value) VALUES (?1, ?2)", [&name, &key.to_string()]);
+    let _ = crate::rows::meta::put(&conn, &name, key);
 }
 
 /// A PAYLOAD HALF STARTED BEFORE ITS TURN, on its own thread, while the file map runs - the python file map and the

@@ -207,14 +207,5 @@ impl Model {
 }
 
 pub(super) fn meta_of(db: &Connection) -> IndexMap<String, String> {
-    let mut out = IndexMap::new();
-    let Ok(mut stmt) = db.prepare("SELECT key, value FROM _meta") else { return out };
-    let Ok(found) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-    else {
-        return out;
-    };
-    for pair in found.flatten() {
-        out.insert(pair.0, pair.1);
-    }
-    out
+    crate::rows::meta::scan(db, None).into_iter().collect()
 }

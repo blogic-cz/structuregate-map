@@ -453,6 +453,7 @@ pub fn load_all(db: &Connection, table: &str, column: &str) -> Result<HashMap<St
     Ok(out)
 }
 
+pub mod meta;
 pub mod probe;
 
 #[cfg(test)]

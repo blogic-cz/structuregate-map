@@ -261,14 +261,14 @@ Test-Case 'project: a project that was never restored is a WARNING in the map su
     Assert-Exit $first 0
     Assert-Line $first 'WARNING      1 C# project(s) never restored (no obj/project.assets.json: lib/Lib.csproj)'
     Assert-Line $first '1 C# file(s) have compile errors; run `dotnet restore`'
-    Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM _meta WHERE key = 'unrestored:csharp' AND value LIKE '%lib/Lib.csproj%'") '1' 'the project listed in _meta'
+    Assert-Equal (@(Get-MetaText $db 'unrestored:csharp' | ConvertFrom-Json) -join ',') 'lib/Lib.csproj' 'the project listed in _meta'
     # RESTORED: the record of the restore is on disk, and the warning goes.
     [void](New-Item -ItemType Directory -Path (Join-Path $tree 'lib/obj') -Force)
     [System.IO.File]::WriteAllText((Join-Path $tree 'lib/obj/project.assets.json'), '{"version":3,"targets":{},"libraries":{},"packageFolders":{}}')
     $restored = Invoke-Gate @map
     Assert-Exit $restored 0
     Assert-NoLine $restored 'never restored'
-    Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM _meta WHERE key = 'unrestored:csharp' AND value = '[]'") '1' 'and the list empty'
+    Assert-Equal (Get-MetaText $db 'unrestored:csharp') '[]' 'and the list empty'
 }
 
 }
