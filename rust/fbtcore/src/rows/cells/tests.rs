@@ -129,6 +129,9 @@ fn a_delete_through_rows_whose_id_is_a_number_takes_their_nodes() {
     let db = Connection::open_in_memory().unwrap();
     let rows = vec![json!({"id": 1, "half": "typescript", "hops": ["a", "b"]}), json!({"id": 2, "half": "other", "hops": ["c"]})];
     super::super::store::insert_rows(&db, "render_path", &rows).unwrap();
+    // A consumer's join, written as it reads: the node's owner IS the row's id, number for number.
+    let joined: i64 = db.query_row("SELECT count(*) FROM render_path r JOIN render_path__hops h ON h.owner = r.id AND h.parent = 0", [], |r| r.get(0)).unwrap();
+    assert_eq!(joined, 3, "b.owner = r.id finds the items of a numbered row");
     delete_children(&db, "render_path", "t.half = ?1", &[&"typescript"]).unwrap();
     let all = load_all(&db, "render_path", "hops").unwrap();
     assert!(!all.contains_key("1"), "row 1's nodes are gone: {all:?}");

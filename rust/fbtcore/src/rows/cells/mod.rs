@@ -124,6 +124,26 @@ pub fn flatten(owner: &str, value: &Value, out: &mut Vec<Value>) {
     });
 }
 
+/// A ROW'S OWNER KEY AS SQLITE HOLDS IT: an INTEGER when its text is a decimal integer (`render_path` numbers its
+/// rows), TEXT otherwise (`x:12`, `#5`). The column has no declared type, so `b.owner = rp.id` compares like with
+/// like - a TEXT `owner` matched no numbered row at all, in a join or a delete. Every writer and reader goes through
+/// here, so the two never disagree.
+pub fn owner_value(owner: &str) -> SqlValue {
+    match owner.parse::<i64>() {
+        Ok(n) if n.to_string() == owner => SqlValue::Integer(n),
+        _ => SqlValue::Text(owner.to_string()),
+    }
+}
+
+fn owner_key(owner: &SqlValue) -> String {
+    match owner {
+        SqlValue::Text(t) => t.clone(),
+        SqlValue::Integer(i) => i.to_string(),
+        SqlValue::Real(f) => f.to_string(),
+        other => format!("{other:?}"),
+    }
+}
+
 /// THE COLUMNS OF EVERY CHILD TABLE, fixed and in this order.
 pub const COLUMNS: &[&str] = &["owner", "n", "parent", "role", "ord", "node", "value"];
 
@@ -132,7 +152,7 @@ pub fn create(db: &Connection, table: &str, column: &str) -> Result<String> {
     let child_table = child(table, column);
     let t = schema::escape(&child_table);
     db.execute_batch(&format!(
-        "CREATE TABLE IF NOT EXISTS \"{t}\" (owner TEXT NOT NULL, n INTEGER NOT NULL, parent INTEGER, role TEXT, \
+        "CREATE TABLE IF NOT EXISTS \"{t}\" (owner NOT NULL, n INTEGER NOT NULL, parent INTEGER, role TEXT, \
          ord INTEGER, node TEXT NOT NULL, value, PRIMARY KEY (owner, n)) WITHOUT ROWID; \
          CREATE INDEX IF NOT EXISTS \"ix_{t}_parent\" ON \"{t}\" (owner, parent); \
          CREATE INDEX IF NOT EXISTS \"ix_{t}_value\" ON \"{t}\" (value);"
@@ -158,6 +178,7 @@ impl<'c> Writer<'c> {
     /// One cell's structure, every node a row.
     pub fn tree(&mut self, owner: &str, value: &Value) -> Result<()> {
         let stmt = &mut self.stmt;
+        let owner = owner_value(owner);
         walk(value, |node| {
             stmt.execute(rusqlite::params![owner, node.n, node.parent, node.role, node.ord, node.node, schema::cell(Some(&node.value))])?;
             Ok(())
@@ -207,14 +228,14 @@ pub fn columns_of(db: &Connection, table: &str) -> Vec<(String, String)> {
 
 /// The SQL a row of `table` (aliased `alias`) is owned by: its id, or `'#' || rowid` for a table without one.
 ///
-/// AS TEXT, because `owner` is text and an `id` need not be: `render_path` numbers its rows, and `'1' IN (SELECT 1)`
-/// is false - a delete through such rows reached none of their nodes, and the next write collided with them. A row
-/// whose id is NULL is owned by its rowid, as `store::insert` names it.
+/// The id as it is, because `owner` holds it as it is (`owner_value`): a delete through numbered rows reached none of
+/// their nodes when the two were compared as text and number. A row whose id is NULL is owned by its rowid, as
+/// `store::insert` names it.
 pub fn owner_expr(db: &Connection, table: &str, alias: &str) -> String {
     let rowid = format!("'#' || {alias}.rowid");
     let has_id = schema::existing_columns(db, table).map(|c| c.iter().any(|c| c == "id")).unwrap_or(false);
     if has_id {
-        format!("(CASE WHEN typeof({alias}.id) IN ('text', 'integer', 'real') THEN CAST({alias}.id AS TEXT) ELSE {rowid} END)")
+        format!("(CASE WHEN {alias}.id IS NOT NULL THEN {alias}.id ELSE {rowid} END)")
     } else {
         rowid
     }
@@ -327,7 +348,7 @@ impl<'c> Reader<'c> {
 
     /// The structure `owner`'s cell held, or None when it held none.
     pub fn get(&mut self, owner: &str) -> Result<Option<Value>> {
-        let rows: Vec<NodeRow> = self.stmt.query_map([owner], read_row)?.collect::<rusqlite::Result<_>>()?;
+        let rows: Vec<NodeRow> = self.stmt.query_map([owner_value(owner)], read_row)?.collect::<rusqlite::Result<_>>()?;
         Ok(rebuild(rows))
     }
 }
@@ -361,7 +382,7 @@ impl Source {
             Source::Read(all) => all.get(owner).cloned(),
             Source::Open { conn, sql } => {
                 let mut stmt = conn.prepare_cached(sql).ok()?;
-                let held: Vec<NodeRow> = stmt.query_map([owner], read_row).ok()?.filter_map(|r| r.ok()).collect();
+                let held: Vec<NodeRow> = stmt.query_map([owner_value(owner)], read_row).ok()?.filter_map(|r| r.ok()).collect();
                 rebuild(held)
             }
         }
@@ -389,10 +410,7 @@ pub fn load_all(db: &Connection, table: &str, column: &str) -> Result<HashMap<St
     let mut held: Vec<NodeRow> = Vec::new();
     let mut query = stmt.query([])?;
     while let Some(r) = query.next()? {
-        let owner: String = match r.get::<_, SqlValue>(0)? {
-            SqlValue::Text(t) => t,
-            other => format!("{other:?}"),
-        };
+        let owner = owner_key(&r.get::<_, SqlValue>(0)?);
         if current.as_deref() != Some(owner.as_str()) {
             if let (Some(done), Some(value)) = (current.take(), rebuild(std::mem::take(&mut held))) {
                 out.insert(done, value);
