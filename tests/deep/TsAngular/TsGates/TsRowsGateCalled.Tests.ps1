@@ -10,9 +10,9 @@
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
 $script:CalledBranchQ = "SELECT k.key || ' | ' || coalesce((SELECT group_concat(b.condition_source, ' ; ') FROM key_reach__always_branches j " +
-    "JOIN branches b ON b.id = j.value AND j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'"
-$script:CalledValueQ = "SELECT k.key || ' | ' || coalesce((SELECT jn.dimension FROM key_reach__always_values jn WHERE jn.owner = '#' || k.rowid AND jn.parent = '#' || k.rowid || '/0' AND jn.ord = 0) || ' ' || " +
-    "(SELECT jn.op FROM key_reach__always_values jn WHERE jn.owner = '#' || k.rowid AND jn.parent = '#' || k.rowid || '/0' AND jn.ord = 0) || ' ' || $(Get-NodeItemListSql 'key_reach__always_values' 'k.rowid' 0 'values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'"
+    "JOIN branches b ON b.id = j.value AND j.owner = '#' || k.rowid AND j.parent = 0), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'"
+$script:CalledValueQ = "SELECT k.key || ' | ' || coalesce($(Get-TsItemFieldSql 'key_reach__always_values' 'k.rowid' 0 'dimension') || ' ' || " +
+    "$(Get-TsItemFieldSql 'key_reach__always_values' 'k.rowid' 0 'op') || ' ' || $(Get-NodeItemListSql 'key_reach__always_values' 'k.rowid' 0 'values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'"
 
 Test-Case 'tsrows gates: a component a private method creates renders under the branch around that method''s call' {
     $tree = New-TsRowsWorkspace @{

@@ -239,6 +239,42 @@ function Invoke-TsRowsQ([string]$Path, [string]$Sql) {
     return $result
 }
 
+# A NODE IS (`owner`, `n`): `n` its preorder number within the cell the row `owner` names, `parent` the `n` of its parent
+# (NULL for the root, `n` = 0). AN OBJECT'S MEMBER IS A NODE ROW OF ITS OWN, its key in `role` - never a column of the
+# object's row (`rows/cells`): the columns of a `<table>__<column>` are fixed. `Get-TsFieldSql` is the scalar member `$Key`
+# of the node `$Node` (an alias of `$Table`), NULL when it has none; a boolean is 0/1.
+function Get-TsFieldSql([string]$Table, [string]$Node, [string]$Key) {
+    return "(SELECT zf.value FROM $Table zf WHERE zf.owner = ${Node}.owner AND zf.parent = ${Node}.n AND zf.role = '$Key')"
+}
+# The owner a row's cell is filed under: `'#' || k.rowid` for a table with no `id`, else the row's `x.id`.
+function Get-TsNodeOwner([string]$Ref) {
+    if ($Ref.EndsWith('.rowid')) { return "'#' || $Ref" }
+    return $Ref
+}
+# The member `$Key` of the ROOT object of the cell the row `$Ref` owns.
+function Get-TsRootFieldSql([string]$Table, [string]$Ref, [string]$Key) {
+    $owner = Get-TsNodeOwner $Ref
+    return "(SELECT zf.value FROM $Table zf WHERE zf.owner = $owner AND zf.parent = 0 AND zf.role = '$Key')"
+}
+# The member `$Key` of item number `$Ord` of the list cell the row `$Ref` owns.
+function Get-TsItemFieldSql([string]$Table, [string]$Ref, [int]$Ord, [string]$Key) {
+    $owner = Get-TsNodeOwner $Ref
+    return "(SELECT zf.value FROM $Table zi JOIN $Table zf ON zf.owner = zi.owner AND zf.parent = zi.n AND zf.role = '$Key' " +
+        "WHERE zi.owner = $owner AND zi.parent = 0 AND zi.ord = $Ord)"
+}
+# A list of OBJECTS spelled as JSON text again: [{"a":"x","b":1}], the named members in that order, each read from its
+# own member row. `$Ref` is the row owning the cell; with `$Role` the list is that member of the cell's root object.
+function Get-TsObjectListSql([string]$Table, [string]$Ref, [string[]]$Members, [string]$Role = '') {
+    $owner = Get-TsNodeOwner $Ref
+    $parts = $Members | ForEach-Object {
+        $m = "(SELECT zm.value FROM $Table zm WHERE zm.owner = zi.owner AND zm.parent = zi.n AND zm.role = '$_')"
+        "char(34) || '$_' || char(34) || ':' || CASE WHEN typeof($m) = 'text' THEN char(34) || $m || char(34) ELSE coalesce($m, 'null') END"
+    }
+    $item = "'{' || " + ($parts -join " || ',' || ") + " || '}'"
+    $where = if ($Role) { "zr.owner = $owner AND zr.parent = 0 AND zr.role = '$Role'" } else { "zr.owner = $owner AND zr.n = 0" }
+    return "(SELECT CASE WHEN count(zi.n) = 0 THEN '[]' ELSE '[' || group_concat($item, ',' ORDER BY zi.ord) || ']' END " +
+        "FROM $Table zr LEFT JOIN $Table zi ON zi.owner = zr.owner AND zi.parent = zr.n WHERE $where GROUP BY zr.n)"
+}
 
 # `key_reach.branch_senses` is an object whose KEYS are branch ids: one `value` row per id in `key_reach__branch_senses`,
 # spelled back `key | {"id": "sense", ...}` as the cell was.
@@ -246,7 +282,7 @@ function Get-TsRowsSensesSql([string]$Db, [string]$KeyWhere) {
     # A branch id is DATA, so each sense is a `value` row whose `role` is the id - never a column (`rows/cells`).
     $pair = "char(34) || n.role || char(34) || ': ' || char(34) || n.value || char(34)"
     return "SELECT k.key || ' | {' || coalesce((SELECT group_concat($pair, ', ' ORDER BY n.rowid) " +
-        "FROM key_reach__branch_senses n WHERE n.parent = '#' || k.rowid || '/0'), '') || '}' AS senses " +
+        "FROM key_reach__branch_senses n WHERE n.owner = '#' || k.rowid AND n.parent = 0), '') || '}' AS senses " +
         "FROM key_reach k WHERE $KeyWhere"
 }
 

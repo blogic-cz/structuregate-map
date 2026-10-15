@@ -146,12 +146,12 @@ Test-Case 'tsrows: a class gate restricts its key only when its class hides, and
         'apps/shop/src/assets/locales/en.json' = '{"demo":{"cls":{"hid":"1","style":"2"}}}'
     })
     Assert-Exit $made.Result 0
-    $v = Invoke-TsStylesQ $made.Db ("SELECT 'v=' || k.key || ' | ' || v.dimension || ' ' || " +
-        "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS r FROM key_reach k " +
-        "JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.cls.%'")
+    $v = Invoke-TsStylesQ $made.Db ("SELECT 'v=' || k.key || ' | ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || ' ' || " +
+        "$(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS r FROM key_reach k " +
+        "JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = 0 WHERE k.key LIKE 'demo.cls.%'")
     Assert-Line $v 'v=demo.cls.hid | kind not_in ["Alpha"]'
     Assert-NoLine $v 'v=demo.cls.style |'
-    Assert-Line (Invoke-TsStylesQ $made.Db ("SELECT 'g=' || key || ' ' || (SELECT count(*) FROM key_reach__always_gates jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') AS r " +
+    Assert-Line (Invoke-TsStylesQ $made.Db ("SELECT 'g=' || key || ' ' || (SELECT count(*) FROM key_reach__always_gates jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) AS r " +
         "FROM key_reach WHERE key = 'demo.cls.style'")) 'g=demo.cls.style 1'
 }
 

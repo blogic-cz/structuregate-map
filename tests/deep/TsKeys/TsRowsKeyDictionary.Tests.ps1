@@ -43,7 +43,7 @@ Test-Case 'tsrows keys: a dictionary call references every key under its prefix,
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || c.name AS reach FROM key_reach k " +
-        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     # held in a field the template reads, held by a getter the template reads, and called in a hook (the call
     # site's own component): each is a component the key is reached from
     foreach ($key in 'demo.sort.options.Rate', 'demo.sort.options.Fees') {

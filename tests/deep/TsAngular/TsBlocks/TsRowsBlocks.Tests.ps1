@@ -68,7 +68,7 @@ function New-TsBlocksDb {
 
 # The sources of the gates every node with `tag` sits under, outermost first.
 $script:TsBlocksChainSql = "SELECT n.tag || ' <- ' || coalesce(group_concat(g.name || ':' || g.source, ' / ' ORDER BY j.ord), '(none)') " +
-    "AS chain FROM template_nodes n LEFT JOIN template_nodes__gate_chain j ON j.owner = n.id AND j.parent = n.id || '/0' " +
+    "AS chain FROM template_nodes n LEFT JOIN template_nodes__gate_chain j ON j.owner = n.id AND j.parent = 0 " +
     "LEFT JOIN gates g ON g.id = j.value " +
     "WHERE n.tag = '{0}' GROUP BY n.id"
 
@@ -101,7 +101,7 @@ Test-Case 'tsrows: an @for block names its context variables and the aliases the
     $db = New-TsBlocksDb
     $r = Invoke-TsRowsQ $db "SELECT $(Get-NodeRootListSql 'template_nodes__context_vars' 'template_nodes.id') AS vars FROM template_nodes WHERE kind = 'ForLoopBlock'"
     Assert-Line $r '["$index","$first","$last","$even","$odd","$count"]'
-    $a = Invoke-TsRowsQ $db "SELECT $(Get-NodeObjectListSql 'template_nodes__context_aliases' 'template_nodes.id' @('name', 'value')) AS aliases FROM template_nodes WHERE kind = 'ForLoopBlock'"
+    $a = Invoke-TsRowsQ $db "SELECT $(Get-TsObjectListSql 'template_nodes__context_aliases' 'template_nodes.id' @('name', 'value')) AS aliases FROM template_nodes WHERE kind = 'ForLoopBlock'"
     Assert-Line $a '[{"name":"i","value":"$index"}]'
 }
 
@@ -112,7 +112,7 @@ Test-Case 'tsrows: an @defer block publishes its when conditions and trigger ref
     $r = Invoke-TsRowsQ $db "SELECT kind || ' ' || source || ' ' || $(Get-NodeRootListSql 'expressions__reads' 'expressions.id') AS cond FROM expressions WHERE kind LIKE 'defer_%'"
     Assert-Line $r 'defer_when ready ["ready"]'
     Assert-Line $r 'defer_prefetch_when soon ["soon"]'
-    $t = Invoke-TsRowsQ $db "SELECT $(Get-NodeObjectListSql 'template_nodes__trigger_refs' 'template_nodes.id' @('phase', 'trigger', 'reference')) || ' ' || $(Get-NodeRootListSql 'template_nodes__hydrate_triggers' 'template_nodes.id') AS t FROM template_nodes WHERE kind = 'DeferredBlock'"
+    $t = Invoke-TsRowsQ $db "SELECT $(Get-TsObjectListSql 'template_nodes__trigger_refs' 'template_nodes.id' @('phase', 'trigger', 'reference')) || ' ' || $(Get-NodeRootListSql 'template_nodes__hydrate_triggers' 'template_nodes.id') AS t FROM template_nodes WHERE kind = 'DeferredBlock'"
     Assert-Line $t '[{"phase":"main","trigger":"viewport","reference":"anchor"}] []'
     Assert-Line (Invoke-TsRowsQ $db ($script:TsBlocksChainSql -f 'q')) 'q <- (none)'
 }
@@ -130,8 +130,8 @@ Test-Case 'tsrows: an ICU publishes its switch value and the interpolations insi
 # The expression rows of one interpolation, `source => reads`, and the kind of its first expression.
 function Get-TsBlocksExpr([string]$Db, [string]$Source) {
     return Invoke-TsRowsQ $Db ("SELECT source || ' => ' || $(Get-NodeRootListSql 'expressions__reads' 'x.id') || ' ' || " +
-        "(SELECT e0.k FROM expressions__ast a JOIN expressions__ast xs ON xs.parent = a.id AND xs.role = 'expressions' JOIN expressions__ast e0 ON e0.parent = xs.id AND e0.ord = 0 WHERE a.parent = x.id || '/0' AND a.role = 'ast') " +
-        "|| coalesce(' ' || (SELECT e0.op FROM expressions__ast a JOIN expressions__ast xs ON xs.parent = a.id AND xs.role = 'expressions' JOIN expressions__ast e0 ON e0.parent = xs.id AND e0.ord = 0 WHERE a.parent = x.id || '/0' AND a.role = 'ast'), '') AS e FROM expressions x WHERE source = '$Source'")
+        "(SELECT $(Get-TsFieldSql 'expressions__ast' 'e0' 'k') FROM expressions__ast a JOIN expressions__ast xs ON xs.owner = a.owner AND xs.parent = a.n AND xs.role = 'expressions' JOIN expressions__ast e0 ON e0.owner = xs.owner AND e0.parent = xs.n AND e0.ord = 0 WHERE a.owner = x.id AND a.parent = 0 AND a.role = 'ast') " +
+        "|| coalesce(' ' || (SELECT $(Get-TsFieldSql 'expressions__ast' 'e0' 'op') FROM expressions__ast a JOIN expressions__ast xs ON xs.owner = a.owner AND xs.parent = a.n AND xs.role = 'expressions' JOIN expressions__ast e0 ON e0.owner = xs.owner AND e0.parent = xs.n AND e0.ord = 0 WHERE a.owner = x.id AND a.parent = 0 AND a.role = 'ast'), '') AS e FROM expressions x WHERE source = '$Source'")
 }
 
 # `Unary` EXTENDS `Binary`: matched as one, `-a` kept neither operand and its read was lost.
@@ -151,11 +151,11 @@ Test-Case 'tsrows: parentheses leave no node of their own' {
 Test-Case 'tsrows: an arrow function is an Fn and its parameter is no read' {
     $db = New-TsBlocksDb
     # the first expression's first argument is the arrow: its kind, and the names it takes
-    $fn = "FROM expressions__ast a JOIN expressions__ast xs ON xs.parent = a.id AND xs.role = 'expressions' " +
-        "JOIN expressions__ast e0 ON e0.parent = xs.id AND e0.ord = 0 JOIN expressions__ast al ON al.parent = e0.id AND al.role = 'args' " +
-        "JOIN expressions__ast f ON f.parent = al.id AND f.ord = 0 WHERE a.parent = x.id || '/0' AND a.role = 'ast'"
-    $params = Get-NodeTextSql 'expressions__ast' "zl.parent = (SELECT f.id $fn) AND zl.role = 'params'"
-    $r = Invoke-TsRowsQ $db ("SELECT $(Get-NodeRootListSql 'expressions__reads' 'x.id') || ' ' || (SELECT f.k $fn) || ' ' || $params AS e FROM expressions x " +
+    $fn = "FROM expressions__ast a JOIN expressions__ast xs ON xs.owner = a.owner AND xs.parent = a.n AND xs.role = 'expressions' " +
+        "JOIN expressions__ast e0 ON e0.owner = xs.owner AND e0.parent = xs.n AND e0.ord = 0 JOIN expressions__ast al ON al.owner = e0.owner AND al.parent = e0.n AND al.role = 'args' " +
+        "JOIN expressions__ast f ON f.owner = al.owner AND f.parent = al.n AND f.ord = 0 WHERE a.owner = x.id AND a.parent = 0 AND a.role = 'ast'"
+    $params = Get-NodeTextSql 'expressions__ast' "zl.owner = x.id AND zl.parent = (SELECT f.n $fn) AND zl.role = 'params'"
+    $r = Invoke-TsRowsQ $db ("SELECT $(Get-NodeRootListSql 'expressions__reads' 'x.id') || ' ' || (SELECT $(Get-TsFieldSql 'expressions__ast' 'f' 'k') $fn) || ' ' || $params AS e FROM expressions x " +
         "WHERE source = '{{ items.filter((x) => x.done) }}'")
     Assert-Line $r '["items.filter","items"] Fn ["x"]'
 }
@@ -170,15 +170,15 @@ Test-Case 'tsrows: a template literal is an Interpolation and typeof a Unary' {
 # FROM v20 AN ASSIGNMENT IS A `Binary`: published as the `Write` it was before, so its target is no read.
 Test-Case 'tsrows: an assignment in an event handler is a Write and reads nothing' {
     $db = New-TsBlocksDb
-    $w = Invoke-TsRowsQ $db ("SELECT a.k || ' ' || a.name || ' ' || $(Get-NodeRootListSql 'expressions__reads' 'x.id') AS w FROM expressions x " +
-        "JOIN expressions__ast a ON a.parent = x.id || '/0' AND a.role = 'ast' WHERE x.source = 'clicked = 1'")
+    $w = Invoke-TsRowsQ $db ("SELECT $(Get-TsFieldSql 'expressions__ast' 'a' 'k') || ' ' || $(Get-TsFieldSql 'expressions__ast' 'a' 'name') || ' ' || $(Get-NodeRootListSql 'expressions__reads' 'x.id') AS w FROM expressions x " +
+        "JOIN expressions__ast a ON a.owner = x.id AND a.parent = 0 AND a.role = 'ast' WHERE x.source = 'clicked = 1'")
     Assert-Line $w 'Write clicked []'
 }
 
 
 # The read targets an expression's `Read` nodes resolved to, `name@row`, by its source.
 function Get-TsBlocksTargets([string]$Db, [string]$Source) {
-    return Invoke-TsRowsQ $Db ("SELECT j.name || '@' || j.[row] AS t " +
+    return Invoke-TsRowsQ $Db ("SELECT $(Get-TsFieldSql 'expressions__ast' 'j' 'name') || '@' || $(Get-TsFieldSql 'expressions__ast' 'j' 'row') AS t " +
         "FROM expressions x JOIN expressions__ast j ON j.owner = x.id AND j.role = 'target' WHERE x.source = '$Source'")
 }
 
@@ -191,7 +191,7 @@ Test-Case 'tsrows: a name an @for, @if or @let binds shadows the component membe
     Assert-Line $it 'done@'
     Assert-NoLine $it 'it@'
     $line = Invoke-TsRowsQ $db ("SELECT 'line_done=' || count(*) AS hit FROM expressions x JOIN expressions__ast j ON j.owner = x.id AND j.role = 'target' " +
-        "JOIN type_members t ON t.id = j.[row] JOIN interfaces i ON i.id = t.owner " +
+        "JOIN type_members t ON t.id = $(Get-TsFieldSql 'expressions__ast' 'j' 'row') JOIN interfaces i ON i.id = t.owner " +
         "WHERE x.source = '{{ it.done }}' AND i.name = 'Line' AND t.name = 'done'")
     Assert-Line $line 'line_done=1'
     Assert-NoLine (Get-TsBlocksTargets $db '{{ u.name }}') 'u@'

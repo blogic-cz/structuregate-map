@@ -87,7 +87,7 @@ Test-Case 'tsrows: a key behind an out-of-scope render is not reached through it
         "JOIN classes p ON p.id = r.from_class WHERE r.tag LIKE 'demo-%'")
     Assert-Line $edges 'HostAComponent>BBoxComponent=out_of_scope'
     Assert-Line $edges 'HostCComponent>SBoxComponent=imported'
-    $sql = "SELECT k.key || ' <- ' || c.name AS reach FROM key_reach k JOIN key_reach__roots j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' " +
+    $sql = "SELECT k.key || ' <- ' || c.name AS reach FROM key_reach k JOIN key_reach__roots j ON j.owner = '#' || k.rowid AND j.parent = 0 " +
         "JOIN components m ON m.id = j.value JOIN classes c ON c.id = m.class WHERE k.key LIKE 'demo.%'"
     $r = Invoke-TsRowsQ $made.Db $sql
     Assert-Line $r 'demo.a.title <- HostAComponent'
@@ -131,7 +131,7 @@ Test-Case 'tsrows: renders holds only the edges the module scope allows, the res
     Assert-Line $aside 'HostBComponent>ABoxComponent'
     Assert-NoLine $aside 'HostAComponent>ABoxComponent'
     # THE SAME EDGES `render_path` WALKS: every hop it takes out of a host is a `renders` row.
-    $walked = Invoke-TsRowsQ $made.Db ("SELECT COUNT(*) AS foreign_hops FROM render_path p JOIN render_path__edges e ON e.owner = p.id AND e.parent = p.id || '/0' " +
+    $walked = Invoke-TsRowsQ $made.Db ("SELECT COUNT(*) AS foreign_hops FROM render_path p JOIN render_path__edges e ON e.owner = p.id AND e.parent = 0 " +
         "WHERE e.value NOT IN (SELECT id FROM renders)")
     Assert-Line $walked '0'
 }

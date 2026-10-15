@@ -97,9 +97,9 @@ Test-Case 'tsrows: a config over an ngFor item reads every element the class can
             '"alias":{"alpha":"A","beta":"B"},"klass":{"gamma":"C"}}}'
     }
     $made = New-TsRowsDb $tree
-    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || v.dimension || ' ' || " +
-        "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
-        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.%'")
+    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || ' ' || " +
+        "$(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
+        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = 0 WHERE k.key LIKE 'demo.%'")
     Assert-Exit $k 0
     Assert-Line $k 'demo.plain.alpha | appOnlyFor.grades in ["Alpha"]'
     Assert-Line $k 'demo.spread.alpha | appOnlyFor.grades in ["Alpha"]'
@@ -116,7 +116,7 @@ Test-Case 'tsrows: a config over an ngFor item reads every element the class can
     # THE WRITE'S BRANCH, not the callee's: `build`'s `if` tests nothing the caller's gates share.
     $b = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || coalesce((SELECT group_concat(" +
         "coalesce((SELECT br.sense FROM branches br WHERE br.id = b.value), 'then'), ',') FROM key_reach__always_branches b " +
-        "WHERE b.owner = '#' || k.rowid AND b.parent = '#' || k.rowid || '/0' AND b.value NOT LIKE 'loop:%'), 'none') AS senses FROM key_reach k WHERE k.key LIKE 'demo.branch.%' OR k.key LIKE 'demo.ret.%'")
+        "WHERE b.owner = '#' || k.rowid AND b.parent = 0 AND b.value NOT LIKE 'loop:%'), 'none') AS senses FROM key_reach k WHERE k.key LIKE 'demo.branch.%' OR k.key LIKE 'demo.ret.%'")
     Assert-Line $b 'demo.branch.alpha | then'
     Assert-Line $b 'demo.branch.beta | else'
     Assert-Line $b 'demo.ret.alpha | none'

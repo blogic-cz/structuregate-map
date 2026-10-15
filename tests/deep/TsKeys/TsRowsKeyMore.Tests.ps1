@@ -80,7 +80,7 @@ Test-Case 'tsrows keys: a +=, an await, a then callback, a copied list, an index
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
-        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     # the control: the first write of a returned local
     Assert-Line $r 'demo.plus.a | field_binding | MoreComponent'
     Assert-Line $r 'demo.plus.b | field_binding | MoreComponent'
@@ -160,15 +160,15 @@ Test-Case 'tsrows keys: a list a component builds and only hands to a child inpu
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.n_paths || ' | ' || (SELECT group_concat(name, ',') FROM (SELECT c.name FROM " +
-        "key_reach__components j JOIN components c ON c.id = j.value AND j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' ORDER BY c.name)) || ' | ' || coalesce((SELECT jn.dimension FROM key_reach__always_values jn WHERE jn.owner = '#' || k.rowid AND jn.parent = '#' || k.rowid || '/0' AND jn.ord = 0) " +
-        "|| ' ' || (SELECT jn.op FROM key_reach__always_values jn WHERE jn.owner = '#' || k.rowid AND jn.parent = '#' || k.rowid || '/0' AND jn.ord = 0) || ' ' || $(Get-NodeItemListSql 'key_reach__always_values' 'k.rowid' 0 'values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
+        "key_reach__components j JOIN components c ON c.id = j.value AND j.owner = '#' || k.rowid AND j.parent = 0 ORDER BY c.name)) || ' | ' || coalesce($(Get-TsItemFieldSql 'key_reach__always_values' 'k.rowid' 0 'dimension') " +
+        "|| ' ' || $(Get-TsItemFieldSql 'key_reach__always_values' 'k.rowid' 0 'op') || ' ' || $(Get-NodeItemListSql 'key_reach__always_values' 'k.rowid' 0 'values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
     # built by a translate call (A) or a literal (E) and displayed only through the radio under the *ngIf: the parent
     # is no site of its own, and the ungated radio path through B binds another list
     Assert-Line $r 'demo.choice.yes | 1 | RadioComponent | vm.kind in ["Home"]'
     Assert-Line $r 'demo.lit.yes | 1 | RadioComponent | vm.kind in ["Life"]'
     # a parent that displays the key itself (its own *ngFor) keeps its own, ungated path
     Assert-Line $r 'demo.both.yes | 2 | DComponent,RadioComponent | -'
-    $g = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || g.name || ' ' || g.source AS always FROM key_reach k JOIN key_reach__always_gates j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' " +
+    $g = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || g.name || ' ' || g.source AS always FROM key_reach k JOIN key_reach__always_gates j ON j.owner = '#' || k.rowid AND j.parent = 0 " +
         "JOIN gates g ON g.id = j.value WHERE k.key LIKE 'demo.%'")
     Assert-Line $g 'demo.choice.yes | ngIf vm.kind === Kind.Home'
     Assert-NoLine $g 'demo.both.yes | ngIf'
@@ -221,15 +221,15 @@ Test-Case 'tsrows keys: key_reach.paths names each way - its render_path row and
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     # one entry per way: n_paths of them
-    $n = Invoke-TsRowsQ $made.Db "SELECT key || ' ' || n_paths || ' ' || (SELECT count(*) FROM key_reach__paths jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') AS n FROM key_reach WHERE key LIKE 'demo.%'"
+    $n = Invoke-TsRowsQ $made.Db "SELECT key || ' ' || n_paths || ' ' || (SELECT count(*) FROM key_reach__paths jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) AS n FROM key_reach WHERE key LIKE 'demo.%'"
     Assert-Line $n 'demo.choice.yes 2 2'
     Assert-Line $n 'demo.list.b 2 2'
     # each way: key | its render_path's components | that row's gates | what the way adds (a gate by its source, a link by its prefix)
     $w = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || (SELECT group_concat(name, '>') FROM (SELECT c.name FROM render_path__hops h " +
-        "JOIN components c ON c.id = h.value WHERE h.owner = p.id AND h.parent = p.id || '/0' ORDER BY h.ord)) || ' | ' || coalesce((SELECT group_concat(g.source, ' & ') FROM render_path__gates pg " +
-        "JOIN gates g ON g.id = pg.value WHERE pg.owner = p.id AND pg.parent = p.id || '/0'), '-') || ' | ' || coalesce((SELECT group_concat(coalesce(g2.source, substr(o.value, 1, instr(o.value, ':') - 1)), ' & ') " +
-        "FROM key_reach__paths ol JOIN key_reach__paths o ON o.parent = ol.id LEFT JOIN gates g2 ON g2.id = o.value WHERE ol.parent = w.id AND ol.role = 'own'), '-') AS way " +
-        "FROM key_reach k JOIN key_reach__paths w ON w.owner = '#' || k.rowid AND w.parent = '#' || k.rowid || '/0' JOIN render_path p ON p.id = w.path WHERE k.key LIKE 'demo.%' ORDER BY 1")
+        "JOIN components c ON c.id = h.value WHERE h.owner = p.id AND h.parent = 0 ORDER BY h.ord)) || ' | ' || coalesce((SELECT group_concat(g.source, ' & ') FROM render_path__gates pg " +
+        "JOIN gates g ON g.id = pg.value WHERE pg.owner = p.id AND pg.parent = 0), '-') || ' | ' || coalesce((SELECT group_concat(coalesce(g2.source, substr(o.value, 1, instr(o.value, ':') - 1)), ' & ') " +
+        "FROM key_reach__paths ol JOIN key_reach__paths o ON o.owner = ol.owner AND o.parent = ol.n LEFT JOIN gates g2 ON g2.id = o.value WHERE ol.owner = w.owner AND ol.parent = w.n AND ol.role = 'own'), '-') AS way " +
+        "FROM key_reach k JOIN key_reach__paths w ON w.owner = '#' || k.rowid AND w.parent = 0 JOIN render_path p ON p.id = $(Get-TsFieldSql 'key_reach__paths' 'w' 'path') WHERE k.key LIKE 'demo.%' ORDER BY 1")
     # the two rows through A that bind the list - never the one through B, whose edge binds another list
     Assert-Line $w 'demo.choice.yes | RootComponent>AComponent>RadioComponent | alphaConfig | bind & model'
     Assert-Line $w 'demo.choice.yes | RootComponent>AComponent>RadioComponent | betaConfig | bind & model'
@@ -274,7 +274,7 @@ Test-Case 'tsrows keys: a component field nothing reads is no site of the key it
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.n_paths || ' | ' || (SELECT group_concat(c.name, ',') FROM key_reach__components j " +
-        "JOIN components c ON c.id = j.value AND j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0') || ' | ' || coalesce($(Get-NodeItemListSql 'key_reach__always_values' 'k.rowid' 0 'values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
+        "JOIN components c ON c.id = j.value AND j.owner = '#' || k.rowid AND j.parent = 0) || ' | ' || coalesce($(Get-NodeItemListSql 'key_reach__always_values' 'k.rowid' 0 'values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
     # B's field is never read, so A's `*ngIf` is the only way to the key
     Assert-Line $r 'demo.label | 1 | AComponent | ["Home"]'
     # read in C's own TypeScript, or reachable through D's `this[k]`: each keeps its ungated literal site
@@ -321,7 +321,7 @@ Test-Case 'tsrows keys: a field only written in a method and a getter nothing re
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.n_paths || ' | ' || coalesce((SELECT group_concat(c.name, ',') FROM key_reach__components j " +
-        "JOIN components c ON c.id = j.value AND j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0'), '-') || ' | ' || coalesce($(Get-NodeItemListSql 'key_reach__always_values' 'k.rowid' 0 'values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
+        "JOIN components c ON c.id = j.value AND j.owner = '#' || k.rowid AND j.parent = 0), '-') || ' | ' || coalesce($(Get-NodeItemListSql 'key_reach__always_values' 'k.rowid' 0 'values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
     # B neither reads `labelCode` nor `title`: A's `*ngIf` is the only way to either key
     Assert-Line $r 'demo.label | 1 | AComponent | ["Home"]'
     Assert-Line $r 'demo.title | 1 | AComponent | ["Home"]'
@@ -366,7 +366,7 @@ Test-Case 'tsrows keys: a field another file only writes and a getter returning 
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || coalesce((SELECT group_concat(name, ',') FROM (SELECT c.name FROM key_reach__components j " +
-        "JOIN components c ON c.id = j.value AND j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' ORDER BY c.name)), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
+        "JOIN components c ON c.id = j.value AND j.owner = '#' || k.rowid AND j.parent = 0 ORDER BY c.name)), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
     # the floor template reads `rangeCode`: its initializer and both writes stay; the count one reads it nowhere
     Assert-Line $r 'demo.range | FloorComponent'
     Assert-Line $r 'demo.houseRange | FloorComponent'
@@ -408,7 +408,7 @@ Test-Case 'tsrows keys: a key written to a member of a made instance stays a sit
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.n_paths || ' | ' || coalesce((SELECT group_concat(c.name, ',') FROM key_reach__components j " +
-        "JOIN components c ON c.id = j.value AND j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0'), '-') || ' | ' || coalesce($(Get-NodeItemListSql 'key_reach__always_values' 'k.rowid' 0 'values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
+        "JOIN components c ON c.id = j.value AND j.owner = '#' || k.rowid AND j.parent = 0), '-') || ' | ' || coalesce($(Get-NodeItemListSql 'key_reach__always_values' 'k.rowid' 0 'values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
     Assert-Line $r 'demo.notSupported | 1 | ResultComponent | ["Result"]'
     Assert-Line $r 'demo.notification | 1 | ResultComponent | ["Result"]'
 }

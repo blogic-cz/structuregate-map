@@ -57,21 +57,19 @@ internal static partial class SqlLinks
 
         // AN INHERITED PROPERTY IS THE ENTITY'S TOO: `IsActive` lives on `EntityBase`, and many columns read
         // as "no property" while only the entity's own body was searched.
+        // `classes.bases` is a list, so NODE ROWS (`classes__bases`), one item per base in order - never JSON text.
         var bases = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        foreach (var row in Query(db, "SELECT qualname, bases FROM classes WHERE bases GLOB '[[]\"*'") ?? [])
+        foreach (var row in Query(db, "SELECT c.qualname, b.value FROM classes c JOIN classes__bases b ON b.owner = c.id "
+            + "AND b.parent = 0 WHERE b.node = 'string' ORDER BY c.rowid, b.ord") ?? [])
         {
-            try
-            {
-                using var list = JsonDocument.Parse(Str(row[1]));
-                bases[Str(row[0])] = [.. list.RootElement.EnumerateArray().Select(b => (b.GetString() ?? "").Split('<')[0])];
-            }
-            catch (JsonException) { }
+            if (!bases.TryGetValue(Str(row[0]), out var list)) bases[Str(row[0])] = list = [];
+            list.Add(Str(row[1]).Split('<')[0]);
         }
         string Member(string entity, string column)
         {
             var seen = new HashSet<string>(StringComparer.Ordinal);
             var queue = new Queue<string>([entity]);
-            while (queue.Count > 0 && seen.Count < 16)
+            while (queue.Count > 0)
             {
                 var type = queue.Dequeue();
                 if (!seen.Add(type)) continue;
@@ -130,17 +128,18 @@ internal static partial class SqlLinks
         var built = Query(db, "SELECT d.file, d.line, d.name, d.open, d.database, f.path FROM sql_dynamic d JOIN files f ON f.id = d.file "
             + "WHERE d.kind = 'trigger' ORDER BY f.path, d.line") ?? [];
         var seeded = new Dictionary<string, List<(long Line, List<string> Values)>>(StringComparer.Ordinal);
-        foreach (var row in Query(db, "SELECT file, line, row_values FROM sql_seeds WHERE status = 'temp'") ?? [])
+        // `row_values` is a list, so NODE ROWS (`sql_seeds__row_values`): a temp row's string values, in order.
+        var temps = new Dictionary<string, (string File, long Line, List<string> Values)>(StringComparer.Ordinal);
+        foreach (var row in Query(db, "SELECT s.id, s.file, s.line, v.value, v.node FROM sql_seeds s LEFT JOIN sql_seeds__row_values v "
+            + "ON v.owner = s.id AND v.parent = 0 WHERE s.status = 'temp' ORDER BY s.rowid, v.ord") ?? [])
         {
-            List<string> values;
-            try
-            {
-                using var document = JsonDocument.Parse(Str(row[2]));
-                values = [.. document.RootElement.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String).Select(v => v.GetString() ?? "")];
-            }
-            catch (JsonException) { continue; }
-            if (!seeded.TryGetValue(Str(row[0]), out var rows)) seeded[Str(row[0])] = rows = [];
-            rows.Add((Num(row[1]), values));
+            if (!temps.TryGetValue(Str(row[0]), out var temp)) temps[Str(row[0])] = temp = (Str(row[1]), Num(row[2]), []);
+            if (Str(row[4]) == "string") temp.Values.Add(Str(row[3]));
+        }
+        foreach (var (file, line, values) in temps.Values)
+        {
+            if (!seeded.TryGetValue(file, out var rows)) seeded[file] = rows = [];
+            rows.Add((line, values));
         }
         return name =>
         {

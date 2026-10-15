@@ -73,9 +73,9 @@ Test-Case 'tsrows: a list a directive hands to a method that tests it in a callb
     Assert-Line $r '[types.Amber] => Kind items.kind in ["Amber"]'
     Assert-Line $r '[types.Coral, types.Jade] => Kind items.kind in ["Coral","Jade"]'
     Assert-Line $r '[types.Jade] => Kind items.kind unknown []'
-    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || v.dimension || ' ' || " +
-        "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
-        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key = 'promo.amber'")
+    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || ' ' || " +
+        "$(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
+        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = 0 WHERE k.key = 'promo.amber'")
     Assert-Line $k 'promo.amber | items.kind in ["Amber"]'
 }
 
@@ -169,8 +169,8 @@ Test-Case 'tsrows: an input flag every parent binds alike restricts what the par
     Assert-Line $r 'isBasic || isProPlan => PlanIDs productID in ["Basic","ProSolo","ProTeam"]'
     Assert-Line $r '!isProPlan => PlanIDs productID not_in ["ProSolo","ProTeam"]'
     Assert-Line $r 'isLoose => PlanIDs productID in ["Basic"]'
-    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || v.op || ' ' || " +
-        "$(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key = 'pro.both'")
+    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || " +
+        "$(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = 0 WHERE k.key = 'pro.both'")
     Assert-Line $k 'pro.both | in ["Basic","ProSolo","ProTeam"]'
 }
 
@@ -207,8 +207,8 @@ Test-Case 'tsrows: an input flag two parents bind differently restricts each way
     Assert-Exit $r 0
     Assert-NoLine $r '!isProPlan =>'
     Assert-NoLine $r 'isBasic =>'
-    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || v.op || ' ' || " +
-        "$(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'pro.%'")
+    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || " +
+        "$(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = 0 WHERE k.key LIKE 'pro.%'")
     Assert-Line $k 'pro.basic | in ["Basic"]'
     Assert-NoLine $k 'pro.notpro'
     $n = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT key || ' paths ' || n_paths AS p FROM key_reach WHERE key LIKE 'pro.%'"
@@ -231,8 +231,8 @@ Test-Case 'tsrows: an input flag read per edge still restricts when the parents 
         'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"extra":"x"}}'
     }
     $made = New-TsRowsDb $tree
-    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || v.dimension || ' ' || v.op || ' ' || " +
-        "$(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.%'")
+    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || ' ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || " +
+        "$(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = 0 WHERE k.key LIKE 'demo.%'")
     Assert-Line $k 'demo.extra | item.kind not_in ["Gamma"]'
     $n = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT key || ' paths ' || n_paths AS p FROM key_reach WHERE key = 'demo.extra'"
     Assert-Line $n 'demo.extra paths 1'
@@ -283,14 +283,14 @@ Test-Case 'tsrows: a constant false bound into an input only [disabled] reads ke
     $n = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT key || ' paths ' || n_paths AS p FROM key_reach WHERE key LIKE 'demo.%'"
     Assert-Line $n 'demo.choice.yes paths 2'
     Assert-Line $n 'demo.shown paths 1'
-    $v = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || v.dimension || ' ' || " +
-        "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.%'")
+    $v = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || ' ' || " +
+        "$(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = 0 WHERE k.key LIKE 'demo.%'")
     Assert-NoLine $v 'demo.choice.yes |'
-    $b = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT k.key || ' branch ' || b.value AS br FROM key_reach k JOIN key_reach__always_branches b ON b.owner = '#' || k.rowid AND b.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.%'"
+    $b = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT k.key || ' branch ' || b.value AS br FROM key_reach k JOIN key_reach__always_branches b ON b.owner = '#' || k.rowid AND b.parent = 0 WHERE k.key LIKE 'demo.%'"
     Assert-NoLine $b 'demo.choice.yes branch'
     Assert-Line $b 'demo.shown branch bind:'
     $g = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' gate ' || g.name AS gate FROM key_reach k " +
-        "JOIN key_reach__always_gates j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN gates g ON g.id = j.value WHERE k.key = 'demo.choice.yes'")
+        "JOIN key_reach__always_gates j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN gates g ON g.id = j.value WHERE k.key = 'demo.choice.yes'")
     Assert-Line $g 'demo.choice.yes gate disabled'
     Assert-NoLine $g 'demo.choice.yes gate ngIf'
 }
