@@ -7,7 +7,7 @@
  * absent file from an unparsed one. So the walk records a row for every file and marks `parsed: false`
  * until a pass claims it.
  */
-import { createReadStream, readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { availableParallelism } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -35,26 +35,22 @@ const NEWLINE = '\n'.charCodeAt(0);
  * `hash: null` means the read FAILED, which is a different fact.
  */
 async function scanFile(file) {
-  const digest = createHash(HASH_ALGORITHM);
-  let newlines = 0;
-  let sawBytes = false;
-  let binary = false;
-  let first = true;
+  // ONE READ, sized to the file: a stream per file paid a fresh 64 KB buffer per chunk and an async tick per
+  // chunk, and on thousands of small sources that was most of the extractor's own time. One file is held at a
+  // time, so no size constant is needed; newlines are counted by `indexOf`, in native code, not byte by byte.
+  let bytes;
   try {
-    // No `highWaterMark`: Node's own default applies, so there is no chunk-size constant here at all.
-    for await (const chunk of createReadStream(file)) {
-      if (first && chunk.includes(0)) binary = true;
-      first = false;
-      sawBytes = true;
-      digest.update(chunk);
-      if (!binary) for (const byte of chunk) if (byte === NEWLINE) newlines += 1;
-    }
+    bytes = readFileSync(file);
   } catch {
     return { lines: null, hash: null };
   }
+  const hash = createHash(HASH_ALGORITHM).update(bytes).digest('hex');
+  if (bytes.includes(0)) return { lines: null, hash };
+  let newlines = 0;
+  for (let at = bytes.indexOf(NEWLINE); at !== -1; at = bytes.indexOf(NEWLINE, at + 1)) newlines += 1;
   // Matches what a whole-file split on newlines reports, so counts stay comparable: a file with content
   // has one more line than its newline count; an empty file counts as 1.
-  return { lines: binary ? null : sawBytes ? newlines + 1 : 1, hash: digest.digest('hex') };
+  return { lines: bytes.length ? newlines + 1 : 1, hash };
 }
 
 /**
