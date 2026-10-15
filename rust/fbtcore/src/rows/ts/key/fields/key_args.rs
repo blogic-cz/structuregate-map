@@ -271,7 +271,8 @@ impl Locals {
                 && l.get("destructured").is_none_or(|d| d == &Value::Bool(false) || d == &Value::from(0));
             let tree = match l.get("expression").filter(|x| !x.is_null()).and_then(Value::as_str) {
                 None => l.get("value").and_then(|v| v.get("$expr")).and_then(Value::as_str).filter(|_| single).and_then(chain_tree),
-                Some(x) => by_id.get(x).and_then(|e| e.get("ast")).filter(|_| single).and_then(|ast| {
+                // PEEKED, and only for a single `const`: the tree is read once into the chain kept.
+                Some(x) => by_id.get(x).filter(|_| single).and_then(|e| e.peek("ast", |ast| ast.and_then(|ast| {
                     let own = params.get(&member).cloned().unwrap_or_default();
                     let call = rows.resolve_in(super::astreads::unwrap(ast), &own.into_iter().collect(), idx, Some(&member));
                     let callee = call.get("receiver").filter(|r| r.get("receiver").and_then(|t| t.get("k")).and_then(Value::as_str) == Some("This"))?
@@ -284,7 +285,7 @@ impl Locals {
                     let mut missing = false;
                     let out = substitute(&chain, params.get(callee)?, args, &mut missing);
                     (!missing).then_some(out)
-                }),
+                }))),
             };
             let key = (member, name);
             let twice = seen.contains_key(&key);

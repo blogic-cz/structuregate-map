@@ -42,7 +42,9 @@ derives the graph from the payload, DROPS it, and only then runs the closure ove
 (`rust/fbtcore/src/rows/ts/store.rs`) reading every row back from SQLITE - full run and partial alike: holding
 both put the exe at many GB. `Store::from_payload` is a test fixture's door only. **A held list or object cell is
 rebuilt from its node rows when a pass first reads it** (`Cell::Nodes`, `cells::load`); one never read stays rows and is never rebuilt. A pass
-must not collect every `ast` into a map up front: map ids to ROWS and read on lookup. `rows/ts/gate/` (with
+must not collect every `ast` into a map up front: map ids to ROWS and read on lookup; a scan that asks something of
+EVERY row's tree reads it with `Row::peek`, which keeps nothing decoded, and checks the id before it asks. The store
+is RELEASED before `key_reach` (`Store::release`): nothing after reads the rows, and holding them was most of the peak. `rows/ts/gate/` (with
 `gate/ts/`, the readers of a class's own TypeScript) and `rows/ts/key/` are folders by `#[path]`, not modules -
 every `super::` there still means `rows::ts`.
 

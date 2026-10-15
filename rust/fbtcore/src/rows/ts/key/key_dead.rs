@@ -34,8 +34,10 @@ pub fn renders_at_false(kind: Option<&str>, name: Option<&str>) -> bool {
 pub fn dead_gates(store: &Store<'_>) -> IndexSet<String> {
     let mut asts: IndexSet<String> = IndexSet::new();
     for e in store.table("expressions").iter() {
-        if let (Some(id), Some(ast)) = (str_of(e, "id"), e.get("ast"))
-            && is_false(ast)
+        // PEEKED, not kept: every expression's tree is asked whether it is the literal, and holding each one
+        // decoded for the rest of the closure was most of what this scan cost.
+        if let Some(id) = str_of(e, "id")
+            && e.peek("ast", |ast| ast.is_some_and(is_false))
         {
             asts.insert(id.to_string());
         }
