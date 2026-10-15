@@ -252,6 +252,9 @@ pub fn build_closure(
     let mut traces: IndexMap<String, usize> =
         TRACES.iter().map(|t| (t.to_string(), 0usize)).collect();
 
+    // EVERY PASS THAT READS THE ROWS IS DONE: what follows folds what they derived. The tables they read, and
+    // every tree decoded on the way, were held to the end and were most of the closure's peak.
+    store.release();
     let scopes = Scopes::new(store);
     for (key, loc) in &locales {
         let hit = routes.get(key);

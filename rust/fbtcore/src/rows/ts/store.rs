@@ -20,215 +20,17 @@ use super::super::half::HALF_COLUMN;
 use super::super::schema;
 use anyhow::Result;
 use rusqlite::Connection;
-use serde_json::{Map, Value};
+#[cfg(test)]
+use serde_json::Map;
+use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-/// The column names of one table, held ONCE instead of once per row.
-pub struct Schema {
-    names: Vec<String>,
-    at: HashMap<String, usize>,
-}
-
-impl Schema {
-    fn of(names: Vec<String>) -> Rc<Schema> {
-        let at = names.iter().cloned().zip(0..).collect();
-        Rc::new(Schema { names, at })
-    }
-}
-
-/// ONE ROW OF A TABLE.
-///
-/// `Held` is what a table hands back: the names live in the table's single `Schema` and the row
-/// is nothing but its cells. This is the shape that matters - a million rows of a dozen columns is
-/// over ten million key strings and a million hash tables when every row is a map of its own,
-/// measured at gigabytes of decoded payload for a file of hundreds of MB, on a machine with less than that free.
-///
-/// `Built` is a row a pass is making. There are far fewer (about a fifth), they are written
-/// rather than walked, and giving each one a schema of its own would cost more than it saves.
-///
-/// AN ABSENT COLUMN IS NOT A NULL ONE, and a shared schema gives every row every column - so a
-/// cell is `Option<Value>`: `None` where this row never had that column, `Some(Null)` where it
-/// holds null. The distinction is free: `Value` has spare discriminants, so `Option<Value>` is
-/// the same 24 bytes. Collapsing the two would be the bug this half keeps finding - a row that
-/// says nothing about a column reads as a row that says "nothing".
-#[derive(Clone, Debug, PartialEq)]
-pub enum Row {
-    Held { schema: Rc<Schema>, cells: Vec<Option<Cell>> },
-    Built(Map<String, Value>),
-}
-
-/// ONE CELL OF A HELD ROW: a value, or a list/object STILL IN ITS JSON TEXT, decoded the first time a pass
-/// asks for it and kept decoded after that.
-///
-/// THE CLOSURE READS EVERY ROW BUT NOT EVERY CELL. `expressions.ast` is hundreds of MB of text on a large Angular workspace and
-/// gigabytes decoded, yet the passes look an AST up through a gate, a node or a role - a few thousand of hundreds of thousands.
-/// Decoding them all up front was most of the closure's memory.
-#[derive(Clone)]
-pub enum Cell {
-    Value(Value),
-    Json(Box<str>, std::cell::OnceCell<Value>),
-    /// A structure written as nodes (`rows/cells/mod.rs`): its owner, rebuilt the first time a pass reads it.
-    Nodes(Rc<cells::Source>, Box<str>, std::cell::OnceCell<Value>),
-}
-
-impl Cell {
-    fn json(text: String) -> Cell {
-        Cell::Json(text.into_boxed_str(), std::cell::OnceCell::new())
-    }
-
-    fn value(&self) -> &Value {
-        match self {
-            Cell::Value(v) => v,
-            Cell::Json(text, decoded) => decoded.get_or_init(|| structure(text)),
-            Cell::Nodes(source, owner, decoded) => decoded.get_or_init(|| source.get(owner).unwrap_or(Value::Null)),
-        }
-    }
-
-    /// Moved out for the WRITE: a cell nobody decoded goes as its text, which the store spells exactly as it
-    /// spells a decoded one (`rawcells`).
-    fn into_value(self) -> Value {
-        match self {
-            Cell::Value(v) => v,
-            Cell::Json(text, decoded) => decoded.into_inner().unwrap_or_else(|| super::super::rawcells::wrap(text.into())),
-            Cell::Nodes(source, owner, decoded) => decoded.into_inner().unwrap_or_else(|| source.get(&owner).unwrap_or(Value::Null)),
-        }
-    }
-}
-
-impl PartialEq for Cell {
-    fn eq(&self, other: &Cell) -> bool {
-        self.value() == other.value()
-    }
-}
-
-impl std::fmt::Debug for Cell {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.value().fmt(f)
-    }
-}
-
-/// A payload cell, as a held cell: text the payload kept stays text until it is read. A FIXTURE'S door now:
-/// every run's closure reads the rows back from the database (`rows/tsapply.rs`).
+mod row;
+pub use row::{Cell, Row, Schema};
 #[cfg(test)]
-fn cell_of(value: Value) -> Cell {
-    match super::super::rawcells::text_of(&value) {
-        Some(text) => Cell::json(text.to_string()),
-        None => Cell::Value(value),
-    }
-}
-
-impl Default for Row {
-    fn default() -> Row {
-        Row::Built(Map::new())
-    }
-}
-
-impl std::fmt::Debug for Schema {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list().entries(self.names.iter()).finish()
-    }
-}
-
-impl PartialEq for Schema {
-    fn eq(&self, other: &Schema) -> bool {
-        self.names == other.names
-    }
-}
-
-impl Row {
-    pub fn new() -> Row {
-        Row::Built(Map::new())
-    }
-
-    pub fn get(&self, key: &str) -> Option<&Value> {
-        match self {
-            Row::Held { schema, cells } => {
-                let at = *schema.at.get(key)?;
-                cells.get(at)?.as_ref().map(Cell::value)
-            }
-            Row::Built(map) => map.get(key),
-        }
-    }
-
-    /// Setting a column on a row the table handed out COPIES IT OUT of the shared shape first.
-    /// No pass does this - the tables are walked, not edited - and the one caller that adds a
-    /// column (`emit`, stamping `half`) is working on a row it built itself.
-    pub fn insert(&mut self, key: String, value: Value) -> Option<Value> {
-        if let Row::Held { .. } = self {
-            *self = Row::Built(self.to_map());
-        }
-        match self {
-            Row::Built(map) => map.insert(key, value),
-            Row::Held { .. } => unreachable!("just made it Built"),
-        }
-    }
-
-    /// The row as a plain map, which is what the storing side writes.
-    pub fn to_map(&self) -> Map<String, Value> {
-        match self {
-            Row::Held { schema, cells } => {
-                let mut map = Map::new();
-                for (index, name) in schema.names.iter().enumerate() {
-                    if let Some(Some(cell)) = cells.get(index) {
-                        map.insert(name.clone(), cell.value().clone());
-                    }
-                }
-                map
-            }
-            Row::Built(map) => map.clone(),
-        }
-    }
-
-    /// The same, consuming the row so the cells are moved rather than copied.
-    pub fn into_map(self) -> Map<String, Value> {
-        match self {
-            Row::Held { schema, cells } => {
-                let mut map = Map::new();
-                for (index, cell) in cells.into_iter().enumerate() {
-                    if let (Some(name), Some(cell)) = (schema.names.get(index), cell) {
-                        map.insert(name.clone(), cell.into_value());
-                    }
-                }
-                map
-            }
-            Row::Built(map) => map,
-        }
-    }
-}
-
-impl std::ops::Index<&str> for Row {
-    type Output = Value;
-
-    fn index(&self, key: &str) -> &Value {
-        self.get(key).unwrap_or(&Value::Null)
-    }
-}
-
-/// Every row of one table, sharing the names their columns go by.
-#[cfg(test)]
-fn shared(rows: Vec<Map<String, Value>>) -> Vec<Row> {
-    // THE NAMES IN THE ORDER THEY WERE FIRST SEEN, over every row: a column only the last row
-    // carries is still a column of the table.
-    let mut names: Vec<String> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-    for row in &rows {
-        for key in row.keys() {
-            if seen.insert(key.clone()) {
-                names.push(key.clone());
-            }
-        }
-    }
-    let schema = Schema::of(names);
-    rows.into_iter()
-        .map(|mut row| {
-            let cells = schema.names.iter().map(|n| row.remove(n).map(cell_of)).collect();
-            Row::Held { schema: Rc::clone(&schema), cells }
-        })
-        .collect()
-}
-
+use row::shared;
 
 pub struct Store<'a> {
     db: Option<&'a Connection>,
@@ -374,6 +176,14 @@ impl<'a> Store<'a> {
         shared
     }
 
+    /// Forget every table read so far, and every structure decoded in them. A table asked for again is read
+    /// again - the same rows, from the same database - so this changes what is held, never what is answered.
+    pub fn release(&mut self) {
+        if self.db.is_some() {
+            self.cache.get_mut().clear();
+        }
+    }
+
     fn read(&self, name: &str) -> Result<Vec<Row>> {
         let db = self.db.expect("a database-backed store has a connection");
         let columns = schema::existing_columns(db, name)?;
@@ -383,9 +193,9 @@ impl<'a> Store<'a> {
 
         // THE STRUCTURES ARE NODES (`rows/cells/mod.rs`): each such column is a cell rebuilt from its child table
         // when a pass first reads it. The owner is the row's id, or its rowid in a table without one.
-        let nodes: Vec<(String, Rc<cells::Source>)> = cells::columns_of(db, name)
+        let nodes: Vec<(String, cells::Source)> = cells::columns_of(db, name)
             .into_iter()
-            .map(|(column, child)| Ok((column, Rc::new(cells::Source::new(db, &child)?))))
+            .map(|(column, child)| Ok((column, cells::Source::new(db, &child)?)))
             .collect::<Result<_>>()?;
         let id_at = keep.iter().position(|c| c == "id");
         let mut select = keep
@@ -411,17 +221,18 @@ impl<'a> Store<'a> {
         // cell is `Some` - what `shared` makes of a map per row, without the map: building hundreds of thousands of them
         // first, each with its own key strings, took the exe to several GB on a partial run of a large consumer.
         let mut names = keep.clone();
-        let node_at: Vec<(usize, Rc<cells::Source>)> = nodes
-            .iter()
-            .map(|(column, source)| {
-                let at = names.iter().position(|n| n == column).unwrap_or_else(|| {
-                    names.push(column.clone());
-                    names.len() - 1
-                });
-                (at, Rc::clone(source))
-            })
-            .collect();
-        let schema = Schema::of(names);
+        let mut sources: Vec<Option<cells::Source>> = Vec::new();
+        let mut node_at: Vec<usize> = Vec::new();
+        for (column, source) in nodes {
+            let at = names.iter().position(|n| *n == column).unwrap_or_else(|| {
+                names.push(column.clone());
+                names.len() - 1
+            });
+            sources.resize_with(names.len(), || None);
+            sources[at] = Some(source);
+            node_at.push(at);
+        }
+        let schema = Rc::new(Schema::with(names, sources, id_at));
         let decode: Vec<bool> = keep.iter().map(|c| structured.is_some_and(|cols| cols.contains(c.as_str()))).collect();
         // A BOOLEAN COMES BACK AN INTEGER, and a pass that asks `== true` of it gets false: `is_default` did, and
         // every switch's default case lost its key on every run that read the rows back - all partial ones.
@@ -448,21 +259,17 @@ impl<'a> Store<'a> {
                 cells.push(Some(Cell::Value(value)));
             }
             if !node_at.is_empty() {
-                let owner = match id_at.map(|i| record.get::<_, rusqlite::types::Value>(i)).transpose()? {
-                    Some(rusqlite::types::Value::Text(id)) => id,
-                    Some(rusqlite::types::Value::Integer(id)) => id.to_string(),
-                    _ => format!("#{}", record.get::<_, i64>(width)?),
-                };
                 cells.resize(schema.names.len(), None);
-                for (at, source) in &node_at {
+                for at in &node_at {
                     // A column that held a scalar in this row keeps it; only a NULL one is a structure's.
                     if matches!(&cells[*at], Some(Cell::Value(v)) if !v.is_null()) {
                         continue;
                     }
-                    cells[*at] = Some(Cell::Nodes(Rc::clone(source), owner.clone().into_boxed_str(), std::cell::OnceCell::new()));
+                    cells[*at] = Some(Cell::Nodes(std::cell::OnceCell::new()));
                 }
             }
-            Ok(Row::Held { schema: Rc::clone(&schema), cells })
+            let rowid = record.get::<_, i64>(width)?;
+            Ok(Row::Held { schema: Rc::clone(&schema), cells: cells.into_boxed_slice(), rowid })
         };
         let rows: Vec<Row> = if has_half {
             stmt.query_map([&self.half], map_row)?
@@ -548,26 +355,11 @@ fn spec_columns(db: &Connection, half: &str, key: &str) -> HashMap<String, HashS
     out
 }
 
-/// Text back to the structure it holds, or the text itself when it holds none.
-///
-/// The rule: only `[` or `{` can open one, and
-/// text that opens like one but does not parse is a string that happens to look like a
-/// structure.
 fn text_of_mut(value: &mut Value) -> &mut String {
     match value {
         Value::String(text) => text,
         _ => unreachable!("only called on a string cell"),
     }
-}
-
-fn structure(text: &str) -> Value {
-    let Some(head) = text.chars().next() else {
-        return Value::String(text.to_string());
-    };
-    if head != '[' && head != '{' {
-        return Value::String(text.to_string());
-    }
-    cells::deep(text).unwrap_or_else(|_| Value::String(text.to_string()))
 }
 
 #[cfg(test)]

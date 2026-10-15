@@ -137,10 +137,11 @@ impl MemberReads {
             if text(e, "lang").as_deref() == Some("ts") {
                 continue;
             }
-            match e.get("ast") {
+            // PEEKED: every template expression's tree is walked once here, and kept it was held to the closure's end.
+            e.peek("ast", |ast| match ast {
                 Some(ast @ Value::Object(_)) => template.walk(ast),
                 _ => identifiers(&text(e, "source").unwrap_or_default(), &mut template.names),
-            }
+            })
         }
         let strings = store.table("string_literals").iter().filter_map(|s| text(s, "value")).collect();
         MemberReads { template, strings, by_file, indexed, writes }

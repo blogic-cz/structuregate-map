@@ -264,12 +264,13 @@ pub fn key_routes(
     // A KEY THE EXPRESSION CHOOSES holds the arm it sits in, one way per literal of it - see
     // `key_arms::template_arms`. No literal of it found is the one way with no arm.
     let expressions = store.table("expressions");
-    let ast_of: std::collections::HashMap<String, &Value> = expressions
+    // BY ROW, the tree read on lookup: a map of every id to its tree decoded every expression in the store.
+    let row_of: std::collections::HashMap<String, &Row> = expressions
         .iter()
-        .filter_map(|e| Some((present(e, "id")?, e.get("ast")?)))
+        .filter_map(|e| Some((present(e, "id")?, e)))
         .collect();
     let arm_ways = |row: &Row, key: &str| -> Vec<Vec<String>> {
-        let Some((expr, ast)) = present(row, "expression").and_then(|x| ast_of.get(&x).map(|a| (x, *a))) else {
+        let Some((expr, ast)) = present(row, "expression").and_then(|x| row_of.get(&x).and_then(|e| e.get("ast")).map(|a| (x, a))) else {
             return Vec::new();
         };
         let mut ways: Vec<Vec<String>> = Vec::new();

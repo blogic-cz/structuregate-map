@@ -319,8 +319,12 @@ impl Branches {
             .filter(|r| cell(r, "source").as_deref() == Some("html"))
             .filter_map(|r| cell(r, "expression")));
         for e in store.table("expressions").iter() {
-            let (Some(id), Some(ast)) = (cell(e, "id"), e.get("ast")) else { continue };
-            if held.contains(&id) {
+            // THE ID FIRST: asking for the tree of a row no template holds decoded every expression's.
+            let Some(id) = cell(e, "id") else { continue };
+            if !held.contains(&id) {
+                continue;
+            }
+            if let Some(ast) = e.get("ast") {
                 out.arms.extend(template_arms(&id, ast).1.into_iter().map(|(arm, tree)| (arm, tree.clone())));
             }
         }
@@ -429,23 +433,27 @@ impl Branches {
                 rows_of.insert(id, e);
             }
         }
-        let ast_of = |id: &str| rows_of.get(id).and_then(|r| r.get("ast")).filter(|a| !a.is_null());
+        // PEEKED: a condition's tree is resolved once into what is kept, and the tree itself is not.
+        let resolve = |id: &str, names: &IndexSet<String>, member: Option<&str>| -> Option<Value> {
+            rows_of.get(id)?.peek("ast", |ast| {
+                let ast = ast.filter(|a| !a.is_null())?;
+                Some(rows.resolve_in(super::astreads::unwrap(ast), names, idx, member))
+            })
+        };
         let none = IndexSet::new();
         let mut out = Conds::new();
         drop(step);
         let step = crate::trace::stage("branches: resolve the conditions");
         for (id, (_, negated, tree, member)) in &self.by_id {
-            let Some(ast) = tree.as_ref().and_then(|t| ast_of(t)) else { continue };
             let names = member.as_ref().and_then(|m| bound.get(m)).unwrap_or(&none);
-            let resolved = rows.resolve_in(super::astreads::unwrap(ast), names, idx, member.as_deref());
+            let Some(resolved) = tree.as_ref().and_then(|t| resolve(t, names, member.as_deref())) else { continue };
             out.insert(id.clone(), (resolved, *negated));
         }
         drop(step);
         let _step = crate::trace::stage("branches: resolve the arms");
         for (id, member) in &self.choices {
-            let Some(ast) = ast_of(id) else { continue };
             let names = member.as_ref().and_then(|m| bound.get(m)).unwrap_or(&none);
-            let resolved = rows.resolve_in(super::astreads::unwrap(ast), names, idx, member.as_deref());
+            let Some(resolved) = resolve(id, names, member.as_deref()) else { continue };
             out.insert(format!("!{id}"), (resolved.clone(), true));
             out.insert(id.clone(), (resolved, false));
         }

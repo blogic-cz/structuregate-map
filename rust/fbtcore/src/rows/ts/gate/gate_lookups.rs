@@ -135,8 +135,10 @@ pub fn lookups(store: &Store<'_>, idx: &EnumIndex) -> Vec<Lookup> {
     let wanted: IndexSet<&str> = locals.values().chain(returns.values()).flatten()
         .filter_map(|r| r.get("expression").and_then(|v| v.as_str())).collect();
     for e in store.table("expressions").iter() {
-        if let (Some(id), Some(ast)) = (e.get("id").and_then(|v| v.as_str()), e.get("ast"))
+        // THE ID FIRST: asking for the tree of a row no lookup wants decoded every expression's.
+        if let Some(id) = e.get("id").and_then(|v| v.as_str())
             && wanted.contains(id)
+            && let Some(ast) = e.get("ast")
         {
             trees.insert(id.to_string(), ast.clone());
         }

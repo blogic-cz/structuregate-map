@@ -164,11 +164,15 @@ impl TsRows {
         }
         for e in store.table("expressions").iter() {
             let Some(key) = cell(e.get("id")).and_then(|x| wanted.get(&x)) else { continue };
-            if let (Some(slot), Some(ast)) = (out.locals.get_mut(key), e.get("ast")) {
-                let ast = super::astreads::unwrap(ast);
-                if ast.get("k").and_then(Value::as_str) == Some("Fn") || decision(ast) {
-                    slot.1 = Some(ast.clone());
-                }
+            // PEEKED: the one tree kept is a copy, so the decoded original need not be.
+            if let Some(slot) = out.locals.get_mut(key) {
+                e.peek("ast", |ast| {
+                    let Some(ast) = ast else { return };
+                    let ast = super::astreads::unwrap(ast);
+                    if ast.get("k").and_then(Value::as_str) == Some("Fn") || decision(ast) {
+                        slot.1 = Some(ast.clone());
+                    }
+                });
             }
         }
         out

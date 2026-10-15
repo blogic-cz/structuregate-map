@@ -19,7 +19,7 @@ use super::key_fields::{id_of, text};
 use super::key_branches::Branches;
 use super::key_lists::ListSource;
 use super::key_loops::Element;
-use super::store::Store;
+use super::store::{Row, Store};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -66,11 +66,19 @@ pub(super) fn input_lists(store: &Store<'_>, lists: &HashMap<String, Vec<Element
         return HashMap::new();
     }
     let expressions = store.table("expressions");
-    let tree_of: HashMap<String, &Value> = expressions.iter().filter_map(|e| Some((text(e, "binding")?, e.get("ast").filter(|a| !a.is_null())?))).collect();
+    // BY ROW, the tree read only for an INPUT's binding - the last row of the binding that has one. A map of every
+    // binding to its tree decoded every template expression in the store.
+    let mut rows_of: HashMap<String, Vec<&Row>> = HashMap::new();
+    for e in expressions.iter() {
+        if let Some(binding) = text(e, "binding") {
+            rows_of.entry(binding).or_default().push(e);
+        }
+    }
+    let tree_of = |id: &str| rows_of.get(id)?.iter().rev().find_map(|e| e.get("ast").filter(|a| !a.is_null()));
     let mut bound: HashMap<(String, String), Vec<&Value>> = HashMap::new();
     for b in store.table("bindings").iter().filter(|b| text(b, "kind").as_deref() == Some("input")) {
         if let (Some(id), Some(node), Some(name)) = (id_of(b, "id"), text(b, "node"), text(b, "name")) {
-            bound.entry((node, name)).or_default().extend(tree_of.get(&id).copied());
+            bound.entry((node, name)).or_default().extend(tree_of(&id));
         }
     }
     let paths = path_lists(store, branches);

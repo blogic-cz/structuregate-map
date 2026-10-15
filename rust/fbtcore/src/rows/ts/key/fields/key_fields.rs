@@ -325,15 +325,19 @@ pub fn field_sites(store: &Store<'_>) -> (Vec<FieldSite>, Stats) {
     for e in store.table("expressions").iter() {
         let Some(node_id) = id_of(e, "node") else { continue };
         let Some(n) = node_by_id.get(&node_id) else { continue };
-        let Some(ast) = e.get("ast").filter(|a| !a.is_null()) else { continue };
-        if matches!(ast, Value::String(s) if s.is_empty()) {
-            continue;
-        }
+        // PEEKED: the rows a template expression reads are all this asks of its tree, which is not kept.
+        let Some(rows) = e.peek("ast", |ast| {
+            let ast = ast.filter(|a| !a.is_null())?;
+            if matches!(ast, Value::String(s) if s.is_empty()) {
+                return None;
+            }
+            Some(read_rows(unwrap(ast)))
+        }) else { continue };
 
         let gates = super::key_methods::gates_of(n);
 
         let mut hit = false;
-        for row in read_rows(unwrap(ast)) {
+        for row in rows {
             let Some(keys) = by_member.get(&row) else { continue };
             if keys.is_empty() {
                 continue;

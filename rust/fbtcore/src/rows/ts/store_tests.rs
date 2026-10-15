@@ -226,3 +226,75 @@ fn setting_a_column_on_a_row_does_not_reach_the_table() {
     assert_eq!(store.table("calls")[0].get("mine"), None, "the table is untouched");
     assert_eq!(store.table("calls")[1].get("mine"), None);
 }
+
+/// A database ON DISK, as a run's is - its node cells are read through a connection of their own (`cells::Source::Open`).
+/// `expressions` is owned by its `id`; `hops` has none and is owned by its rowid, a text id and a number id among them.
+fn with_nodes(name: &str, test: impl FnOnce(&Connection)) {
+    let path = std::env::temp_dir().join(format!("fbt-store-nodes-{name}-{}.sqlite", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch(
+        "CREATE TABLE expressions (id, ast, half TEXT);
+         INSERT INTO expressions VALUES ('x:1', NULL, 'typescript'), (7, NULL, 'typescript'), ('x:3', 'plain', 'typescript');
+         CREATE TABLE hops (via TEXT, list, half TEXT);
+         INSERT INTO hops VALUES ('a', NULL, 'typescript'), ('b', NULL, 'typescript');",
+    )
+    .unwrap();
+    let mut ast = cells::Writer::new(&db, "expressions", "ast").unwrap();
+    ast.tree("x:1", &json!({"k": "Literal", "v": false})).unwrap();
+    ast.tree("7", &json!({"k": "Read", "name": "n"})).unwrap();
+    drop(ast);
+    let mut list = cells::Writer::new(&db, "hops", "list").unwrap();
+    list.tree("#1", &json!(["first"])).unwrap();
+    list.tree("#2", &json!(["second", 2])).unwrap();
+    drop(list);
+    test(&db);
+    drop(db);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn a_structure_written_as_nodes_comes_back_for_the_row_that_owns_it() {
+    // THE OWNER IS THE ROW'S: its `id` as text or as a number, its rowid where the table has none. A cell no longer
+    // carries an owner of its own, so the row's cells are where it is read from.
+    with_nodes("owner", |db| {
+    let store = Store::from_db(db, "typescript").unwrap();
+    let exprs = store.table("expressions");
+    assert_eq!(exprs[0]["ast"], json!({"k": "Literal", "v": false}));
+    assert_eq!(exprs[1]["ast"], json!({"k": "Read", "name": "n"}), "a number id owns its nodes too");
+    assert_eq!(exprs[2]["ast"], json!("plain"), "a scalar the column held stays the scalar");
+    let hops = store.table("hops");
+    assert_eq!(hops[0]["list"], json!(["first"]));
+    assert_eq!(hops[1]["list"], json!(["second", 2]), "a table without an id: each row its own rowid's");
+    assert_eq!(hops[1].clone().into_map()["list"], json!(["second", 2]), "and a row moved out for the write");
+    });
+}
+
+#[test]
+fn a_peeked_structure_answers_as_a_read_one_does_and_is_not_kept() {
+    with_nodes("peek", |db| {
+    let store = Store::from_db(db, "typescript").unwrap();
+    let exprs = store.table("expressions");
+    let undecoded = |row: &Row| matches!(row, Row::Held { cells, .. } if cells.iter().any(|c| matches!(c, Some(Cell::Nodes(d)) if d.get().is_none())));
+    let seen = exprs[0].peek("ast", |ast| ast.cloned());
+    assert_eq!(seen, Some(json!({"k": "Literal", "v": false})));
+    assert!(undecoded(&exprs[0]), "the tree peeked is not held decoded");
+    assert_eq!(exprs[0].get("ast"), seen.as_ref(), "the same answer a read gives");
+    assert!(!undecoded(&exprs[0]), "a read keeps it");
+    assert_eq!(exprs[0].peek("ast", |ast| ast.cloned()), seen, "and a peek then answers from what was kept");
+    });
+}
+
+#[test]
+fn a_released_store_reads_its_rows_again_and_they_are_the_same_rows() {
+    // RELEASED BEFORE `key_reach`: what the passes read is dropped, and a table asked for after it is read again.
+    with_nodes("release", |db| {
+    let mut store = Store::from_db(db, "typescript").unwrap();
+    let before = store.table("expressions");
+    let first: Vec<Map<String, Value>> = before.iter().map(Row::to_map).collect();
+    store.release();
+    let again = store.table("expressions");
+    assert!(!Rc::ptr_eq(&before, &again), "the table was read again, not served from what was held");
+    assert_eq!(again.iter().map(Row::to_map).collect::<Vec<_>>(), first);
+    });
+}

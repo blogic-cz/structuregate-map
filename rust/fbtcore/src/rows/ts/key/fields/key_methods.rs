@@ -124,10 +124,14 @@ pub(super) fn method_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
         for e in store.table("expressions").iter() {
             let Some(node_id) = id_of(e, "node") else { continue };
             let Some(n) = node_by_id.get(&node_id) else { continue };
-            let Some(ast) = e.get("ast").filter(|a| !a.is_null()) else { continue };
+            // PEEKED: the calls a template expression makes are all this asks of its tree, which is not kept.
+            let Some(found) = e.peek("ast", |ast| {
+                let ast = ast.filter(|a| !a.is_null())?;
+                let mut found = Vec::new();
+                calls(unwrap(ast), &mut found);
+                Some(found)
+            }) else { continue };
             let Some(at) = id_of(e, "id") else { continue };
-            let mut found = Vec::new();
-            calls(unwrap(ast), &mut found);
             let mut done = std::collections::HashSet::new();
             // A CALL ON A RECEIVER TYPED BY A BASE OR AN INTERFACE is the call of every built subtype's member (`key_classes`).
             let found = found.into_iter().flat_map(|(row, args)| {
