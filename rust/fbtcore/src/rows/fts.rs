@@ -200,7 +200,12 @@ pub fn build(db_path: &Path, with_json: bool) -> Result<Indexed> {
                 }
             }
             if !readers.is_empty() {
-                let owner: String = row.get(wanted.len() + 1)?;
+                // The owner as a node holds it (`cells::owner_value`): a numbered row's id is a number.
+                let raw: rusqlite::types::Value = row.get(wanted.len() + 1)?;
+                let owner = match raw {
+                    rusqlite::types::Value::Text(t) => cells::owner_value(&t),
+                    other => other,
+                };
                 for (reader, width) in readers.iter_mut() {
                     let mut held = reader.query([&owner])?;
                     while let Some(node) = held.next()? {
