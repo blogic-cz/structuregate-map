@@ -32,23 +32,27 @@ pub fn renders_at_false(kind: Option<&str>, name: Option<&str>) -> bool {
 
 /// Every render gate whose condition is the literal `false`.
 pub fn dead_gates(store: &Store<'_>) -> IndexSet<String> {
+    // ONLY A RENDER GATE'S EXPRESSION IS ASKED. Asked of every expression, this scan rebuilt every tree of the
+    // store from its node rows to answer for the few hundred a render gate names - seconds on a large workspace.
+    let gates = store.table("gates");
+    let render = |g: &Row| renders_at_false(str_of(g, "gate_kind"), str_of(g, "name"));
+    let wanted: IndexSet<&str> = gates.iter().filter(|g| render(g)).filter_map(|g| str_of(g, "expression")).collect();
+    let mut out = IndexSet::new();
+    if wanted.is_empty() {
+        return out;
+    }
     let mut asts: IndexSet<String> = IndexSet::new();
     for e in store.table("expressions").iter() {
-        // PEEKED, not kept: every expression's tree is asked whether it is the literal, and holding each one
-        // decoded for the rest of the closure was most of what this scan cost.
+        // PEEKED, not kept: the tree is asked whether it is the literal, and nothing later reads it again.
         if let Some(id) = str_of(e, "id")
+            && wanted.contains(id)
             && e.peek("ast", |ast| ast.is_some_and(is_false))
         {
             asts.insert(id.to_string());
         }
     }
-    let mut out = IndexSet::new();
-    if asts.is_empty() {
-        return out;
-    }
-    for g in store.table("gates").iter() {
-        let renders = renders_at_false(str_of(g, "gate_kind"), str_of(g, "name"));
-        if renders
+    for g in gates.iter() {
+        if render(g)
             && str_of(g, "expression").is_some_and(|x| asts.contains(x))
             && let Some(id) = str_of(g, "id")
         {

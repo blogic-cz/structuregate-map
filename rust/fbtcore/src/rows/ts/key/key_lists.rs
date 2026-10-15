@@ -94,7 +94,7 @@ pub(super) fn with_reader<R>(store: &Store<'_>, f: impl FnOnce(&Returned<'_, '_>
     let keys: KeySet = store.table("translations").iter().filter_map(|t| super::key_fields::text(t, "key")).collect();
     let i18n = store.option_list("i18n_calls");
     let dict = store.option_list("i18n_dictionary_calls");
-    let rows = super::gate_tsrows::TsRows::new(store);
+    let rows = super::gate_tsrows::TsRows::of(store);
     let returns = store.table("returns");
     let one_return = one_returns(&returns);
     let every = returns_by_member(&returns);

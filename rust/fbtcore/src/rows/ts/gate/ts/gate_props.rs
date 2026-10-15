@@ -125,7 +125,7 @@ fn read_chain(text: &str) -> Option<Value> {
 
 impl<'a> Props<'a> {
     pub fn new(store: &Store<'_>, idx: &'a EnumIndex, claimed: &dyn Fn(&str) -> bool) -> Props<'a> {
-        let calls = Calls::new(store, idx, TsRows::new(store), claimed);
+        let calls = Calls::new(store, idx, TsRows::of(store), claimed);
         let defs = Self::defs(store, idx, calls.rows());
         let methods = store.table("members").iter()
             .filter(|m| cell(m, "kind").as_deref() == Some("method"))
