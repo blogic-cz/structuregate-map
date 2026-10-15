@@ -44,7 +44,8 @@ third of the rows runs the expensive phase in seconds. So:
   exe: release's optimisation without LTO - a rebuild in seconds instead of ~4 minutes. Ship with the default.
 - A worktree starts with an EMPTY `rust/fbtcore/target`, and a cold build is ten minutes: link the main checkout's
   instead (`rm -rf rust/fbtcore/target && ln -s <main checkout>/rust/fbtcore/target rust/fbtcore/target`) - cargo
-  locks it, so two builds only queue.
+  locks it, so two builds only queue. The link is ignored (`rust/*/target`, no trailing slash); never `git add -f` it -
+  committed once, it replaced the main checkout's build directory with a link to itself.
 
 ## The machine's limits
 
