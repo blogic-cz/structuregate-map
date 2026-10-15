@@ -232,7 +232,10 @@
   -->
   <PropertyGroup>
     <FbtCoreDir>$(MSBuildThisFileDirectory)../rust/fbtcore</FbtCoreDir>
-    <FbtCoreOut>$(FbtCoreDir)/target/release</FbtCoreOut>
+    <!-- THE CARGO PROFILE: `release` (whole-program LTO) is what ships; a working build may pass
+         -p:FbtCoreProfile=lab - the same optimisation without LTO, a rebuild in seconds instead of minutes. -->
+    <FbtCoreProfile Condition="'$(FbtCoreProfile)' == ''">release</FbtCoreProfile>
+    <FbtCoreOut>$(FbtCoreDir)/target/$(FbtCoreProfile)</FbtCoreOut>
     <!-- What cargo names the two shapes: fbtcore.lib/.dll on Windows, libfbtcore.a/.so on Linux,
          libfbtcore.a/.dylib on macOS. .NET probes `fbtcore` under each OS's own name. -->
     <FbtCoreStatic Condition="'$(OS)' == 'Windows_NT'">fbtcore.lib</FbtCoreStatic>
@@ -243,7 +246,7 @@
   </PropertyGroup>
 
   <Target Name="BuildFbtCore" BeforeTargets="BeforeCompile">
-    <Exec Command="cargo build --release --manifest-path &quot;$(FbtCoreDir)/Cargo.toml&quot;"
+    <Exec Command="cargo build --profile $(FbtCoreProfile) --manifest-path &quot;$(FbtCoreDir)/Cargo.toml&quot;"
           WorkingDirectory="$(FbtCoreDir)" />
     <Error Condition="!Exists('$(FbtCoreOut)/$(FbtCoreStatic)')"
            Text="structuregate: $(FbtCoreStatic) was not produced - is the rust toolchain installed and on PATH?" />
