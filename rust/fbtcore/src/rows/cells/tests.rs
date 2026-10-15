@@ -122,3 +122,15 @@ fn dropping_a_half_takes_its_nodes_and_leaves_the_other_halves() {
     assert!(!all.contains_key("x:1"), "the half's nodes went with its rows");
     assert_eq!(all.get("x:2"), Some(&json!({"k": "Read", "name": "kept"})));
 }
+
+#[test]
+fn a_delete_through_rows_whose_id_is_a_number_takes_their_nodes() {
+    // `render_path` numbers its rows: the nodes are owned by '1', the row's id is 1.
+    let db = Connection::open_in_memory().unwrap();
+    let rows = vec![json!({"id": 1, "half": "typescript", "hops": ["a", "b"]}), json!({"id": 2, "half": "other", "hops": ["c"]})];
+    super::super::store::insert_rows(&db, "render_path", &rows).unwrap();
+    delete_children(&db, "render_path", "t.half = ?1", &[&"typescript"]).unwrap();
+    let all = load_all(&db, "render_path", "hops").unwrap();
+    assert!(!all.contains_key("1"), "row 1's nodes are gone: {all:?}");
+    assert_eq!(all.get("2"), Some(&json!(["c"])));
+}
