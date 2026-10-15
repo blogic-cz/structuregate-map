@@ -32,14 +32,13 @@ pub(super) fn lens_tables(db: &Connection, out: &mut String, limit: usize, width
     ]);
     show(out, &rows, &named(&["table", "rows", "columns"]), limit, width.max(90));
     let _ = writeln!(out);
-    if let Ok(mut stmt) = db.prepare("SELECT key, value FROM _meta")
-        && let Ok(meta) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Value>(1)?)))
     {
         // CUT LIKE ANY CELL. `deps:python` is the whole bound-through record of a tree, and printed whole
-        // it made `--tables` megabytes of output; `--width 0` still shows every value in full.
+        // it made `--tables` megabytes of output; `--width 0` still shows every value in full. A structure is printed
+        // as the JSON its nodes rebuild (`rows::meta`).
         let meta_width = if width == 0 { 0 } else { width.max(90) };
-        for pair in meta.flatten() {
-            let (key, value) = pair;
+        for (key, value) in crate::rows::meta::scan(db, None) {
+            let value = Value::Text(value);
             let padded = format!("{key}{}", " ".repeat(8usize.saturating_sub(key.chars().count())));
             let _ = writeln!(out, "  {padded} {}", clip(&cell(&value).replace('\n', " "), meta_width));
         }
@@ -141,16 +140,12 @@ pub(super) fn lens_id(db: &Connection, out: &mut String, row_id: &str, width: us
 /// with no prefix for a database that recorded none.
 fn roots_of(db: &Connection) -> Vec<(String, String)> {
     let mut roots = Vec::new();
-    if let Ok(mut stmt) = db.prepare("SELECT value FROM _meta WHERE key LIKE 'roots:%'")
-        && let Ok(found) = stmt.query_map([], |r| r.get::<_, String>(0))
-    {
-        for listed in found.flatten() {
-            let pairs: Vec<(String, String)> = serde_json::from_str(&listed).unwrap_or_default();
-            roots.extend(pairs);
-        }
+    for (_, listed) in crate::rows::meta::scan(db, Some("roots:%")) {
+        let pairs: Vec<(String, String)> = serde_json::from_str(&listed).unwrap_or_default();
+        roots.extend(pairs);
     }
     if roots.is_empty()
-        && let Ok(root) = db.query_row("SELECT value FROM _meta WHERE key = 'root'", [], |r| r.get::<_, String>(0))
+        && let Some(root) = crate::rows::meta::get(db, "root")
     {
         roots.push((String::new(), root));
     }

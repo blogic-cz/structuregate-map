@@ -2,7 +2,7 @@
 //! printed one line - the rows and how many files were re-read - with no trace asked for: which half took the time and
 //! why it ran could not be found out afterwards. So every run now says how long each step took, and keeps that, with
 //! each half's own account of why it ran (`Collector::refresh`), in `_meta` as `last_refresh` - one JSON value, replaced
-//! by every run that did work (a run that re-read nothing and replayed the passes keeps the one before), readable with `--map-query <db> --sql "SELECT value FROM _meta WHERE key = 'last_refresh'"`.
+//! by every run that did work (a run that re-read nothing and replayed the passes keeps the one before), readable with `--map-query <db> --tables --width 0` (a structure, so its nodes are in `_meta__value` - `rows::meta`).
 //!
 //! NO KEY READS IT: the passes over the finished rows key on `counter:`, `setup:` and `schema` (`derived.rs`), and a
 //! payload half on the tree, so a value that moves on every run moves nothing else. Its timings come from the clock
@@ -72,11 +72,9 @@ pub fn said(into: &mut Collector, db: &str, clock: Clock, replayed: bool) {
     for (half, facts) in &into.refresh {
         kept[half.as_str()] = facts.clone();
     }
-    let written = rusqlite::Connection::open(db).and_then(|conn| {
+    let written = rusqlite::Connection::open(db).map_err(anyhow::Error::from).and_then(|conn| {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        conn.execute_batch("CREATE TABLE IF NOT EXISTS _meta (key TEXT, value TEXT)")?;
-        conn.execute("DELETE FROM _meta WHERE key = ?1", [KEY])?;
-        conn.execute("INSERT INTO _meta (key, value) VALUES (?1, ?2)", [KEY, &kept.to_string()])
+        crate::rows::meta::put_value(&conn, KEY, &kept)
     });
     if let Err(why) = written {
         into.notes.push(format!("the run's account was not kept in _meta.{KEY} - {why}"));
@@ -107,20 +105,15 @@ fn keep(into: &mut Collector, db: &str, key: &str, wanted: &str) {
     if !Path::new(db).is_file() {
         return;
     }
-    let written = rusqlite::Connection::open(db).and_then(|conn| {
+    let written = rusqlite::Connection::open(db).map_err(anyhow::Error::from).and_then(|conn| {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        let meta: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = '_meta'", [], |r| r.get(0))?;
-        if meta == 0 {
+        if !crate::rows::meta::exists(&conn) {
             return Ok(());
         }
-        let held: Option<String> = conn
-            .query_row("SELECT value FROM _meta WHERE key = ?1", [key], |r| r.get(0))
-            .or_else(|e| if matches!(e, rusqlite::Error::QueryReturnedNoRows) { Ok(None) } else { Err(e) })?;
-        if held.as_deref() == Some(wanted) {
+        if crate::rows::meta::get(&conn, key).as_deref() == Some(wanted) {
             return Ok(());
         }
-        conn.execute("DELETE FROM _meta WHERE key = ?1", [key])?;
-        conn.execute("INSERT INTO _meta (key, value) VALUES (?1, ?2)", [key, wanted]).map(|_| ())
+        crate::rows::meta::put(&conn, key, wanted)
     });
     if let Err(why) = written {
         into.notes.push(format!("the map's {key} were not kept in _meta.{key} - {why}"));
@@ -176,14 +169,14 @@ mod tests {
         let db = dir.join("map.sqlite");
         let _ = std::fs::remove_file(&db);
         let conn = rusqlite::Connection::open(&db).unwrap();
-        conn.execute_batch("CREATE TABLE _meta (key TEXT, value TEXT); INSERT INTO _meta VALUES ('root', '/t/src');").unwrap();
+        crate::rows::meta::put(&conn, "root", "/t/src").unwrap();
         drop(conn);
         let given = vec![("src/".to_string(), "/t/src".to_string()), ("test/".to_string(), "/t/test".to_string())];
         let mut into = Collector::new();
         let held = |db: &Path| -> Vec<String> {
             let conn = rusqlite::Connection::open(db).unwrap();
-            let mut stmt = conn.prepare("SELECT value FROM _meta WHERE key = 'roots'").unwrap();
-            stmt.query_map([], |r| r.get(0)).unwrap().flatten().collect()
+            let held: i64 = conn.query_row("SELECT count(*) FROM _meta WHERE key = 'roots'", [], |r| r.get(0)).unwrap();
+            (0..held).filter_map(|_| crate::rows::meta::get(&conn, "roots")).collect()
         };
         let db_text = db.to_string_lossy().into_owned();
         roots(&mut into, &db_text, &given);

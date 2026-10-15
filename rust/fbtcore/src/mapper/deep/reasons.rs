@@ -54,7 +54,7 @@ pub(super) struct Before {
 
 pub(super) fn before(db: &str) -> Option<Before> {
     let conn = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
-    let text: String = conn.query_row("SELECT value FROM _meta WHERE key = ?1", [KEPT], |r| r.get(0)).ok()?;
+    let text = crate::rows::meta::get(&conn, KEPT)?;
     let kept: Value = serde_json::from_str(&text).ok()?;
     let pair = |p: &Value| (p[0].as_str().unwrap_or("").to_string(), p[1].as_str().unwrap_or("").to_string());
     let projects = kept["projects"].as_object()?.iter()
@@ -71,9 +71,7 @@ pub(super) fn keep(db: &str, version: &str, now: &Parts, before: Option<&Before>
     let value = json!({ "version": version, "projects": now }).to_string();
     let Ok(conn) = rusqlite::Connection::open(db) else { return };
     let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
-    let _ = conn.execute_batch("CREATE TABLE IF NOT EXISTS _meta (key TEXT, value TEXT)");
-    let _ = conn.execute("DELETE FROM _meta WHERE key = ?1", [KEPT]);
-    let _ = conn.execute("INSERT INTO _meta (key, value) VALUES (?1, ?2)", [KEPT, value.as_str()]);
+    let _ = crate::rows::meta::put(&conn, KEPT, &value);
 }
 
 /// Why one moved file is read again.

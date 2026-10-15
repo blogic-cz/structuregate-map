@@ -39,7 +39,7 @@ Every half writes into ONE database and the halves SHARE table names (`calls`, `
 
 **Not here:** `.ps1` and `.md` are in the JSON map (`buildmap.json`) and write no rows in this
 database. A count over a shared table without `f.lang = ...` adds two languages together.
-`--tables` prints the languages present (`files:csharp 36`) beside the roots (`root` the first, `roots` a JSON array of all) and file count, from `_meta`.
+`--tables` prints the languages present (`files:csharp 36`) beside the roots (`root` the first, `roots` a list of all) and file count, from `_meta`.
 
 ## The entry point builds it — do not build it by hand
 
@@ -51,7 +51,8 @@ A C# file is read again when it, its project file or its project's references ch
 runs whole when any `.ts`/`.html` under its workspace moved and starts nothing when none did.
 
 **A SLOW REFRESH EXPLAINS ITSELF AFTERWARDS.** `_meta` key `last_refresh` is the last WORKING run's account (a run
-that changed nothing keeps it), as JSON:
+that changed nothing keeps it), a structure - node rows in `_meta__value` (`owner` the key), printed as JSON by
+`--tables --width 0`:
 `when`, `took_ms`, `steps_ms` per half, `passes` (`ran`/`replayed`), `reread`, and `csharp.causes` (re-reads by
 cause: `content`, `project`, `new`, …) with `csharp.projects` - the projects whose inputs forced the most, and which
 input moved - plus `typescript` (files moved by extension, `setup_moved`). Its full trace is `<db>.last-run.jsonl`

@@ -12,6 +12,7 @@
 
 pub mod calls;
 pub mod cells;
+pub use cells::meta;
 pub mod fts;
 // THE PARTIAL RUN'S OWN MACHINERY - what is handed back, which files depend on which, what each read - in a folder
 // by `#[path]`, so every `super::` in them still means `rows`.
@@ -140,14 +141,19 @@ pub fn ts_state(db: &Path, lang: &str) -> TsState {
     };
 
     let recorded = reads::recorded(db, lang);
+    let (graph, scope) = match rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) {
+        Ok(conn) if db.exists() => (remember::stored_graph(&conn), remember::stored_scope(&conn)),
+        _ => Default::default(),
+    };
     TsState {
         rebuild: !store::usable(db),
         shas: store::recorded(db, lang),
         setup: meta(&format!("setup:{lang}")),
         alone: half::alone(db, lang),
         counters: store::counters(db),
-        deps: stored(&format!("deps:{lang}"), Value::Object(Map::new())),
-        scope: stored(&format!("scope:{lang}"), Value::Array(Vec::new())),
+        // THE GRAPH AND THE SCOPE ARE TABLES (`ts_deps`, `ts_scope`); handed to node as JSON, which is transport.
+        deps: graph.into_iter().map(|(target, dependents)| (target, Value::from(dependents))).collect::<Map<_, _>>().into(),
+        scope: Value::from(scope),
         json_columns: from_spec("json_columns", Value::Object(Map::new())),
         bool_columns: from_spec("bool_columns", Value::Object(Map::new())),
         rebuilt: from_spec("rebuilt", Value::Array(Vec::new())),

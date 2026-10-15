@@ -51,7 +51,7 @@ moved" from "content moved". Other causes: `not recorded before`, `written by an
 `--map-exclude` match that moved. The Angular half says how many files moved, by extension, and whether its
 setup (compiler, node, config, rows version) moved.
 
-`_meta` key `last_refresh` keeps it as JSON, replaced by every run that did work: `when`, `took_ms`,
+`_meta` key `last_refresh` keeps it (node rows in `_meta__value`; `--map-query <db> --tables --width 0` prints it as JSON), replaced by every run that did work: `when`, `took_ms`,
 `steps_ms`, `passes` (`ran`/`replayed`), `reread`, `csharp` (`causes`, `projects`), `typescript`, `trace`.
 The full trace is `<db>.last-run.jsonl` beside the database; read it with `structuregate --trace-report <file>`.
 Neither key feeds the passes over the finished rows, so a run that changed nothing still replays them.

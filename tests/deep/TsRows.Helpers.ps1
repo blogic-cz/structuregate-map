@@ -286,14 +286,33 @@ function Get-TsRowsSensesSql([string]$Db, [string]$KeyWhere) {
         "FROM key_reach k WHERE $KeyWhere"
 }
 
-# A `_meta` value that is a structure (`spec:typescript`, `deps:typescript`, `scope:typescript`) is kept as JSON TEXT, which SQLite
-# is not asked to open: it is read whole here and walked as an object.
+# A `_meta` value that is a structure (`spec:typescript`) is NODE ROWS (`rows::meta`), read whole here as the JSON they
+# rebuild and walked as an object.
 function Get-TsRowsMeta([string]$Db, [string]$Key) {
-    $result = Invoke-Gate --map-query $Db --width 0 --sql "SELECT value FROM _meta WHERE key = '$Key'"
-    Assert-Exit $result 0
-    $line = @($result.Lines | ForEach-Object { $_.Trim() } | Where-Object { $_ -and ($_[0] -eq '{' -or $_[0] -eq '[') }) | Select-Object -First 1
-    if (-not $line) { throw "no `_meta` value for '$Key'. Output:`n$($result.Text)" }
-    return $line | ConvertFrom-Json
+    $text = Get-MetaText $Db $Key
+    if (-not $text) { throw "no `_meta` value for '$Key' in $Db" }
+    return $text | ConvertFrom-Json
+}
+
+# THE GRAPH A PARTIAL RUN STARTS FROM is the table `ts_deps` (`target`, `dependent`, in the graph's order; a target with
+# no dependent is one row with a NULL one): read back as the object node is handed, `{target: [dependent, ...]}`.
+function Get-TsRowsDeps([string]$Db) {
+    $r = Invoke-Gate --map-query $Db --width 0 --limit 0 --sql "SELECT 'e=' || target || '|' || coalesce(dependent, '') AS e FROM ts_deps ORDER BY rowid"
+    Assert-Exit $r 0
+    $deps = [ordered]@{}
+    foreach ($line in @($r.Lines | ForEach-Object { $_.Trim() } | Where-Object { $_.StartsWith('e=') })) {
+        $target, $dependent = $line.Substring(2).Split('|', 2)
+        if (-not $deps.Contains($target)) { $deps[$target] = @() }
+        if ($dependent) { $deps[$target] += $dependent }
+    }
+    return [pscustomobject]$deps
+}
+
+# The scope set (`deps::scope_files`): the table `ts_scope`, one path a row.
+function Get-TsRowsScope([string]$Db) {
+    $r = Invoke-Gate --map-query $Db --width 0 --limit 0 --sql "SELECT 'p=' || path AS p FROM ts_scope ORDER BY rowid"
+    Assert-Exit $r 0
+    return @($r.Lines | ForEach-Object { $_.Trim() } | Where-Object { $_.StartsWith('p=') } | ForEach-Object { $_.Substring(2) })
 }
 
 # Lines a case computed itself, shaped like a gate result so Assert-Line / Assert-NoLine read them.

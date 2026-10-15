@@ -52,10 +52,8 @@ fn keyed(db: &str, config_stamp: &str, facts_stamp: &str, build: &str, row_fts: 
     }
     // WHAT DESCRIBES THE ROWS, not the tallies: `rows` counts the derived tables too, so it moves because these
     // passes ran, and a key holding it would never match.
-    let mut meta = conn.prepare("SELECT key, value FROM _meta WHERE key LIKE 'counter:%' OR key LIKE 'setup:%' OR key = 'schema' ORDER BY key")?;
-    let rows = meta.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?)))?;
-    for row in rows {
-        let (name, value) = row?;
+    let described = ["counter:%", "setup:%", "schema"].into_iter().flat_map(|like| crate::rows::meta::scan(&conn, Some(like)));
+    for (name, value) in described.collect::<BTreeMap<_, _>>() {
         parts.insert(name, blake3::hash(value.as_bytes()).to_hex()[..16].to_string());
     }
     let mut hash = blake3::Hasher::new();
@@ -124,10 +122,9 @@ pub fn remember(into: &mut Collector, db: &str, key: &Key, before: Before) {
                        "tables": into.database });
     // A KEY THAT COULD NOT BE KEPT IS SAID: dropped in silence - a database busy on Windows - the passes ran on every
     // run and nothing said why.
-    let written = rusqlite::Connection::open(db).and_then(|conn| {
+    let written = rusqlite::Connection::open(db).map_err(anyhow::Error::from).and_then(|conn| {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        conn.execute("DELETE FROM _meta WHERE key = ?1", [KEPT])?;
-        conn.execute("INSERT INTO _meta (key, value) VALUES (?1, ?2)", [KEPT, &kept.to_string()])
+        crate::rows::meta::put_value(&conn, KEPT, &kept)
     });
     if let Err(why) = written {
         into.notes.push(format!("the passes over the finished rows could not keep their key, so they run again next time - {why}"));
@@ -136,7 +133,7 @@ pub fn remember(into: &mut Collector, db: &str, key: &Key, before: Before) {
 
 fn recorded(db: &str) -> Option<Value> {
     let conn = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
-    let text: String = conn.query_row("SELECT value FROM _meta WHERE key = ?1", [KEPT], |r| r.get(0)).ok()?;
+    let text = crate::rows::meta::get(&conn, KEPT)?;
     serde_json::from_str(&text).ok()
 }
 

@@ -85,17 +85,8 @@ pub fn alone(path: &Path, lang: &str) -> bool {
     let Ok(db) = Connection::open(path) else {
         return true;
     };
-    let Ok(mut stmt) = db.prepare("SELECT key, value FROM _meta WHERE key LIKE 'files:%'") else {
-        return true;
-    };
-    let Ok(rows) = stmt.query_map([], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-    }) else {
-        return true;
-    };
-
     let mine = format!("files:{lang}");
-    for (key, value) in rows.flatten() {
+    for (key, value) in super::meta::scan(&db, Some("files:%")) {
         if key == mine {
             continue;
         }
@@ -116,10 +107,7 @@ pub fn meta(path: &Path, key: &str) -> String {
     let Ok(db) = Connection::open(path) else {
         return String::new();
     };
-    db.query_row("SELECT value FROM _meta WHERE key = ?1", [key], |r| {
-        r.get::<_, String>(0)
-    })
-    .unwrap_or_default()
+    super::meta::get(&db, key).unwrap_or_default()
 }
 
 #[cfg(test)]

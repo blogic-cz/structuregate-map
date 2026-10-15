@@ -92,13 +92,11 @@ Test-Case 'csrefs: a change to what a project compiles against re-reads its file
     Assert-Line $restored.Result 'by project: Demo.csproj 1 (obj/project.assets.json)'
 }
 
-# `_meta.last_refresh`, as an object.
+# `_meta.last_refresh`, as an object (node rows, read back as the JSON they rebuild - `Get-MetaText`).
 function Get-CsRefsRefresh([string]$Db) {
-    $r = Invoke-Gate --map-query $Db --width 0 --sql "SELECT 'v=' || value FROM _meta WHERE key = 'last_refresh'"
-    Assert-Exit $r 0
-    $line = $r.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | Select-Object -First 1
-    if ($null -eq $line) { throw "no last_refresh in _meta:`n$($r.Text)" }
-    return $line.Trim().Substring(2) | ConvertFrom-Json
+    $text = Get-MetaText $Db 'last_refresh'
+    if (-not $text) { throw "no last_refresh in _meta of $Db" }
+    return $text | ConvertFrom-Json
 }
 
 Test-Case 'csrefs: a re-read run says which files moved and which project forced the rest, and _meta keeps it' {

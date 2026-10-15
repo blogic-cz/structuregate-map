@@ -84,7 +84,7 @@ fn find_maps(root: &Path) -> Vec<(String, i64)> {
 /// The file count a structuregate map records, or `None` for any other database.
 fn map_files(path: &Path) -> Option<i64> {
     let db = rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
-    let meta = |key: &str| db.query_row("SELECT value FROM _meta WHERE key = ?1", [key], |r| r.get::<_, String>(0)).ok();
+    let meta = |key: &str| crate::rows::meta::get(&db, key);
     meta("schema")?;
     meta("root")?;
     Some(meta("files").and_then(|f| f.parse().ok()).unwrap_or(0))
