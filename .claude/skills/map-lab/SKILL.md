@@ -22,7 +22,8 @@ third of the rows runs the expensive phase in seconds. So:
 2. **Iterate with a phase-only harness over the stored map**, not a fresh map per try: a `#[test]` (or env-gated
    entry) that opens a COPY of the sample's database and runs only the phase under work - e.g. the TypeScript
    closure, `keyreach::build_closure` over `rows::ts::store::Store::from_db` - and dumps what it emits to a file.
-   Build it `--release`, put every probe behind an environment variable so a new measurement needs no rebuild, and
+   Build it with `--profile lab` (release's optimisation without LTO: a one-file rebuild in seconds instead of ~4
+   minutes), put every probe behind an environment variable so a new measurement needs no rebuild, and
    diff the dump against the one from before the change: byte for byte, every step.
 3. **Measure memory by phase**: `memprof.sh <dll> <tree> <out> [gate args]` maps a tree while sampling the gate
    process twice a second; `python3 memreport.py <out>` gives the peak per phase, `--timeline` the curve against
