@@ -96,14 +96,14 @@ function Get-TextCanon([string]$Text) {
 function Get-Keys([string]$Build, [string]$Db) {
     $map = @{}
     if (Test-Nodes $Build $Db) {
-        $f = { param($role) "(SELECT x.value FROM key_reach__always_values x WHERE x.parent = it.id AND x.role = '$role')" }
+        $f = { param($role) "(SELECT x.value FROM key_reach__always_values x WHERE x.owner = it.owner AND x.parent = it.n AND x.role = '$role')" }
         $values = "(SELECT group_concat(v.value, ',' ORDER BY v.ord) FROM key_reach__always_values l " +
-            "JOIN key_reach__always_values v ON v.parent = l.id WHERE l.parent = it.id AND l.role = 'values')"
+            "JOIN key_reach__always_values v ON v.owner = l.owner AND v.parent = l.n WHERE l.owner = it.owner AND l.parent = it.n AND l.role = 'values')"
         $entry = "coalesce($(& $f 'enum_name'), '') || '|' || coalesce($(& $f 'dimension'), '') || '|' || " +
             "coalesce($(& $f 'op'), '') || '|' || coalesce($values, '') || '|' || coalesce($(& $f 'domain'), '')"
         $sql = "SELECT k.key || '$sep' || coalesce(k.route, '') || '$sep' || coalesce(k.n_paths, '') || '$sep' || " +
             "coalesce((SELECT group_concat(e, char(30)) FROM (SELECT $entry AS e FROM key_reach__always_values it " +
-            "WHERE it.parent = '#' || k.rowid || '/0')), '') FROM key_reach k"
+            "WHERE it.owner = '#' || k.rowid AND it.parent = 0)), '') FROM key_reach k"
         foreach ($r in (Get-Lines $Build $Db $sql)) {
             $canon = (@($r[3].Split([char]30) | Where-Object { $_ }) | Sort-Object) -join ' ; '
             $map[$r[0]] = [pscustomobject]@{ r = $r[1]; n = $r[2]; v = $canon }
@@ -119,7 +119,7 @@ function Get-Gates([string]$Build, [string]$Db) {
     $join = "FROM gate_values v JOIN gates g ON g.id = v.gate LEFT JOIN files f ON f.id = g.owner_file"
     $map = @{}
     if (Test-Nodes $Build $Db) {
-        $values = "(SELECT group_concat(i.value, ',' ORDER BY i.ord) FROM gate_values__values_json i WHERE i.parent = '#' || v.rowid || '/0')"
+        $values = "(SELECT group_concat(i.value, ',' ORDER BY i.ord) FROM gate_values__values_json i WHERE i.owner = '#' || v.rowid AND i.parent = 0)"
         foreach ($r in (Get-Lines $Build $Db "SELECT $at || '$sep' || coalesce(v.op, '') || '$sep' || coalesce($values, '') $join")) {
             $map[$r[0]] = "$($r[1]) [$($r[2])]"
         }
