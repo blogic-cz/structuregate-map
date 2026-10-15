@@ -63,46 +63,83 @@ function New-Map([string]$Build, [string]$Db) {
     Invoke-Build $Build $arguments | Out-Null
 }
 
-# ONE JSON OBJECT PER LINE, so nothing is parsed out of a table: the query names a single column, the rule line
-# under its header is skipped, and every later line is one row.
-function Get-Rows([string]$Build, [string]$Db, [string]$Sql) {
-    $text = Invoke-Build $Build @('--map-query', $Db, '--width', '0', '--limit', '100000000', '--sql', $Sql)
+# ONE ROW PER LINE, its fields joined by `|~|` in the query itself: the query names a single column, the rule line
+# under its header is skipped, and every later line is one row, split back into its fields.
+$sep = '|~|'
+function Get-Lines([string]$Build, [string]$Db, [string]$Sql) {
+    $text = Invoke-Build $Build @('--map-query', $Db, '--width', '0', '--limit', '0', '--sql', $Sql)
     $rows = @()
     $body = $false
     foreach ($line in @($text)) {
         $t = "$line".Trim()
         if (-not $body) { if ($t.StartsWith('---')) { $body = $true }; continue }
-        if ($t.StartsWith('{')) { $rows += ($t | ConvertFrom-Json) }
+        if ($t.Contains($sep)) { $rows += , $t.Split([string[]]@($sep), [System.StringSplitOptions]::None) }
     }
     return , $rows
+}
+
+# A MAP FROM BEFORE NODE ROWS (schema 10 and older) holds `always_values` and `values_json` as JSON TEXT, read whole
+# here and opened by PowerShell; a map with `_cells` holds them as node rows, read by role. Both come out as ONE
+# canonical spelling - a restriction WITHOUT ITS ROW IDS, `enum_name|dimension|op|values|domain` per entry, sorted -
+# so a schema change alone reads as no change at all. `always_values` names its enum by id (`e:2`), and ids can
+# shift between two builds of one tree: compared as written, every restricted key would read as changed.
+function Test-Nodes([string]$Build, [string]$Db) {
+    $r = Get-Lines $Build $Db "SELECT 'n' || '$sep' || count(*) FROM sqlite_master WHERE name = '_cells'"
+    return $r.Count -gt 0 -and $r[0][1] -ne '0'
+}
+function Get-TextCanon([string]$Text) {
+    if (-not $Text -or $Text -eq '[]') { return '' }
+    return ((ConvertFrom-Json $Text) | ForEach-Object {
+        "$($_.enum_name)|$($_.dimension)|$($_.op)|$(@($_.values) -join ',')|$($_.domain)"
+    } | Sort-Object) -join ' ; '
+}
+function Get-Keys([string]$Build, [string]$Db) {
+    $map = @{}
+    if (Test-Nodes $Build $Db) {
+        $f = { param($role) "(SELECT x.value FROM key_reach__always_values x WHERE x.parent = it.id AND x.role = '$role')" }
+        $values = "(SELECT group_concat(v.value, ',' ORDER BY v.ord) FROM key_reach__always_values l " +
+            "JOIN key_reach__always_values v ON v.parent = l.id WHERE l.parent = it.id AND l.role = 'values')"
+        $entry = "coalesce($(& $f 'enum_name'), '') || '|' || coalesce($(& $f 'dimension'), '') || '|' || " +
+            "coalesce($(& $f 'op'), '') || '|' || coalesce($values, '') || '|' || coalesce($(& $f 'domain'), '')"
+        $sql = "SELECT k.key || '$sep' || coalesce(k.route, '') || '$sep' || coalesce(k.n_paths, '') || '$sep' || " +
+            "coalesce((SELECT group_concat(e, char(30)) FROM (SELECT $entry AS e FROM key_reach__always_values it " +
+            "WHERE it.parent = '#' || k.rowid || '/0')), '') FROM key_reach k"
+        foreach ($r in (Get-Lines $Build $Db $sql)) {
+            $canon = (@($r[3].Split([char]30) | Where-Object { $_ }) | Sort-Object) -join ' ; '
+            $map[$r[0]] = [pscustomobject]@{ r = $r[1]; n = $r[2]; v = $canon }
+        }
+    } else {
+        $sql = "SELECT key || '$sep' || coalesce(route, '') || '$sep' || coalesce(n_paths, '') || '$sep' || coalesce(always_values, '') FROM key_reach"
+        foreach ($r in (Get-Lines $Build $Db $sql)) { $map[$r[0]] = [pscustomobject]@{ r = $r[1]; n = $r[2]; v = (Get-TextCanon $r[3]) } }
+    }
+    return $map
+}
+function Get-Gates([string]$Build, [string]$Db) {
+    $at = "coalesce(f.path, '') || ':' || g.line || ':' || g.col || ' ' || coalesce(g.source, '') || ' | ' || coalesce(v.dimension, '')"
+    $join = "FROM gate_values v JOIN gates g ON g.id = v.gate LEFT JOIN files f ON f.id = g.owner_file"
+    $map = @{}
+    if (Test-Nodes $Build $Db) {
+        $values = "(SELECT group_concat(i.value, ',' ORDER BY i.ord) FROM gate_values__values_json i WHERE i.parent = '#' || v.rowid || '/0')"
+        foreach ($r in (Get-Lines $Build $Db "SELECT $at || '$sep' || coalesce(v.op, '') || '$sep' || coalesce($values, '') $join")) {
+            $map[$r[0]] = "$($r[1]) [$($r[2])]"
+        }
+    } else {
+        foreach ($r in (Get-Lines $Build $Db "SELECT $at || '$sep' || coalesce(v.op, '') || '$sep' || coalesce(v.values_json, '') $join")) {
+            $listed = if ($r[2]) { @(ConvertFrom-Json $r[2]) -join ',' } else { '' }
+            $map[$r[0]] = "$($r[1]) [$listed]"
+        }
+    }
+    return $map
 }
 
 if (-not $OldDb) { $OldDb = Join-Path $Out 'old.sqlite'; New-Map $Old $OldDb }
 if (-not $NewDb) { $NewDb = Join-Path $Out 'new.sqlite'; New-Map $New $NewDb }
 
-$keySql = "SELECT json_object('k', key, 'v', always_values, 'r', route, 'n', n_paths) AS j FROM key_reach"
-$gateSql = "SELECT json_object('g', coalesce(f.path, '') || ':' || g.line || ':' || g.col || ' ' || coalesce(g.source, ''), " +
-    "'d', v.dimension, 'o', v.op, 'v', v.values_json) AS j FROM gate_values v JOIN gates g ON g.id = v.gate " +
-    "LEFT JOIN files f ON f.id = g.owner_file"
+# A key is restricted when its canonical spelling holds an entry: `[]` and an absent value are both "no restriction".
+function Test-Restricted($Row) { return $null -ne $Row -and [string]$Row.v -ne '' }
 
-function Get-ByKey($Rows, [string]$Field) {
-    $map = @{}
-    foreach ($r in $Rows) { $map[[string]$r.$Field] = $r }
-    return $map
-}
-# `[]` and an absent value are both "no restriction".
-function Test-Restricted($Row) { return $null -ne $Row -and $Row.v -and [string]$Row.v -ne '[]' }
-# A restriction WITHOUT ITS ROW IDS: `always_values` names its enum by id (`e:2`), and ids can shift between two
-# builds of one tree - compared as written, every restricted key would read as changed.
-function Get-Canon($Row) {
-    if (-not (Test-Restricted $Row)) { return '' }
-    return ((ConvertFrom-Json ([string]$Row.v)) | ForEach-Object {
-        "$($_.enum_name)|$($_.dimension)|$($_.op)|$(@($_.values) -join ',')|$($_.domain)"
-    } | Sort-Object) -join ' ; '
-}
-
-$oldKeys = Get-ByKey (Get-Rows $Old $OldDb $keySql) 'k'
-$newKeys = Get-ByKey (Get-Rows $New $NewDb $keySql) 'k'
+$oldKeys = Get-Keys $Old $OldDb
+$newKeys = Get-Keys $New $NewDb
 $lost = [System.Collections.Generic.List[string]]::new()
 $changed = [System.Collections.Generic.List[string]]::new()
 $gained = [System.Collections.Generic.List[string]]::new()
@@ -112,13 +149,12 @@ foreach ($k in ($oldKeys.Keys + $newKeys.Keys | Sort-Object -Unique)) {
     if ($o -and $n -and $o.r -ne $n.r) { $routes++ }
     $was = Test-Restricted $o; $is = Test-Restricted $n
     if ($was -and -not $is) { $lost.Add("$k`n    old $($o.v)`n    new $(if ($n) { $n.v } else { '(key gone)' })") }
-    elseif ($was -and $is -and (Get-Canon $o) -ne (Get-Canon $n)) { $changed.Add("$k`n    old $($o.v)`n    new $($n.v)") }
+    elseif ($was -and $is -and $o.v -ne $n.v) { $changed.Add("$k`n    old $($o.v)`n    new $($n.v)") }
     elseif (-not $was -and $is) { $gained.Add("$k`n    new $($n.v)") }
 }
 
-$gateKey = { param($r) "$($r.g) | $($r.d)" }
-$oldGates = @{}; foreach ($r in (Get-Rows $Old $OldDb $gateSql)) { $oldGates[(& $gateKey $r)] = "$($r.o) $($r.v)" }
-$newGates = @{}; foreach ($r in (Get-Rows $New $NewDb $gateSql)) { $newGates[(& $gateKey $r)] = "$($r.o) $($r.v)" }
+$oldGates = Get-Gates $Old $OldDb
+$newGates = Get-Gates $New $NewDb
 $gateDiff = [System.Collections.Generic.List[string]]::new()
 foreach ($g in ($oldGates.Keys + $newGates.Keys | Sort-Object -Unique)) {
     $o = $oldGates[$g]; $n = $newGates[$g]

@@ -193,10 +193,10 @@ fn replace_affected(db: &Connection, affected: &[String], whole: &[String]) -> R
     for table in tables_with_half(db)? {
         let columns = schema::existing_columns(db, &table)?;
         let escaped = schema::escape(&table);
-        // A STRUCTURE'S NODES GO WITH ITS TABLE: a child table (`cells`) of a table rebuilt whole is whole too.
-        let whole_table = wholly.contains(table.as_str())
-            || super::cells::parent_of(db, &table).is_some_and(|parent| wholly.contains(parent.as_str()));
-        let count = if whole_table {
+        // A STRUCTURE'S NODES GO FIRST, THROUGH THE ROWS THAT OWN THEM: a node carries no scope of its own (`cells`).
+        let count = if wholly.contains(table.as_str()) {
+            let lang = LANG;
+            super::cells::delete_children(db, &table, &format!("t.\"{HALF_COLUMN}\" = ?1"), &[&lang])?;
             db.execute(
                 &format!("DELETE FROM \"{escaped}\" WHERE \"{HALF_COLUMN}\" = ?1"),
                 [LANG],
@@ -212,6 +212,7 @@ fn replace_affected(db: &Connection, affected: &[String], whole: &[String]) -> R
             for id in &ids {
                 params.push(id);
             }
+            super::cells::delete_children(db, &table, &format!("t.\"{HALF_COLUMN}\" = ? AND t.owner_file IN ({marks})"), params.as_slice())?;
             db.execute(&sql, params.as_slice())?
         } else {
             continue
@@ -230,6 +231,7 @@ fn replace_affected(db: &Connection, affected: &[String], whole: &[String]) -> R
         for path in affected {
             params.push(path);
         }
+        super::cells::delete_children(db, "files", &format!("t.half = ? AND t.path IN ({marks})"), params.as_slice())?;
         db.execute(&sql, params.as_slice())?;
     }
     Ok(removed)

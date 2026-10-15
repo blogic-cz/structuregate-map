@@ -65,7 +65,7 @@ WHERE f.path = '<path>' AND fn.line = <line>;
 -- every copy of one expression, with the function it sits in and what it reads
 SELECT f.path, x.line, x.func, x.role, x.source,
   (SELECT group_concat(j.value, ',' ORDER BY j.ord) FROM expressions__reads j
-   WHERE j.owner = x.id AND j.parent = x.id || '/0') reads
+   WHERE j.owner = x.id AND j.parent = 0) reads
 FROM expressions x JOIN files f ON f.id = x.file WHERE x.shape = '<digest>';
 ```
 

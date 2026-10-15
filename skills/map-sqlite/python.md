@@ -75,12 +75,12 @@ SELECT callee, count(*) n FROM calls WHERE callee LIKE 'STORE.%' GROUP BY callee
 
 -- which functions read a given constant (`--reads DATA_DIR` is this query over all ten tables)
 SELECT f.path, x.func, count(*) n FROM expressions x JOIN files f ON f.id = x.file
-JOIN expressions__reads r ON r.owner = x.id AND r.parent = x.id || '/0'
+JOIN expressions__reads r ON r.owner = x.id AND r.parent = 0
 WHERE r.value = 'DATA_DIR' AND x.func <> '' GROUP BY f.path, x.func ORDER BY n DESC;
 
 -- a constant reached through a parameter default, which the query above cannot see
 SELECT f.path, p.qualname, p.name, p.default_expr FROM parameters p JOIN files f ON f.id = p.file
-JOIN parameters__reads r ON r.owner = p.id AND r.parent = p.id || '/0' WHERE r.value = 'DATA_DIR';
+JOIN parameters__reads r ON r.owner = p.id AND r.parent = 0 WHERE r.value = 'DATA_DIR';
 
 -- one decorator applied twice to one def: silent at run time, invisible in a diff
 SELECT file, target, name, count(*) n FROM decorators GROUP BY file, target, name HAVING n > 1;
