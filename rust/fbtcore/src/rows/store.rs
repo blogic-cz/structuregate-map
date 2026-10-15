@@ -233,7 +233,8 @@ fn drop_files(db: &Connection, rels: &BTreeSet<String>, lang: &str) -> Result<()
 /// Rows into a table the way every half's are: scalars as columns, every list and object as nodes in its
 /// child table (`cells`). For a pass that writes a table of its own - it must never spell a structure as text.
 pub fn insert_rows(db: &Connection, table: &str, rows: &[Value]) -> Result<()> {
-    insert(db, table, rows, &[])
+    insert(db, table, rows, &[])?;
+    cells::index_values(db)
 }
 
 fn insert(db: &Connection, table: &str, rows: &[Value], stamp: &[(String, Value)]) -> Result<()> {
@@ -447,7 +448,9 @@ pub fn write(path: &Path, req: &WriteRequest<'_>) -> Result<Applied> {
 
     let db = Connection::open(path)
         .with_context(|| format!("cannot open the map database {}", path.display()))?;
-    db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF;")?;
+    // A LARGE PAGE CACHE FOR THE WRITE: tens of millions of node rows go into b-trees, and SQLite's default of 2 MB
+    // re-read the same interior pages from disk over and over. 256 MB, released when the connection closes.
+    db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; PRAGMA cache_size = -262144;")?;
 
     let tx = db.unchecked_transaction()?;
     let mut steps: Vec<(&'static str, u64)> = Vec::new();
@@ -506,6 +509,8 @@ pub fn write(path: &Path, req: &WriteRequest<'_>) -> Result<Applied> {
     let wrong = if req.counts { verify(&db, req.shas, req.lang) } else { 0 };
     lap("verify", &mut steps);
 
+    cells::index_values(&db)?;
+    lap("index the node values", &mut steps);
     write_meta(&db, req, found, &written, &carried)?;
     tx.commit()?;
     lap("commit", &mut steps);
