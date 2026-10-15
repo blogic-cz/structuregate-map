@@ -131,7 +131,7 @@ pub fn lists(store: &Store<'_>, idx: &EnumIndex) -> Lists {
         }
     }
 
-    let rows = TsRows::new(store);
+    let rows = TsRows::of(store);
     let bound = bound_by(store);
     let none = IndexSet::new();
     let mut candidates: IndexMap<String, (String, String)> = IndexMap::new();

@@ -88,6 +88,11 @@ pub(crate) fn bare(o: &Map<String, Value>) -> Option<&str> {
 }
 
 impl TsRows {
+    /// The one every pass shares (`Store::shared`): the rows it is built from do not change while they run.
+    pub fn of(store: &Store<'_>) -> std::rc::Rc<TsRows> {
+        store.shared("ts_rows", |s| TsRows::new(s))
+    }
+
     pub fn new(store: &Store<'_>) -> TsRows {
         let mut out = TsRows::default();
         for f in store.table("files").iter() {

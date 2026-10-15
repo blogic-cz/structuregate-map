@@ -39,7 +39,7 @@ pub fn arg_conds<'l>(
     if links.is_empty() {
         return (out, found_params);
     }
-    let rows = super::gate_tsrows::TsRows::new(store);
+    let rows = super::gate_tsrows::TsRows::of(store);
     let expressions = store.table("expressions");
     let by_id: HashMap<String, &Row> = expressions.iter().filter_map(|e| Some((id_of(e, "id")?, e))).collect();
     let params = super::key_fields::callables(store).0;

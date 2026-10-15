@@ -52,7 +52,7 @@ pub(super) struct Mirror<'a> {
     children: IndexMap<String, Vec<String>>,
     params: IndexMap<String, Vec<String>>,
     /// The TypeScript reads, tied to their rows: a list test's element is a TYPE member.
-    rows: TsRows,
+    rows: std::rc::Rc<TsRows>,
 }
 
 impl<'a> Mirror<'a> {
@@ -77,7 +77,7 @@ impl<'a> Mirror<'a> {
             parent: IndexMap::new(),
             children: IndexMap::new(),
             params: IndexMap::new(),
-            rows: TsRows::new(store),
+            rows: TsRows::of(store),
         };
         (m.parent, m.params) = lists::scopes(store);
         for (child, up) in &m.parent {

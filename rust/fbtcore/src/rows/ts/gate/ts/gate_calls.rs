@@ -57,7 +57,7 @@ pub struct Calls<'a> {
     /// A property holding a function (`isPlus = isPlusItem`) -> that function's row.
     alias: IndexMap<String, String>,
     exprs: Rc<Vec<Row>>,
-    rows: TsRows,
+    rows: std::rc::Rc<TsRows>,
     idx: &'a EnumIndex,
 }
 
@@ -67,7 +67,7 @@ impl<'a> Calls<'a> {
         &self.rows
     }
 
-    pub fn new(store: &Store<'_>, idx: &'a EnumIndex, rows: TsRows, claimed: &dyn Fn(&str) -> bool) -> Calls<'a> {
+    pub fn new(store: &Store<'_>, idx: &'a EnumIndex, rows: std::rc::Rc<TsRows>, claimed: &dyn Fn(&str) -> bool) -> Calls<'a> {
         let mut bound: IndexMap<String, IndexSet<String>> = IndexMap::new();
         for f in store.table("functions").iter() {
             let Some(parent) = cell(f, "parent") else { continue };
@@ -210,7 +210,7 @@ mod tests {
 
     fn calls(tables: Value) -> Calls<'static> {
         let store = store_of(tables);
-        Calls::new(&store, none(), TsRows::new(&store), &|_| false)
+        Calls::new(&store, none(), TsRows::of(&store), &|_| false)
     }
 
     fn param(name: &str) -> Value {
@@ -267,7 +267,7 @@ mod tests {
         let rebound = method(json!({"functions": [{"id": "fn:9", "parent": "m:is", "params": [{"name": "p"}]}]}));
         assert!(calls(rebound).is_empty());
         let store = store_of(method(json!({})));
-        let claimed = Calls::new(&store, none(), TsRows::new(&store), &|row| row == "m:is");
+        let claimed = Calls::new(&store, none(), TsRows::of(&store), &|row| row == "m:is");
         assert!(claimed.is_empty());
     }
 
@@ -288,7 +288,7 @@ mod tests {
         assert_eq!(got.1["left"]["left"], param("chosen"));
         // A function another reader reads is not inlined: the call is aimed at it instead.
         let store = store_of(t);
-        let claimed = Calls::new(&store, none(), TsRows::new(&store), &|row| row == "fn:1");
+        let claimed = Calls::new(&store, none(), TsRows::of(&store), &|row| row == "fn:1");
         let (row, aimed) = claimed.inline(&site(vec![param("chosen")])).expect("aimed");
         assert_eq!((row.as_str(), aimed["receiver"]["target"]["row"].clone()), ("fn:1", json!("fn:1")));
         assert_eq!(aimed["k"], json!("Call"));

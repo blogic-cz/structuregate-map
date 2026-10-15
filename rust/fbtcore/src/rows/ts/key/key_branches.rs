@@ -417,7 +417,7 @@ impl Branches {
     /// x === v)` can tell its element from its value.
     pub fn conds(&self, store: &Store<'_>, idx: &EnumIndex) -> Conds {
         let step = crate::trace::stage("branches: read the rows");
-        let rows = TsRows::new(store);
+        let rows = TsRows::of(store);
         let mut bound: IndexMap<String, IndexSet<String>> = IndexMap::new();
         for f in store.table("functions").iter() {
             let Some(parent) = cell(f, "parent") else { continue };

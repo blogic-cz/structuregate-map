@@ -81,7 +81,7 @@ pub fn case_values(
     mem: &MemberEnums,
     idx: &EnumIndex,
 ) -> IndexMap<String, (Option<String>, Vec<Value>)> {
-    let rows = TsRows::new(store);
+    let rows = TsRows::of(store);
     let none = IndexSet::new();
     let expressions = store.table("expressions");
     // BY ROW, NOT BY TREE: an AST is decoded when it is read (`store::Cell`), so the map holds rows and only the
