@@ -184,22 +184,25 @@ pub(crate) fn owner_sql(conn: &Connection, table: &str, alias: &str) -> String {
 }
 
 /// The ITEMS of a list column as a table: `owner`, `ord` and each of `members` (`value` for a scalar item, a member's
-/// name for an object item), NULL where no node carries it - a plain table, no JSON function.
+/// name for an object item - a node below it by role), NULL where no node carries it - a plain table, no JSON function.
 pub(crate) fn items_sql(conn: &Connection, table: &str, column: &str, members: &[&str]) -> String {
     let Some(child) = nodes_of(conn, table, column) else {
         let nulls: Vec<String> = members.iter().map(|m| format!(", NULL AS \"{m}\"")).collect();
         return format!("(SELECT NULL AS owner, NULL AS ord{} WHERE 0)", nulls.concat());
     };
-    let held = super::schema::existing_columns(conn, &child).unwrap_or_default();
+    let escaped = super::schema::escape(&child);
+    // A scalar item is its own `value`; an object item's member is a node BELOW it, found by role (`cells`).
     let picked: Vec<String> = members
         .iter()
-        .map(|m| if held.iter().any(|c| c == m) { format!(", j.\"{m}\" AS \"{m}\"") } else { format!(", NULL AS \"{m}\"") })
+        .map(|m| {
+            if *m == "value" {
+                ", j.value AS \"value\"".to_string()
+            } else {
+                format!(", (SELECT x.value FROM \"{escaped}\" x WHERE x.owner = j.owner AND x.parent = j.n AND x.role = '{m}') AS \"{m}\"")
+            }
+        })
         .collect();
-    format!(
-        "(SELECT j.owner AS owner, j.ord AS ord{} FROM \"{}\" j WHERE j.parent = j.owner || '/0')",
-        picked.concat(),
-        super::schema::escape(&child)
-    )
+    format!("(SELECT j.owner AS owner, j.ord AS ord{} FROM \"{escaped}\" j WHERE j.parent = 0)", picked.concat())
 }
 
 /// One column read back row by row: a scalar as itself, a structure from its node table.
@@ -301,7 +304,7 @@ mod tests {
         assert_eq!(detail, "{Blue=2, Red=1} at a/Ids.cs:3, web/ids.ts:1; {Red=1} at b/Ids.cs:4");
         // THE PLACES ARE NODES, never a JSON text: one item per place, in order.
         let at: Vec<String> = conn
-            .prepare("SELECT j.value FROM duplicate_types d JOIN duplicate_types__at j ON j.owner = d.id AND j.parent = d.id || '/0' ORDER BY j.ord")
+            .prepare("SELECT j.value FROM duplicate_types d JOIN duplicate_types__at j ON j.owner = d.id AND j.parent = 0 ORDER BY j.ord")
             .unwrap()
             .query_map([], |r| r.get(0))
             .unwrap()

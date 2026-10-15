@@ -200,6 +200,7 @@ fn drop_files(db: &Connection, rels: &BTreeSet<String>, lang: &str) -> Result<()
             }
             let columns = schema::existing_columns(db, &table)?;
             if columns.iter().any(|c| c == "file") {
+                cells::delete_children(db, &table, &format!("t.file IN ({id_marks})"), id_params.as_slice())?;
                 db.execute(
                     &format!(
                         "DELETE FROM \"{}\" WHERE file IN ({id_marks})",
@@ -210,6 +211,8 @@ fn drop_files(db: &Connection, rels: &BTreeSet<String>, lang: &str) -> Result<()
             }
         }
     }
+    let t_owned = if lang.is_empty() { String::new() } else { " AND t.lang = ?".to_string() };
+    cells::delete_children(db, "files", &format!("t.path IN ({marks}){t_owned}"), params.as_slice())?;
     let _ = db.execute(&format!("DELETE FROM files WHERE path IN ({marks}){owned}"), params.as_slice());
     let _ = db.execute(
         &format!("DELETE FROM file_text WHERE path IN ({marks}) AND path NOT IN (SELECT path FROM files)"),
@@ -233,7 +236,7 @@ pub fn insert_rows(db: &Connection, table: &str, rows: &[Value]) -> Result<()> {
     insert(db, table, rows, &[])
 }
 
-pub(super) fn insert(db: &Connection, table: &str, rows: &[Value], stamp: &[(String, Value)]) -> Result<()> {
+fn insert(db: &Connection, table: &str, rows: &[Value], stamp: &[(String, Value)]) -> Result<()> {
     // A LIST OR AN OBJECT IS NOT A COLUMN of this table: its nodes go to `<table>__<column>` (`cells`).
     let (structured, scalar) = cells::structured_columns(rows);
     let mut columns: Vec<String> = schema::columns_of(rows)
@@ -270,11 +273,8 @@ pub(super) fn insert(db: &Connection, table: &str, rows: &[Value], stamp: &[(Str
         quoted,
         marks
     );
-    for column in &structured {
-        cells::register(db, table, column)?;
-    }
-
-    let mut nodes: Vec<Vec<Value>> = vec![Vec::new(); structured.len()];
+    // ONE WRITER PER STRUCTURED COLUMN, its statement prepared once: every node is bound as the walk reaches it.
+    let mut writers: Vec<cells::Writer<'_>> = structured.iter().map(|c| cells::Writer::new(db, table, c)).collect::<Result<_>>()?;
     let mut stmt = db.prepare(&sql)?;
     for row in rows {
         let object = row.as_object();
@@ -296,18 +296,11 @@ pub(super) fn insert(db: &Connection, table: &str, rows: &[Value], stamp: &[(Str
             Some(Value::Number(n)) => n.to_string(),
             _ => format!("#{}", db.last_insert_rowid()),
         };
-        let inherit = cells::inherited(object);
         for (at, column) in structured.iter().enumerate() {
             let Some(value) = object.get(column).filter(|v| cells::is_structured(v)) else { continue };
             let value = cells::decoded(value);
-            cells::flatten(&owner, &value, &inherit, &mut nodes[at]);
-            if nodes[at].len() >= cells::NODE_CHUNK {
-                cells::write_nodes(db, table, column, &mut nodes[at], stamp)?;
-            }
+            writers[at].tree(&owner, &value)?;
         }
-    }
-    for (at, column) in structured.iter().enumerate() {
-        cells::write_nodes(db, table, column, &mut nodes[at], stamp)?;
     }
     Ok(())
 }
