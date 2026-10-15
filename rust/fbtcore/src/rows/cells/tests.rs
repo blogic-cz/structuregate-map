@@ -2,29 +2,9 @@ use super::*;
 use serde_json::json;
 
 fn round_trip(value: &Value) -> Value {
+    // Through the real writer and the real reader: the table the store makes, nothing hand-built.
     let db = Connection::open_in_memory().unwrap();
-    let mut rows = Vec::new();
-    flatten("x:1", value, &Map::new(), &mut rows);
-    let names: Vec<String> = {
-        let mut seen: Vec<String> = Vec::new();
-        for row in &rows {
-            for key in row.as_object().unwrap().keys() {
-                if !seen.contains(key) {
-                    seen.push(key.clone());
-                }
-            }
-        }
-        seen
-    };
-    schema::create(&db, "t__c", &names).unwrap();
-    for row in &rows {
-        let object = row.as_object().unwrap();
-        let marks = vec!["?"; names.len()].join(",");
-        let quoted: Vec<String> = names.iter().map(|n| format!("\"{n}\"")).collect();
-        let values: Vec<_> = names.iter().map(|n| schema::cell(object.get(n))).collect();
-        db.execute(&format!("INSERT INTO t__c ({}) VALUES ({marks})", quoted.join(",")), rusqlite::params_from_iter(values)).unwrap();
-    }
-    register(&db, "t", "c").unwrap();
+    Writer::new(&db, "t", "c").unwrap().tree("x:1", value).unwrap();
     load_all(&db, "t", "c").unwrap().remove("x:1").unwrap()
 }
 
@@ -70,28 +50,20 @@ fn a_tree_deeper_than_any_cap_is_kept_whole() {
 #[test]
 fn every_node_is_a_row_joined_by_owner_and_parent() {
     let mut rows = Vec::new();
-    let inherit: Map<String, Value> = [("owner_file".to_string(), json!("f:3"))].into_iter().collect();
-    flatten("x:9", &json!({"k": "Call", "args": [{"k": "Read", "name": "a"}]}), &inherit, &mut rows);
-    let shape: Vec<(String, String, String, String)> = rows
+    flatten("x:9", &json!({"k": "Call", "args": [{"k": "Read", "name": "a"}]}), &mut rows);
+    let shape: Vec<String> = rows
         .iter()
-        .map(|r| {
-            let s = |k: &str| r[k].as_str().map(String::from).unwrap_or_else(|| r[k].to_string());
-            (s("id"), s("parent"), s("role"), format!("{}={}", s("node"), s("value")))
-        })
+        .map(|r| format!("{}/{} p={} {} {}={}", r["owner"].as_str().unwrap(), r["n"], r["parent"], r["role"], r["node"].as_str().unwrap(), r["value"]))
         .collect();
-    let want = [
-        ("x:9/0", "null", "null", "object=null"),
-        ("x:9/1", "x:9/0", "k", "string=Call"),
-        ("x:9/2", "x:9/0", "args", "list=null"),
-        ("x:9/3", "x:9/2", "args", "object=null"),
-        ("x:9/4", "x:9/3", "k", "string=Read"),
-        ("x:9/5", "x:9/3", "name", "string=a"),
-    ];
-    let want: Vec<(String, String, String, String)> =
-        want.iter().map(|(a, b, c, d)| (a.to_string(), b.to_string(), c.to_string(), d.to_string())).collect();
-    assert_eq!(shape, want);
+    assert_eq!(shape, [
+        "x:9/0 p=null null object=null",
+        "x:9/1 p=0 \"k\" string=\"Call\"",
+        "x:9/2 p=0 \"args\" list=null",
+        "x:9/3 p=2 \"args\" object=null",
+        "x:9/4 p=3 \"k\" string=\"Read\"",
+        "x:9/5 p=3 \"name\" string=\"a\"",
+    ]);
     assert_eq!(rows[3]["ord"], 0);
-    assert!(rows.iter().all(|r| r["owner"] == "x:9" && r["owner_file"] == "f:3"));
 }
 
 #[test]
@@ -99,11 +71,54 @@ fn a_member_name_is_a_role_never_a_column_so_names_that_are_data_cannot_collide(
     // Ids keying a map, an object literal's own keys, and two names SQLite would call one column.
     let senses = json!({"br:12": "then", "!arm:x#1": "else", "Home": 1, "home": true, "id": "a member called id"});
     let mut rows = Vec::new();
-    flatten("k:1", &senses, &Map::new(), &mut rows);
+    flatten("k:1", &senses, &mut rows);
     let columns: std::collections::BTreeSet<&String> = rows.iter().flat_map(|r| r.as_object().unwrap().keys()).collect();
-    let fixed: std::collections::BTreeSet<String> = ["id", "owner", "parent", "role", "ord", "node", "value"].iter().map(|c| c.to_string()).collect();
+    let fixed: std::collections::BTreeSet<String> = COLUMNS.iter().map(|c| c.to_string()).collect();
     assert_eq!(columns.into_iter().cloned().collect::<std::collections::BTreeSet<_>>(), fixed);
     assert!(rows.iter().any(|r| r["role"] == "br:12" && r["value"] == "then"));
     assert!(rows.iter().any(|r| r["role"] == "home" && r["node"] == "bool" && r["value"] == 1));
     assert_eq!(round_trip(&senses), senses);
+}
+
+#[test]
+fn the_store_writes_every_structure_as_nodes_and_reads_it_back_whole() {
+    let db = Connection::open_in_memory().unwrap();
+    let ast = json!({"k": "Cond", "cond": {"k": "Read", "name": "a", "param": true}, "then": {"k": "Literal", "v": 1}, "else": null});
+    let rows = vec![
+        json!({"id": "x:1", "file": "f:1", "ast": ast.clone(), "reads": ["a", "b"], "line": 3}),
+        json!({"id": "x:2", "file": "f:1", "ast": null, "reads": [], "line": 4}),
+        json!({"id": "x:3", "file": "f:2", "reads": "not a list here", "line": 5}),
+    ];
+    super::super::store::insert_rows(&db, "expressions", &rows).unwrap();
+    let parent = schema::existing_columns(&db, "expressions").unwrap();
+    assert!(!parent.contains(&"ast".to_string()), "a column only ever structured stays out of its table: {parent:?}");
+    assert!(parent.contains(&"reads".to_string()), "a column scalar in some row keeps it: {parent:?}");
+    let asts = load_all(&db, "expressions", "ast").unwrap();
+    assert_eq!(asts.get("x:1"), Some(&ast));
+    assert_eq!(asts.get("x:2"), None, "a null cell is no node at all");
+    let reads = load_all(&db, "expressions", "reads").unwrap();
+    assert_eq!(reads.get("x:1"), Some(&json!(["a", "b"])));
+    assert_eq!(reads.get("x:2"), Some(&json!([])));
+    let scalar: String = db.query_row("SELECT reads FROM expressions WHERE id = 'x:3'", [], |r| r.get(0)).unwrap();
+    assert_eq!(scalar, "not a list here");
+    // A DELETE OF THE ROWS TAKES THEIR NODES, through the rows: the nodes carry no scope of their own.
+    delete_children(&db, "expressions", "t.file = ?1", &[&"f:1"]).unwrap();
+    let left: i64 = db.query_row("SELECT count(*) FROM expressions__ast", [], |r| r.get(0)).unwrap();
+    assert_eq!(left, 0, "every node of a row of f:1 is gone");
+    let kept: i64 = db.query_row("SELECT count(*) FROM expressions__reads WHERE owner = 'x:3'", [], |r| r.get(0)).unwrap();
+    assert_eq!(kept, 0, "x:3 held a scalar - it never had nodes");
+}
+
+#[test]
+fn dropping_a_half_takes_its_nodes_and_leaves_the_other_halves() {
+    let db = Connection::open_in_memory().unwrap();
+    let rows = vec![
+        json!({"id": "x:1", "half": "typescript", "ast": {"k": "Read", "name": "a"}}),
+        json!({"id": "x:2", "ast": {"k": "Read", "name": "kept"}}),
+    ];
+    super::super::store::insert_rows(&db, "expressions", &rows).unwrap();
+    super::super::half::drop_half(&db, "typescript").unwrap();
+    let all = load_all(&db, "expressions", "ast").unwrap();
+    assert!(!all.contains_key("x:1"), "the half's nodes went with its rows");
+    assert_eq!(all.get("x:2"), Some(&json!({"k": "Read", "name": "kept"})));
 }

@@ -36,7 +36,7 @@ use std::path::Path;
 const BATCH: usize = 4000;
 
 /// A node row's own bookkeeping: where it hangs, never what it says.
-const NODE_COLUMNS: &[&str] = &["id", "owner", "parent", "role", "ord", "node", "file", "owner_file", "half", "lang"];
+const NODE_COLUMNS: &[&str] = &["owner", "n", "parent", "role", "ord", "node"];
 
 /// What a build did.
 pub struct Indexed {
@@ -156,7 +156,7 @@ pub fn build(db_path: &Path, with_json: bool) -> Result<Indexed> {
                 continue;
             }
             readers.push((
-                tx.prepare(&format!("SELECT {} FROM \"{}\" WHERE owner = ?1 ORDER BY rowid", texts.join(", "), schema::escape(child)))?,
+                tx.prepare(&format!("SELECT {} FROM \"{}\" WHERE owner = ?1 ORDER BY n", texts.join(", "), schema::escape(child)))?,
                 texts.len(),
             ));
         }

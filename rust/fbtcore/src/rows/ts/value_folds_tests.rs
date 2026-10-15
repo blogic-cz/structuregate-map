@@ -250,10 +250,10 @@ fn an_empty_list_and_no_list_stay_apart_in_the_node_table() {
                 json!({"gate": "g:2", "values_json": [], "listed_json": null})];
     crate::rows::store::insert_rows(&db, "gate_values", &rows).unwrap();
     let count = |sql: &str| -> i64 { db.query_row(sql, [], |r| r.get(0)).unwrap() };
-    assert_eq!(count("SELECT count(*) FROM gate_values__listed_json WHERE owner = '#1' AND parent IS NULL"), 1);
+    assert_eq!(count("SELECT count(*) FROM gate_values__listed_json WHERE owner = '#1' AND n = 0"), 1);
     assert_eq!(count("SELECT count(*) FROM gate_values__listed_json WHERE owner = '#2'"), 0);
-    assert_eq!(count("SELECT count(*) FROM gate_values__values_json WHERE owner = '#2' AND parent IS NULL"), 1);
-    assert_eq!(count("SELECT count(*) FROM gate_values__values_json WHERE parent = '#1/0'"), 1);
+    assert_eq!(count("SELECT count(*) FROM gate_values__values_json WHERE owner = '#2' AND n = 0"), 1);
+    assert_eq!(count("SELECT count(*) FROM gate_values__values_json WHERE owner = '#1' AND parent = 0"), 1);
 }
 
 #[test]

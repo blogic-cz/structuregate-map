@@ -51,6 +51,8 @@ pub fn tables_with_half(db: &Connection) -> Result<Vec<String>> {
 /// longer says that, which is worse than no rows because they look real.
 pub fn drop_half(db: &Connection, half: &str) -> Result<()> {
     for table in tables_with_half(db)? {
+        // The nodes first, through the rows that own them: a node carries no `half` of its own (`cells`).
+        super::cells::delete_children(db, &table, &format!("t.\"{HALF_COLUMN}\" = ?1"), &[&half])?;
         db.execute(
             &format!(
                 "DELETE FROM \"{}\" WHERE \"{}\" = ?1",

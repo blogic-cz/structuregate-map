@@ -55,8 +55,9 @@ The ban is a literal `findstr`, so a needle can match its own rationale comment 
 
 **Everything parsed is NODES.** A row cell holding a list or an object is never JSON text: `store::insert` writes
 it to the child table `<table>__<column>` (`expressions__ast`, `assignments__reads`), one row per node -
-`id` (`<owner>/<n>`, the root `<owner>/0`), `owner`, `parent`, `role`, `ord`, `node`, `value` - FIXED columns: an
-object's every member is a row, its name a `role`, never a column (`rust/fbtcore/src/rows/cells/mod.rs`). A pass writing its own table uses `store::insert_rows`, never
+a node is `(owner, n)` - `n` its preorder number, the root 0 - with `parent` (the parent's `n`), `role`, `ord`, `node`,
+`value`: FIXED columns, an object's every member a row, its name a `role` (`rust/fbtcore/src/rows/cells/mod.rs`); a
+delete reaches nodes through their row (`cells::delete_children`). A pass writing its own table uses `store::insert_rows`, never
 `serde_json::to_string` into a cell; a reader joins the child table (`cells::load`/`load_all` in rust), never
 `json_each`/`json_extract`. **No depth cap**: a parse goes to the end - no `depth > N`, no `*DEPTH*` constant,
 no `kids[:8]`; a walk that could loop takes a visited set. `tests/self/SelfMap.Tests.ps1` asks this repo's own

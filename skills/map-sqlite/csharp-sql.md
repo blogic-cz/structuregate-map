@@ -165,11 +165,11 @@ JOIN files f ON f.id = m.file WHERE r.symbol LIKE '%.Reference';
 -- a backend enum member and every C# switch that handles it, by the member's NUMBER
 SELECT mn.value member, f.path, s.line, s.guard
 FROM enums e JOIN files ef ON ef.id = e.file
-JOIN enums__members m ON m.parent = e.id || '/0'
-JOIN enums__members mn ON mn.parent = m.id AND mn.role = 'name'
-JOIN enums__members mv ON mv.parent = m.id AND mv.role = 'value'
+JOIN enums__members m ON m.owner = e.id AND m.parent = 0
+JOIN enums__members mn ON mn.owner = m.owner AND mn.parent = m.n AND mn.role = 'name'
+JOIN enums__members mv ON mv.owner = m.owner AND mv.parent = m.n AND mv.role = 'value'
 JOIN switch_cases s ON s.discriminant_type = e.symbol JOIN files f ON f.id = s.file
-JOIN switch_cases__label_values v ON v.parent = s.id || '/0'
+JOIN switch_cases__label_values v ON v.owner = s.id AND v.parent = 0
 WHERE ef.lang = 'csharp' AND e.name = 'Kinds' AND v.value = CAST(mv.value AS TEXT);
 
 -- which components render a component, and where
