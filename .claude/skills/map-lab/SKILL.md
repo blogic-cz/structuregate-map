@@ -38,6 +38,14 @@ third of the rows runs the expensive phase in seconds. So:
    included, never by rowid or id - ids shift), and `pwsh -NoProfile -File scripts/Compare-Release.ps1 -Tree <tree>
    -OldDb <before> -NewDb <after> -Old <before dll> -New <after dll> -Out <dir>` - LOST, changed and gained all 0.
 
+## Build fast
+
+- `cargo test --profile lab` / `cargo build --profile lab`, and `dotnet build ... -p:FbtCoreProfile=lab` for the
+  exe: release's optimisation without LTO - a rebuild in seconds instead of ~4 minutes. Ship with the default.
+- A worktree starts with an EMPTY `rust/fbtcore/target`, and a cold build is ten minutes: link the main checkout's
+  instead (`rm -rf rust/fbtcore/target && ln -s <main checkout>/rust/fbtcore/target rust/fbtcore/target`) - cargo
+  locks it, so two builds only queue.
+
 ## The machine's limits
 
 - **One full map of a large tree at a time.** One peaked near 7 GB; two at once ran a 14 GB machine out of memory
