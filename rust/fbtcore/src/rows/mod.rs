@@ -19,6 +19,8 @@ pub mod fts;
 pub mod carry;
 #[path = "partial/deps.rs"]
 pub mod deps;
+#[path = "partial/digest.rs"]
+pub mod digest;
 pub mod dups;
 pub mod dispatch;
 pub mod http;
@@ -28,6 +30,8 @@ pub mod pyjson;
 mod rawcells;
 #[path = "partial/reads.rs"]
 pub mod reads;
+#[path = "partial/remember.rs"]
+mod remember;
 pub mod schema;
 pub mod seeds;
 pub mod sqlrun;
@@ -284,6 +288,7 @@ pub fn apply(db: &Path, root: &str, batch: &Batch) -> Result<Receipt> {
 
     let request = store::WriteRequest {
         tables: &batch.tables,
+        stream: None,
         texts: &store::Texts::Held(&texts),
         root,
         shas: &batch.shas,

@@ -393,8 +393,14 @@ fn search(db: &Connection, texts: &Texts<'_>) -> Result<i64> {
     Ok(db.query_row("SELECT count(*) FROM file_text", [], |r| r.get(0))?)
 }
 
+/// Rows handed to the store a batch at a time: called with a sink, it puts every batch of every table into it.
+pub type Stream<'a> = dyn Fn(&mut dyn FnMut(&str, &[Value]) -> Result<()>) -> Result<()> + 'a;
+
 pub struct WriteRequest<'a> {
     pub tables: &'a Map<String, Value>,
+    /// MORE ROWS, STREAMED - a large payload that is never held whole (`tsapply::apply_streamed`). Written after
+    /// `tables`, batch by batch, stamped the same way.
+    pub stream: Option<&'a Stream<'a>>,
     pub texts: &'a Texts<'a>,
     pub root: &'a str,
     pub shas: &'a Map<String, Value>,
@@ -492,6 +498,18 @@ pub fn write(path: &Path, req: &WriteRequest<'_>) -> Result<Applied> {
             stamp.push((half::HALF_COLUMN.to_string(), Value::String(h.to_string())));
         }
         insert(&db, table, rows, &stamp)?;
+    }
+    if let Some(stream) = req.stream {
+        stream(&mut |table, rows| {
+            let mut stamp: Vec<(String, Value)> = Vec::new();
+            if table == "files" {
+                stamp.push(("lang".to_string(), Value::String(req.lang.to_string())));
+            }
+            if let Some(h) = req.half {
+                stamp.push((half::HALF_COLUMN.to_string(), Value::String(h.to_string())));
+            }
+            insert(&db, table, rows, &stamp)
+        })?;
     }
     lap("insert", &mut steps);
 

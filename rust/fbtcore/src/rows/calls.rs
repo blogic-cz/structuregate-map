@@ -80,18 +80,18 @@ fn ts_apply_on(db: &Path, root: &str, payload: &str) -> Result<String, String> {
     let started = std::time::Instant::now();
     // SAFETY: node has exited and nothing writes the payload while it is mapped; the mapping is dropped here.
     let mapped = unsafe { memmap2::Mmap::map(&file) }.map_err(|e| format!("the payload {payload} could not be mapped - {e}"))?;
-    // NO DEPTH LIMIT: an expression tree is as deep as its source wrote it, and serde's default of 128 failed
-    // the payload of a tree deeper than that.
-    let parsed: tsapply::TsPayload = {
+    // THE HEAD ONLY: `tables` is skipped here (cheaply - nothing is built for it) and streamed by the apply. No
+    // depth limit: an expression tree is as deep as its source wrote it.
+    let head: tsapply::TsPayload = {
         use serde::Deserialize;
         let mut reader = serde_json::Deserializer::from_slice(&mapped);
         reader.disable_recursion_limit();
         let parsed = tsapply::TsPayload::deserialize(&mut reader).and_then(|p| reader.end().map(|_| p));
         parsed.map_err(|e| format!("the rows could not be read - {e}"))?
     };
-    drop(mapped);
     let parse_ms = started.elapsed().as_millis() as u64;
-    let mut receipt = tsapply::apply(db, root, parsed).map_err(|e| format!("{e:#}"))?;
+    let mut receipt = tsapply::apply_streamed(db, root, head, &mapped).map_err(|e| format!("{e:#}"))?;
+    drop(mapped);
     receipt.phases.insert("parse the payload".to_string(), parse_ms);
     serde_json::to_string(&receipt).map_err(|e| format!("the receipt could not be serialised: {e}"))
 }
