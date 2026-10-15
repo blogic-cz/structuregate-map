@@ -154,6 +154,12 @@ a "database is rebuilt, never appended" case that compared row counts, when the 
 `CREATE TABLE` throw and leaves the counts identical. Restoring a file from a backup keeps its OLD
 timestamp, and MSBuild then skips the rebuild — touch it, or the "restored" run tests the mutant.
 
+**A change checked on a LARGE REAL tree is iterated on a SAMPLE of it, never a full map per try**
+(`.claude/skills/map-lab/`: cut a slice with `make-sample.py`, run only the phase under work over its stored map,
+measure memory per phase with `memprof.sh`/`memreport.py` and full vs partial time with `bench.sh`, then confirm
+ONCE on the whole tree with a row compare and `Compare-Release.ps1`). One full map of a large tree at a time, and
+every run's `TMPDIR` on the home disk, never `/tmp`.
+
 Suites are dot-sourced into ONE scope in name order, so a helper named like the harness's own silently
 replaces it for every suite that sorts later — and a suite must not lean on another suite's helper, or
 `-Only` breaks it.

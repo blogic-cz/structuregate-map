@@ -20,7 +20,7 @@ rust/*/target/
 #   buildmap.*   the graph and the deep map, rebuilt by any --map run
 #   .fbt/        the merkle snapshot that lets an unchanged tree skip the walk
 #   .claude/*    junctions to skills/, made by the connect step - but NOT .claude/rules/ and NOT
-#                .claude/skills/dotnet-trace/ (a skill for working on THIS repo, never shared); .claude/rules/ is the
+#                .claude/skills/dotnet-trace/ and .claude/skills/map-lab/ (skills for working on THIS repo, never shared); .claude/rules/ is the
 #                path-scoped session notes CLAUDE.md hands its deep detail to; those are source
 # The two RATCHETS are committed on purpose - structure-baseline.json and map-baseline.json record
 # debt that may only shrink, so they have to travel with the history that shrinks it.
@@ -34,6 +34,7 @@ buildmap.sqlite.last-run.jsonl
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/dotnet-trace/
+!.claude/skills/map-lab/
 !.claude/agents/
 
 # A machine's own consumer trees - see src/StructureGate.csproj.
