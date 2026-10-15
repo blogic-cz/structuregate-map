@@ -80,10 +80,10 @@ Test-Case 'csrows: an expression''s shape is its WHOLE skeleton, every level and
     $db = New-CsDb @{ 'Deep.cs' = "namespace Demo; public class Deep { " +
         "public int Sum(int a) => $chain; public int[] Wide(int a) => new[] { $args12 }; }" }
     Assert-Equal (Get-CsScalar $db ("SELECT max(n) FROM (SELECT count(*) n FROM expressions__shape " +
-        "WHERE k = 'AddExpression' GROUP BY owner)")) '519' 'AddExpressions in the shape of the 520-term chain'
+        "WHERE role = 'k' AND value = 'AddExpression' GROUP BY owner)")) '519' 'AddExpressions in the shape of the 520-term chain'
     Assert-Equal (Get-CsScalar $db ("SELECT max(n) FROM (SELECT count(*) n FROM expressions__shape c " +
-        "JOIN expressions__shape l ON l.id = c.parent AND l.role = 'c' JOIN expressions__shape r ON r.id = l.parent " +
-        "WHERE r.k = 'ArrayInitializerExpression' GROUP BY r.id)")) '12' 'children of the twelve-item initializer'
+        "JOIN expressions__shape l ON l.owner = c.owner AND l.n = c.parent AND l.role = 'c' AND l.node = 'list' JOIN expressions__shape r ON r.owner = l.owner AND r.n = l.parent " +
+        "JOIN expressions__shape rk ON rk.owner = r.owner AND rk.parent = r.n AND rk.role = 'k' WHERE rk.value = 'ArrayInitializerExpression' GROUP BY r.owner, r.n)")) '12' 'children of the twelve-item initializer'
 }
 
 Test-Case 'csrows: the tables a C# tree produces' {
@@ -92,7 +92,11 @@ Test-Case 'csrows: the tables a C# tree produces' {
                         @('classes', 'IReader'), @('functions', 'Load'), @('decorators', 'Route'),
                         @('parameters', 'size'), @('branches', 'if'), @('raises', 'ArgumentException'),
                         @('returns', 'built'), @('string_literals', 'api/v1'), @('assignments', 'built'))) {
-        $r = Invoke-CsQ $db --sql "SELECT * FROM $($pair[0])"
+        # a class's `bases` is a list - node rows of `classes__bases`, one item per base - so `IReader` is read there, by its class
+        $sql = if ($pair[0] -eq 'classes') {
+            "SELECT c.name, b.value AS base FROM classes c JOIN classes__bases b ON b.owner = c.id AND b.parent = 0 WHERE c.name = 'Reader'"
+        } else { "SELECT * FROM $($pair[0])" }
+        $r = Invoke-CsQ $db --sql $sql
         Assert-Line $r $pair[1]
     }
 }

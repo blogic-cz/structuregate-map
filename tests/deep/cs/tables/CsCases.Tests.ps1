@@ -57,15 +57,17 @@ function Get-CsCasesValue([string]$Db, [string]$Sql) {
 
 # ONE MEMBER, ONE QUERY: asked over every member at once, the output holds the other members' numbers too.
 function Get-CsCasesMember([string]$Db, [string]$Name) {
-    return Get-CsCasesValue $Db ("SELECT coalesce(m.value, 'null') FROM enums e JOIN enums__members m ON m.owner = e.id AND m.parent = e.id || '/0' " +
-        "WHERE e.name = 'Kinds' AND m.name = '$Name'")
+    # a member is an object node: its `name` and its `value` are node rows below it, each with its key in `role`
+    return Get-CsCasesValue $Db ("SELECT coalesce(v.value, 'null') FROM enums e JOIN enums__members m ON m.owner = e.id AND m.parent = 0 " +
+        "JOIN enums__members nm ON nm.owner = m.owner AND nm.parent = m.n AND nm.role = 'name' LEFT JOIN enums__members v ON v.owner = m.owner AND v.parent = m.n AND v.role = 'value' " +
+        "WHERE e.name = 'Kinds' AND nm.value = '$Name'")
 }
 
 Test-Case 'cscases: a bound enum carries every member with the number the compiler folded' {
     $db = New-CsCasesDb @{ 'Ids.cs' = $script:CsCasesSource; 'Demo.csproj' = $script:CsCasesProject }
     Assert-Equal (Get-CsCasesValue $db "SELECT count(*) FROM enums") '1' 'enums rows'
     Assert-Equal (Get-CsCasesValue $db "SELECT symbol || '|' || exported || '|' || underlying || '|' || (owner_file = file) FROM enums") 'Demo.Kinds|1|int|1' 'the enum row'
-    Assert-Equal (Get-CsCasesValue $db "SELECT (SELECT count(*) FROM enums__members j WHERE j.owner = enums.id AND j.parent = enums.id || '/0') FROM enums") '6' 'members'
+    Assert-Equal (Get-CsCasesValue $db "SELECT (SELECT count(*) FROM enums__members j WHERE j.owner = enums.id AND j.parent = 0) FROM enums") '6' 'members'
     Assert-Equal (Get-CsCasesMember $db 'Extra') '40' 'Extra'
     Assert-Equal (Get-CsCasesMember $db 'Next') '41' 'Next, inherited from Extra'
     Assert-Equal (Get-CsCasesMember $db 'Neg') '-2' 'Neg'
@@ -89,10 +91,10 @@ Test-Case 'cscases: each case section is a switch_cases row - labels, the member
     $db = New-CsCasesDb @{ 'Ids.cs' = $script:CsCasesSource; 'Demo.csproj' = $script:CsCasesProject }
     Assert-Equal (Get-CsCasesValue $db "SELECT count(*) FROM switch_cases WHERE kind = 'case'") '3' 'case sections'
     # TWO LABELS, ONE SECTION: `case Extra: case Next:` share their statements, so they share their row.
-    $both = "SELECT (SELECT count(*) FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0') || '|' || (SELECT j.value FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0' AND j.ord = 1) || '|' || (SELECT j.value FROM switch_cases__label_symbols j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0' AND j.ord = 0) || '|' || (SELECT j.value FROM switch_cases__label_values j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0' AND j.ord = 0) || ',' || (SELECT j.value FROM switch_cases__label_values j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0' AND j.ord = 1) FROM switch_cases WHERE line = 9"
+    $both = "SELECT (SELECT count(*) FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = 0) || '|' || (SELECT j.value FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = 0 AND j.ord = 1) || '|' || (SELECT j.value FROM switch_cases__label_symbols j WHERE j.owner = switch_cases.id AND j.parent = 0 AND j.ord = 0) || '|' || (SELECT j.value FROM switch_cases__label_values j WHERE j.owner = switch_cases.id AND j.parent = 0 AND j.ord = 0) || ',' || (SELECT j.value FROM switch_cases__label_values j WHERE j.owner = switch_cases.id AND j.parent = 0 AND j.ord = 1) FROM switch_cases WHERE line = 9"
     Assert-Equal (Get-CsCasesValue $db $both) '2|Kinds.Next|Demo.Kinds.Extra|40,41' 'the two-label section'
     Assert-Equal (Get-CsCasesValue $db "SELECT guard || '|' || is_default FROM switch_cases WHERE line = 12") 'flag|0' 'the guarded section'
-    Assert-Equal (Get-CsCasesValue $db "SELECT (SELECT count(*) FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0') || '|' || is_default FROM switch_cases WHERE line = 14") '0|1' 'default'
+    Assert-Equal (Get-CsCasesValue $db "SELECT (SELECT count(*) FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = 0) || '|' || is_default FROM switch_cases WHERE line = 14") '0|1' 'default'
     # WHICH SWITCH: every section points at the `branches` row of its own switch.
     $joined = "SELECT count(*) FROM switch_cases s JOIN branches b ON b.id = s.branch WHERE b.kind = 'switch' AND b.line = 7"
     Assert-Equal (Get-CsCasesValue $db $joined) '3' 'sections joined to their switch'
@@ -102,9 +104,9 @@ Test-Case 'cscases: each case section is a switch_cases row - labels, the member
 Test-Case 'cscases: each switch-expression arm is a row, with what it evaluates to' {
     $db = New-CsCasesDb @{ 'Ids.cs' = $script:CsCasesSource; 'Demo.csproj' = $script:CsCasesProject }
     Assert-Equal (Get-CsCasesValue $db "SELECT count(*) FROM switch_cases WHERE kind = 'arm'") '3' 'arms'
-    Assert-Equal (Get-CsCasesValue $db "SELECT (SELECT j.value FROM switch_cases__label_values j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0' AND j.ord = 0) || '|' || result FROM switch_cases WHERE line = 20") '0|"base"' 'the first arm'
+    Assert-Equal (Get-CsCasesValue $db "SELECT (SELECT j.value FROM switch_cases__label_values j WHERE j.owner = switch_cases.id AND j.parent = 0 AND j.ord = 0) || '|' || result FROM switch_cases WHERE line = 20") '0|"base"' 'the first arm'
     Assert-Equal (Get-CsCasesValue $db "SELECT guard FROM switch_cases WHERE line = 21") 'true' 'the guarded arm'
-    Assert-Equal (Get-CsCasesValue $db "SELECT is_default || '|' || (SELECT count(*) FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0') FROM switch_cases WHERE line = 22") '1|0' 'the discard arm'
+    Assert-Equal (Get-CsCasesValue $db "SELECT is_default || '|' || (SELECT count(*) FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = 0) FROM switch_cases WHERE line = 22") '1|0' 'the discard arm'
 }
 
 Test-Case 'cscases: a re-read file REPLACES its enum and case rows' {
@@ -164,8 +166,8 @@ namespace Demo.Models
     Assert-Equal (Get-CsCasesValue $db "SELECT count(*) FROM decorators WHERE target = 'Gamma'") '0' 'Gamma has none'
     # an enum argument is a constant too: it once read [""] beside the int arguments that folded
     Assert-Equal (Get-CsCasesValue $db "SELECT $(Get-NodeRootListSql 'decorators__arg_values' 'decorators.id') FROM decorators WHERE name = 'AttributeUsage'") '["System.AttributeTargets.Field"]' 'enum argument'
-    $entry = "SELECT coalesce($(Get-NodeListSql 'enums__members' 'm' 'attributes'), 'null') FROM enums e JOIN enums__members m ON m.owner = e.id AND m.parent = e.id || '/0' " +
-        "WHERE e.name = 'HueKind' AND m.name = '{0}'"
+    $entry = "SELECT coalesce($(Get-NodeListSql 'enums__members' 'm' 'attributes'), 'null') FROM enums e JOIN enums__members m ON m.owner = e.id AND m.parent = 0 " +
+        "JOIN enums__members nm ON nm.owner = m.owner AND nm.parent = m.n AND nm.role = 'name' WHERE e.name = 'HueKind' AND nm.value = '{0}'"
     Assert-Equal (Get-CsCasesValue $db ($entry -f 'Alpha')) '["ExternalId"]' 'Alpha entry'
     Assert-Equal (Get-CsCasesValue $db ($entry -f 'Gamma')) '[]' 'Gamma entry'
 }
