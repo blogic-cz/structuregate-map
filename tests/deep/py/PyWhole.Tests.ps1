@@ -33,11 +33,11 @@ Test-Case 'pywhole: an expression''s shape is its WHOLE skeleton, every level an
     $wide = (1..12 | ForEach-Object { "$_" }) -join ', '
     $files = @{ 'deep.py' = "def go(a):" + $nl + "    total = $chain" + $nl + "    items = [$wide]" + $nl + "    return total, items" + $nl }
     $deepest = Get-PyWholeCell $files ("SELECT 'v=' || max(n) FROM (SELECT count(*) n FROM expressions__shape " +
-        "WHERE k = 'BinOp' GROUP BY owner)")
+        "WHERE role = 'k' AND value = 'BinOp' GROUP BY owner)")
     Assert-Equal $deepest '99' 'BinOps in the shape of the hundred-term chain'
     $widest = Get-PyWholeCell $files ("SELECT 'v=' || max(n) FROM (SELECT count(*) n FROM expressions__shape c " +
-        "JOIN expressions__shape l ON l.id = c.parent AND l.role = 'c' JOIN expressions__shape r ON r.id = l.parent " +
-        "WHERE r.k = 'List' GROUP BY r.id)")
+        "JOIN expressions__shape l ON l.owner = c.owner AND l.n = c.parent AND l.role = 'c' AND l.node = 'list' JOIN expressions__shape r ON r.owner = l.owner AND r.n = l.parent " +
+        "JOIN expressions__shape rk ON rk.owner = r.owner AND rk.parent = r.n AND rk.role = 'k' WHERE rk.value = 'List' GROUP BY r.owner, r.n)")
     Assert-Equal $widest '12' 'children of the twelve-item list'
 }
 
@@ -50,14 +50,17 @@ Test-Case 'pywhole: a call through ten package re-exports binds to the def at th
     Assert-Equal $bound 'p10/impl.py>run' 'the def eleven hops away'
 }
 
-Test-Case 'pywhole: two packages re-exporting each other still map, and the call binds where the cycle closes' {
+# A CYCLE ENDS THE WALK, A VISITED SET DOES - not a hop count - and what it ends on is no def: neither file writes
+# `run`, they only pass it to each other. Binding the call to the `__init__` the walk stopped in is the guess
+# `follow` exists to avoid, so the call stays unbound (an unbound call's target is '', never NULL).
+Test-Case 'pywhole: two packages re-exporting each other still map, and a call no file defines stays unbound' {
     $files = @{
         'use.py'        = "from left import run" + $nl + "def go():" + $nl + "    run()" + $nl
         'left/__init__.py'  = "from right import run" + $nl
         'right/__init__.py' = "from left import run" + $nl
     }
-    $bound = Get-PyWholeCell $files "SELECT 'v=' || coalesce(target_path, '-') FROM calls WHERE callee = 'run'"
-    if ($bound -notin @('left/__init__.py', 'right/__init__.py', '-')) { throw "a cycle bound the call to '$bound'" }
+    $bound = Get-PyWholeCell $files "SELECT 'v=' || count(*) || '|' || quote(target_path) || '|' || quote(target_name) FROM calls WHERE callee = 'run'"
+    Assert-Equal $bound "1|''|''" 'the call into the cycle'
 }
 
 Test-Case 'pywhole: no cell of the python map is JSON text - every list and object is node rows' {
