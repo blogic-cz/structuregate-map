@@ -154,11 +154,30 @@ pub fn create(db: &Connection, table: &str, column: &str) -> Result<String> {
     db.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS \"{t}\" (owner NOT NULL, n INTEGER NOT NULL, parent INTEGER, role TEXT, \
          ord INTEGER, node TEXT NOT NULL, value, PRIMARY KEY (owner, n)) WITHOUT ROWID; \
-         CREATE INDEX IF NOT EXISTS \"ix_{t}_parent\" ON \"{t}\" (owner, parent); \
-         CREATE INDEX IF NOT EXISTS \"ix_{t}_value\" ON \"{t}\" (value);"
+         CREATE INDEX IF NOT EXISTS \"ix_{t}_parent\" ON \"{t}\" (owner, parent);"
     ))?;
     register(db, table, column)?;
     Ok(child_table)
+}
+
+/// THE `value` INDEX, made AFTER the rows are in - by `store::write` once per write, by `store::insert_rows` per
+/// table. Built during the insert, every node landed at a random place in it, and on a large workspace that was
+/// most of the time the store spent; one sort over the finished table is a fraction of that. `IF NOT EXISTS`, so a
+/// partial run inserts into the index a full run built.
+pub fn index_values(db: &Connection) -> Result<()> {
+    if schema::existing_columns(db, REGISTRY).map(|c| c.is_empty()).unwrap_or(true) {
+        return Ok(());
+    }
+    let children: Vec<String> = {
+        let mut stmt = db.prepare(&format!("SELECT child FROM {REGISTRY}"))?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    for child_table in children {
+        let t = schema::escape(&child_table);
+        db.execute_batch(&format!("CREATE INDEX IF NOT EXISTS \"ix_{t}_value\" ON \"{t}\" (value)"))?;
+    }
+    Ok(())
 }
 
 /// Writes one column's structures straight into its child table: one prepared statement, every node bound as the
