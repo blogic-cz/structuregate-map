@@ -51,6 +51,18 @@ has to be added to the target, or its files are unbanned and nothing says so. Ev
 The ban is a literal `findstr`, so a needle can match its own rationale comment — `import re` once matched
 `import resolves` and failed the build over a docstring. Needles carry a leading space for that reason.
 
+## No JSON in the deep map, no cap on a parse — the build refuses either
+
+**Everything parsed is NODES.** A row cell holding a list or an object is never JSON text: `store::insert` writes
+it to the child table `<table>__<column>` (`expressions__ast`, `assignments__reads`), one row per node -
+`id` (`<owner>/<n>`, the root `<owner>/0`), `owner`, `parent`, `role`, `ord`, `node`, `value` - FIXED columns: an
+object's every member is a row, its name a `role`, never a column (`rust/fbtcore/src/rows/cells/mod.rs`). A pass writing its own table uses `store::insert_rows`, never
+`serde_json::to_string` into a cell; a reader joins the child table (`cells::load`/`load_all` in rust), never
+`json_each`/`json_extract`. **No depth cap**: a parse goes to the end - no `depth > N`, no `*DEPTH*` constant,
+no `kids[:8]`; a walk that could loop takes a visited set. `tests/self/SelfMap.Tests.ps1` asks this repo's own
+deep map for a SQLite JSON function in a string literal, a `*DEPTH*`/`*LEVELS*` constant and a literal compared
+with a `depth`, and fails on any.
+
 ## No consumer's names — the build refuses one
 
 This repo is public; every half was measured on PRIVATE trees. A fixture, comment or doc uses invented names

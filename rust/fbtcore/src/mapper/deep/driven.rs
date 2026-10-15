@@ -31,7 +31,9 @@ use std::path::Path;
 // 24: an enum member's attributes - a `decorators` row (`target_kind = 'enum_member'`) and `enums.members[].attributes`;
 // a field's, a const's and an event field's attributes are `decorators` rows (`target_kind` the member kind);
 // an error a generated file on disk takes part in is a `diagnostics` row of `kind = 'generated'`.
-pub(super) const CS_ROWS_VERSION: &str = "25";
+// 26: `expressions.shape` is the WHOLE skeleton, uncapped, and a structure (node rows), no longer JSON text.
+// 28: an index initializer's entry (`["EU"] = 3`) is named by its KEY (`EU`), not by `["EU"]` spelled as text.
+pub(super) const CS_ROWS_VERSION: &str = "28";
 /// The same for the SQL extractor. 7: `sql_dynamic`, an object created by dynamic SQL.
 const SQL_ROWS_VERSION: &str = "7";
 /// Rows held before a batch is sent - both ends pay for it, so it decides whether a large solution fits.

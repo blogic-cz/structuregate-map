@@ -63,3 +63,47 @@ Test-Case 'csfold: a name written after its declaration is not folded to its ini
     # Both operands fold, and the sum is still not "23".
     Assert-Equal (Get-CsFoldArgument $db 'Two + Three') '/' 'an integer sum is not a concatenation'
 }
+
+# FOLLOWED TO THE END: a readonly built out of readonlies is folded however many links it has (a depth of six cut it
+# at three), and only a symbol already on the way - two readonlies built out of each other, which compiles - stops it.
+Test-Case 'csfold: a chain of twelve readonly links folds whole, and a cycle of two is the symbol' {
+    $nl = [string][char]10
+    $links = (0..11 | ForEach-Object { "    private static readonly string L$_ = L$($_ + 1) + `".`";$nl" }) -join ''
+    $tree = Use-Tree @{
+        'Demo.csproj' = $script:CsFoldProject
+        'Chain.cs' = "namespace Demo;$nl" +
+            "public class Chain$nl{$nl" + $links +
+            "    private static readonly string L12 = `"x`";$nl" +
+            "    private static readonly string Ping = Pong + `"i`";$nl" +
+            "    private static readonly string Pong = Ping + `"o`";$nl" +
+            "    public static void Take(object value) { }$nl" +
+            "    public void Run() { Take(L0); Take(Ping); }$nl}$nl"
+    }
+    $db = Join-Path $tree 'chain.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    Assert-Equal (Get-CsFoldArgument $db 'L0') ('x' + ('.' * 12) + '/folded') 'thirteen readonlies, folded to the end'
+    Assert-Equal (Get-CsFoldArgument $db 'Ping') '/symbol' 'a cycle is the symbol it binds, not a hang'
+}
+
+# EVERY STRING A TEMPLATE CAN BE: two loops over six literals each are 36 strings, past the 32 a product was once cut
+# at (the whole argument was then no template at all).
+Test-Case 'csfold: a template of two six-way loops keeps all thirty-six strings' {
+    $nl = [string][char]10
+    $six = { param($p) (0..5 | ForEach-Object { "`"$p$_`"" }) -join ', ' }
+    $tree = Use-Tree @{
+        'Demo.csproj' = $script:CsFoldProject
+        'Many.cs' = "namespace Demo;$nl" +
+            "public class Many$nl{$nl" +
+            "    public static void Take(object value) { }$nl" +
+            "    public void Run()$nl    {$nl" +
+            "        foreach (var a in new[] { $(& $six 'a') })$nl" +
+            "            foreach (var b in new[] { $(& $six 'b') })$nl" +
+            "                Take(`"x`" + a + `"-`" + b);$nl    }$nl}$nl"
+    }
+    $db = Join-Path $tree 'many.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    $r = Invoke-Gate --map-query $db --width 0 --sql ("SELECT 'v=' || count(*) AS v FROM arguments a JOIN calls c ON c.id = a.call " +
+        "JOIN arguments__template s ON s.parent = a.id || '/0' WHERE c.callee = 'Take'")
+    Assert-Exit $r 0
+    Assert-Line $r 'v=36'
+}

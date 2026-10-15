@@ -8,8 +8,8 @@
 
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
-$script:InstReach = "SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
-    "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'"
+$script:InstReach = "SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
+    "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'"
 
 Test-Case 'tsrows keys: a table reached through a setter input, a method handed the loop item and a returned pushed list, under one parent of two' {
     $tree = New-TsRowsWorkspace @{

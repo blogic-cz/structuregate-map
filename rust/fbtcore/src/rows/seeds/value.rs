@@ -66,12 +66,12 @@ pub fn decimal_text(text: &str) -> Option<String> {
 pub fn json_string(text: &str) -> String {
     serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into())
 }
-/// A list of names as a JSON array.
+/// A list of names as a JSON array - the text a seed is told apart by (`walk.rs`), never a stored cell.
 pub fn columns(names: &[String]) -> String {
     format!("[{}]", names.iter().map(|n| json_string(n)).collect::<Vec<_>>().join(","))
 }
 
-/// The values as JSON: a number, a string or null as SQL wrote it, and one not known before run time as its
+/// The values as JSON text - `walk.rs`'s key, never a stored cell: a number, a string or null as SQL wrote it, and one not known before run time as its
 /// own text.
 pub fn values(values: &[Val]) -> String {
     let cells: Vec<String> = values
@@ -84,6 +84,26 @@ pub fn values(values: &[Val]) -> String {
         })
         .collect();
     format!("[{}]", cells.join(","))
+}
+
+/// The values as the list `sql_seeds.row_values` holds: a number, a string or null as SQL wrote it, and one not
+/// known before run time as its own text. A `num` is the number it reads as (`1.50` is 1.5 - the scale is in
+/// `text`); one too large for that stays its text.
+pub fn listed(values: &[Val]) -> serde_json::Value {
+    let cells = values.iter().map(|(kind, expr)| match kind.as_str() {
+        "null" => serde_json::Value::Null,
+        "int" if expr.parse::<i64>().is_ok() => serde_json::Value::from(expr.parse::<i64>().unwrap_or(0)),
+        "num" => match decimal_text(expr) {
+            Some(text) => match (text.parse::<i64>(), text.parse::<f64>()) {
+                (Ok(n), _) => serde_json::Value::from(n),
+                (_, Ok(f)) if f.is_finite() => serde_json::Value::from(f),
+                _ => serde_json::Value::String(text),
+            },
+            None => serde_json::Value::String(expr.clone()),
+        },
+        _ => serde_json::Value::String(expr.clone()),
+    });
+    serde_json::Value::Array(cells.collect())
 }
 
 /// A value as a reader of a message sees it.
@@ -108,5 +128,9 @@ mod tests {
         assert_eq!(decimal_text("-0.0").as_deref(), Some("0.0"));
         assert_eq!(values(&[("int".into(), "5".into()), ("str".into(), "Crème \"x\"".into()), ("null".into(), "".into())]),
             r#"[5,"Crème \"x\"",null]"#);
+        assert_eq!(
+            listed(&[("int".into(), "5".into()), ("num".into(), "007.50".into()), ("str".into(), "x".into()), ("null".into(), "".into())]),
+            serde_json::json!([5, 7.5, "x", null])
+        );
     }
 }

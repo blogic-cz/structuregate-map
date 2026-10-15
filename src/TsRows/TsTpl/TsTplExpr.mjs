@@ -53,38 +53,38 @@ export function makeExprNormalizer(ng) {
    * `params`: the arrow-function parameters in scope. A bare read of one is the parameter, not the component
    * member of that name, and is marked `param` so the summary leaves it out of `reads` (`TsExprSummary.mjs`).
    */
-  function normalizeExpr(ast, depth = 0, params = null) {
-    if (ast === null || ast === undefined || depth > 60) return null;
+  function normalizeExpr(ast, params = null) {
+    if (ast === null || ast === undefined) return null;
     const k = kindOf(ast);
     const a = ast;
     switch (k) {
       case 'Source':
-        return { k, src: a.source ?? null, ast: normalizeExpr(a.ast, depth + 1, params) };
+        return { k, src: a.source ?? null, ast: normalizeExpr(a.ast, params) };
       case 'Interpolation':
         return {
           k, strings: a.strings,
-          expressions: (a.expressions ?? []).map((e) => normalizeExpr(e, depth + 1, params)),
+          expressions: (a.expressions ?? []).map((e) => normalizeExpr(e, params)),
         };
       case 'Literal':
         return { k, v: a.value };
       case 'Array':
-        return { k, items: (a.expressions ?? []).map((e) => normalizeExpr(e, depth + 1, params)) };
+        return { k, items: (a.expressions ?? []).map((e) => normalizeExpr(e, params)) };
       case 'Map':
         return {
           k,
           keys: (a.keys ?? []).map((x) => ({ key: x.key, quoted: x.quoted })),
-          values: (a.values ?? []).map((v) => normalizeExpr(v, depth + 1, params)),
+          values: (a.values ?? []).map((v) => normalizeExpr(v, params)),
         };
       case 'Read':
       case 'SafeRead': {
-        const receiver = normalizeExpr(a.receiver, depth + 1, params);
+        const receiver = normalizeExpr(a.receiver, params);
         const param = params !== null && receiver?.k === 'Implicit' && params.has(a.name);
         return { k, name: a.name, receiver, ...(param ? { param: true } : {}) };
       }
       case 'Write':
         return {
-          k, name: a.name, receiver: normalizeExpr(a.receiver, depth + 1, params),
-          value: normalizeExpr(a.value, depth + 1, params),
+          k, name: a.name, receiver: normalizeExpr(a.receiver, params),
+          value: normalizeExpr(a.value, params),
         };
       case 'This':
       case 'Implicit':
@@ -94,66 +94,66 @@ export function makeExprNormalizer(ng) {
         // FROM v20 AN ASSIGNMENT IS A `Binary` (`=`, `+=`, `??=`, ...), where it was `PropertyWrite` /
         // `KeyedWrite` before. Published as before, so the target is a write and not a read of the target.
         if (isAssignment(a.operation) && (a.left instanceof ng.PropertyRead || a.left instanceof ng.KeyedRead)) {
-          const value = normalizeExpr(a.right, depth + 1, params);
+          const value = normalizeExpr(a.right, params);
           const op = a.operation === '=' ? {} : { op: a.operation };
           return a.left instanceof ng.PropertyRead
-            ? { k: 'Write', name: a.left.name, receiver: normalizeExpr(a.left.receiver, depth + 1, params), value, ...op }
+            ? { k: 'Write', name: a.left.name, receiver: normalizeExpr(a.left.receiver, params), value, ...op }
             : {
-              k: 'KeyedWrite', receiver: normalizeExpr(a.left.receiver, depth + 1, params),
-              key: normalizeExpr(a.left.key, depth + 1, params), value, ...op,
+              k: 'KeyedWrite', receiver: normalizeExpr(a.left.receiver, params),
+              key: normalizeExpr(a.left.key, params), value, ...op,
             };
         }
         return {
-          k, op: a.operation, left: normalizeExpr(a.left, depth + 1, params),
-          right: normalizeExpr(a.right, depth + 1, params),
+          k, op: a.operation, left: normalizeExpr(a.left, params),
+          right: normalizeExpr(a.right, params),
         };
       case 'Unary':
-        return { k, op: a.operator, expr: normalizeExpr(a.expr, depth + 1, params) };
+        return { k, op: a.operator, expr: normalizeExpr(a.expr, params) };
       case 'Cond':
         return {
-          k, cond: normalizeExpr(a.condition, depth + 1, params), then: normalizeExpr(a.trueExp, depth + 1, params),
-          else: normalizeExpr(a.falseExp, depth + 1, params),
+          k, cond: normalizeExpr(a.condition, params), then: normalizeExpr(a.trueExp, params),
+          else: normalizeExpr(a.falseExp, params),
         };
       case 'Pipe':
         return {
-          k, name: a.name, exp: normalizeExpr(a.exp, depth + 1, params),
-          args: (a.args ?? []).map((x) => normalizeExpr(x, depth + 1, params)),
+          k, name: a.name, exp: normalizeExpr(a.exp, params),
+          args: (a.args ?? []).map((x) => normalizeExpr(x, params)),
         };
       case 'Call':
       case 'SafeCall':
         return {
-          k, receiver: normalizeExpr(a.receiver, depth + 1, params),
-          args: (a.args ?? []).map((x) => normalizeExpr(x, depth + 1, params)),
+          k, receiver: normalizeExpr(a.receiver, params),
+          args: (a.args ?? []).map((x) => normalizeExpr(x, params)),
         };
       case 'KeyedRead':
       case 'SafeKeyedRead':
-        return { k, receiver: normalizeExpr(a.receiver, depth + 1, params), key: normalizeExpr(a.key, depth + 1, params) };
+        return { k, receiver: normalizeExpr(a.receiver, params), key: normalizeExpr(a.key, params) };
       case 'Not':
       case 'NonNull':
-        return { k, expr: normalizeExpr(a.expression, depth + 1, params) };
+        return { k, expr: normalizeExpr(a.expression, params) };
       case 'Chain':
-        return { k, items: (a.expressions ?? []).map((e) => normalizeExpr(e, depth + 1, params)) };
+        return { k, items: (a.expressions ?? []).map((e) => normalizeExpr(e, params)) };
       // Parentheses carry no meaning once the tree is explicit.
       case 'Paren':
-        return normalizeExpr(a.expression, depth + 1, params);
+        return normalizeExpr(a.expression, params);
       case 'TemplateLiteral':
         return {
           k: 'Interpolation', strings: (a.elements ?? []).map((e) => e.text),
-          expressions: (a.expressions ?? []).map((e) => normalizeExpr(e, depth + 1, params)),
+          expressions: (a.expressions ?? []).map((e) => normalizeExpr(e, params)),
         };
       case 'Tagged':
-        return { k, receiver: normalizeExpr(a.tag, depth + 1, params), expr: normalizeExpr(a.template, depth + 1, params) };
+        return { k, receiver: normalizeExpr(a.tag, params), expr: normalizeExpr(a.template, params) };
       case 'Typeof':
       case 'Void':
-        return { k: 'Unary', op: k === 'Typeof' ? 'typeof' : 'void', expr: normalizeExpr(a.expression, depth + 1, params) };
+        return { k: 'Unary', op: k === 'Typeof' ? 'typeof' : 'void', expr: normalizeExpr(a.expression, params) };
       case 'Spread':
-        return { k, expr: normalizeExpr(a.expression, depth + 1, params) };
+        return { k, expr: normalizeExpr(a.expression, params) };
       case 'Regex':
         return { k: 'Other', kind: 'RegularExpressionLiteral', src: `/${a.body}/${a.flags ?? ''}` };
       case 'Arrow': {
         const names = (a.parameters ?? []).map((p) => p.name);
         const inner = new Set([...(params ?? []), ...names]);
-        const body = normalizeExpr(a.body, depth + 1, inner);
+        const body = normalizeExpr(a.body, inner);
         return { k: 'Fn', params: names, ...(body ? { returns: [body] } : {}) };
       }
       default: {
@@ -162,8 +162,8 @@ export function makeExprNormalizer(ng) {
         const out = { k };
         for (const [f, v] of Object.entries(a)) {
           if (f === 'span' || f === 'sourceSpan' || f === 'nameSpan') continue;
-          if (Array.isArray(v)) out[f] = v.map((x) => (isAst(x) ? normalizeExpr(x, depth + 1, params) : x));
-          else if (isAst(v)) out[f] = normalizeExpr(v, depth + 1, params);
+          if (Array.isArray(v)) out[f] = v.map((x) => (isAst(x) ? normalizeExpr(x, params) : x));
+          else if (isAst(v)) out[f] = normalizeExpr(v, params);
           else if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) out[f] = v;
         }
         return out;

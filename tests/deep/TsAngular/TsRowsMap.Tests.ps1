@@ -16,12 +16,10 @@ if ($script:TsRowsModules -and $script:TsRowsPython) {
 Test-Case 'tsrows: the map publishes its own join spec and id scheme' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT j.key || ' -> ' || j.value AS spec FROM _meta, " +
-        "json_each(json_extract(_meta.value, '`$.joins')) j " +
-        "WHERE _meta.key = 'spec:typescript' AND j.key = 'members.class'")
+    $spec = Get-TsRowsMeta $made.Db 'spec:typescript'
+    $r = New-TsRowsLines @("members.class -> $($spec.joins.'members.class')")
     Assert-Line $r 'members.class -> classes'
-    $i = Invoke-TsRowsQ $made.Db ("SELECT json_extract(value, '`$.id_scheme.c') AS scheme " +
-        "FROM _meta WHERE key = 'spec:typescript'")
+    $i = New-TsRowsLines @("$($spec.id_scheme.c)")
     Assert-Line $i 'classes'
 }
 
@@ -31,8 +29,7 @@ Test-Case 'tsrows: the map publishes its own join spec and id scheme' {
 Test-Case 'tsrows: an id prefix that serves two tables names both' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT json_extract(value, '`$.id_scheme.k') AS scheme " +
-        "FROM _meta WHERE key = 'spec:typescript'")
+    $r = New-TsRowsLines @("$((Get-TsRowsMeta $made.Db 'spec:typescript').id_scheme.k)")
     Assert-Line $r 'consts | i18n_refs'
 }
 
@@ -51,15 +48,12 @@ Test-Case 'tsrows: a join that reaches the wrong file is refused, however well i
             "export class ShelfComponent {}`n"
     }
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT group_concat(json_extract(j.value, '`$.field')) AS route " +
-        "FROM _meta, json_each(json_extract(_meta.value, '`$.anchors.renders')) j " +
-        "WHERE _meta.key = 'spec:typescript'")
+    $spec = Get-TsRowsMeta $made.Db 'spec:typescript'
+    $r = New-TsRowsLines @((@($spec.anchors.renders) | ForEach-Object { $_.field }) -join ',')
     Assert-Line $r 'template,node'
     Assert-NoLine $r 'from_class'
     # ...and the refused column is still a published JOIN: it is a real reference, just not a route home.
-    $j = Invoke-TsRowsQ $made.Db ("SELECT j.key || ' -> ' || j.value AS j FROM _meta, " +
-        "json_each(json_extract(_meta.value, '`$.joins')) j " +
-        "WHERE _meta.key = 'spec:typescript' AND j.key = 'renders.from_class'")
+    $j = New-TsRowsLines @("renders.from_class -> $($spec.joins.'renders.from_class')")
     Assert-Line $j 'renders.from_class -> classes'
 }
 
@@ -80,9 +74,7 @@ Test-Case 'tsrows: a table whose joins all disagree about the file is published 
     $made = New-TsRowsDb $tree
     # BY NAME, not by position: the list grows as the map does, and a case pinned to `[0]` would fail the
     # day another table joins it rather than the day this rule breaks.
-    $r = Invoke-TsRowsQ $made.Db ("SELECT j.value AS t FROM _meta, " +
-        "json_each(json_extract(_meta.value, '`$.unanchored')) j " +
-        "WHERE _meta.key = 'spec:typescript' AND j.value = 'render_graph'")
+    $r = New-TsRowsLines @((@((Get-TsRowsMeta $made.Db 'spec:typescript').unanchored) | Where-Object { $_ -eq 'render_graph' }))
     Assert-Line $r 'render_graph'
 }
 
@@ -92,9 +84,8 @@ Test-Case 'tsrows: a table whose joins all disagree about the file is published 
 Test-Case 'tsrows: an inline template contains its own nodes, because the offset is applied' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT json_extract(value, '`$.anchors.template_nodes[0].field') " +
-        "|| ' by ' || json_extract(value, '`$.anchors.template_nodes[0].proof') AS route " +
-        "FROM _meta WHERE key = 'spec:typescript'")
+    $first = @((Get-TsRowsMeta $made.Db 'spec:typescript').anchors.template_nodes)[0]
+    $r = New-TsRowsLines @("$($first.field) by $($first.proof)")
     Assert-Line $r 'template by containment'
 }
 
@@ -139,7 +130,7 @@ Test-Case 'tsrows: a gate comparing an enum constant restricts that dimension to
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
     $r = Invoke-TsRowsQ $made.Db ("SELECT enum_name || ' ' || dimension || ' ' || op || ' ' || " +
-        "values_json || ' of ' || domain AS restriction FROM gate_values")
+        "$(Get-NodeRootListSql 'gate_values__values_json' 'gate_values.rowid') || ' of ' || domain AS restriction FROM gate_values")
     Assert-Line $r 'Tier tier in ["Gold"] of 2'
 }
 
@@ -150,7 +141,7 @@ Test-Case 'tsrows: a gate comparing an enum constant restricts that dimension to
 Test-Case 'tsrows: a component nothing renders is its own root, at depth zero' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT depth || ' | ' || hops || ' | ' || truncated AS path " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT depth || ' | ' || $(Get-NodeRootListSql 'render_path__hops' 'render_path.id') || ' | ' || truncated AS path " +
         "FROM render_path WHERE component = root")
     Assert-Line $r '0 | ["ng:1"] | 0'
 }
@@ -161,7 +152,7 @@ Test-Case 'tsrows: a key on a template carrier is placed, with the gates of the 
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
     $r = Invoke-TsRowsQ $made.Db ("SELECT route || ' | ' || n_refs || ' | ' || n_paths || ' | ' || " +
-        "always_gates AS reach FROM key_reach WHERE key = 'shop.title'")
+        "$(Get-NodeRootListSql 'key_reach__always_gates' 'key_reach.rowid') AS reach FROM key_reach WHERE key = 'shop.title'")
     Assert-Line $r 'template | 1 | 1 | ["g:1"]'
 }
 
@@ -341,26 +332,19 @@ Test-Case 'tsrows: the map records which files a change reaches' {
     Assert-Exit $made.Result 0
 
     # IT IS STORED, not derived on demand: deriving it re-read a database of hundreds of MB and cost about a minute.
-    $held = Invoke-TsRowsQ $made.Db ("SELECT 'targets=' || count(*) AS n FROM " +
-        "json_each((SELECT value FROM _meta WHERE key = 'deps:typescript'))")
+    $deps = Get-TsRowsMeta $made.Db 'deps:typescript'
+    $held = New-TsRowsLines @("targets=$(@($deps.PSObject.Properties).Count)")
     Assert-NoLine $held 'targets=0'
 
     # IT IS KEYED BY PATH, not by row id: node is the only consumer and node has no id for a file until it
     # has extracted one. An import is an edge - `main.ts` imports `./cart`, so a change to cart.ts must
     # re-extract main.ts.
-    $edge = Invoke-TsRowsQ $made.Db ("SELECT 'edge=' || count(*) AS n FROM " +
-        "json_each((SELECT value FROM _meta WHERE key = 'deps:typescript')) AS t, " +
-        "json_each(t.value) AS d " +
-        "WHERE t.key = 'apps/shop/src/cart.ts' AND d.value = 'apps/shop/src/main.ts'")
+    $edge = New-TsRowsLines @("edge=$(@(@($deps.'apps/shop/src/cart.ts') | Where-Object { $_ -eq 'apps/shop/src/main.ts' }).Count)")
     Assert-Line $edge 'edge=1'
 
     # A ROW REFERENCE IS AN EDGE TOO, and this is the half a list of relations misses: the component's
     # template is a file of its own, and `templates.class` names a class the template file never imports.
-    $tpl = Invoke-TsRowsQ $made.Db ("SELECT 'tpl=' || count(*) AS n FROM " +
-        "json_each((SELECT value FROM _meta WHERE key = 'deps:typescript')) AS t, " +
-        "json_each(t.value) AS d " +
-        "WHERE t.key = 'apps/shop/src/basket.component.ts' " +
-        "AND d.value = 'apps/shop/src/basket.component.html'")
+    $tpl = New-TsRowsLines @("tpl=$(@(@($deps.'apps/shop/src/basket.component.ts') | Where-Object { $_ -eq 'apps/shop/src/basket.component.html' }).Count)")
     Assert-Line $tpl 'tpl=1'
 
     # AND WHICH FILES THE GRAPH CANNOT SPEAK FOR. A file that DECLARES a selector can make a template match
@@ -371,13 +355,10 @@ Test-Case 'tsrows: the map records which files a change reaches' {
     # `cart.component.ts` AND NOT `basket.component.ts`, which declares a Component, a Directive, a Pipe
     # and an NgModule in one file - it reaches the set through four tables at once, so dropping two of them
     # left it in and the case passed while proving nothing. The cart declares only a component.
-    $scope = Invoke-TsRowsQ $made.Db ("SELECT 'declares=' || count(*) AS n FROM " +
-        "json_each((SELECT value FROM _meta WHERE key = 'scope:typescript')) " +
-        "WHERE value = 'apps/shop/src/cart.component.ts'")
+    $inScope = @(Get-TsRowsMeta $made.Db 'scope:typescript')
+    $scope = New-TsRowsLines @("declares=$(@($inScope | Where-Object { $_ -eq 'apps/shop/src/cart.component.ts' }).Count)")
     Assert-Line $scope 'declares=1'
-    $notScope = Invoke-TsRowsQ $made.Db ("SELECT 'template=' || count(*) AS n FROM " +
-        "json_each((SELECT value FROM _meta WHERE key = 'scope:typescript')) " +
-        "WHERE value = 'apps/shop/src/basket.component.html'")
+    $notScope = New-TsRowsLines @("template=$(@($inScope | Where-Object { $_ -eq 'apps/shop/src/basket.component.html' }).Count)")
     Assert-Line $notScope 'template=0'
 }
 
@@ -390,9 +371,9 @@ Test-Case 'tsrows: an AST a partial run re-extracted is stored as the object it 
     Set-Content -LiteralPath (Join-Path $tree 'apps/shop/src/helpers.ts') -Value 'export const help = [1, 2].map((x) => x + 1);'
     $again = New-TsRowsDb $tree
     Assert-Line $again.Result 'put back'
-    $of = "FROM expressions WHERE ast IS NOT NULL AND file = (SELECT id FROM files WHERE path = 'apps/shop/src/helpers.ts')"
+    $of = "FROM expressions WHERE EXISTS (SELECT 1 FROM expressions__ast a WHERE a.owner = expressions.id) AND file = (SELECT id FROM files WHERE path = 'apps/shop/src/helpers.ts')"
     Assert-NoLine (Invoke-TsRowsQ $again.Db "SELECT 'n=' || count(*) AS n $of") 'n=0'
-    Assert-Line (Invoke-TsRowsQ $again.Db "SELECT 'bad=' || count(*) AS n $of AND json_extract(ast, '$.k') IS NULL") 'bad=0'
+    Assert-Line (Invoke-TsRowsQ $again.Db "SELECT 'bad=' || count(*) AS n $of AND NOT EXISTS (SELECT 1 FROM expressions__ast r WHERE r.id = expressions.id || '/0' AND r.k IS NOT NULL)") 'bad=0'
 }
 
 # A PARTIAL RUN REPAIRS THE GRAPH it read its own plan from: the next run decides what to re-read from it,
@@ -403,9 +384,8 @@ Test-Case 'tsrows: a partial run records the import it just added in the graph' 
     Set-Content -LiteralPath (Join-Path $tree 'apps/shop/src/helpers.ts') -Value "import { Cart } from './cart';`nexport const help = new Cart();"
     $again = New-TsRowsDb $tree
     Assert-Line $again.Result 'put back'
-    $edge = Invoke-TsRowsQ $again.Db ("SELECT 'edge=' || count(*) AS n FROM " +
-        "json_each((SELECT value FROM _meta WHERE key = 'deps:typescript')) AS t, json_each(t.value) AS d " +
-        "WHERE t.key = 'apps/shop/src/cart.ts' AND d.value = 'apps/shop/src/helpers.ts'")
+    $deps = Get-TsRowsMeta $again.Db 'deps:typescript'
+    $edge = New-TsRowsLines @("edge=$(@(@($deps.'apps/shop/src/cart.ts') | Where-Object { $_ -eq 'apps/shop/src/helpers.ts' }).Count)")
     Assert-Line $edge 'edge=1'
 }
 

@@ -157,8 +157,8 @@ function readJsonc(text) {
     try { return JSON.parse(cleaned.join('')); } catch { return null; }
 }
 
-/** How deep an `extends` chain is followed before it is treated as a loop. */
-const MAX_EXTENDS = 5;
+/* An `extends` chain and a `references` graph are followed TO THE END: a config already visited is a loop and is
+   not read again, which is the whole of what a depth limit of five was standing in for. */
 
 /**
  * An `extends` value, as the file it names. TypeScript resolves it two ways and so does this:
@@ -192,8 +192,9 @@ function resolveExtends(specifier, directory) {
  * one has to write its way back out (`"baseUrl": "../../.."`). Resolving it against the consuming repo
  * instead would silently point every alias at the wrong tree.
  */
-function findOptions(file, depth) {
-    if (depth > MAX_EXTENDS || !existsSync(file)) return null;
+function findOptions(file, visited = new Set()) {
+    if (visited.has(file) || !existsSync(file)) return null;
+    visited.add(file);
     let parsed;
     try { parsed = readJsonc(readFileSync(file, 'utf8')); } catch { return null; }
     if (!parsed) return null;
@@ -205,7 +206,7 @@ function findOptions(file, depth) {
     for (const specifier of chain) {
         const next = resolveExtends(specifier, path.dirname(file));
         if (!next) continue;
-        const found = findOptions(next, depth + 1);
+        const found = findOptions(next, visited);
         if (found) return found;
     }
     return null;
@@ -232,15 +233,15 @@ function resolveReference(target, directory) {
  */
 export function loadAliases(root) {
     const groups = [];
-    collectAliases(path.join(root, 'tsconfig.json'), groups, new Set(), 0);
+    collectAliases(path.join(root, 'tsconfig.json'), groups, new Set());
     return groups.length > 0 ? groups : null;
 }
 
-function collectAliases(file, groups, seen, depth) {
-    if (depth > MAX_EXTENDS || seen.has(file) || !existsSync(file)) return;
+function collectAliases(file, groups, seen) {
+    if (seen.has(file) || !existsSync(file)) return;
     seen.add(file);
 
-    const found = findOptions(file, 0);
+    const found = findOptions(file);
     if (found !== null) {
         const { options, base } = found;
         const baseUrl = options.baseUrl ? path.resolve(base, options.baseUrl) : base;
@@ -262,7 +263,7 @@ function collectAliases(file, groups, seen, depth) {
     if (!parsed || !Array.isArray(parsed.references)) return;
     for (const reference of parsed.references) {
         if (!reference || typeof reference.path !== 'string') continue;
-        collectAliases(resolveReference(reference.path, path.dirname(file)), groups, seen, depth + 1);
+        collectAliases(resolveReference(reference.path, path.dirname(file)), groups, seen);
     }
 }
 

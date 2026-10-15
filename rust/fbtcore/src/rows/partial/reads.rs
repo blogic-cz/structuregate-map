@@ -51,21 +51,35 @@ pub fn recorded(db: &Path, half: &str) -> Recorded {
     let mut shapes = Map::new();
     let mut coupled: IndexMap<String, IndexSet<String>> = IndexMap::new();
     if let Ok(conn) = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY) {
-        if let Ok(mut stmt) = conn.prepare("SELECT path, reads, surface, reads_deep FROM files WHERE half = ?1") {
+        // `reads` and `reads_deep` are lists, so nodes (`files__reads`, `files__reads_deep`), read by the file's id.
+        // A database whose files never recorded them answers nothing, as before.
+        let held = super::dups::has_columns(&conn, "files", &["reads", "surface", "reads_deep"]);
+        let lists = super::dups::Column::new(&conn, "files", "reads").and_then(|r| Ok((r, super::dups::Column::new(&conn, "files", "reads_deep")?)));
+        let scalar = |c: &str| super::dups::scalar_sql(&conn, "files", "f", c);
+        let sql = format!(
+            "SELECT f.path, {}, f.surface, {}, {} FROM files f WHERE f.half = ?1",
+            scalar("reads"),
+            scalar("reads_deep"),
+            super::dups::owner_sql(&conn, "files", "f")
+        );
+        if held
+            && let Ok((mut reads_of, mut deep_of)) = lists
+            && let Ok(mut stmt) = conn.prepare(&sql)
+        {
             loaded = true;
             let rows = stmt.query_map([half], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
-                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, rusqlite::types::Value>(1)?,
                     r.get::<_, Option<String>>(2)?,
-                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, rusqlite::types::Value>(3)?,
+                    r.get::<_, String>(4)?,
                 ))
             });
-            for (path, reads, surface, deep) in rows.into_iter().flatten().flatten() {
-                for (text, into) in [(reads, &mut readers), (deep, &mut deep_readers)] {
-                    if let Some(text) = text
-                        && let Ok(Value::Array(list)) = serde_json::from_str::<Value>(&text)
-                    {
+            let rows: Vec<_> = rows.into_iter().flatten().flatten().collect();
+            for (path, reads, surface, deep, owner) in rows {
+                for (column, held, into) in [(&mut reads_of, reads, &mut readers), (&mut deep_of, deep, &mut deep_readers)] {
+                    if let Ok(Value::Array(list)) = column.value(&owner, &held) {
                         for read in list.iter().filter_map(Value::as_str) {
                             into.entry(read.to_string()).or_default().insert(path.clone());
                         }
@@ -228,6 +242,8 @@ pub fn dangling(
     };
     let marks = |n: usize| vec!["?"; n].join(",");
     let mut vanished: IndexSet<String> = IndexSet::new();
+    // A NODE TABLE IS NOT A ROW ANYONE NAMES: its ids are its own tree's, and its rows go with their owner.
+    let names: Vec<String> = names.into_iter().filter(|t| super::cells::parent_of(db, t).is_none()).collect();
     for table in names.iter().filter(|t| owned(t).unwrap_or(false)) {
         let sql = format!(
             "SELECT id FROM \"{}\" WHERE \"{HALF_COLUMN}\" = ? AND owner_file IN ({})",
@@ -277,6 +293,24 @@ pub fn dangling(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_reads_a_file_recorded_come_back_from_their_nodes() {
+        let db = crate::rows::TempDb::new("reads", "nodes");
+        {
+            let conn = Connection::open(&*db).unwrap();
+            let files = [
+                json!({"id": "f:1", "path": "a.ts", "half": "typescript", "reads": ["b.ts"], "surface": "s1", "reads_deep": []}),
+                json!({"id": "f:2", "path": "b.ts", "half": "typescript", "reads": [], "surface": "s2", "reads_deep": ["a.ts"]}),
+            ];
+            crate::rows::store::insert_rows(&conn, "files", &files).unwrap();
+        }
+        let got = recorded(&db, "typescript");
+        assert!(got.loaded);
+        assert_eq!(got.readers, json!({"b.ts": ["a.ts"]}));
+        assert_eq!(got.deep_readers, json!({"a.ts": ["b.ts"]}));
+        assert_eq!(got.surfaces, json!({"a.ts": "s1", "b.ts": "s2"}));
+    }
 
     #[test]
     fn a_kept_row_naming_an_id_the_run_replaces_away_is_found_and_one_kept_is_not() {

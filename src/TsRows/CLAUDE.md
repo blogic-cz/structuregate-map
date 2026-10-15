@@ -44,7 +44,8 @@ runs) are compared by that, every carried field equal, never by `c:412`.
   `imported` (`default`, `*`), `kind`, `type_only`, and where it is DECLARED - `declared`, `declared_file`,
   `declared_id` (a top-level class, function, interface, enum, type alias or const; none when two share the name),
   `declared_name` - plus `via`, every barrel on the way. All three barrel shapes are followed: `export * from`,
-  `export { X } from`, and `import { X } ...; export { X }`. `exports.resolved`/`resolved_file` is the file a
+  `export { X } from`, and `import { X } ...; export { X }` - through a chain of any length; only a (file, name) the
+  walk already stood on (a cycle) stops it. `exports.resolved`/`resolved_file` is the file a
   re-export's `from` resolves to. An importer DEPENDS on its declaring file and every barrel in `via`
   (`rust/fbtcore/src/rows/partial/deps.rs`), so a partial run re-reads it when either moves.
 

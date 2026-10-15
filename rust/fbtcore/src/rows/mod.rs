@@ -11,6 +11,7 @@
 //! owns and the batching exists only to bound peak memory, not to cross a pipe.
 
 pub mod calls;
+pub mod cells;
 pub mod fts;
 // THE PARTIAL RUN'S OWN MACHINERY - what is handed back, which files depend on which, what each read - in a folder
 // by `#[path]`, so every `super::` in them still means `rows`.

@@ -15,6 +15,8 @@
 //! `styles` of `angular.json` or a partial `@use`d into a component's own (this pass follows no `@use`).
 
 use rusqlite::Connection;
+use crate::rows::dups::Column;
+use rusqlite::types::Value as SqlValue;
 use serde_json::{Map, Value};
 use std::collections::{BTreeSet, HashMap};
 
@@ -52,11 +54,13 @@ fn own_sheets(db: &Connection, half: &str) -> HashMap<String, BTreeSet<String>> 
         .collect();
     let id_of: HashMap<&str, &str> = path_of.iter().map(|(id, path)| (path.as_str(), id.as_str())).collect();
     let mut out: HashMap<String, BTreeSet<String>> = HashMap::new();
-    for row in text_rows(db, "SELECT id, file, style_urls FROM components WHERE half = ?1", half, 3) {
-        let (Some(component), Some(file), Some(urls)) = (&row[0], &row[1], &row[2]) else { continue };
+    // `style_urls` is a list: its nodes, by the component's id.
+    let Ok(mut list) = Column::new(db, "components", "style_urls") else { return out };
+    for row in text_rows(db, "SELECT id, file FROM components WHERE half = ?1", half, 2) {
+        let (Some(component), Some(file)) = (&row[0], &row[1]) else { continue };
         let Some(path) = path_of.get(file) else { continue };
         let dir = path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-        let urls: Vec<String> = serde_json::from_str(urls).unwrap_or_default();
+        let urls = list.strings(component, &SqlValue::Null).unwrap_or_default();
         let sheets = out.entry(component.clone()).or_default();
         for url in urls {
             if let Some(id) = id_of.get(join_path(dir, &url).as_str()) {
@@ -123,11 +127,15 @@ fn bindings(db: &Connection, half: &str) -> Vec<Binding> {
             component: r[4].clone(), classes: vec![name], condition: r[6].clone(),
         });
     }
-    let ng = "SELECT id, template, node, component, ast, source FROM expressions \
+    // `ast` is an object: its nodes, rebuilt for the few expressions that are an `[ngClass]`.
+    let Ok(mut tree) = Column::new(db, "expressions", "ast") else { return out };
+    let ng = "SELECT id, template, node, component, '', source FROM expressions \
               WHERE half = ?1 AND name = 'ngClass' ORDER BY rowid";
     for r in text_rows(db, ng, half, 6) {
         let mut classes = Vec::new();
-        if let Some(ast) = r[4].as_deref().and_then(|t| serde_json::from_str::<Value>(t).ok()) {
+        if let Some(id) = r[0].as_deref()
+            && let Ok(ast) = tree.value(id, &SqlValue::Null)
+        {
             ng_classes(&ast, &mut classes);
         }
         if classes.is_empty() {

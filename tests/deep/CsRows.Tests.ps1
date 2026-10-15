@@ -65,10 +65,25 @@ Test-Case 'csrows: an expression carries what it READS and CALLS, so a query nev
     $db = New-CsDb @{ 'Reader.cs' = Get-CsSample }
     # The READS COLUMN ALONE, because `calls` carries the same name for this expression: a case that asked
     # for both passed while the chain was not being read at all.
-    $r = Invoke-CsQ $db --sql "SELECT reads FROM expressions WHERE source LIKE '%Registry.Resolve(%'"
+    $r = Invoke-CsQ $db --sql "SELECT $(Get-NodeRootListSql 'expressions__reads' 'expressions.id') AS reads FROM expressions WHERE source LIKE '%Registry.Resolve(%'"
     # EVERY PREFIX OF A CHAIN IS A READ, which is what makes "who reads this" answerable.
     Assert-Line $r 'Registry.Resolve'
     Assert-Line $r 'name'
+}
+
+# THE WHOLE SKELETON, AS NODE ROWS: `shape` was cut at four levels and eight children and written as JSON text. A chain
+# of 520 terms is 519 `AddExpression`s deep - past the JSON writer's own default nesting of 1000 too, since each level
+# is an object and a list - and an array of twelve items is twelve children wide.
+Test-Case 'csrows: an expression''s shape is its WHOLE skeleton, every level and every child, as node rows' {
+    $chain = (1..520 | ForEach-Object { 'a' }) -join ' + '
+    $args12 = (1..12 | ForEach-Object { 'a' }) -join ', '
+    $db = New-CsDb @{ 'Deep.cs' = "namespace Demo; public class Deep { " +
+        "public int Sum(int a) => $chain; public int[] Wide(int a) => new[] { $args12 }; }" }
+    Assert-Equal (Get-CsScalar $db ("SELECT max(n) FROM (SELECT count(*) n FROM expressions__shape " +
+        "WHERE k = 'AddExpression' GROUP BY owner)")) '519' 'AddExpressions in the shape of the 520-term chain'
+    Assert-Equal (Get-CsScalar $db ("SELECT max(n) FROM (SELECT count(*) n FROM expressions__shape c " +
+        "JOIN expressions__shape l ON l.id = c.parent AND l.role = 'c' JOIN expressions__shape r ON r.id = l.parent " +
+        "WHERE r.k = 'ArrayInitializerExpression' GROUP BY r.id)")) '12' 'children of the twelve-item initializer'
 }
 
 Test-Case 'csrows: the tables a C# tree produces' {
@@ -86,7 +101,7 @@ Test-Case 'csrows: a static readonly field reads the constant it is built from' 
     # `static readonly` is how C# writes what python writes as a module-level capital name. Without the row,
     # a constant used only to build another one looks dead.
     $db = New-CsDb @{ 'Reader.cs' = Get-CsSample }
-    $r = Invoke-CsQ $db --sql "SELECT reads FROM consts WHERE name = 'Root'"
+    $r = Invoke-CsQ $db --sql "SELECT $(Get-NodeRootListSql 'consts__reads' 'consts.id') AS reads FROM consts WHERE name = 'Root'"
     Assert-Line $r 'Prefix'
     # AND THE CHAIN IT IS BUILT WITH, written out: `Defaults.Suffix` is a read of `Defaults` and of
     # `Defaults.Suffix`, and the second is the one a query for that constant asks for.
@@ -103,7 +118,7 @@ Test-Case 'csrows: an expression-bodied member is a RETURN' {
     # A tree written in `=>` members would otherwise have an empty `returns` table, which reads as a
     # codebase whose methods return nothing.
     $db = New-CsDb @{ 'A.cs' = 'public class A { public int Go() => Store.Count; }' }
-    Assert-Line (Invoke-CsQ $db --sql 'SELECT source, reads FROM returns') 'Store.Count'
+    Assert-Line (Invoke-CsQ $db --sql "SELECT source, $(Get-NodeRootListSql 'returns__reads' 'returns.id') AS reads FROM returns") 'Store.Count'
 }
 
 Test-Case 'csrows: a qualname carries the namespace, so two Program classes do not collide' {

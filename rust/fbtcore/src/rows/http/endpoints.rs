@@ -2,9 +2,11 @@
 //! `decorators` rows (their folded argument values, `arg_values`) and the `classes` rows (a class's bases).
 
 use super::matching::endpoint_route;
-use crate::rows::dups::{has_columns, text};
+use crate::rows::dups::{has_columns, owner_sql, scalar_sql, text, Column};
+use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
-use std::collections::{BTreeMap, HashMap};
+use serde_json::Value;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub(super) struct Endpoint {
     pub file: String,
@@ -19,9 +21,6 @@ pub(super) struct Endpoint {
 const VERBS: [(&str, &str); 7] =
     [("HttpGet", "GET"), ("HttpPost", "POST"), ("HttpPut", "PUT"), ("HttpDelete", "DELETE"), ("HttpPatch", "PATCH"), ("HttpHead", "HEAD"), ("HttpOptions", "OPTIONS")];
 
-/// How far up a class's bases its route is looked for.
-const LEVELS: usize = 5;
-
 /// An attribute as the routing names it: `Route`, `HttpGet`, with or without `Attribute`, written dotted or not.
 fn attribute(name: &str) -> &str {
     let last = name.rsplit('.').next().unwrap_or(name);
@@ -29,9 +28,9 @@ fn attribute(name: &str) -> &str {
 }
 
 /// The route an attribute is given: its first argument, when that is positional (`Name=text` is a named one).
-fn template(values: &str) -> Option<String> {
-    let list: Vec<String> = serde_json::from_str(values).ok()?;
-    let first = list.into_iter().next()?;
+fn template(values: &Value) -> Option<String> {
+    let list = values.as_array().filter(|l| l.iter().all(Value::is_string))?;
+    let first = list.first()?.as_str()?.to_string();
     let named = first.split_once('=').is_some_and(|(name, _)| !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_'));
     (!named).then_some(first)
 }
@@ -62,13 +61,21 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
     if !has_columns(conn, "decorators", &["file", "line", "cls", "name", "target", "target_kind", "arg_values"]) {
         return Ok(vec![]);
     }
-    let mut stmt = conn.prepare("SELECT file, line, cls, name, target, target_kind, arg_values FROM decorators ORDER BY file, line")?;
-    let rows = stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, text(r, 4)?, text(r, 5)?, text(r, 6)?)))?;
+    // `arg_values` is a list: its nodes.
+    let mut values = Column::new(conn, "decorators", "arg_values")?;
+    let sql = format!(
+        "SELECT d.file, d.line, d.cls, d.name, d.target, d.target_kind, {}, {} FROM decorators d ORDER BY d.file, d.line",
+        owner_sql(conn, "decorators", "d"),
+        scalar_sql(conn, "decorators", "d", "arg_values")
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, text(r, 4)?, text(r, 5)?, text(r, 6)?, r.get::<_, SqlValue>(7)?)))?;
     let mut decorators = vec![];
     for row in rows {
-        let (file, line, cls, name, target, kind, values) = row?;
+        let (file, line, cls, name, target, kind, owner, held) = row?;
         let Some(path) = csharp.get(&file) else { continue };
-        decorators.push(Decorator { path: path.clone(), file, line: line.parse().unwrap_or(0), cls, name, target, kind, template: template(&values) });
+        let template = template(&values.value(&owner, &held)?);
+        decorators.push(Decorator { path: path.clone(), file, line: line.parse().unwrap_or(0), cls, name, target, kind, template });
     }
     let (classes, by_symbol) = classes(conn, csharp)?;
     // A CLASS'S OWN ROUTE: its attribute is on the class row's target, and its `cls` is the class AROUND it.
@@ -103,7 +110,7 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
             (true, None) => continue,
             _ => m.verbs.clone(),
         };
-        let class_routes = class_route(&(file.clone(), cls.clone()), &routes, &classes, &by_symbol, 0).unwrap_or_else(|| vec![String::new()]);
+        let class_routes = class_route(&(file.clone(), cls.clone()), &routes, &classes, &by_symbol, &mut HashSet::new()).unwrap_or_else(|| vec![String::new()]);
         for (verb, own) in verbs {
             let written = own.filter(|t| !t.is_empty()).or_else(|| m.route.clone()).unwrap_or_default();
             let mut made: Vec<String> = Vec::new();
@@ -138,14 +145,16 @@ fn classes(conn: &Connection, csharp: &HashMap<String, String>) -> rusqlite::Res
     if !has_columns(conn, "classes", &["file", "name", "symbol", "bases"]) {
         return Ok((held, by_symbol));
     }
-    let mut stmt = conn.prepare("SELECT file, name, symbol, bases FROM classes")?;
-    let rows = stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?)))?;
+    let mut list = Column::new(conn, "classes", "bases")?;
+    let sql = format!("SELECT k.file, k.name, k.symbol, {}, {} FROM classes k", owner_sql(conn, "classes", "k"), scalar_sql(conn, "classes", "k", "bases"));
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, r.get::<_, SqlValue>(4)?)))?;
     for row in rows {
-        let (file, name, symbol, bases) = row?;
+        let (file, name, symbol, owner, cell) = row?;
         if !csharp.contains_key(&file) {
             continue;
         }
-        let bases: Vec<String> = serde_json::from_str(&bases).unwrap_or_default();
+        let bases = list.strings(&owner, &cell)?;
         if !symbol.is_empty() {
             by_symbol.entry(symbol.clone()).or_insert((file.clone(), name.clone()));
         }
@@ -154,16 +163,23 @@ fn classes(conn: &Connection, csharp: &HashMap<String, String>) -> rusqlite::Res
     Ok((held, by_symbol))
 }
 
-/// A class's own `[Route]`s, or the nearest base class's.
-fn class_route(key: &(String, String), routes: &HashMap<(String, String), Vec<String>>, classes: &Classes, by_symbol: &HashMap<String, (String, String)>, depth: usize) -> Option<Vec<String>> {
+/// A class's own `[Route]`s, or the nearest base class's - as far up as the bases go. `seen` is every class already
+/// asked, so bases that name each other (a broken tree) end the walk instead of looping; no depth cap.
+fn class_route(
+    key: &(String, String),
+    routes: &HashMap<(String, String), Vec<String>>,
+    classes: &Classes,
+    by_symbol: &HashMap<String, (String, String)>,
+    seen: &mut HashSet<(String, String)>,
+) -> Option<Vec<String>> {
     if let Some(own) = routes.get(key) {
         return Some(own.clone());
     }
-    if depth >= LEVELS {
+    if !seen.insert(key.clone()) {
         return None;
     }
     let class = classes.get(key)?;
-    class.bases.iter().filter_map(|b| by_symbol.get(b)).find_map(|base| class_route(base, routes, classes, by_symbol, depth + 1))
+    class.bases.iter().filter_map(|b| by_symbol.get(b)).find_map(|base| class_route(base, routes, classes, by_symbol, seen))
 }
 
 /// The class route and the method's, with the tokens a route may carry replaced.
@@ -182,6 +198,49 @@ fn combine(class: &str, method: &str, cls: &str, name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn chain(n: usize, cycle: bool) -> (HashMap<(String, String), Vec<String>>, Classes, HashMap<String, (String, String)>) {
+        // C0 derives from C1, C1 from C2 .. and the last has the route - or, `cycle`, the last derives from C0 again.
+        let key = |i: usize| ("f:1".to_string(), format!("C{i}"));
+        let (mut routes, mut classes, mut by_symbol) = (HashMap::new(), HashMap::new(), HashMap::new());
+        for i in 0..n {
+            by_symbol.insert(format!("Demo.C{i}"), key(i));
+            let next = if i + 1 < n { vec![format!("Demo.C{}", i + 1)] } else if cycle { vec!["Demo.C0".to_string()] } else { vec![] };
+            classes.insert(key(i), Class { bases: next });
+        }
+        if !cycle {
+            routes.insert(key(n - 1), vec!["api/base".to_string()]);
+        }
+        (routes, classes, by_symbol)
+    }
+
+    #[test]
+    fn a_route_is_found_however_far_up_and_bases_in_a_cycle_end() {
+        let (routes, classes, by_symbol) = chain(9, false);
+        let start = ("f:1".to_string(), "C0".to_string());
+        assert_eq!(class_route(&start, &routes, &classes, &by_symbol, &mut HashSet::new()), Some(vec!["api/base".to_string()]));
+        let (routes, classes, by_symbol) = chain(4, true);
+        assert_eq!(class_route(&start, &routes, &classes, &by_symbol, &mut HashSet::new()), None);
+    }
+
+    #[test]
+    fn an_endpoint_is_read_from_the_decorators_and_bases_nodes() {
+        let conn = Connection::open_in_memory().unwrap();
+        let rows = |table: &str, rows: Vec<Value>| crate::rows::store::insert_rows(&conn, table, &rows).unwrap();
+        rows("classes", vec![
+            json!({"id": "c:1", "file": "f:1", "name": "OrdersController", "symbol": "Demo.OrdersController", "bases": ["Demo.ApiBase"]}),
+            json!({"id": "c:2", "file": "f:1", "name": "ApiBase", "symbol": "Demo.ApiBase", "bases": []}),
+        ]);
+        rows("decorators", vec![
+            json!({"id": "d:1", "file": "f:1", "line": 2, "cls": "", "name": "Route", "target": "ApiBase", "target_kind": "class", "arg_values": ["api/[controller]"]}),
+            json!({"id": "d:2", "file": "f:1", "line": 9, "cls": "OrdersController", "name": "HttpGet", "target": "List", "target_kind": "method", "arg_values": ["list"]}),
+        ]);
+        let csharp = HashMap::from([("f:1".to_string(), "Orders.cs".to_string())]);
+        let found = load(&conn, &csharp).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].verb.as_str(), found[0].template.as_str()), ("GET", "api/Orders/list"));
+    }
 
     #[test]
     fn routes_combine_and_tokens_are_replaced() {
@@ -194,10 +253,10 @@ mod tests {
 
     #[test]
     fn a_named_argument_is_no_template() {
-        assert_eq!(template(r#"["api/x"]"#).as_deref(), Some("api/x"));
-        assert_eq!(template(r#"["Name=x"]"#), None);
-        assert_eq!(template(r#"["{id=5}"]"#).as_deref(), Some("{id=5}"));
-        assert_eq!(template("[]"), None);
+        assert_eq!(template(&json!(["api/x"])).as_deref(), Some("api/x"));
+        assert_eq!(template(&json!(["Name=x"])), None);
+        assert_eq!(template(&json!(["{id=5}"])).as_deref(), Some("{id=5}"));
+        assert_eq!(template(&json!([])), None);
         assert_eq!(attribute("Http.HttpGetAttribute"), "HttpGet");
     }
 }

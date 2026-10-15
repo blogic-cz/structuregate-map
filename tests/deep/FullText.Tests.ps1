@@ -40,15 +40,26 @@ Test-Case 'fulltext: a python call, its arguments, its strings and its docstring
 Test-Case 'fulltext: every string an expression touches is listed, not the first twelve' {
     $parts = (1..15 | ForEach-Object { "'s$_'" }) -join ' + '
     $tree = Use-Tree @{ 'app.py' = "WORD = $parts$nl" }
-    Assert-Equal (Get-FullTextValue $tree '.py' "SELECT 'v=' || json_array_length(strings) FROM expressions ORDER BY size DESC LIMIT 1") '15' 'strings'
+    Assert-Equal (Get-FullTextValue $tree '.py' "SELECT 'v=' || (SELECT count(*) FROM expressions__strings j WHERE j.owner = expressions.id AND j.parent = expressions.id || '/0') FROM expressions ORDER BY size DESC LIMIT 1") '15' 'strings'
 }
 
 Test-Case 'fulltext: an argument that is a literal python reads without running it has a value' {
     $tree = Use-Tree @{ 'app.py' = "def go(a, b, c, d):$nl    return a$nl$nl$nl" + "go(-1, (1, 2), {'k': [1]}, len)$nl" }
     $value = { param($p) Get-FullTextValue $tree '.py' "SELECT 'v=' || value FROM arguments WHERE param = '$p'" }
     Assert-Equal (& $value 'a') '-1' 'a negative number'
-    Assert-Equal (& $value 'b') '(1, 2)' 'a tuple'
-    Assert-Equal (& $value 'c') "{'k': [1]}" 'a dict'
+    # A CONTAINER is node rows (`arguments__value`), never its repr: its kind, then each item below `items`.
+    $node = { param($p, $sql) Get-FullTextValue $tree '.py' ("SELECT 'v=' || ($sql) FROM arguments a JOIN arguments__value r " +
+        "ON r.id = a.id || '/0' WHERE a.param = '$p'") }
+    $kind = "SELECT k.value FROM arguments__value k WHERE k.parent = r.id AND k.role = 'k'"
+    $items = "SELECT group_concat(i.value, ',' ORDER BY i.ord) FROM arguments__value l JOIN arguments__value i ON i.parent = l.id " +
+        "WHERE l.parent = r.id AND l.role = 'items'"
+    Assert-Equal (& $node 'b' $kind) 'tuple' 'a tuple'
+    Assert-Equal (& $node 'b' $items) '1,2' 'its items'
+    Assert-Equal (& $node 'c' $kind) 'dict' 'a dict'
+    $pair = "SELECT kk.value || '=' || vk.value FROM arguments__value l JOIN arguments__value e ON e.parent = l.id " +
+        "JOIN arguments__value kk ON kk.parent = e.id AND kk.role = 'key' JOIN arguments__value vv ON vv.parent = e.id AND vv.role = 'value' " +
+        "JOIN arguments__value vk ON vk.parent = vv.id AND vk.role = 'k' WHERE l.parent = r.id AND l.role = 'items'"
+    Assert-Equal (& $node 'c' $pair) 'k=list' 'its key, holding a list'
     Assert-Equal (& $value 'd') '' 'a name is not a literal'
 }
 

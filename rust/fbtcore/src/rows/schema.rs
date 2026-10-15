@@ -20,8 +20,7 @@ pub const JOIN_COLUMNS: &[&str] = &[
     "parent",
 ];
 
-/// One cell. A list or an object becomes JSON text, which SQLite can still search and
-/// `json_each` can open.
+/// One scalar cell. A list or an object is not a cell: it is nodes in a child table (`rows/cells/mod.rs`).
 pub fn cell(raw: Option<&Value>) -> ToSqlOutput<'static> {
     let value = match raw {
         None | Some(Value::Null) => SqlValue::Null,
@@ -34,14 +33,8 @@ pub fn cell(raw: Option<&Value>) -> ToSqlOutput<'static> {
             }
         }
         Some(Value::String(s)) => SqlValue::Text(s.clone()),
-        // A PAYLOAD CELL STILL IN THE TEXT NODE SENT - see `rawcells`: decoded here, one at a time, and spelled
-        // exactly as a decoded one is.
-        Some(other) if super::rawcells::text_of(other).is_some() => {
-            let text = super::rawcells::text_of(other).unwrap_or("null");
-            SqlValue::Text(super::pyjson::dumps(&serde_json::from_str(text).unwrap_or(Value::Null)))
-        }
-        // A list or an object, spelled as python spells it - see pyjson::dumps.
-        Some(other) => SqlValue::Text(super::pyjson::dumps(other)),
+        // A LIST OR AN OBJECT NEVER REACHES A COLUMN: `store::insert` writes it as nodes (`cells`).
+        Some(_) => SqlValue::Null,
     };
     ToSqlOutput::Owned(value)
 }

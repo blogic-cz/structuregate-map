@@ -60,8 +60,8 @@ class Sections:
         if isinstance(node, ast.Name):
             # A CLASS BODY IS NOT AN ENCLOSING SCOPE, as the Binder says: only the innermost scope is asked
             # when it is a class.
-            for depth, (kind, bound) in enumerate(reversed(self.scopes)):
-                if kind == "class" and depth > 0:
+            for outward, (kind, bound) in enumerate(reversed(self.scopes)):
+                if kind == "class" and outward > 0:
                     continue
                 if node.id in bound:
                     return bound[node.id]

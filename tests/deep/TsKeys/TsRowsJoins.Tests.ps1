@@ -38,9 +38,9 @@ Test-Case 'tsrows: a key behind one enum tested through differently written expr
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || json_extract(v.value, '$.dimension') || ' ' || " +
-        "json_extract(v.value, '$.op') || ' ' || json_extract(v.value, '$.values') AS reach " +
-        "FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'demo.%'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || v.dimension || ' ' || " +
+        "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
+        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.%'")
     Assert-Line $r 'demo.shared | item.kind | kind in ["Alpha"]'
     Assert-NoLine $r 'demo.split |'
 }
@@ -70,12 +70,15 @@ Test-Case 'tsrows: a local read, a function argument and a chained call name the
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $l = Invoke-TsRowsQ $made.Db ("SELECT 'local ' || l.name || ' ' || json_extract(x.ast, '$.receiver.receiver.local.line') || ':' || " +
-        "json_extract(x.ast, '$.receiver.receiver.local.col') || ' row ' || l.line || ':' || l.col AS j " +
-        "FROM expressions x JOIN locals l ON l.name = 'alphaKinds' WHERE x.source = 'alphaKinds.includes(kind)'")
+    $l = Invoke-TsRowsQ $made.Db ("SELECT 'local ' || l.name || ' ' || lc.line || ':' || " +
+        "lc.col || ' row ' || l.line || ':' || l.col AS j " +
+        "FROM expressions x JOIN locals l ON l.name = 'alphaKinds' " +
+        "JOIN expressions__ast r1 ON r1.parent = x.id || '/0' AND r1.role = 'receiver' JOIN expressions__ast r2 ON r2.parent = r1.id AND r2.role = 'receiver' " +
+        "JOIN expressions__ast lc ON lc.parent = r2.id AND lc.role = 'local' WHERE x.source = 'alphaKinds.includes(kind)'")
     Assert-Line $l 'local alphaKinds 4:11 row 4:11'
     $f = Invoke-TsRowsQ $made.Db ("SELECT 'fn ' || c.callee || ' -> ' || coalesce(f.name, 'inline') || ' ' || f.line AS j FROM calls c " +
-        "JOIN functions f ON f.id = json_extract(c.args, '$[0].`$fn_id') WHERE c.callee IN ('[[1]].map', 'rows.reduce')")
+        "JOIN calls__args a0 ON a0.owner = c.id AND a0.parent = c.id || '/0' AND a0.ord = 0 " +
+        "JOIN functions f ON f.id = a0.[`$fn_id] WHERE c.callee IN ('[[1]].map', 'rows.reduce')")
     Assert-Line $f 'fn [[1]].map -> getTotal 8'
     Assert-Line $f 'fn rows.reduce -> inline 8'
     $c = Invoke-TsRowsQ $made.Db ("SELECT 'chain ' || c.method || ' on ' || coalesce(r.method, '-') AS j FROM calls c " +

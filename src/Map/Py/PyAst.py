@@ -17,9 +17,8 @@ import ast
 # multiply the table while answering nothing the identifier columns cannot already answer.
 MIN_EXPRESSION_NODES = 3
 
-# How deep the structural skeleton of an expression goes. The shape is for recognising a pattern; the code
-# itself is in `source`, in full, in the same row.
-MAX_AST_DEPTH = 4
+# The kinds a shape descends into: the expression skeleton, never a statement nested in a lambda's body.
+SHAPE_KINDS = (ast.expr, ast.operator, ast.cmpop, ast.boolop, ast.unaryop)
 
 NEWLINE = chr(10)
 
@@ -124,16 +123,26 @@ def sizes(tree: ast.AST) -> dict:
     return counted
 
 
-def shape(node, depth: int = 0) -> dict:
-    """The structural skeleton of an expression: kinds only, no names, capped."""
-    out = {"k": type(node).__name__}
-    if depth >= MAX_AST_DEPTH:
-        return out
-    kids = [shape(child, depth + 1) for child in ast.iter_child_nodes(node)
-            if isinstance(child, (ast.expr, ast.operator, ast.cmpop, ast.boolop, ast.unaryop))]
-    if kids:
-        out["c"] = kids[:8]
-    return out
+def shape(node) -> dict:
+    """The structural skeleton of an expression: kinds only, no names - and WHOLE, every level and every child.
+
+    NO CAP, AND NO RECURSION. A cut at four levels and eight children answered "which expressions look like
+    this" for the top of a tree only, and `a + b + ... + z` is a left-leaning chain as deep as it is long, so
+    the walk is an explicit stack: python's recursion limit is not a property of the source being mapped.
+    """
+    root = {"k": type(node).__name__}
+    stack = [(node, root)]
+    while stack:
+        current, out = stack.pop()
+        kids = []
+        for child in ast.iter_child_nodes(current):
+            if isinstance(child, SHAPE_KINDS):
+                made = {"k": type(child).__name__}
+                kids.append(made)
+                stack.append((child, made))
+        if kids:
+            out["c"] = kids
+    return root
 
 
 def facts(node) -> dict:

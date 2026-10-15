@@ -7,8 +7,10 @@
 //! namespace and name compiled into two projects is two. A declaration with no symbol (a TypeScript enum) is
 //! a place per file. An enum's places are compared by their members, name and value; any other type's are not.
 
+use super::cells;
+use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::BTreeMap;
 
 const KINDS: [&str; 6] = ["class", "struct", "record", "interface", "enum", "delegate"];
@@ -28,10 +30,15 @@ pub fn write(conn: &Connection) -> rusqlite::Result<usize> {
     let mut members: BTreeMap<(String, String), String> = BTreeMap::new();
     let enums = has_columns(conn, "enums", &["file", "name", "members"]);
     if enums {
-        let mut stmt = conn.prepare("SELECT file, name, members FROM enums")?;
-        for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?)))? {
-            let (file, name, list) = row?;
-            members.insert((file, name), canonical(&list));
+        // `members` is a list of `{name, value}`: its nodes, read back row by row.
+        let mut list = Column::new(conn, "enums", "members")?;
+        let sql = format!("SELECT file, name, {}, {} FROM enums e", owner_sql(conn, "enums", "e"), scalar_sql(conn, "enums", "e", "members"));
+        let mut stmt = conn.prepare(&sql)?;
+        let rows: Vec<(String, String, String, SqlValue)> =
+            stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, r.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
+        for (file, name, owner, scalar) in rows {
+            let held = list.value(&owner, &scalar)?;
+            members.insert((file, name), canonical(&held));
         }
     }
     let mut add = |name: String, place: Place, project: String, file: String| {
@@ -68,10 +75,13 @@ pub fn write(conn: &Connection) -> rusqlite::Result<usize> {
         }
     }
 
+    // `symbols` and `at` are LISTS, so they are nodes (`duplicate_types__symbols`, `duplicate_types__at`): the table
+    // and its node tables go together. Made up front, so a tree with no duplicate still has the table.
+    cells::drop_children(conn, "duplicate_types").map_err(failed)?;
     conn.execute_batch(
-        "DROP TABLE IF EXISTS duplicate_types; CREATE TABLE duplicate_types (id, name, kinds, langs, places, symbols, at, members_differ, detail);",
+        "DROP TABLE IF EXISTS duplicate_types; CREATE TABLE duplicate_types (id, name, kinds, langs, places, members_differ, detail);",
     )?;
-    let mut insert = conn.prepare("INSERT INTO duplicate_types VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)")?;
+    let mut made: Vec<Value> = Vec::new();
     let mut n = 0;
     for (name, places) in &by_name {
         if places.len() < 2 {
@@ -86,18 +96,19 @@ pub fn write(conn: &Connection) -> rusqlite::Result<usize> {
         };
         let (differ, detail) = compared(&places);
         n += 1;
-        insert.execute(rusqlite::params![
-            format!("dt:{n}"),
-            name,
-            set(&|p| p.kind.clone()).join(","),
-            set(&|p| p.lang.clone()).join(","),
-            places.len() as i64,
-            json!(set(&|p| p.symbol.clone())).to_string(),
-            json!(set(&|p| p.at.clone())).to_string(),
-            differ,
-            detail,
-        ])?;
+        made.push(serde_json::json!({
+            "id": format!("dt:{n}"),
+            "name": name,
+            "kinds": set(&|p| p.kind.clone()).join(","),
+            "langs": set(&|p| p.lang.clone()).join(","),
+            "places": places.len() as i64,
+            "symbols": set(&|p| p.symbol.clone()),
+            "at": set(&|p| p.at.clone()),
+            "members_differ": differ,
+            "detail": detail,
+        }));
     }
+    super::store::insert_rows(conn, "duplicate_types", &made).map_err(failed)?;
     conn.execute_batch("CREATE INDEX ix_duplicate_types_name ON duplicate_types(name);")?;
     Ok(n)
 }
@@ -119,8 +130,8 @@ fn compared(places: &[&Place]) -> (Option<i64>, String) {
 }
 
 /// `[{name, value}]` as `{A=1, B=2}`, sorted by name, so two copies listed in a different order are one set.
-fn canonical(list: &str) -> String {
-    let parsed: Vec<Value> = serde_json::from_str(list).unwrap_or_default();
+fn canonical(list: &Value) -> String {
+    let parsed: &[Value] = list.as_array().map(Vec::as_slice).unwrap_or_default();
     let mut pairs: Vec<String> = parsed
         .iter()
         .map(|m| {
@@ -136,9 +147,106 @@ fn canonical(list: &str) -> String {
     format!("{{{}}}", pairs.join(", "))
 }
 
+/// Whether a table holds every column - as a column of its own, or as the node table its structures went to.
 pub(crate) fn has_columns(conn: &Connection, table: &str, wanted: &[&str]) -> bool {
     let held = super::schema::existing_columns(conn, table).unwrap_or_default();
-    wanted.iter().all(|w| held.iter().any(|c| c == w))
+    if held.is_empty() {
+        return false;
+    }
+    let nodes = cells::columns_of(conn, table);
+    wanted.iter().all(|w| held.iter().any(|c| c == w) || nodes.iter().any(|(c, _)| c == w))
+}
+
+// A LIST OR AN OBJECT IS NODES (`cells`): what the passes over finished rows read a column through. A column every
+// row held a structure in has no column of its own at all, so each of these asks before it names one.
+
+/// The node table a column's structures went to, when any row held one.
+pub(crate) fn nodes_of(conn: &Connection, table: &str, column: &str) -> Option<String> {
+    let child = cells::child(table, column);
+    let made = cells::columns_of(conn, table).into_iter().any(|(c, t)| c == column && t == child);
+    (made && !super::schema::existing_columns(conn, &child).unwrap_or_default().is_empty()).then_some(child)
+}
+
+/// A column as SQL selects it: `alias."column"`, or NULL where the table holds no scalar there.
+pub(crate) fn scalar_sql(conn: &Connection, table: &str, alias: &str, column: &str) -> String {
+    let held = super::schema::existing_columns(conn, table).unwrap_or_default();
+    if held.iter().any(|c| c == column) { format!("{alias}.\"{}\"", super::schema::escape(column)) } else { "NULL".into() }
+}
+
+/// What a node row's `owner` is for a row of `table`, in SQL: its id, or `#<rowid>` where it has none (`store`).
+pub(crate) fn owner_sql(conn: &Connection, table: &str, alias: &str) -> String {
+    let rowid = format!("'#' || {alias}.rowid");
+    if super::schema::existing_columns(conn, table).unwrap_or_default().iter().any(|c| c == "id") {
+        format!("(CASE WHEN typeof({alias}.id) IN ('text', 'integer', 'real') THEN CAST({alias}.id AS TEXT) ELSE {rowid} END)")
+    } else {
+        rowid
+    }
+}
+
+/// The ITEMS of a list column as a table: `owner`, `ord` and each of `members` (`value` for a scalar item, a member's
+/// name for an object item), NULL where no node carries it - a plain table, no JSON function.
+pub(crate) fn items_sql(conn: &Connection, table: &str, column: &str, members: &[&str]) -> String {
+    let Some(child) = nodes_of(conn, table, column) else {
+        let nulls: Vec<String> = members.iter().map(|m| format!(", NULL AS \"{m}\"")).collect();
+        return format!("(SELECT NULL AS owner, NULL AS ord{} WHERE 0)", nulls.concat());
+    };
+    let held = super::schema::existing_columns(conn, &child).unwrap_or_default();
+    let picked: Vec<String> = members
+        .iter()
+        .map(|m| if held.iter().any(|c| c == m) { format!(", j.\"{m}\" AS \"{m}\"") } else { format!(", NULL AS \"{m}\"") })
+        .collect();
+    format!(
+        "(SELECT j.owner AS owner, j.ord AS ord{} FROM \"{}\" j WHERE j.parent = j.owner || '/0')",
+        picked.concat(),
+        super::schema::escape(&child)
+    )
+}
+
+/// One column read back row by row: a scalar as itself, a structure from its node table.
+pub(crate) struct Column<'c> {
+    reader: Option<cells::Reader<'c>>,
+}
+
+impl<'c> Column<'c> {
+    pub(crate) fn new(conn: &'c Connection, table: &str, column: &str) -> rusqlite::Result<Column<'c>> {
+        let reader = match nodes_of(conn, table, column) {
+            Some(child) => Some(cells::Reader::new(conn, &child).map_err(failed)?),
+            None => None,
+        };
+        Ok(Column { reader })
+    }
+
+    /// The cell of the row `owner` is, whose own column held `scalar`.
+    pub(crate) fn value(&mut self, owner: &str, scalar: &SqlValue) -> rusqlite::Result<Value> {
+        if !matches!(scalar, SqlValue::Null) {
+            return Ok(match scalar {
+                SqlValue::Integer(i) => Value::from(*i),
+                SqlValue::Real(f) => Value::from(*f),
+                SqlValue::Text(t) => Value::String(t.clone()),
+                SqlValue::Blob(b) => Value::String(String::from_utf8_lossy(b).into_owned()),
+                SqlValue::Null => Value::Null,
+            });
+        }
+        match self.reader.as_mut() {
+            Some(reader) => Ok(reader.get(owner).map_err(failed)?.unwrap_or(Value::Null)),
+            None => Ok(Value::Null),
+        }
+    }
+
+    /// The cell's items as strings - a list of names, the way `bases` and `reads` are held. Anything else is none.
+    pub(crate) fn strings(&mut self, owner: &str, scalar: &SqlValue) -> rusqlite::Result<Vec<String>> {
+        Ok(match self.value(owner, scalar)? {
+            Value::Array(items) => items.iter().map(|i| i.as_str().unwrap_or("").to_string()).collect(),
+            _ => Vec::new(),
+        })
+    }
+}
+
+fn failed(e: anyhow::Error) -> rusqlite::Error {
+    match e.downcast::<rusqlite::Error>() {
+        Ok(e) => e,
+        Err(e) => rusqlite::Error::InvalidParameterName(format!("{e:#}")),
+    }
 }
 
 pub(crate) fn text(row: &rusqlite::Row, i: usize) -> rusqlite::Result<String> {
@@ -152,6 +260,7 @@ pub(crate) fn text(row: &rusqlite::Row, i: usize) -> rusqlite::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn rows(conn: &Connection) -> Vec<(String, i64, Option<i64>, String)> {
         conn.prepare("SELECT name, places, members_differ, detail FROM duplicate_types ORDER BY name")
@@ -173,12 +282,16 @@ mod tests {
              CREATE TABLE classes (file, name, kind, line, symbol);
              INSERT INTO classes VALUES ('f:1', 'ColorIDs', 'enum', 3, 'X.ColorIDs'), ('f:2', 'ColorIDs', 'enum', 4, 'X.ColorIDs'),
                                         ('f:3', 'Partial', 'class', 1, 'X.Partial'), ('f:4', 'Partial', 'class', 1, 'X.Partial');
-             CREATE TABLE enums (file, name, line, members);
-             INSERT INTO enums VALUES ('f:1', 'ColorIDs', 3, '[{\"name\": \"Blue\", \"value\": 2}, {\"name\": \"Red\", \"value\": 1}]'),
-                                      ('f:2', 'ColorIDs', 4, '[{\"name\": \"Red\", \"value\": 1}]'),
-                                      ('f:5', 'ColorIDs', 1, '[{\"name\": \"Red\", \"value\": 1}, {\"name\": \"Blue\", \"value\": 2}]');",
+",
         )
         .unwrap();
+        // `members` as every half stores it: nodes, through the store.
+        let enums = [
+            json!({"id": "en:1", "file": "f:1", "name": "ColorIDs", "line": 3, "members": [{"name": "Blue", "value": 2}, {"name": "Red", "value": 1}]}),
+            json!({"id": "en:2", "file": "f:2", "name": "ColorIDs", "line": 4, "members": [{"name": "Red", "value": 1}]}),
+            json!({"id": "en:3", "file": "f:5", "name": "ColorIDs", "line": 1, "members": [{"name": "Red", "value": 1}, {"name": "Blue", "value": 2}]}),
+        ];
+        crate::rows::store::insert_rows(&conn, "enums", &enums).unwrap();
         assert_eq!(write(&conn).unwrap(), 1);
         let found = rows(&conn);
         assert_eq!(found.len(), 1);
@@ -186,5 +299,19 @@ mod tests {
         assert_eq!((name.as_str(), *places, *differ), ("ColorIDs", 3, Some(1)));
         // The TypeScript copy lists the same members in another order: one set with the first C# copy.
         assert_eq!(detail, "{Blue=2, Red=1} at a/Ids.cs:3, web/ids.ts:1; {Red=1} at b/Ids.cs:4");
+        // THE PLACES ARE NODES, never a JSON text: one item per place, in order.
+        let at: Vec<String> = conn
+            .prepare("SELECT j.value FROM duplicate_types d JOIN duplicate_types__at j ON j.owner = d.id AND j.parent = d.id || '/0' ORDER BY j.ord")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(at, vec!["a/Ids.cs:3", "b/Ids.cs:4", "web/ids.ts:1"]);
+        assert!(!has_columns(&conn, "duplicate_types", &["nope"]) && has_columns(&conn, "duplicate_types", &["at", "symbols"]));
+        // Rewritten whole: a second run leaves one copy of every node, not two.
+        write(&conn).unwrap();
+        let nodes: i64 = conn.query_row("SELECT count(*) FROM duplicate_types__at", [], |r| r.get(0)).unwrap();
+        assert_eq!(nodes, 4);
     }
 }

@@ -95,9 +95,6 @@ pub(super) fn spell(v: &Value) -> Option<&str> {
     }
 }
 
-/// Most argument lists one call's ternaries of strings expand to.
-const MAX_SPELLINGS: usize = 16;
-
 /// Every string a ternary (nested too) of string arms is, None for any other value.
 fn arms(v: &Value) -> Option<Vec<Value>> {
     if spell(v).is_some() {
@@ -110,15 +107,12 @@ fn arms(v: &Value) -> Option<Vec<Value>> {
     Some(all)
 }
 
-/// The argument lists a call stands for: the product of each ternary-of-strings argument's arms, or the list
-/// itself when none is one or the product passes `MAX_SPELLINGS`.
+/// The argument lists a call stands for: the product of each ternary-of-strings argument's arms - EVERY one of
+/// them, however many - or the list itself when none is one.
 pub(super) fn spellings(args: &[Value]) -> Vec<Vec<Value>> {
     let mut lists = vec![Vec::new()];
     for arg in args {
         let options = arms(arg).filter(|_| spell(arg).is_none()).unwrap_or_else(|| vec![arg.clone()]);
-        if lists.len() * options.len() > MAX_SPELLINGS {
-            return vec![args.to_vec()];
-        }
         lists = lists.into_iter().flat_map(|l| options.iter().map(move |o| [l.clone(), vec![o.clone()]].concat())).collect();
     }
     lists
@@ -136,9 +130,24 @@ struct Frame<'v> {
     at: Option<String>,
 }
 
-/// Most times one read enters a member it is still reading with OTHER arguments (a recursion handing on what it was
-/// handed): each may spell other keys, and nothing else ends a recursion whose arguments keep changing.
-const MAX_REENTRIES: usize = 64;
+/// HOW BIG AN ENTRY'S ARGUMENTS ARE, in tree nodes. A member still being read is entered again (a recursion handing
+/// on other arguments, which may spell other keys) only with arguments NO LARGER than the ones it is being read with,
+/// and never with the same ones. Every argument is built out of the source's own subtrees, so only finitely many
+/// fit under a size: the recursion ends without a count, and one whose arguments GROW (`f(n + 'a')`) is cut where
+/// they would grow - its later ways are not all read, so none of them is claimed (`cyclic`).
+fn size(args: &[Value]) -> usize {
+    let mut stack: Vec<&Value> = args.iter().collect();
+    let mut n = 0;
+    while let Some(v) = stack.pop() {
+        n += 1;
+        match v {
+            Value::Array(items) => stack.extend(items),
+            Value::Object(map) => stack.extend(map.values()),
+            _ => {}
+        }
+    }
+    n
+}
 
 /// WHAT ONE READ HAS ENTERED (#48). Each (member, arguments) is read ONCE, its keys kept with its callees' branch links
 /// RELATIVE to its own entry (`arg:<branch>@` for its own branch, `arg:<branch>@^E1~^E2` for one below), and every call
@@ -148,10 +157,9 @@ const MAX_REENTRIES: usize = 64;
 #[derive(Default)]
 pub(super) struct Seen {
     done: std::collections::HashMap<String, Found>,
-    /// The members being read, outermost first, each with its (member, arguments) entry.
-    active: Vec<(String, String)>,
+    /// The members being read, outermost first, each with its (member, arguments) entry and the arguments' `size`.
+    active: Vec<(String, String, usize)>,
     cyclic: std::collections::HashSet<String>,
-    reentries: usize,
 }
 
 type Found = Vec<(String, Vec<String>)>;
@@ -217,7 +225,7 @@ impl Returned<'_, '_> {
             return self.enter(member.to_string(), &Value::Null, &mut seen, out, None);
         }
         let frame = Frame { member: member.to_string(), args: &[], site: None, at: None };
-        seen.active.push((member.to_string(), format!("{member} []")));
+        seen.active.push((member.to_string(), format!("{member} []"), usize::MAX));
         for row in self.every.get(member).into_iter().flatten() {
             if let Some(ret) = row.get("value") {
                 self.held(ret, &frame, &mut seen, out);
@@ -231,7 +239,7 @@ impl Returned<'_, '_> {
     ///
     /// AN ARGUMENT THAT IS A TERNARY OF STRINGS IS EACH OF THEM: `k(on ? 'x' : 'y')` over `(n) => t(`q.${n}`)` reads the
     /// callee once per spelling, no condition carried. Left whole, the hole stayed open and an open hole matches every
-    /// key under the prefix. Past `MAX_SPELLINGS` combinations the call is read as it was.
+    /// key under the prefix. Every combination is read, however many.
     fn enter(&self, member: String, call: &Value, seen: &mut Seen, out: &mut Found, site: Option<&str>) {
         let args = call.get("$args").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
         let spelled = spellings(args);
@@ -249,15 +257,16 @@ impl Returned<'_, '_> {
         if let Some(found) = seen.done.get(&entry) {
             return out.extend(compose(found, site));
         }
-        if let Some(i) = seen.active.iter().position(|(m, _)| *m == member) {
-            let ring: Vec<String> = seen.active[i..].iter().map(|(m, _)| m.clone()).collect();
+        let weight = size(args);
+        if let Some(i) = seen.active.iter().position(|(m, _, _)| *m == member) {
+            let ring: Vec<String> = seen.active[i..].iter().map(|(m, _, _)| m.clone()).collect();
             seen.cyclic.extend(ring);
-            if seen.reentries >= MAX_REENTRIES || seen.active.iter().any(|(_, e)| *e == entry) {
+            let smallest = seen.active.iter().filter(|(m, _, _)| *m == member).map(|(_, _, w)| *w).min().unwrap_or(0);
+            if weight > smallest || seen.active.iter().any(|(_, e, _)| *e == entry) {
                 return;
             }
-            seen.reentries += 1;
         }
-        seen.active.push((member.clone(), entry.clone()));
+        seen.active.push((member.clone(), entry.clone(), weight));
         let mut found = Found::new();
         let frame = Frame { member: member.clone(), args, site: None, at: None };
         if let Some(row) = self.one_return.get(&member) {
@@ -542,3 +551,7 @@ pub(super) fn spelled_arrows(store: &Store<'_>, params: &std::collections::HashM
     }
     out
 }
+
+#[cfg(test)]
+#[path = "key_follow_tests.rs"]
+mod tests;

@@ -5,6 +5,9 @@
     Its helpers are its own - `-Only HttpLinks` runs this suite alone. The compiler cache is the one TsRows fills.
 #>
 
+# The node rows' SQL (a list cell is `<table>__<column>`, never JSON text).
+. (Join-Path $PSScriptRoot 'nodes/NodeSql.Helpers.ps1')
+
 function Get-HttpLinksModules {
     $modules = Join-Path ([System.IO.Path]::GetTempPath()) 'sgtest-tsrows\node_modules'
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return $null }
@@ -98,7 +101,7 @@ Test-Case 'httplinks: a C# endpoint carries its class route, constants folded an
     Assert-Line $r 'ep=GET|api/calculations/{id}|CalculationController.Get'
     Assert-Line $r 'ep=GET|absolute/ping|CalculationController.Ping'
     Assert-Line $r 'ep=GET|api/Orders/List|OrdersController.List'
-    $v = Get-HttpLinksRows $tree "SELECT 'av=' || arg_values AS a FROM decorators WHERE name = 'Route' AND target_kind = 'class' AND target = 'CalculationController'"
+    $v = Get-HttpLinksRows $tree "SELECT 'av=' || $(Get-NodeRootListSql 'decorators__arg_values' 'decorators.id') AS a FROM decorators WHERE name = 'Route' AND target_kind = 'class' AND target = 'CalculationController'"
     Assert-Line $v 'av=["api/calculations"]'
 }
 

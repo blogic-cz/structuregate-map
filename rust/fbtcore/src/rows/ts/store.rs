@@ -15,6 +15,7 @@
 //!   * `half` is dropped. No pass reads it, and a row carrying it would differ from the
 //!     row node walked — the kind of difference that is found late.
 
+use super::super::cells;
 use super::super::half::HALF_COLUMN;
 use super::super::schema;
 use anyhow::Result;
@@ -68,6 +69,8 @@ pub enum Row {
 pub enum Cell {
     Value(Value),
     Json(Box<str>, std::cell::OnceCell<Value>),
+    /// A structure written as nodes (`rows/cells/mod.rs`): its owner, rebuilt the first time a pass reads it.
+    Nodes(Rc<cells::Source>, Box<str>, std::cell::OnceCell<Value>),
 }
 
 impl Cell {
@@ -79,6 +82,7 @@ impl Cell {
         match self {
             Cell::Value(v) => v,
             Cell::Json(text, decoded) => decoded.get_or_init(|| structure(text)),
+            Cell::Nodes(source, owner, decoded) => decoded.get_or_init(|| source.get(owner).unwrap_or(Value::Null)),
         }
     }
 
@@ -88,6 +92,7 @@ impl Cell {
         match self {
             Cell::Value(v) => v,
             Cell::Json(text, decoded) => decoded.into_inner().unwrap_or_else(|| super::super::rawcells::wrap(text.into())),
+            Cell::Nodes(source, owner, decoded) => decoded.into_inner().unwrap_or_else(|| source.get(&owner).unwrap_or(Value::Null)),
         }
     }
 }
@@ -376,11 +381,20 @@ impl<'a> Store<'a> {
         let has_half = columns.iter().any(|c| c == HALF_COLUMN);
         let keep: Vec<String> = columns.into_iter().filter(|c| c != HALF_COLUMN).collect();
 
-        let select = keep
+        // THE STRUCTURES ARE NODES (`rows/cells/mod.rs`): each such column is a cell rebuilt from its child table
+        // when a pass first reads it. The owner is the row's id, or its rowid in a table without one.
+        let nodes: Vec<(String, Rc<cells::Source>)> = cells::columns_of(db, name)
+            .into_iter()
+            .map(|(column, child)| Ok((column, Rc::new(cells::Source::new(db, &child)?))))
+            .collect::<Result<_>>()?;
+        let id_at = keep.iter().position(|c| c == "id");
+        let mut select = keep
             .iter()
             .map(|c| format!("\"{}\"", schema::escape(c)))
             .collect::<Vec<_>>()
             .join(", ");
+        select.push_str(", rowid");
+        let width = keep.len();
         let sql = if has_half {
             format!(
                 "SELECT {select} FROM \"{}\" WHERE \"{HALF_COLUMN}\" = ?1 ORDER BY rowid",
@@ -396,7 +410,18 @@ impl<'a> Store<'a> {
         // STRAIGHT INTO THE HELD SHAPE. A SQL row has every column, so the schema is the SELECT's and every
         // cell is `Some` - what `shared` makes of a map per row, without the map: building hundreds of thousands of them
         // first, each with its own key strings, took the exe to several GB on a partial run of a large consumer.
-        let schema = Schema::of(keep.clone());
+        let mut names = keep.clone();
+        let node_at: Vec<(usize, Rc<cells::Source>)> = nodes
+            .iter()
+            .map(|(column, source)| {
+                let at = names.iter().position(|n| n == column).unwrap_or_else(|| {
+                    names.push(column.clone());
+                    names.len() - 1
+                });
+                (at, Rc::clone(source))
+            })
+            .collect();
+        let schema = Schema::of(names);
         let decode: Vec<bool> = keep.iter().map(|c| structured.is_some_and(|cols| cols.contains(c.as_str()))).collect();
         // A BOOLEAN COMES BACK AN INTEGER, and a pass that asks `== true` of it gets false: `is_default` did, and
         // every switch's default case lost its key on every run that read the rows back - all partial ones.
@@ -421,6 +446,21 @@ impl<'a> Store<'a> {
                     continue;
                 }
                 cells.push(Some(Cell::Value(value)));
+            }
+            if !node_at.is_empty() {
+                let owner = match id_at.map(|i| record.get::<_, rusqlite::types::Value>(i)).transpose()? {
+                    Some(rusqlite::types::Value::Text(id)) => id,
+                    Some(rusqlite::types::Value::Integer(id)) => id.to_string(),
+                    _ => format!("#{}", record.get::<_, i64>(width)?),
+                };
+                cells.resize(schema.names.len(), None);
+                for (at, source) in &node_at {
+                    // A column that held a scalar in this row keeps it; only a NULL one is a structure's.
+                    if matches!(&cells[*at], Some(Cell::Value(v)) if !v.is_null()) {
+                        continue;
+                    }
+                    cells[*at] = Some(Cell::Nodes(Rc::clone(source), owner.clone().into_boxed_str(), std::cell::OnceCell::new()));
+                }
             }
             Ok(Row::Held { schema: Rc::clone(&schema), cells })
         };
@@ -527,7 +567,7 @@ fn structure(text: &str) -> Value {
     if head != '[' && head != '{' {
         return Value::String(text.to_string());
     }
-    serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.to_string()))
+    cells::deep(text).unwrap_or_else(|_| Value::String(text.to_string()))
 }
 
 #[cfg(test)]

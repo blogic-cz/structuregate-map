@@ -9,6 +9,9 @@
     this half walks with. Its helpers are its own - `-Only TsPlain` runs this suite alone.
 #>
 
+# The node rows' SQL (a list cell is `<table>__<column>`, never JSON text).
+. (Join-Path $PSScriptRoot '../nodes/NodeSql.Helpers.ps1')
+
 $script:TsPlainModules = Get-TypeScriptPath 'typescript@5'
 if (-not $script:TsPlainModules) { Write-Host '    (no node/npm-installed typescript 5 - the plain typescript cases are not run)' }
 
@@ -191,7 +194,7 @@ Test-Case 'tsplain: a catch clause is a handlers row, the nested arrow''s throw 
     Invoke-TsPlainMap $tree | Out-Null
     # Digits: bare, name_read, passes, raises, reraises, finally.
     $r = Get-TsPlainRows $tree ("SELECT 'h=' || line || ':' || try_line || ':' || name || ':' || bare || name_read || passes" +
-        " || raises || reraises || finally || ':' || comment || ':' || calls || ':' || types FROM handlers ORDER BY line")
+        " || raises || reraises || finally || ':' || comment || ':' || $(Get-NodeRootListSql 'handlers__calls' 'handlers.id') || ':' || $(Get-NodeRootListSql 'handlers__types' 'handlers.id') FROM handlers ORDER BY line")
     Assert-Line $r 'h=3:2:e:110111:// best effort:["log.warn"]:[]'
     Assert-Line $r 'h=8:8::101000:/* swallow */:[]:[]'
     Assert-Equal (Get-TsPlainScalar $tree "SELECT count(*) FROM handlers WHERE func = 'run'") '2' 'both clauses sit in run'

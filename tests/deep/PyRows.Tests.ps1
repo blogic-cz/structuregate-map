@@ -14,6 +14,9 @@ $script:PyRowsPython = [bool]$script:Python
 if (-not $script:PyRowsPython) { Write-Host '    (no python on this machine - the deep map cases are not run)' }
 
 # Build the deep map over a throwaway tree and hand back the database path.
+# The node rows' SQL (a list cell is `<table>__<column>`, never JSON text).
+. (Join-Path $PSScriptRoot 'nodes/NodeSql.Helpers.ps1')
+
 function New-Db([hashtable]$Files) {
     $tree = Use-Tree $Files
     $db = Join-Path $tree 'map.sqlite'
@@ -46,7 +49,7 @@ Test-Case 'pyrows: a call is a row, with its callee, its scope and its own sourc
 
 Test-Case 'pyrows: an expression carries what it READS and CALLS, so a query never re-parses it' {
     $db = New-Db @{ 'a.py' = "value = (STORE.get(name) or {}).items()" + [char]10 }
-    $r = Invoke-Q $db --sql "SELECT reads, calls FROM expressions WHERE source LIKE '%items%' LIMIT 1"
+    $r = Invoke-Q $db --sql "SELECT $(Get-NodeRootListSql 'expressions__reads' 'expressions.id') AS reads, $(Get-NodeRootListSql 'expressions__calls' 'expressions.id') AS calls FROM expressions WHERE source LIKE '%items%' LIMIT 1"
     Assert-Line $r 'STORE.get'
     Assert-Line $r 'name'
 }
@@ -384,7 +387,7 @@ Test-Case 'pyrows: a PARAMETER is a row, with its annotation, its default and wh
         '',
         'def load(path=SETTINGS, mode: str = "r", *rest, **extra):',
         '    return path') -join [char]10 }
-    $r = Invoke-Q $db --sql "SELECT name, kind, annotation, default_expr, reads, qualname FROM parameters ORDER BY position"
+    $r = Invoke-Q $db --sql "SELECT name, kind, annotation, default_expr, $(Get-NodeRootListSql 'parameters__reads' 'parameters.id') AS reads, qualname FROM parameters ORDER BY position"
     Assert-Line $r 'path'
     Assert-Line $r 'SETTINGS'
     Assert-Line $r 'str'
@@ -405,9 +408,9 @@ Test-Case 'pyrows: an assignment and a constant carry what the RIGHT-HAND SIDE r
         'def go():',
         '    local = inspect.signature',
         '    return local') -join [char]10 }
-    $r = Invoke-Q $db --sql "SELECT name, reads FROM consts WHERE name = 'SAFE_GET'"
+    $r = Invoke-Q $db --sql "SELECT name, $(Get-NodeRootListSql 'consts__reads' 'consts.id') AS reads FROM consts WHERE name = 'SAFE_GET'"
     Assert-Line $r 'inspect.getsource'
-    $a = Invoke-Q $db --sql "SELECT target, reads FROM assignments WHERE target = 'local'"
+    $a = Invoke-Q $db --sql "SELECT target, $(Get-NodeRootListSql 'assignments__reads' 'assignments.id') AS reads FROM assignments WHERE target = 'local'"
     Assert-Line $a 'inspect.signature'
 }
 

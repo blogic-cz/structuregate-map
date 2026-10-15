@@ -9,11 +9,11 @@
 
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
-$script:ChainQ = @'
-SELECT k.key || ' | ' || k.route || ' | ' || k.n_paths || ' | ' || COALESCE((SELECT group_concat(json_extract(v.value, '$.dimension') || ' ' ||
-json_extract(v.value, '$.op') || ' ' || json_extract(v.value, '$.values'), '; ') FROM json_each(k.always_values) v), 'none') AS r
+$script:ChainQ = @"
+SELECT k.key || ' | ' || k.route || ' | ' || k.n_paths || ' | ' || COALESCE((SELECT group_concat(v.dimension || ' ' ||
+v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values'), '; ') FROM key_reach__always_values v WHERE v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0'), 'none') AS r
 FROM key_reach k WHERE k.key LIKE 'demo.%'
-'@
+"@
 
 $script:ChainBase = @{
     'apps/shop/src/kinds.ts' = "export enum Kind { Home = 1, Flat = 2, Life = 3 }`nexport function isHome(kind: Kind): boolean { return kind === Kind.Home; }`n"

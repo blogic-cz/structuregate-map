@@ -13,9 +13,33 @@ pub fn state(db: &Path, lang: &str, whole: bool) -> Result<String, String> {
 
 /// One batch of rows, stored; the receipt back.
 pub fn apply(db: &Path, root: &str, payload: &[u8]) -> Result<String, String> {
-    let batch: super::Batch = serde_json::from_slice(payload).map_err(|e| format!("the rows could not be read - {e}"))?;
-    let receipt = super::apply(db, root, &batch).map_err(|e| format!("{e:#}"))?;
-    serde_json::to_string(&receipt).map_err(|e| format!("receipt could not be serialised: {e}"))
+    deep_stack(|| {
+        let batch: super::Batch = {
+            use serde::Deserialize;
+            let mut reader = serde_json::Deserializer::from_slice(payload);
+            reader.disable_recursion_limit();
+            let batch = super::Batch::deserialize(&mut reader).and_then(|b| reader.end().map(|_| b));
+            batch.map_err(|e| format!("the rows could not be read - {e}"))?
+        };
+        let receipt = super::apply(db, root, &batch).map_err(|e| format!("{e:#}"))?;
+        serde_json::to_string(&receipt).map_err(|e| format!("receipt could not be serialised: {e}"))
+    })
+}
+
+/// THE STACK A TREE OF ANY DEPTH IS DECODED ON. A parse is never cut (no depth cap), and serde builds and drops a
+/// value by recursion: on the caller's thread - .NET's, 1 MB on Windows - a deep expression would end the process.
+/// The stack is reserved, not committed, so an ordinary batch costs nothing for it.
+const DEEP_STACK: usize = 1 << 30;
+
+fn deep_stack<T: Send>(work: impl FnOnce() -> Result<T, String> + Send) -> Result<T, String> {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(DEEP_STACK)
+            .spawn_scoped(scope, work)
+            .map_err(|e| format!("the store thread could not start - {e}"))?
+            .join()
+            .map_err(|_| "the store thread panicked".to_string())?
+    })
 }
 
 /// The rows of every file a partial run is NOT re-extracting, written to `target`. AN UNREADABLE PLAN IS
@@ -48,11 +72,23 @@ pub fn ts_state(db: &Path, lang: &str) -> Result<String, String> {
 /// streaming it through a reader cost seconds of per-byte overhead; mapped pages are the file's own, so the OS
 /// can drop them. The parse is timed here, the only side that knows when it began.
 pub fn ts_apply(db: &Path, root: &str, payload: &str) -> Result<String, String> {
+    deep_stack(|| ts_apply_on(db, root, payload))
+}
+
+fn ts_apply_on(db: &Path, root: &str, payload: &str) -> Result<String, String> {
     let file = std::fs::File::open(payload).map_err(|e| format!("the payload {payload} could not be opened - {e}"))?;
     let started = std::time::Instant::now();
     // SAFETY: node has exited and nothing writes the payload while it is mapped; the mapping is dropped here.
     let mapped = unsafe { memmap2::Mmap::map(&file) }.map_err(|e| format!("the payload {payload} could not be mapped - {e}"))?;
-    let parsed: tsapply::TsPayload = serde_json::from_slice(&mapped).map_err(|e| format!("the rows could not be read - {e}"))?;
+    // NO DEPTH LIMIT: an expression tree is as deep as its source wrote it, and serde's default of 128 failed
+    // the payload of a tree deeper than that.
+    let parsed: tsapply::TsPayload = {
+        use serde::Deserialize;
+        let mut reader = serde_json::Deserializer::from_slice(&mapped);
+        reader.disable_recursion_limit();
+        let parsed = tsapply::TsPayload::deserialize(&mut reader).and_then(|p| reader.end().map(|_| p));
+        parsed.map_err(|e| format!("the rows could not be read - {e}"))?
+    };
     drop(mapped);
     let parse_ms = started.elapsed().as_millis() as u64;
     let mut receipt = tsapply::apply(db, root, parsed).map_err(|e| format!("{e:#}"))?;

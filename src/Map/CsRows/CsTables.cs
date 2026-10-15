@@ -68,7 +68,8 @@ internal sealed class CsTables
         SortedDictionary<string, string> shas, List<(string Rel, string Abs)> read, string lang = "csharp")
     {
         var stream = new MemoryStream();
-        using (var json = new Utf8JsonWriter(stream))
+        // NO NESTING LIMIT: the writer's own default of 1000 is a cap on how deep an expression's shape may be.
+        using (var json = new Utf8JsonWriter(stream, new JsonWriterOptions { MaxDepth = int.MaxValue }))
         {
             json.WriteStartObject();
             json.WriteBoolean("all", all);
@@ -116,50 +117,85 @@ internal sealed class CsTables
     }
 
     /// <summary>
-    /// One cell. A list stays a LIST here and becomes JSON text in the database, which is what the python
-    /// half already does with `reads` and `calls` — so `json_each` opens a C# row the same way it opens a
-    /// python one, and a query written for one language runs against the other.
+    /// One cell. A list or an object stays a STRUCTURE here and becomes node rows in the database (the store
+    /// in <c>rust/fbtcore/src/rows/cells/mod.rs</c>), which is what the python half does with `reads`, `calls`
+    /// and `shape` - so a C# row and a python one are opened by the same join.
+    ///
+    /// A STRUCTURE IS ONE OF: a list of strings, an object `(Key, Value)[]` (an expression's `shape`), or a
+    /// list of objects (an enum's `members`) - and an object's member may be any of them again. It is written
+    /// with an explicit stack, never by recursion, because a shape is as deep as the expression it describes.
     /// </summary>
-    private static void Cell(Utf8JsonWriter json, string key, object value)
+    private static void Cell(Utf8JsonWriter json, string key, object? value) => Tree(json, key, value ?? "");
+
+    private static void Tree(Utf8JsonWriter json, string key, object value)
     {
+        var open = new Stack<(System.Collections.IEnumerator Items, bool List)>();
+        Open(json, key, value, open);
+        while (open.Count > 0)
+        {
+            var (items, list) = open.Peek();
+            if (!items.MoveNext())
+            {
+                if (list) json.WriteEndArray();
+                else json.WriteEndObject();
+                open.Pop();
+                continue;
+            }
+            if (list) Open(json, null, items.Current, open);
+            else
+            {
+                var (name, cell) = ((string, object?))items.Current!;
+                Open(json, name, cell, open);
+            }
+        }
+    }
+
+    /// <summary>Writes a scalar whole, or starts an object or a list and leaves its items to <see cref="Tree"/>.
+    /// A null inside a structure is JSON null: "" would read as a member whose value is empty text.</summary>
+    private static void Open(Utf8JsonWriter json, string? key, object? value,
+        Stack<(System.Collections.IEnumerator Items, bool List)> open)
+    {
+        if (key is not null) json.WritePropertyName(key);
         switch (value)
         {
+            case ValueTuple<string, object?>[] node:
+                json.WriteStartObject();
+                open.Push((node.GetEnumerator(), false));
+                break;
+            // A LIST OF OBJECTS - an enum's `members`, a shape's `c` - in the shape the TypeScript half writes,
+            // so one query opens both.
+            case IEnumerable<(string Key, object? Value)[]> objects:
+                json.WriteStartArray();
+                open.Push((objects.GetEnumerator(), true));
+                break;
+            case null:
+                json.WriteNullValue();
+                break;
             case string text:
-                json.WriteString(key, text);
+                json.WriteStringValue(text);
                 break;
             case int number:
-                json.WriteNumber(key, number);
+                json.WriteNumberValue(number);
                 break;
             // A literal's `number`: written as text it compared unequal to every number in SQL.
             case double real when double.IsFinite(real):
-                json.WriteNumber(key, real);
+                json.WriteNumberValue(real);
                 break;
             case long number:
-                json.WriteNumber(key, number);
+                json.WriteNumberValue(number);
                 break;
             case IEnumerable<string> list:
-                json.WriteStartArray(key);
+                json.WriteStartArray();
                 foreach (var item in list) json.WriteStringValue(item);
                 json.WriteEndArray();
                 break;
-            // A LIST OF OBJECTS - an enum's `members` - in the shape the TypeScript half writes, so one query
-            // opens both. A null inside one is JSON null: "" would read as a member whose value is empty text.
-            case IEnumerable<(string Key, object? Value)[]> objects:
-                json.WriteStartArray(key);
-                foreach (var item in objects)
-                {
-                    json.WriteStartObject();
-                    foreach (var (name, cell) in item)
-                    {
-                        if (cell is null) json.WriteNull(name);
-                        else Cell(json, name, cell);
-                    }
-                    json.WriteEndObject();
-                }
-                json.WriteEndArray();
+            // A LIST OF ANYTHING - an argument's `template`, lists of pieces that are strings or holes.
+            case System.Collections.IList items:
+                json.WriteStartArray();
+                open.Push((items.GetEnumerator(), true));
                 break;
             default:
-                json.WriteString(key, value?.ToString() ?? "");
+                json.WriteStringValue(value.ToString() ?? "");
                 break;
         }
     }

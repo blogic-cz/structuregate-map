@@ -250,6 +250,26 @@ fn columns_of(db: &Connection, table: &str) -> Vec<String> {
     rows.filter_map(|c| c.ok()).collect()
 }
 
+/// Whether a table holds a column - as its own, or as the node table its lists went to (`rows::cells`).
+fn held(db: &Connection, table: &str, column: &str) -> bool {
+    columns_of(db, table).iter().any(|c| c == column) || crate::rows::dups::nodes_of(db, table, column).is_some()
+}
+
+/// The items of a list column, joinable as `<alias>` beside `<row>` (a row of `table`): `<alias>.value` is an item, in
+/// `<alias>.ord` order - a join, where it once took a JSON table function.
+fn items_of(db: &Connection, table: &str, row: &str, column: &str, alias: &str) -> String {
+    format!(
+        "JOIN {} {alias} ON {alias}.owner = {}",
+        crate::rows::dups::items_sql(db, table, column, &["value"]),
+        crate::rows::dups::owner_sql(db, table, row)
+    )
+}
+
+/// A node table: one a list or an object of another table's rows went to. Not a table of rows anyone asked about.
+fn is_nodes(db: &Connection, table: &str) -> bool {
+    crate::rows::cells::parent_of(db, table).is_some()
+}
+
 fn escape(name: &str) -> String {
     name.replace('"', "\"\"")
 }

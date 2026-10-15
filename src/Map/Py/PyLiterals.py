@@ -69,8 +69,8 @@ def context_of(node: ast.AST, parents: dict, src) -> dict:
     while isinstance(parent, CONTAINERS) or (contained and collects(parent, child)):
         child, parent = parent, parents.get(id(parent))
     found = {"use": "other", "callee": "", "target": ""}
-    if isinstance(parent, ast.Compare) or isinstance(parent, ast.MatchValue):
-        found["use"] = "compare"
+    if isinstance(parent, (ast.Compare, ast.MatchValue)):
+        found.update(use="compare", target=compared_with(parent, child, parents, src))
     elif isinstance(parent, (ast.BinOp, ast.AugAssign)) and child is not getattr(parent, "target", None):
         found["use"] = "arith"
     elif isinstance(parent, ast.Subscript) and parent.slice is child:
@@ -99,6 +99,19 @@ def context_of(node: ast.AST, parents: dict, src) -> dict:
     if contained and found["use"] != "declared":
         return {"use": "other", "callee": "", "target": ""}
     return found
+
+
+def compared_with(parent: ast.AST, child: ast.AST, parents: dict, src) -> str:
+    """The source text of what a literal is compared WITH: the neighbouring operand of a comparison (`depth > 60`
+    and `60 < depth` both say `depth`), or the subject of the `match` a value pattern belongs to."""
+    if isinstance(parent, ast.Compare):
+        operands = [parent.left, *parent.comparators]
+        at = next((i for i, operand in enumerate(operands) if operand is child), 0)
+        return src(operands[at - 1] if at else operands[1])
+    node = parents.get(id(parent))
+    while node is not None and not isinstance(node, ast.Match):
+        node = parents.get(id(node))
+    return src(node.subject) if node is not None else ""
 
 
 def callee_of(call: ast.Call, src) -> dict:

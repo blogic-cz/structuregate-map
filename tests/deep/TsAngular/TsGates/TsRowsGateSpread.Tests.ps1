@@ -11,7 +11,7 @@
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
 $script:TsGateSpreadSql = "SELECT g.source || ' => ' || v.enum_name || ' ' || v.dimension || ' ' || v.op || ' ' || " +
-    "v.values_json AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate"
+    "$(Get-NodeRootListSql 'gate_values__values_json' 'v.rowid') AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate"
 
 # THE ISSUE'S REPRO, then what a consumer writes beside it. A spread of an `@Input` or of a plain field is a SET
 # row: "some element is in the list", and its negation "none is" - exact both ways, so `in` stays `in` even when

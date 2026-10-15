@@ -43,17 +43,20 @@ pub fn run(event: &str, out: &mut Out) -> i64 {
 
 /// Folders never holding a map, and never worth the walk.
 const SKIP: [&str; 9] = ["node_modules", ".git", "bin", "obj", "dist", "out", ".venv", "__pycache__", ".vs"];
-const DEPTH: usize = 6;
 const MAX_DIRS: usize = 20_000;
 
 /// Every deep map under `root`, as (path from the root, file count), the root's own `buildmap.sqlite` first. A map is
 /// told by its CONTENT - a `_meta` table naming its `schema` and `root` - never by its name: a tree writes it wherever
 /// its wiring's `--map-sqlite` says, and keeps as many as it maps halves apart.
+///
+/// BREADTH FIRST, AND NO DEPTH: the folders nearest the root are read first, so the walk reaches a map at any
+/// depth and spends its `MAX_DIRS` budget - what keeps a per-turn hook quick - on the shallow folders a map
+/// sits in, never down one deep subtree. A link is never followed (`file_type` does not follow one).
 fn find_maps(root: &Path) -> Vec<(String, i64)> {
     let mut found = Vec::new();
-    let mut queue = vec![(root.to_path_buf(), 0usize)];
+    let mut queue = std::collections::VecDeque::from([root.to_path_buf()]);
     let mut seen = 0;
-    while let Some((dir, depth)) = queue.pop() {
+    while let Some(dir) = queue.pop_front() {
         seen += 1;
         if seen > MAX_DIRS {
             break;
@@ -63,7 +66,7 @@ fn find_maps(root: &Path) -> Vec<(String, i64)> {
             let path = e.path();
             let name = e.file_name().to_string_lossy().into_owned();
             match e.file_type() {
-                Ok(t) if t.is_dir() && depth < DEPTH && !SKIP.contains(&name.as_str()) => queue.push((path, depth + 1)),
+                Ok(t) if t.is_dir() && !SKIP.contains(&name.as_str()) => queue.push_back(path),
                 Ok(t) if t.is_file() && name.ends_with(".sqlite") => {
                     if let Some(files) = map_files(&path) {
                         let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");

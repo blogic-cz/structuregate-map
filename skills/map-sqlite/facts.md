@@ -107,7 +107,7 @@ carries, and the error line names the cause: no Drive scope, or that account can
 
 | table | one row per |
 |---|---|
-| `doc_facts` | a row of a configured table: `facts`, `source`, `section`, `subsection` (the bold paragraph or lower heading above its table), `key`, `label`, `cells` (JSON, header -> cell; a column with no header is its number), `file` (the snapshot), `line` (a Markdown line, a JSON `startIndex`), `version` |
+| `doc_facts` | a row of a configured table: `facts`, `source`, `section`, `subsection` (the bold paragraph or lower heading above its table), `key`, `label`, `cells` (node rows `doc_facts__cells`, header -> cell; a column with no header is its number), `file` (the snapshot), `line` (a Markdown line, a JSON `startIndex`), `version` |
 | `doc_links` | a fact against a code value; `status` is `bound`, `missing in code` (in the document, not the code) or `missing in doc` (in the code, not the document); `target` is the code row (`sd:`, `e:`, `k:`, `c:`) with its `file`, `line`, `value`, `name` and a seed's `condition` |
 
 A fact matching several code rows (a code seeded twice) gets a `bound` row for each.

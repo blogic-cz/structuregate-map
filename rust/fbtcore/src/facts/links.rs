@@ -3,6 +3,8 @@
 //! constants a class declares (`consts`), the classes deriving from a type (`classes.bases`). Nothing here parses.
 
 use super::config::Link;
+use crate::rows::dups::{items_sql, owner_sql, scalar_sql, Column};
+use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
 use serde_json::Value;
 
@@ -47,12 +49,15 @@ fn seed(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> {
         Some((s, n)) => (s.trim_matches(['[', ']']).to_lowercase(), n.trim_matches(['[', ']']).to_lowercase()),
         None => ("dbo".to_string(), link.target.trim_matches(['[', ']']).to_lowercase()),
     };
-    let mut stmt = conn.prepare(
+    // The value is the item of `row_values` at the position the column has in `columns` - both lists, so nodes.
+    let (names, values) = (items_sql(conn, "sql_seeds", "columns", &["value"]), items_sql(conn, "sql_seeds", "row_values", &["value"]));
+    let mut stmt = conn.prepare(&format!(
         "SELECT s.id, s.file, s.line, s.condition, \
-                (SELECT json_extract(s.row_values, '$[' || c.key || ']') FROM json_each(s.columns) c WHERE lower(c.value) = lower(?3)) \
+                (SELECT v.value FROM {names} c JOIN {values} v ON v.owner = c.owner AND v.ord = c.ord \
+                 WHERE c.owner = s.id AND lower(c.value) = lower(?3)) \
          FROM sql_seeds s WHERE s.status <> 'temp' AND lower(CASE s.schema WHEN '' THEN 'dbo' ELSE s.schema END) = ?1 \
            AND lower(s.name) = ?2 ORDER BY s.id",
-    )?;
+    ))?;
     let rows = stmt.query_map([&schema, &name, &link.column], |r| {
         Ok(Code { target: text(r, 0)?, file: text(r, 1)?, line: r.get::<_, Option<i64>>(2)?.unwrap_or(0), condition: text(r, 3)?, value: text(r, 4)?, name: String::new() })
     })?;
@@ -63,9 +68,11 @@ fn seed(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> {
 /// The members of the enum the link names: by its symbol, or by its name when that names exactly one.
 fn members(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> {
     let symbol = has(conn, "enums", "symbol");
-    let pick = |by: &str| -> rusqlite::Result<Vec<(String, String, i64, String)>> {
-        let mut stmt = conn.prepare(&format!("SELECT id, file, line, members FROM enums WHERE {by} = ?1 ORDER BY id"))?;
-        stmt.query_map([&link.target], |r| Ok((text(r, 0)?, text(r, 1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0), text(r, 3)?)))?
+    // `members` is a list of `{name, value}`: its nodes, by the enum row's owner.
+    let (owner, held) = (owner_sql(conn, "enums", "e"), scalar_sql(conn, "enums", "e", "members"));
+    let pick = |by: &str| -> rusqlite::Result<Vec<(String, String, i64, String, SqlValue)>> {
+        let mut stmt = conn.prepare(&format!("SELECT e.id, e.file, e.line, {owner}, {held} FROM enums e WHERE e.{by} = ?1 ORDER BY e.id"))?;
+        stmt.query_map([&link.target], |r| Ok((text(r, 0)?, text(r, 1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0), text(r, 3)?, r.get(4)?)))?
             .collect()
     };
     let mut found = if symbol { pick("symbol")? } else { Vec::new() };
@@ -79,8 +86,10 @@ fn members(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> {
         )));
     }
     let mut out = Vec::new();
-    for (id, file, line, list) in found {
-        for member in serde_json::from_str::<Vec<Value>>(&list).unwrap_or_default() {
+    let mut list = Column::new(conn, "enums", "members")?;
+    for (id, file, line, owner, held) in found {
+        let Value::Array(members) = list.value(&owner, &held)? else { continue };
+        for member in members {
             let name = member["name"].as_str().unwrap_or("").to_string();
             let value = match &member["value"] {
                 Value::String(s) => s.clone(),
@@ -109,10 +118,14 @@ fn consts(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> {
 
 /// The classes that list the link's type among their bases, by their name.
 fn derived(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> {
-    let mut stmt = conn.prepare(
-        "SELECT c.id, c.file, c.line, c.name, coalesce(c.symbol, '') FROM classes c, json_each(c.bases) b \
-         WHERE b.value = ?1 OR b.value LIKE '%.' || ?1 ORDER BY c.id",
-    )?;
+    // `bases` is a list: one node per base. A class listing the type twice is one row per listing, as before.
+    let bases = items_sql(conn, "classes", "bases", &["value"]);
+    let owner = owner_sql(conn, "classes", "c");
+    let symbol = if has(conn, "classes", "symbol") { "coalesce(c.symbol, '')" } else { "''" };
+    let mut stmt = conn.prepare(&format!(
+        "SELECT c.id, c.file, c.line, c.name, {symbol} FROM classes c JOIN {bases} b ON b.owner = {owner} \
+         WHERE b.value = ?1 OR b.value LIKE '%.' || ?1 ORDER BY c.id, b.ord",
+    ))?;
     let rows = stmt.query_map([&link.target], |r| {
         let name = text(r, 3)?;
         Ok(Code { target: text(r, 0)?, file: text(r, 1)?, line: r.get::<_, Option<i64>>(2)?.unwrap_or(0), value: name.clone(), name: text(r, 4)?, condition: String::new() })
@@ -131,4 +144,34 @@ fn text(row: &rusqlite::Row, i: usize) -> rusqlite::Result<String> {
         rusqlite::types::Value::Real(f) => f.to_string(),
         _ => String::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn link(kind: &str, target: &str, column: &str) -> Link {
+        Link { facts: "f".into(), kind: kind.into(), target: target.into(), column: column.into(), by: "value".into() }
+    }
+
+    #[test]
+    fn every_link_reads_its_lists_from_their_nodes() {
+        let db = Connection::open_in_memory().unwrap();
+        let put = |table: &str, rows: Vec<Value>| crate::rows::store::insert_rows(&db, table, &rows).unwrap();
+        put("enums", vec![json!({"id": "en:1", "file": "f:1", "line": 2, "name": "Tier", "symbol": "Demo.Tier",
+                                 "members": [{"name": "Gold", "value": 1}, {"name": "Silver", "value": 2}]})]);
+        put("classes", vec![
+            json!({"id": "c:1", "file": "f:1", "line": 5, "name": "Alpha", "symbol": "Demo.Alpha", "bases": ["Demo.Plugin"]}),
+            json!({"id": "c:2", "file": "f:1", "line": 9, "name": "Beta", "symbol": "Demo.Beta", "bases": []}),
+        ]);
+        put("sql_seeds", vec![json!({"id": "sd:1", "file": "f:2", "line": 3, "condition": "", "schema": "", "name": "Items",
+                                     "status": "bound", "columns": ["Name", "ItemID"], "row_values": ["Pen", 42]})]);
+        let values = |kind: &str, target: &str, column: &str| -> Vec<String> {
+            codes(&db, &link(kind, target, column)).unwrap().into_iter().map(|c| c.value).collect()
+        };
+        assert_eq!(values("enum", "Demo.Tier", ""), vec!["1", "2"]);
+        assert_eq!(values("class", "Plugin", ""), vec!["Alpha"]);
+        assert_eq!(values("seed", "dbo.Items", "itemid"), vec!["42"]);
+    }
 }

@@ -22,7 +22,7 @@ Test-Case 'tsrows: a catch clause is a handlers row of the Angular half' {
     Assert-Exit $made.Result 0
     # Digits: bare, name_read, passes, raises, reraises, finally.
     $r = Invoke-TsRowsQ $made.Db ("SELECT 'h=' || line || ':' || try_line || ':' || name || ':' || bare || name_read || passes" +
-        " || raises || reraises || finally || ':' || comment || ':' || calls || '|' || half FROM handlers ORDER BY line")
+        " || raises || reraises || finally || ':' || comment || ':' || $(Get-NodeRootListSql 'handlers__calls' 'handlers.id') || '|' || half FROM handlers ORDER BY line")
     Assert-Line $r 'h=6:4:e:110111:// best effort:["log.warn"]|typescript'
     Assert-Line $r 'h=12:12::101000:/* swallow */:[]|typescript'
     Assert-Line (Invoke-TsRowsQ $made.Db "SELECT 'unowned=' || count(*) FROM handlers WHERE member IS NULL") 'unowned=0'

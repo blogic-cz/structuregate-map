@@ -6,6 +6,9 @@
     runs this suite alone - so the two it needs are written here under names of their own.
 #>
 
+# The node rows' SQL (a list cell is `<table>__<column>`, never JSON text).
+. (Join-Path $PSScriptRoot 'nodes/NodeSql.Helpers.ps1')
+
 $script:PyBindPython = [bool]$script:Python
 if (-not $script:PyBindPython) { Write-Host '    (no python on this machine - the binding cases are not run)' }
 
@@ -294,7 +297,7 @@ Test-Case 'pybind: of several same-named modules the import binds the one that d
         'other/util.py'      = "WRITE = 3" + $nl
     }
     $r = Get-PyBindRows $tree ("SELECT callee || '>' || target_path FROM calls UNION ALL " +
-                               "SELECT 'read>' || reads || '>' || binds FROM returns")
+                               "SELECT 'read>' || $(Get-NodeRootListSql 'returns__reads' 'returns.id' ', ') || '>' || $(Get-NodeRootListSql 'returns__binds' 'returns.id' ', ') FROM returns")
     Assert-Line $r 'ranked>keys/util.py'
     # The READ is bound too, position for position: `ranked` and `WRITE` both come from keys/util.py.
     Assert-Line $r 'read>["WRITE", "ranked"]>["keys/util.py::WRITE", "keys/util.py::ranked"]'
@@ -324,7 +327,7 @@ Test-Case 'pybind: a read names the SYMBOL it binds, so two files defining ROOT 
         'other.py'  = "ROOT = 'b'" + $nl
         'use.py'    = "from config import ROOT" + $nl + "def where(path):" + $nl + "    return ROOT + path" + $nl
     }
-    $r = Get-PyBindRows $tree "SELECT reads || '>' || binds FROM returns"
+    $r = Get-PyBindRows $tree "SELECT $(Get-NodeRootListSql 'returns__reads' 'returns.id' ', ') || '>' || $(Get-NodeRootListSql 'returns__binds' 'returns.id' ', ') FROM returns"
     Assert-Line $r '["ROOT", "path"]>["config.py::ROOT", ""]'
 }
 

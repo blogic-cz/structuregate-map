@@ -28,7 +28,7 @@ Test-Case 'tsrows: a full run proves the recorded reads before a partial run may
     Assert-Exit $made.Result 0
     Assert-NoLine $made.Result 'recorded reads miss'
     Assert-Line (Invoke-TsRowsQ $made.Db "SELECT 'reads=' || value AS r FROM _meta WHERE key = 'reads:typescript'") 'reads=proven'
-    $b = Invoke-TsRowsQ $made.Db "SELECT 'b=' || reads AS r FROM files WHERE path = 'apps/shop/src/b.ts'"
+    $b = Invoke-TsRowsQ $made.Db "SELECT 'b=' || $(Get-NodeRootListSql 'files__reads' 'files.id') AS r FROM files WHERE path = 'apps/shop/src/b.ts'"
     Assert-Line $b 'apps/shop/src/a.ts'
 }
 
@@ -80,7 +80,7 @@ Test-Case 'tsrows: a file answered from a cache still records what the answer re
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     foreach ($reader in 'x', 'y') {
-        $reads = Invoke-TsRowsQ $made.Db "SELECT '$reader=' || reads AS r FROM files WHERE path = 'apps/shop/src/$reader.ts'"
+        $reads = Invoke-TsRowsQ $made.Db "SELECT '$reader=' || $(Get-NodeRootListSql 'files__reads' 'files.id') AS r FROM files WHERE path = 'apps/shop/src/$reader.ts'"
         Assert-Line $reads 'apps/shop/src/g.ts'
     }
     Set-Content -LiteralPath (Join-Path $tree 'apps/shop/src/g.ts') -Value "export const BASE = 'c';"
@@ -102,7 +102,7 @@ Test-Case 'tsrows: a name imported through a barrel reads the barrel and its dec
     $tree = New-TsRowsWorkspace $files
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $reads = Invoke-TsRowsQ $made.Db "SELECT 'i=' || reads AS r FROM files WHERE path = 'apps/shop/src/i.ts'"
+    $reads = Invoke-TsRowsQ $made.Db "SELECT 'i=' || $(Get-NodeRootListSql 'files__reads' 'files.id') AS r FROM files WHERE path = 'apps/shop/src/i.ts'"
     # Y is behind the SECOND star: the walk looks in x first, and finding nothing there is not a read of x.
     Assert-Line $reads 'apps/shop/src/lib/index.ts'
     Assert-Line $reads 'apps/shop/src/lib/y.ts'
@@ -135,8 +135,8 @@ Test-Case 'tsrows: an expression another file names keeps its id when its own fi
     Assert-Line $again.Result 'read 2 file(s) again for 1 changed'
     Assert-NoLine $again.Result 'reading every hop of dependents again'
     # AND THE KEPT ROW NAMES A ROW THAT IS THERE.
-    $joined = Invoke-TsRowsQ $again.Db ("SELECT 'found=' || count(*) AS r FROM members m JOIN expressions e " +
-        "ON e.id = json_extract(m.value, '$.`$expr_id') WHERE m.name = 'v'")
+    $joined = Invoke-TsRowsQ $again.Db ("SELECT 'found=' || count(*) AS r FROM members m JOIN members__value mv ON mv.id = m.id || '/0' JOIN expressions e " +
+        "ON e.id = mv.[`$expr_id] WHERE m.name = 'v'")
     Assert-Line $joined 'found=1'
 }
 

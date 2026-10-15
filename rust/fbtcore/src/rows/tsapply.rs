@@ -193,7 +193,10 @@ fn replace_affected(db: &Connection, affected: &[String], whole: &[String]) -> R
     for table in tables_with_half(db)? {
         let columns = schema::existing_columns(db, &table)?;
         let escaped = schema::escape(&table);
-        let count = if wholly.contains(table.as_str()) {
+        // A STRUCTURE'S NODES GO WITH ITS TABLE: a child table (`cells`) of a table rebuilt whole is whole too.
+        let whole_table = wholly.contains(table.as_str())
+            || super::cells::parent_of(db, &table).is_some_and(|parent| wholly.contains(parent.as_str()));
+        let count = if whole_table {
             db.execute(
                 &format!("DELETE FROM \"{escaped}\" WHERE \"{HALF_COLUMN}\" = ?1"),
                 [LANG],

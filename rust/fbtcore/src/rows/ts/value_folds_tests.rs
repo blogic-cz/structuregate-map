@@ -217,24 +217,43 @@ fn emit_values(gates: &GateMap, idx: &EnumIndex) -> Vec<Row> {
 }
 
 #[test]
-fn the_values_column_is_COMPACT_unlike_every_other_json_cell() {
-    // This one names its separators `(",", ":")`. A cell the row store writes puts a
-    // space after the comma, and a diff against the other side reads every row as
-    // changed if this one does too.
+fn the_values_column_is_the_list_itself_never_its_text() {
+    // A list in a row is nodes in the store (`gate_values__values_json`); a JSON text would be
+    // a string cell no query can join into.
     let gates = map(&[("g:1", gate("in", &["A", "B"]))]);
     let rows = emit_values(&gates, &idx_of(FOUR));
-    assert_eq!(rows[0]["values_json"], json!("[\"A\",\"B\"]"));
+    assert_eq!(rows[0]["values_json"], json!(["A", "B"]));
 }
 
 #[test]
-fn listed_is_a_compact_cell_of_its_own_and_null_when_nothing_lists() {
+fn listed_is_a_list_of_its_own_and_null_when_nothing_lists() {
     let mut rows = gate("unknown", &[]);
     rows[0]["listed"] = json!(["A", "B"]);
     let out = emit_values(&map(&[("g:1", rows)]), &idx_of(FOUR));
     assert_eq!((out[0]["values_json"].clone(), out[0]["listed_json"].clone()),
-               (json!("[]"), json!("[\"A\",\"B\"]")));
+               (json!([]), json!(["A", "B"])));
     let out = emit_values(&map(&[("g:1", gate("in", &["A"]))]), &idx_of(FOUR));
     assert_eq!(out[0]["listed_json"], Value::Null);
+    // AN EMPTY LIST IS LISTED: `[]` is not null.
+    let mut rows = gate("unknown", &[]);
+    rows[0]["listed"] = json!([]);
+    let out = emit_values(&map(&[("g:1", rows)]), &idx_of(FOUR));
+    assert_eq!(out[0]["listed_json"], json!([]));
+}
+
+#[test]
+fn an_empty_list_and_no_list_stay_apart_in_the_node_table() {
+    // `[]` is a root node with no item; null is no node at all - so `listed` empty and `listed`
+    // absent are still two answers once stored.
+    let db = rusqlite::Connection::open_in_memory().unwrap();
+    let rows = [json!({"gate": "g:1", "values_json": ["A"], "listed_json": []}),
+                json!({"gate": "g:2", "values_json": [], "listed_json": null})];
+    crate::rows::store::insert_rows(&db, "gate_values", &rows).unwrap();
+    let count = |sql: &str| -> i64 { db.query_row(sql, [], |r| r.get(0)).unwrap() };
+    assert_eq!(count("SELECT count(*) FROM gate_values__listed_json WHERE owner = '#1' AND parent IS NULL"), 1);
+    assert_eq!(count("SELECT count(*) FROM gate_values__listed_json WHERE owner = '#2'"), 0);
+    assert_eq!(count("SELECT count(*) FROM gate_values__values_json WHERE owner = '#2' AND parent IS NULL"), 1);
+    assert_eq!(count("SELECT count(*) FROM gate_values__values_json WHERE parent = '#1/0'"), 1);
 }
 
 #[test]

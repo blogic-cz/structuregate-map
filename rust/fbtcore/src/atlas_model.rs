@@ -3,35 +3,44 @@
 
 use super::*;
 
-/// Every row of one table that this half wrote, with its structure columns decoded.
-pub(super) fn rows(db: &Connection, table: &str, json_columns: &IndexSet<String>) -> Vec<Row> {
-    let sql = format!("SELECT * FROM \"{}\" WHERE half = ?1", table.replace('"', "\"\""));
+/// Every row of one table that this half wrote, with its structures rebuilt from their node tables (`cells`).
+pub(super) fn rows(db: &Connection, table: &str) -> Vec<Row> {
+    // A STRUCTURE IS NODES: each node column read whole (these tables are small), by the owner its rows name.
+    let nodes: Vec<(String, std::collections::HashMap<String, Value>)> = crate::rows::cells::columns_of(db, table)
+        .into_iter()
+        .filter_map(|(column, _)| crate::rows::cells::load_all(db, table, &column).ok().map(|held| (column, held)))
+        .collect();
+    let owner = crate::rows::dups::owner_sql(db, table, "t");
+    let sql = format!("SELECT {owner}, t.* FROM \"{}\" t WHERE t.half = ?1", table.replace('"', "\"\""));
     let Ok(mut stmt) = db.prepare(&sql) else { return Vec::new() };
-    let names: Vec<String> = stmt.column_names().iter().map(|c| (*c).to_string()).collect();
+    let names: Vec<String> = stmt.column_names().iter().skip(1).map(|c| (*c).to_string()).collect();
     let Ok(mut found) = stmt.query([HALF]) else { return Vec::new() };
     let mut out = Vec::new();
     while let Ok(Some(record)) = found.next() {
         let mut row = Map::new();
         for (index, name) in names.iter().enumerate() {
-            let raw: rusqlite::types::Value = match record.get(index) {
+            let raw: rusqlite::types::Value = match record.get(index + 1) {
                 Ok(v) => v,
                 Err(_) => rusqlite::types::Value::Null,
             };
-            let mut value = match raw {
+            let value = match raw {
                 rusqlite::types::Value::Null => Value::Null,
                 rusqlite::types::Value::Integer(i) => Value::from(i),
                 rusqlite::types::Value::Real(f) => Value::from(f),
                 rusqlite::types::Value::Text(t) => Value::String(t),
                 rusqlite::types::Value::Blob(b) => Value::String(String::from_utf8_lossy(&b).into_owned()),
             };
-            if !value.is_null()
-                && json_columns.contains(name)
-                && let Value::String(text) = &value
-                && let Ok(decoded) = serde_json::from_str::<Value>(text)
-            {
-                value = decoded;
-            }
             row.insert(name.clone(), value);
+        }
+        if !nodes.is_empty() {
+            let key: String = record.get(0).unwrap_or_default();
+            for (column, held) in &nodes {
+                if let Some(value) = held.get(&key)
+                    && row.get(column).is_none_or(Value::is_null)
+                {
+                    row.insert(column.clone(), value.clone());
+                }
+            }
         }
         out.push(row);
     }

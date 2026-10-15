@@ -59,8 +59,8 @@ Test-Case 'tsrows keys: a constructor write and an interface method reach the te
     $tree = New-KeyClassesTree
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
-        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     # the class built with `new` holds its constructor's write
     Assert-Line $r 'demo.btn.a | field_binding | HostComponent'
     # every implementer a `new` builds is a way the interface's method answers
@@ -117,8 +117,8 @@ Test-Case 'tsrows keys: a list of instances a parent pushes and a child loops ov
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
-        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     # an arrow property the constructor puts in an object written to `tooltip`: every return of it, read where the child calls it
     Assert-Line $r 'demo.pay.yes | field_binding | DemoTableComponent'
     Assert-Line $r 'demo.pay.no | field_binding | DemoTableComponent'
@@ -169,8 +169,8 @@ Test-Case 'tsrows keys: a method an instance holds hands back every return it sp
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
-        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     # a METHOD written to `tooltip.text`, its two returns each a key it spells: the template calls it, so either renders
     Assert-Line $r 'demo.void.yes | field_binding | DemoTableComponent'
     Assert-Line $r 'demo.void.no | field_binding | DemoTableComponent'

@@ -55,17 +55,24 @@ function fileOfModule(ts, moduleSym) {
  *   `export * from './x'`            - the star whose module exports `name`
  *   `export { name } from './x'`      - into './x', under the name it had there
  *   `import { name } ...; export { name }` - into the module the import names
+ *
+ * FOLLOWED TO THE END, NOT TO A DEPTH: `seen` holds every (file, name) the walk has stood on, and only a
+ * barrel chain that comes back to one - two barrels re-exporting each other, which no compiler resolves -
+ * stops it, with no answer. A legitimate chain of any length is walked whole.
  */
-function trace(ts, checker, moduleSym, name, via, depth = 0) {
+function trace(ts, checker, moduleSym, name, via, seen = new Set()) {
   const file = fileOfModule(ts, moduleSym);
-  if (!file || depth > 16) return null;
+  if (!file) return null;
+  const at = `${file.fileName}\0${name}`;
+  if (seen.has(at)) return null;
+  seen.add(at);
   const exported = checker.getExportsOfModule(moduleSym).find((s) => s.escapedName === name);
   if (!exported) return null;
   const into = (specifier, inner) => {
     const target = checker.getSymbolAtLocation(specifier);
     if (!target) return null;
     via.push(file);
-    return trace(ts, checker, target, inner, via, depth + 1);
+    return trace(ts, checker, target, inner, via, seen);
   };
   const decl = exported.declarations?.[0];
   if ((exported.flags & ts.SymbolFlags.Alias) === 0) {

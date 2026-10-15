@@ -12,7 +12,7 @@ if ($script:TsRowsModules -and $script:TsRowsPython) {
 
 # One query for the three cases: every restriction a gate of the tree carries, by its source.
 $script:TsGateThroughSql = "SELECT g.source || ' => ' || v.enum_name || ' ' || v.dimension || ' ' || v.op || ' ' || " +
-    "v.values_json AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate"
+    "$(Get-NodeRootListSql 'gate_values__values_json' 'v.rowid') AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate"
 
 # THE FLAG SHAPES. `isBig` is written once in `ngOnInit`, which runs before the view is first
 # read, so its NEGATION is as exact as the flag: `not_in`. `isLater` is written in a click handler that may
@@ -128,9 +128,9 @@ Test-Case 'tsrows: a flag assigned from a service method restricts what the meth
     Assert-Line $r 'showNorth && model.selected => Brand brand in ["North"]'
     Assert-Line $r 'showNorth && model.selected => Size size in ["Large","Medium"]'
     Assert-Line $r 'showNorthNow => Brand brand in ["North"]'
-    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || json_extract(v.value, '$.dimension') || ' ' || " +
-        "json_extract(v.value, '$.op') || ' ' || json_extract(v.value, '$.values') AS reach " +
-        "FROM key_reach k, json_each(k.always_values) v WHERE k.key = 'beta.north'")
+    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || v.dimension || ' ' || " +
+        "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
+        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key = 'beta.north'")
     Assert-Line $k 'beta.north | brand in ["North"]'
     Assert-Line $k 'beta.north | size in ["Large","Medium"]'
 }
@@ -246,9 +246,9 @@ Test-Case 'tsrows: a list handed to a structural directive restricts what the di
     Assert-Line $r '[Kind.Coral, Kind.Jade] => Kind items.kind in ["Coral","Jade"]'
     Assert-Line $r 'chosen => Kind items.kind unknown []'
     Assert-Line $r '[Kind.Jade] => Kind current in ["Jade"]'
-    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || json_extract(v.value, '$.dimension') || ' ' || " +
-        "json_extract(v.value, '$.op') || ' ' || json_extract(v.value, '$.values') AS reach " +
-        "FROM key_reach k, json_each(k.always_values) v WHERE k.key = 'promo.amber'")
+    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || v.dimension || ' ' || " +
+        "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
+        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key = 'promo.amber'")
     Assert-Line $k 'promo.amber | items.kind in ["Amber"]'
 }
 
@@ -408,22 +408,22 @@ Test-Case 'tsrows: a config listing an ngFor item property restricts each key to
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT g.source || ' => ' || v.dimension || ' ' || v.op || ' ' || " +
-        "v.values_json || ' listed ' || coalesce(v.listed_json, 'null') AS restriction " +
+        "$(Get-NodeRootListSql 'gate_values__values_json' 'v.rowid') || ' listed ' || coalesce($(Get-NodeRootListSql 'gate_values__listed_json' 'v.rowid'), 'null') AS restriction " +
         "FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'Grade'")
     Assert-Exit $r 0
     Assert-Line $r '{ grades: [t.grade] } => appOnlyFor.grades not_in ["Gamma"] listed ["Alpha","Beta"]'
     Assert-Line $r '{ grades: [Grade.Alpha] } => appOnlyFor.grades in ["Alpha"] listed ["Alpha"]'
-    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || json_extract(v.value, '$.dimension') || ' ' || " +
-        "json_extract(v.value, '$.op') || ' ' || json_extract(v.value, '$.values') AS reach " +
-        "FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'demo.cards.%' OR k.key LIKE 'demo.later.%'")
+    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || v.dimension || ' ' || " +
+        "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
+        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.cards.%' OR k.key LIKE 'demo.later.%'")
     Assert-Line $k 'demo.cards.alpha | appOnlyFor.grades in ["Alpha"]'
     Assert-Line $k 'demo.cards.beta | appOnlyFor.grades in ["Beta"]'
     Assert-Line $k 'demo.cards.lit | appOnlyFor.grades in ["Alpha"]'
     Assert-Line $k 'demo.later.alpha | appOnlyFor.grades in ["Alpha"]'
     Assert-Line $k 'demo.later.beta | appOnlyFor.grades in ["Beta"]'
     # ONE LINK, the config's: the `*ngFor` gate on the same chain reads no element, so it carries none.
-    $b = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || (SELECT count(*) FROM json_each(k.always_branches) " +
-        "WHERE value LIKE 'loop:%') AS links FROM key_reach k WHERE k.key = 'demo.cards.alpha'")
+    $b = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || (SELECT count(*) FROM key_reach__always_branches " +
+        "WHERE owner = '#' || k.rowid AND parent = '#' || k.rowid || '/0' AND value LIKE 'loop:%') AS links FROM key_reach k WHERE k.key = 'demo.cards.alpha'")
     Assert-Line $b 'demo.cards.alpha | 1'
 }
 }

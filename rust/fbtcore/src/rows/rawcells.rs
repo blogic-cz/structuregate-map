@@ -22,14 +22,23 @@ pub fn tables<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Map<String, 
     let raw: IndexMap<String, Box<RawValue>> = IndexMap::deserialize(deserializer)?;
     let mut out = Map::new();
     for (name, table) in raw {
-        let rows = match serde_json::from_str::<Vec<IndexMap<String, Box<RawValue>>>>(table.get()) {
+        let rows = match rows_of(table.get()) {
             Ok(rows) => Value::Array(rows.into_iter().map(|row| Value::Object(row.into_iter().map(|(k, v)| (k, cell(&v))).collect())).collect()),
             // Not a list of rows: kept as it was, decoded.
-            Err(_) => serde_json::from_str(table.get()).map_err(serde::de::Error::custom)?,
+            Err(_) => super::cells::deep(table.get()).map_err(serde::de::Error::custom)?,
         };
         out.insert(name, rows);
     }
     Ok(out)
+}
+
+/// A table's rows, each cell still its text - with no depth limit, as every read of a tree here.
+fn rows_of(text: &str) -> serde_json::Result<Vec<IndexMap<String, Box<RawValue>>>> {
+    let mut reader = serde_json::Deserializer::from_str(text);
+    reader.disable_recursion_limit();
+    let rows = Vec::<IndexMap<String, Box<RawValue>>>::deserialize(&mut reader)?;
+    reader.end()?;
+    Ok(rows)
 }
 
 fn cell(raw: &RawValue) -> Value {

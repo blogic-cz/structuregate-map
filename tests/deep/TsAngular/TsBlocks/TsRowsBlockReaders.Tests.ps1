@@ -70,9 +70,9 @@ function New-TsBlockReadersDb {
 }
 
 # Each key's always_values on the `Grade` enum, `key | dimension op values`.
-$script:TsBlockReadersValuesSql = "SELECT k.key || ' | ' || json_extract(v.value, '$.dimension') || ' ' || " +
-    "json_extract(v.value, '$.op') || ' ' || json_extract(v.value, '$.values') AS reach " +
-    "FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'demo.%'"
+$script:TsBlockReadersValuesSql = "SELECT k.key || ' | ' || v.dimension || ' ' || " +
+    "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
+    "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.%'"
 
 # AN `@case` IS THE COMPARISON `@switch` WRITES, as `*ngSwitchCase` is: neither gate is a `Binary`, so without
 # the switch pass a key one case alone renders read as shown for every grade. `@default` takes no value and
@@ -80,7 +80,7 @@ $script:TsBlockReadersValuesSql = "SELECT k.key || ' | ' || json_extract(v.value
 Test-Case 'tsrows: an @switch case restricts the switch expression to its value' {
     $db = New-TsBlockReadersDb
     $g = Invoke-TsRowsQ $db ("SELECT g.name || ':' || g.source || ' => ' || v.dimension || ' ' || v.op || ' ' || " +
-        "v.values_json AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'Grade'")
+        "$(Get-NodeRootListSql 'gate_values__values_json' 'v.rowid') AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'Grade'")
     Assert-Line $g 'SwitchBlockCase:grades.Alpha => grade in ["Alpha"]'
     Assert-Line $g 'SwitchBlockCase:grades.Beta => grade in ["Beta"]'
     $k = Invoke-TsRowsQ $db $script:TsBlockReadersValuesSql
@@ -100,10 +100,10 @@ Test-Case 'tsrows: an @for over a list of objects is a loop whose item reads are
 
 # The declaration each `Read` of an interpolation resolved to, `name@<owner name>.<member name>`.
 function Get-TsBlockReadersTargets([string]$Db, [string]$Source) {
-    return Invoke-TsRowsQ $Db ("SELECT json_extract(j.value, '$.name') || '@' || coalesce(i.name || '.' || t.name, " +
-        "json_extract(j.value, '$.row')) AS t FROM expressions x, json_tree(x.ast) j " +
-        "LEFT JOIN type_members t ON t.id = json_extract(j.value, '$.row') LEFT JOIN interfaces i ON i.id = t.owner " +
-        "WHERE x.source = '$Source' AND j.key = 'target'")
+    return Invoke-TsRowsQ $Db ("SELECT j.name || '@' || coalesce(i.name || '.' || t.name, " +
+        "j.[row]) AS t FROM expressions x JOIN expressions__ast j ON j.owner = x.id AND j.role = 'target' " +
+        "LEFT JOIN type_members t ON t.id = j.[row] LEFT JOIN interfaces i ON i.id = t.owner " +
+        "WHERE x.source = '$Source'")
 }
 
 # AN `as` ALIAS HOLDS ITS CONDITION'S VALUE: a read chain's declared type, a pipe's unwrapped one. It bound to
@@ -153,8 +153,8 @@ function New-TsBlockLoopDb {
 # exactly then, so it is NOT inside the loop: the loop's sibling, under no loop gate.
 Test-Case 'tsrows: an @for gates its content, and its @empty is the loop''s sibling outside that gate' {
     $db = New-TsBlockLoopDb
-    $chain = "SELECT n.tag || ' <- ' || coalesce(group_concat(g.name || ':' || g.source, ' / '), '(none)') AS chain " +
-        "FROM template_nodes n LEFT JOIN json_each(n.gate_chain) j LEFT JOIN gates g ON g.id = j.value " +
+    $chain = "SELECT n.tag || ' <- ' || coalesce(group_concat(g.name || ':' || g.source, ' / ' ORDER BY j.ord), '(none)') AS chain " +
+        "FROM template_nodes n LEFT JOIN template_nodes__gate_chain j ON j.owner = n.id AND j.parent = n.id || '/0' LEFT JOIN gates g ON g.id = j.value " +
         "WHERE n.tag = '{0}' GROUP BY n.id"
     Assert-Line (Invoke-TsRowsQ $db ($chain -f 'em')) 'em <- ForLoopBlock:lines'
     Assert-Line (Invoke-TsRowsQ $db ($chain -f 's')) 's <- (none)'
@@ -167,7 +167,7 @@ Test-Case 'tsrows: an @for gates its content, and its @empty is the loop''s sibl
 # for what an `@for` renders, as for what an `*ngFor` does. The `@empty` key requires nothing.
 Test-Case 'tsrows: a feature filling an @for list reaches the keys inside it as it does under *ngFor' {
     $db = New-TsBlockLoopDb
-    $f = Invoke-TsRowsQ $db ("SELECT k.key || ' | ' || f.value AS feature FROM key_reach k, json_each(k.always_features) f " +
+    $f = Invoke-TsRowsQ $db ("SELECT k.key || ' | ' || f.value AS feature FROM key_reach k JOIN key_reach__always_features f ON f.owner = '#' || k.rowid AND f.parent = '#' || k.rowid || '/0' " +
         "WHERE k.key LIKE 'demo.%'")
     Assert-Line $f 'demo.loop.inside | IsPromoEnabled'
     Assert-Line $f 'demo.ngfor.inside | IsPromoEnabled'

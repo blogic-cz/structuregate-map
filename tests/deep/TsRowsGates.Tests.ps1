@@ -31,7 +31,7 @@ Test-Case 'tsrows: a gate calling a membership predicate over enum constants res
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-TsRowsQ $made.Db ("SELECT g.source || ' => ' || v.dimension || ' ' || v.op || ' ' || " +
-        "v.values_json AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate " +
+        "$(Get-NodeRootListSql 'gate_values__values_json' 'v.rowid') AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate " +
         "WHERE v.enum_name = 'Plan'")
     Assert-Line $r 'isPlanActive([plans.Pro, plans.Team]) => active in ["Pro","Team"]'
     Assert-Line $r '!isPlanActive([plans.Free]) => active not_in ["Free"]'
@@ -67,7 +67,7 @@ Test-Case 'tsrows: a gate calling a method that delegates to a keyed lookup rest
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-TsRowsQ $made.Db ("SELECT g.source || ' => ' || v.dimension || ' ' || v.op || ' ' || " +
-        "v.values_json AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate " +
+        "$(Get-NodeRootListSql 'gate_values__values_json' 'v.rowid') AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate " +
         "WHERE v.enum_name = 'Shade'")
     Assert-Line $r 'isShown(Shade.Red) => model.swatches.shade in ["Red"]'
     Assert-Line $r '!isShown(Shade.Green) => model.swatches.shade unknown []'
@@ -126,7 +126,7 @@ Test-Case 'tsrows: a directive rendering only when its value is in its list rest
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-TsRowsQ $made.Db ("SELECT g.source || ' => ' || v.dimension || ' ' || v.op || ' ' || " +
-        "v.values_json AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'Grade'")
+        "$(Get-NodeRootListSql 'gate_values__values_json' 'v.rowid') AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'Grade'")
     Assert-Line $r '{value: current, list: [grades.A, grades.B]} => current in ["A","B"]'
     Assert-NoLine $r 'list: []}'
 }
@@ -169,7 +169,7 @@ Test-Case 'tsrows: a config object lists its exclusion members, and a conditiona
     $made = New-TsRowsDb $tree
     # `--width 0`: a row here is longer than the display cuts a cell at.
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT g.source || ' => ' || v.dimension || ' ' || " +
-        "v.op || ' ' || v.values_json || ' listed ' || coalesce(v.listed_json, 'null') AS restriction " +
+        "v.op || ' ' || $(Get-NodeRootListSql 'gate_values__values_json' 'v.rowid') || ' listed ' || coalesce($(Get-NodeRootListSql 'gate_values__listed_json' 'v.rowid'), 'null') AS restriction " +
         "FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'Colors'")
     Assert-Exit $r 0
     Assert-Line $r '{include: [colors.Red, colors.Blue]} => colorFilter.include in ["Blue","Red"] listed ["Blue","Red"]'
@@ -205,8 +205,8 @@ Test-Case 'tsrows: an arrow-function property returns like a method and its call
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT m.name || ' | ' || coalesce(r.implicit, 0) || ' | ' || " +
-        "json_extract(r.value, '$.`$method') || ' | ' || json_extract(r.value, '$.`$receiver') || ' | ' || " +
-        "json_array_length(m.params) AS ret FROM returns r JOIN members m ON m.id = r.member " +
+        "(SELECT rv.[`$method] FROM returns__value rv WHERE rv.id = r.id || '/0') || ' | ' || $(Get-NodeObjectListSql 'returns__value' 'r.id' @('$enum', 'value') '$receiver') || ' | ' || " +
+        "(SELECT count(*) FROM members__params j WHERE j.owner = m.id AND j.parent = m.id || '/0') AS ret FROM returns r JOIN members m ON m.id = r.member " +
         "WHERE m.name IN ('isUs', 'isEu', 'isMethod')")
     Assert-Exit $r 0
     Assert-Line $r 'isUs | 1 | some | [{"$enum":"PlanIDs.UsA","value":1},{"$enum":"PlanIDs.UsB","value":2}] | 1'
@@ -218,7 +218,7 @@ Test-Case 'tsrows: an arrow-function property returns like a method and its call
     Assert-Line $fn 'isOther returns id === PlanIDs.Other'
     # ...and the call to it is the restriction its body proves, exactly as the method's is.
     $g = Invoke-TsRowsQ $made.Db ("SELECT g.source || ' => ' || v.dimension || ' ' || v.op || ' ' || " +
-        "v.values_json AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'PlanIDs'")
+        "$(Get-NodeRootListSql 'gate_values__values_json' 'v.rowid') AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'PlanIDs'")
     Assert-Line $g 'isUs(productID) => productID in ["UsA","UsB"]'
     Assert-Line $g '!isEu(productID) => productID not_in ["EuA"]'
     Assert-Line $g 'isMethod(productID) => productID in ["UsA","UsB"]'
@@ -245,7 +245,7 @@ Test-Case 'tsrows: a getter whose only true return sits under an enum test restr
     }
     $made = New-TsRowsDb $tree
     $g = Invoke-TsRowsQ $made.Db ("SELECT g.source || ' => ' || v.dimension || ' ' || v.op || ' ' || " +
-        "v.values_json AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'Tone'")
+        "$(Get-NodeRootListSql 'gate_values__values_json' 'v.rowid') AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'Tone'")
     Assert-Line $g 'isAlphaRemote => '
     Assert-Line $g ' in ["Alpha"]'
     Assert-NoLine $g 'isAlphaOrAny'
@@ -289,7 +289,7 @@ Test-Case 'tsrows: an async selector built for one enum member restricts the set
     }
     $made = New-TsRowsDb $tree
     $g = Invoke-TsRowsQ $made.Db ("SELECT g.source || ' => ' || v.dimension || ' ' || v.op || ' ' || " +
-        "v.values_json AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'Tone'")
+        "$(Get-NodeRootListSql 'gate_values__values_json' 'v.rowid') AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate WHERE v.enum_name = 'Tone'")
     Assert-Line $g 'alpha$ | async => hasItemOfTone.tone in ["Alpha"]'
     Assert-Line $g 'beta$ | async => hasItem.tone in ["Beta"]'
     Assert-NoLine $g '!('
@@ -337,7 +337,7 @@ Test-Case 'tsrows: a directive comparing its input with an injected config value
     }
     $made = New-TsRowsDb $tree
     $g = Invoke-TsRowsQ $made.Db ("SELECT g.name || ' | ' || coalesce(v.dimension, '-') || ' ' || coalesce(v.op, '-') || ' ' || " +
-        "coalesce(v.values_json, '-') AS restriction FROM gates g LEFT JOIN gate_values v ON v.gate = g.id " +
+        "coalesce($(Get-NodeRootListSql 'gate_values__values_json' 'v.rowid'), '-') AS restriction FROM gates g LEFT JOIN gate_values v ON v.gate = g.id " +
         "WHERE g.name IN ('forTenant', 'notForTenant')")
     Assert-Line $g 'forTenant | '
     Assert-Line $g 'in ["Alpha"]'
@@ -401,7 +401,7 @@ Test-Case 'tsrows: a directive comparing the constant the template hands in rest
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT g.name || ' ' || g.source || ' => ' || v.dimension || " +
-        "' ' || v.op || ' ' || v.values_json AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate " +
+        "' ' || v.op || ' ' || $(Get-NodeRootListSql 'gate_values__values_json' 'v.rowid') AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate " +
         "WHERE v.enum_name = 'Modes'")
     Assert-Exit $r 0
     Assert-Line $r 'whenMode Modes.A => activeMode in ["A"]'

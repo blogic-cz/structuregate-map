@@ -84,7 +84,7 @@ Test-Case 'tsrows: a createEffect member names the actions it listens to, whethe
     }
     $made = New-TsRowsDb (New-TsRowsWorkspace $files)
     Assert-Exit $made.Result 0
-    $e = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT 'e=' || name || ' | ' || actions || ' | ' || dispatch || ' | ' || coalesce(emits,'') AS r FROM state_effects")
+    $e = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT 'e=' || name || ' | ' || $(Get-NodeRootListSql 'state_effects__actions' 'state_effects.id' ', ') || ' | ' || dispatch || ' | ' || coalesce($(Get-NodeRootListSql 'state_effects__emits' 'state_effects.id' ', '),'') AS r FROM state_effects")
     Assert-Line $e 'e=loadAlpha$ | ["demoActions.load", "demoActions.clear"] | 1 | ["demoActions.done"]'
     Assert-Line $e 'e=logAlpha$ | ["demoActions.done"] | 0 | []'
 }

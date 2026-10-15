@@ -54,19 +54,10 @@ fn text(row: &Row, name: &str) -> Option<String> {
     }
 }
 
-/// A list cell's strings - decoded, or still the text a payload sent (see `rawcells`).
+/// A list cell's strings - decoded, or still the text a payload sent (see `rawcells`), decoded as deep as it goes.
 pub(super) fn list(value: Option<&Value>) -> Vec<String> {
-    let decoded;
-    let value = match value {
-        Some(v) => match super::rawcells::text_of(v) {
-            Some(raw) => {
-                decoded = serde_json::from_str::<Value>(raw).unwrap_or(Value::Null);
-                &decoded
-            }
-            None => v,
-        },
-        None => return Vec::new(),
-    };
+    let Some(value) = value else { return Vec::new() };
+    let value = super::cells::decoded(value);
     value.as_array().into_iter().flatten().filter_map(|s| s.as_str().map(String::from)).collect()
 }
 

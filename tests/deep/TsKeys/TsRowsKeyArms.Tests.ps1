@@ -9,9 +9,9 @@
 
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
-$script:TsKeyArmsSql = "SELECT k.key || ' | ' || json_extract(v.value, '$.dimension') || ' ' || " +
-    "json_extract(v.value, '$.op') || ' ' || json_extract(v.value, '$.values') AS reach " +
-    "FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'ov.%' ORDER BY 1"
+$script:TsKeyArmsSql = "SELECT k.key || ' | ' || v.dimension || ' ' || " +
+    "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
+    "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'ov.%' ORDER BY 1"
 
 # THE SHAPES OF A KEY CHOSEN IN A CONDITIONAL ARM, all through a wrapper `t` around the configured `instant`: a ternary choosing between
 # two calls inside a SERVICE call's argument, under a `case` - the case alone was all `ov.e` carried - an `&&`
@@ -56,7 +56,7 @@ Test-Case 'tsrows: a key a translation call chooses in a conditional arm carries
     Assert-Line $r 'ov.e2 | brand not_in ["Larch"]'
     Assert-Line $r 'ov.e2 | item in ["Case"]'
     # The arm is on the CALL row, as `branch` and `case` are: the i18n ref joins it.
-    $c = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || c.choices AS arm FROM i18n_refs k " +
+    $c = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || $(Get-NodeRootListSql 'calls__choices' 'c.id') AS arm FROM i18n_refs k " +
         "JOIN calls c ON c.id = k.call WHERE k.key = 'ov.e2'")
     Assert-Line $c 'ov.e2 | ["!x:'
 }
@@ -108,8 +108,8 @@ Test-Case 'tsrows: a dimension no way permits anything for is in nothing, never 
             '"tp":{"red":"a","nested":"b"},"bt":{"tagBlue":"c","tagTealX":"d"}}'
     }
     $made = New-TsRowsDb $tree
-    $r = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT key || ' | ' || always_values || ' | ' || " +
-        "json_array_length(unreadable_values) || ' ' || coalesce(json_extract(unreadable_values, '$[0].dimension'), '-') AS reach " +
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT key || ' | ' || (SELECT '[' || group_concat('{' || char(34) || 'enum' || char(34) || ': ' || char(34) || v.enum || char(34) || ', ' || char(34) || 'dimension' || char(34) || ': ' || char(34) || v.dimension || char(34) || ', ' || char(34) || 'op' || char(34) || ': ' || char(34) || v.op || char(34) || ', ' || char(34) || 'values' || char(34) || ': ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values' ', ') || ', ' || char(34) || 'domain' || char(34) || ': ' || v.domain || '}', ', ' ORDER BY v.ord) || ']' FROM key_reach__always_values v WHERE v.owner = '#' || key_reach.rowid AND v.parent = '#' || key_reach.rowid || '/0') || ' | ' || " +
+        "(SELECT count(*) FROM key_reach__unreadable_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') || ' ' || coalesce((SELECT jn.dimension FROM key_reach__unreadable_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0), '-') AS reach " +
         "FROM key_reach WHERE key LIKE 'tp.%' OR key LIKE 'bt.%'")
     Assert-Exit $r 0
     Assert-Line $r '"dimension": "colorFilter.include", "op": "in", "values": [], "domain": 6}] | 0 -'
@@ -179,7 +179,7 @@ Test-Case 'tsrows: a key a template expression chooses carries its arm' {
     Assert-Line $r 'tc.and | kind in ["Alpha"]'
     Assert-Line $r 'tc.or | kind not_in ["Alpha"]'
     Assert-NoLine $r 'tc.plain'
-    $s = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT key || ' | ' || branch_senses AS senses FROM key_reach WHERE key LIKE 'tc.alpha.%'"
+    $s = Invoke-Gate --map-query $made.Db --width 0 --sql (Get-TsRowsSensesSql $made.Db "k.key LIKE 'tc.alpha.%'")
     Assert-Line $s 'tc.alpha.no | {"!arm:'
     Assert-Line $s 'tc.alpha.yes | {"arm:'
 }

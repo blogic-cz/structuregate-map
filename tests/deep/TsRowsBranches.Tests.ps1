@@ -45,8 +45,8 @@ function New-TsBranchTree {
 Test-Case 'tsrows: a key assigned under an if carries the value its condition permits' {
     $made = New-TsRowsDb (New-TsBranchTree)
     $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || route || ' | ' || " +
-        "json_extract(always_values, '$[0].dimension') || ' ' || json_extract(always_values, '$[0].op') || ' ' || " +
-        "json_extract(always_values, '$[0].values') AS reach FROM key_reach WHERE key LIKE 'tips.%'")
+        "(SELECT jn.dimension FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || (SELECT jn.op FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || " +
+        "$(Get-NodeItemListSql 'key_reach__always_values' 'key_reach.rowid' 0 'values') AS reach FROM key_reach WHERE key LIKE 'tips.%'")
     Assert-Line $r 'tips.small | field_binding | tierID in ["Small"]'
     Assert-Line $r 'tips.big | field_binding | tierID in ["Big"]'
     Assert-Line $r 'tips.element | field_binding | tierID in ["Low","Mid"]'
@@ -56,8 +56,9 @@ Test-Case 'tsrows: a key assigned under an if carries the value its condition pe
 # written once with no condition has no branch that always holds.
 Test-Case 'tsrows: a key also written with no condition needs no branch, and branches stay out of the gates' {
     $made = New-TsRowsDb (New-TsBranchTree)
-    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || json_array_length(always_branches) || ' | ' || " +
-        "json_array_length(maybe_branches) || ' | ' || always_gates || ' | ' || always_values AS reach " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || (SELECT count(*) FROM key_reach__always_branches jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') || ' | ' || " +
+        "(SELECT count(*) FROM key_reach__maybe_branches jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') || ' | ' || $(Get-NodeRootListSql 'key_reach__always_gates' 'key_reach.rowid') || ' | ' || " +
+        "(SELECT CASE WHEN count(*) = 0 THEN '[]' ELSE '[{' END FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') AS reach " +
         "FROM key_reach WHERE key IN ('tips.small', 'tips.both')")
     Assert-Line $r 'tips.small | 1 | 1 | [] | [{'
     Assert-Line $r 'tips.both | 0 | 1 | [] | []'
@@ -87,9 +88,9 @@ Test-Case 'tsrows: a key assigned in a switch case carries the value its case pe
             '"kinds":{"warm":"a","blue":"b","other":"c"}}'
     }
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || json_array_length(always_branches) || ' | ' || " +
-        "json_extract(always_values, '$[0].dimension') || ' ' || json_extract(always_values, '$[0].op') || ' ' || " +
-        "json_extract(always_values, '$[0].values') AS reach FROM key_reach WHERE key LIKE 'kinds.%'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || (SELECT count(*) FROM key_reach__always_branches jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') || ' | ' || " +
+        "(SELECT jn.dimension FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || (SELECT jn.op FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || " +
+        "$(Get-NodeItemListSql 'key_reach__always_values' 'key_reach.rowid' 0 'values') AS reach FROM key_reach WHERE key LIKE 'kinds.%'")
     Assert-Line $r 'kinds.warm | 1 | kind in ["Green","Red"]'
     Assert-Line $r 'kinds.blue | 2 | kind in ["Blue"]'
     Assert-Line $r 'kinds.other | 1 | kind in ["Black","White"]'
@@ -119,13 +120,13 @@ Test-Case 'tsrows: a key chosen by a ternary or returned by a getter carries its
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || route || ' | ' || " +
-        "json_extract(always_values, '$[0].dimension') || ' ' || json_extract(always_values, '$[0].op') || ' ' || " +
-        "json_extract(always_values, '$[0].values') AS reach FROM key_reach WHERE key LIKE 'days.%'")
+        "(SELECT jn.dimension FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || (SELECT jn.op FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || " +
+        "$(Get-NodeItemListSql 'key_reach__always_values' 'key_reach.rowid' 0 'values') AS reach FROM key_reach WHERE key LIKE 'days.%'")
     Assert-Line $r 'days.mon | field_binding | day in ["Mon"]'
     Assert-Line $r 'days.other | field_binding | day not_in ["Mon"]'
     Assert-Line $r 'days.sun | field_binding | day in ["Sun"]'
     # The early return does not make the fallback conditional on anything the map reads: it gets no value.
-    $plain = Invoke-TsRowsQ $made.Db "SELECT key || ' | ' || always_values AS reach FROM key_reach WHERE key = 'days.plain'"
+    $plain = Invoke-TsRowsQ $made.Db "SELECT key || ' | ' || $(Get-NodeRootListSql 'key_reach__always_values' 'key_reach.rowid') AS reach FROM key_reach WHERE key = 'days.plain'"
     Assert-Line $plain 'days.plain | []'
 }
 
@@ -155,8 +156,8 @@ Test-Case 'tsrows: a key passed to a translation call carries the branch the cal
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || route || ' | ' || " +
-        "json_extract(always_values, '$[0].dimension') || ' ' || json_extract(always_values, '$[0].op') || ' ' || " +
-        "json_extract(always_values, '$[0].values') AS reach FROM key_reach WHERE key LIKE 'labels.%'")
+        "(SELECT jn.dimension FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || (SELECT jn.op FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || " +
+        "$(Get-NodeItemListSql 'key_reach__always_values' 'key_reach.rowid' 0 'values') AS reach FROM key_reach WHERE key LIKE 'labels.%'")
     # the getter is bound by the template, so its returned translate call is a field_binding site (it was a
     # ts_call, which any other component's field_binding for the same key then replaced); the branches are the same.
     Assert-Line $r 'labels.duo | field_binding | plan in ["Duo"]'
@@ -191,12 +192,12 @@ Test-Case 'tsrows: a boolean property is read as the comparison it is assigned' 
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || " +
-        "json_extract(always_values, '$[0].dimension') || ' ' || json_extract(always_values, '$[0].op') || ' ' || " +
-        "json_extract(always_values, '$[0].values') AS reach FROM key_reach WHERE key LIKE 'firms.%'")
+        "(SELECT jn.dimension FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || (SELECT jn.op FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || " +
+        "$(Get-NodeItemListSql 'key_reach__always_values' 'key_reach.rowid' 0 'values') AS reach FROM key_reach WHERE key LIKE 'firms.%'")
     Assert-Line $r 'firms.elm | firm in ["Elm"]'
     Assert-Line $r 'firms.notoak | firm not_in ["Oak"]'
     Assert-Line $r 'firms.gate | firm in ["Elm"]'
-    $neg = Invoke-TsRowsQ $made.Db "SELECT key || ' | ' || always_values AS reach FROM key_reach WHERE key = 'firms.notelm'"
+    $neg = Invoke-TsRowsQ $made.Db "SELECT key || ' | ' || $(Get-NodeRootListSql 'key_reach__always_values' 'key_reach.rowid') AS reach FROM key_reach WHERE key = 'firms.notelm'"
     Assert-Line $neg 'firms.notelm | []'
 }
 
@@ -223,11 +224,11 @@ Test-Case 'tsrows: a key returned by a pipe renders where the pipe is used, unde
             '"pipes":{"red":"a","other":"b"}}'
     }
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || route || ' | ' || json_array_length(components) || ' | ' || " +
-        "json_array_length(always_gates) || ' | ' || json_extract(always_values, '$[0].op') || ' ' || " +
-        "json_extract(always_values, '$[0].values') AS reach FROM key_reach WHERE key = 'pipes.red'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || route || ' | ' || (SELECT count(*) FROM key_reach__components jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') || ' | ' || " +
+        "(SELECT count(*) FROM key_reach__always_gates jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') || ' | ' || (SELECT jn.op FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || " +
+        "$(Get-NodeItemListSql 'key_reach__always_values' 'key_reach.rowid' 0 'values') AS reach FROM key_reach WHERE key = 'pipes.red'")
     Assert-Line $r 'pipes.red | pipe | 1 | 1 | in ["Red"]'
-    $s = Invoke-TsRowsQ $made.Db "SELECT branch_senses AS s FROM key_reach WHERE key = 'pipes.red'"
+    $s = Invoke-TsRowsQ $made.Db (Get-TsRowsSensesSql $made.Db "k.key = 'pipes.red'")
     Assert-Line $s '": "then"'
 }
 
@@ -268,9 +269,9 @@ Test-Case 'tsrows: a key built by a template literal renders under its branch, a
             '"featureChecks":["FlagService.isOn"],"featureEnum":"FlagCodes"}'
     }
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || json_array_length(components) || ' | ' || " +
-        "json_extract(always_values, '$[0].dimension') || ' ' || json_extract(always_values, '$[0].op') || ' ' || " +
-        "json_extract(always_values, '$[0].values') AS reach FROM key_reach WHERE key LIKE 'plans.bundle.%' OR key LIKE 'label.%'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || (SELECT count(*) FROM key_reach__components jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') || ' | ' || " +
+        "(SELECT jn.dimension FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || (SELECT jn.op FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || " +
+        "$(Get-NodeItemListSql 'key_reach__always_values' 'key_reach.rowid' 0 'values') AS reach FROM key_reach WHERE key LIKE 'plans.bundle.%' OR key LIKE 'label.%'")
     Assert-Line $r 'plans.bundle.Small Pack | 1 | tierID in ["OakLarge","OakSmall"]'
     Assert-Line $r 'plans.bundle.Large Pack | 1 | tierID in ["OakLarge","OakSmall"]'
     Assert-Line $r 'label.Oak.value | 1 | firm in ["Oak"]'
@@ -317,20 +318,21 @@ Test-Case 'tsrows: a component a factory returns from a case renders only for th
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $edges = Invoke-TsRowsQ $made.Db ("SELECT r.to_name || ' | ' || r.via || ' | ' || m.name || ' | ' || " +
-        "json_array_length(r.return_ways) AS edge FROM renders r JOIN members m ON m.id = r.returned_by " +
+        "(SELECT count(*) FROM renders__return_ways jn WHERE jn.owner = r.id AND jn.parent = r.id || '/0') AS edge FROM renders r JOIN members m ON m.id = r.returned_by " +
         "WHERE r.to_name LIKE '%Detail%'")
     Assert-Line $edges 'AlphaDetailComponent | ngComponentOutlet | componentFor | 1'
     Assert-Line $edges 'BetaDetailComponent | ngComponentOutlet | componentFor | 1'
     # The case rides `branches`, and no `switch_cases` id lands in `gates`.
     $paths = Invoke-TsRowsQ $made.Db ("SELECT c.name || ' | ' || sc.discriminant_source || ' | ' || " +
-        "(SELECT count(*) FROM json_each(rp.gates) j JOIN switch_cases s ON s.id = j.value) || ' | ' || sc.labels " +
+        "(SELECT count(*) FROM render_path__gates j JOIN switch_cases s ON s.id = j.value WHERE j.owner = rp.id AND j.parent = rp.id || '/0') || ' | ' || " +
+        "(SELECT l.[`$enum] FROM switch_cases__labels l WHERE l.owner = sc.id AND l.parent = sc.id || '/0' AND l.ord = 0) " +
         "AS path FROM render_path rp JOIN components c ON c.id = rp.component " +
-        "JOIN json_each(rp.branches) b JOIN switch_cases sc ON sc.id = b.value")
-    Assert-Line $paths 'AlphaDetailComponent | kind | 0 | [{"$enum": "DemoKind.Alpha"'
-    Assert-Line $paths 'BetaDetailComponent | kind | 0 | [{"$enum": "DemoKind.Beta"'
-    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || json_array_length(always_branches) || ' | ' || " +
-        "json_extract(always_values, '$[0].enum_name') || ' ' || json_extract(always_values, '$[0].dimension') || ' ' || " +
-        "json_extract(always_values, '$[0].op') || ' ' || json_extract(always_values, '$[0].values') AS reach " +
+        "JOIN render_path__branches b ON b.owner = rp.id AND b.parent = rp.id || '/0' JOIN switch_cases sc ON sc.id = b.value")
+    Assert-Line $paths 'AlphaDetailComponent | kind | 0 | DemoKind.Alpha'
+    Assert-Line $paths 'BetaDetailComponent | kind | 0 | DemoKind.Beta'
+    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || (SELECT count(*) FROM key_reach__always_branches jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') || ' | ' || " +
+        "(SELECT jn.enum_name FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || (SELECT jn.dimension FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || " +
+        "(SELECT jn.op FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0) || ' ' || $(Get-NodeItemListSql 'key_reach__always_values' 'key_reach.rowid' 0 'values') AS reach " +
         "FROM key_reach WHERE key LIKE 'demo.%'")
     Assert-Line $r 'demo.alpha.title | 1 | DemoKind kind in ["Alpha"]'
     Assert-Line $r 'demo.beta.title | 1 | DemoKind kind in ["Beta"]'

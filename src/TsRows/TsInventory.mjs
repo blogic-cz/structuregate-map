@@ -176,7 +176,7 @@ export async function inventory({ store, root, feRoot, projectId = null,
  *
  * EVERY file row gets the flag, not only the inventory ones. A row interned during the declarations pass
  * started with no `parsed` field at all, so a query for `parsed === false` skipped it and the map looked
- * fully parsed while templates beyond the depth limit had never been read.
+ * fully parsed while templates the template pass never reached had never been read.
  */
 export function markParsed(store, absPaths) {
   const wanted = new Set([...absPaths]);

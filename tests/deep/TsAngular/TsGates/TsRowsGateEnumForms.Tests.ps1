@@ -16,7 +16,7 @@
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
 $script:TsEnumFormsSql = "SELECT g.source || ' => ' || v.enum_name || ' ' || v.dimension || ' ' || v.op || ' ' || " +
-    "v.values_json AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate"
+    "$(Get-NodeRootListSql 'gate_values__values_json' 'v.rowid') AS restriction FROM gate_values v JOIN gates g ON g.id = v.gate"
 
 Test-Case 'tsrows: a twin enum, a getter alias field and a number each read as the member they name' {
     $tree = New-TsRowsWorkspace @{
@@ -76,9 +76,9 @@ Test-Case 'tsrows: a [hidden] binding gates its subtree on the negation of its c
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"gateInputs":["hidden"]}'
     }
     $made = New-TsRowsDb $tree
-    $sql = "SELECT k.key || ' | ' || json_extract(v.value,'`$.dimension') || ' ' || json_extract(v.value,'`$.op') || ' ' || " +
-        "json_extract(v.value,'`$.values') || ' | ' || (SELECT gate_kind FROM gates WHERE id = json_extract(k.always_gates,'`$[0]')) AS r " +
-        "FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'demo.hid.%'"
+    $sql = "SELECT k.key || ' | ' || v.dimension || ' ' || v.op || ' ' || " +
+        "$(Get-NodeListSql 'key_reach__always_values' 'v' 'values') || ' | ' || (SELECT gate_kind FROM gates WHERE id = (SELECT jn.value FROM key_reach__always_gates jn WHERE jn.owner = '#' || k.rowid AND jn.parent = '#' || k.rowid || '/0' AND jn.ord = 0)) AS r " +
+        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.hid.%'"
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $sql
     Assert-Exit $r 0
     Assert-Line $r 'demo.hid.own | kind not_in ["Alpha"] | hidden'
@@ -159,8 +159,8 @@ Test-Case 'tsrows: a key under a guarded method returning a bare optional read i
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $sql = "SELECT k.key || ' | ' || coalesce((SELECT group_concat(json_extract(v.value,'`$.dimension') || ' ' || " +
-        "json_extract(v.value,'`$.op') || ' ' || json_extract(v.value,'`$.values'), ' & ') FROM json_each(k.always_values) v), '-') AS r " +
+    $sql = "SELECT k.key || ' | ' || coalesce((SELECT group_concat(v.dimension || ' ' || " +
+        "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values'), ' & ') FROM key_reach__always_values v WHERE v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0'), '-') AS r " +
         "FROM key_reach k WHERE k.key LIKE 'demo.gm.%'"
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $sql
     Assert-Exit $r 0
