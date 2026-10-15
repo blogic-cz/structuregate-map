@@ -20,7 +20,9 @@
 //! column. The root of every cell is one node, so `[]` and `{}` are rows too and an absent cell is no row at all.
 //!
 //! COMPACT, because there are tens of millions: `(owner, n)` is the primary key of a `WITHOUT ROWID` table - one
-//! b-tree that holds the rows AND finds a cell and a node - and `(owner, parent)` and `value` are the only indexes.
+//! b-tree that holds the rows AND finds a cell, a node and a node's children (`owner = ? AND parent = ?` reads the
+//! owner's few nodes off it) - and `value` is the only index. An `(owner, parent)` index cost a sixth of the map and a
+//! quarter of the row write, and served no query the key does not.
 //! A node carries no `file`, `owner_file` or `half`: every delete that scopes a row takes its nodes THROUGH the row
 //! (`delete_children`), so nothing is stored twice. `_cells` records which columns of which table went where.
 //!
@@ -153,8 +155,7 @@ pub fn create(db: &Connection, table: &str, column: &str) -> Result<String> {
     let t = schema::escape(&child_table);
     db.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS \"{t}\" (owner NOT NULL, n INTEGER NOT NULL, parent INTEGER, role TEXT, \
-         ord INTEGER, node TEXT NOT NULL, value, PRIMARY KEY (owner, n)) WITHOUT ROWID; \
-         CREATE INDEX IF NOT EXISTS \"ix_{t}_parent\" ON \"{t}\" (owner, parent);"
+         ord INTEGER, node TEXT NOT NULL, value, PRIMARY KEY (owner, n)) WITHOUT ROWID;"
     ))?;
     register(db, table, column)?;
     Ok(child_table)
