@@ -12,7 +12,7 @@ __pycache__/
 *.pyc
 
 # rust build output for fbtcore (the .lib/.dll are produced by the build, never committed)
-rust/*/target/
+rust/*/target
 
 # THIS REPO IS ITS OWN CONSUMER. Connect-Gate.ps1 wired the gate into this build, and everything it
 # writes here is derived from the tree it just walked:
