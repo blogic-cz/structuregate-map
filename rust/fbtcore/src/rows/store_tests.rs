@@ -16,6 +16,7 @@ fn request<'a>(
     keep_existing: bool,
 ) -> WriteRequest<'a> {
     WriteRequest {
+        stream: None,
         tables,
         texts,
         root: ".",

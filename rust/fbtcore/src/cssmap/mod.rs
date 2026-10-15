@@ -173,6 +173,7 @@ pub fn store(db_path: &Path, root: &str, workspace: &Path, half: &str, notes: &m
     notes.extend(derived.notes);
     let applied = store::write(db_path, &WriteRequest {
         tables: &derived.tables,
+        stream: None,
         texts: &store::Texts::Held(&BTreeMap::new()),
         root,
         shas: &Map::new(),

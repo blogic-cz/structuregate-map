@@ -128,59 +128,10 @@ pub fn recorded(db: &Path, half: &str) -> Recorded {
 /// THREE THINGS ARE NAMED WITHOUT BEING READ, and each is answered elsewhere: a file that declares what a
 /// template resolves (`deps::scope_files`) turns any change of it into a full run; a table a rollup rebuilds
 /// (`rebuilt`) is derived again whole; and `node_modules` is not walked, so nothing in it ever reads as changed.
+#[cfg(test)]
 pub fn unread(tables: &Map<String, Value>, rebuilt: &[String]) -> Vec<(String, String)> {
-    let rows_of = |name: &str| tables.get(name).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_object);
-    let text = |row: &Map<String, Value>, name: &str| match row.get(name) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    };
-    let mut path_of: IndexMap<String, String> = IndexMap::new();
-    let mut reads: IndexMap<String, IndexSet<String>> = IndexMap::new();
-    for row in rows_of("files") {
-        let (Some(id), Some(path)) = (text(row, "id"), text(row, "path")) else { continue };
-        if row.contains_key("reads") {
-            reads.insert(path.clone(), super::deps::list(row.get("reads")).into_iter().collect());
-        }
-        path_of.insert(id, path);
-    }
-    let owner = |row: &Map<String, Value>| text(row, "owner_file").or_else(|| text(row, "file"));
-    let mut owner_of: IndexMap<String, String> = IndexMap::new();
-    for (name, rows) in tables {
-        for row in rows.as_array().into_iter().flatten().filter_map(Value::as_object) {
-            let Some(id) = text(row, "id") else { continue };
-            let home = if name == "files" { Some(id.clone()) } else { owner(row) };
-            if let Some(home) = home {
-                owner_of.insert(id, home);
-            }
-        }
-    }
-    let scope: IndexSet<String> = super::deps::scope_files(tables).into_iter().collect();
-    let template = |p: &str| p.ends_with(".html");
-    let answered = |p: &str| template(p) || scope.contains(p) || p.starts_with("node_modules/") || p.contains("/node_modules/");
-    let mut seen: IndexSet<(String, String)> = IndexSet::new();
-    for (name, rows) in tables {
-        if name == "files" || rebuilt.iter().any(|r| r == name) {
-            continue;
-        }
-        for row in rows.as_array().into_iter().flatten().filter_map(Value::as_object) {
-            let Some(own) = owner(row).and_then(|o| path_of.get(&o).cloned()) else { continue };
-            let Some(read) = reads.get(&own) else { continue };
-            if template(&own) {
-                continue;
-            }
-            for (column, value) in row {
-                if column == "id" || column == "owner_file" {
-                    continue;
-                }
-                let Value::String(v) = value else { continue };
-                let Some(named) = owner_of.get(v).and_then(|o| path_of.get(o)) else { continue };
-                if *named != own && !answered(named) && !read.contains(named) {
-                    seen.insert((own.clone(), named.clone()));
-                }
-            }
-        }
-    }
-    seen.into_iter().collect()
+    // ONE DERIVATION, streamed or held - see `digest.rs`.
+    super::digest::Digest::over(tables, rebuilt).unread()
 }
 
 /// How a refusal by `dangling` begins, so the caller asks again over every hop rather than reporting an error.
@@ -197,7 +148,7 @@ pub fn dangling(
     db: &Connection,
     half: &str,
     replaced: &[String],
-    tables: &Map<String, Value>,
+    kept: &IndexSet<String>,
     deps: &Map<String, Value>,
 ) -> anyhow::Result<Option<(usize, String)>> {
     use super::half::{tables_with_half, HALF_COLUMN};
@@ -223,14 +174,6 @@ pub fn dangling(
     }
     if watchers.is_empty() {
         return Ok(None);
-    }
-    let mut kept: IndexSet<String> = IndexSet::new();
-    for rows in tables.values().filter_map(Value::as_array) {
-        for row in rows.iter().filter_map(Value::as_object) {
-            if let Some(Value::String(id)) = row.get("id") {
-                kept.insert(id.clone());
-            }
-        }
     }
     let replaced_ids = file_ids(&gone_paths)?;
     let watcher_ids = file_ids(&watchers)?;
@@ -327,11 +270,11 @@ mod tests {
         let deps = json!({"b.ts": ["a.ts"]});
         // b.ts is read again and keeps c:1: nothing a.ts holds is left pointing at nothing.
         let kept = json!({"classes": [{"id": "c:1", "file": "f:2"}]});
-        let found = dangling(&db, "typescript", &["b.ts".to_string()], kept.as_object().unwrap(), deps.as_object().unwrap());
+        let found = dangling(&db, "typescript", &["b.ts".to_string()], &super::super::digest::Digest::over(kept.as_object().unwrap(), &[]).ids, deps.as_object().unwrap());
         assert_eq!(found.unwrap(), None);
         // b.ts comes back with c:1 under a new id: a.ts's call would name a row that is gone.
         let renumbered = json!({"classes": [{"id": "c:9", "file": "f:2"}, {"id": "c:2", "file": "f:2"}]});
-        let found = dangling(&db, "typescript", &["b.ts".to_string()], renumbered.as_object().unwrap(), deps.as_object().unwrap());
+        let found = dangling(&db, "typescript", &["b.ts".to_string()], &super::super::digest::Digest::over(renumbered.as_object().unwrap(), &[]).ids, deps.as_object().unwrap());
         assert_eq!(found.unwrap(), Some((1, "calls -> c:1".to_string())));
     }
 

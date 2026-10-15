@@ -25,35 +25,6 @@ use indexmap::{IndexMap, IndexSet};
 use serde_json::{Map, Value};
 
 /// One row, as the payload holds it.
-type Row = Map<String, Value>;
-
-/// A row's own id and its housekeeping are not references to anywhere.
-const SKIP_COLUMNS: &[&str] = &["id", "file", "half"];
-
-/// The tables that say "this file declares something a template can name".
-const SCOPE_TABLES: &[&str] = &["selector_index", "pipes", "directives", "ng_modules"];
-
-/// `b:4711` — a short alphabetic prefix, a colon, digits. The shape every map
-/// handle has.
-///
-/// No pattern: split and count. The prefix is bounded because these are the map's own handles,
-/// and a source string that happens to contain a colon (`http://...`) fails the digit test.
-fn looks_like_id(value: &str) -> bool {
-    let Some(cut) = value.find(':') else { return false };
-    if cut == 0 || cut > 3 || cut == value.len() - 1 {
-        return false;
-    }
-    value[..cut].bytes().all(|b| b.is_ascii_alphabetic())
-        && value[cut + 1..].bytes().all(|b| b.is_ascii_digit())
-}
-
-fn text(row: &Row, name: &str) -> Option<String> {
-    match row.get(name) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    }
-}
-
 /// A list cell's strings - decoded, or still the text a payload sent (see `rawcells`), decoded as deep as it goes.
 pub(super) fn list(value: Option<&Value>) -> Vec<String> {
     let Some(value) = value else { return Vec::new() };
@@ -63,16 +34,6 @@ pub(super) fn list(value: Option<&Value>) -> Vec<String> {
 
 /// Every table's rows, as the payload holds them.
 pub type Tables<'a> = &'a Map<String, Value>;
-
-fn rows_of<'a>(tables: Tables<'a>, name: &str) -> impl Iterator<Item = &'a Row> {
-    tables
-        .get(name)
-        .and_then(|v| v.as_array())
-        .map(|a| a.as_slice())
-        .unwrap_or(&[])
-        .iter()
-        .filter_map(|r| r.as_object())
-}
 
 /// `{path -> [the paths that must be re-extracted with it]}`, from the ROWS and not from the
 /// database.
@@ -85,110 +46,9 @@ fn rows_of<'a>(tables: Tables<'a>, name: &str) -> impl Iterator<Item = &'a Row> 
 /// file until it has extracted one. A path is also what survives a rebuild: the ids are handles
 /// this run made up.
 pub fn graph(tables: Tables<'_>) -> IndexMap<String, Vec<String>> {
-    let mut path_of: IndexMap<String, String> = IndexMap::new();
-    for row in rows_of(tables, "files") {
-        if let (Some(id), Some(path)) = (text(row, "id"), text(row, "path")) {
-            path_of.insert(id, path);
-        }
-    }
-
-    // Two passes, because the owner of an id is only known once every table has been seen: a row
-    // in the first table may point at a row in the last.
-    let mut owner: IndexMap<String, String> = IndexMap::new();
-    for rows in tables.values() {
-        for row in rows.as_array().map(|a| a.as_slice()).unwrap_or(&[]).iter().filter_map(|r| r.as_object()) {
-            if let (Some(id), Some(file)) = (text(row, "id"), text(row, "file")) {
-                owner.insert(id, file);
-            }
-        }
-    }
-
-    let mut out: IndexMap<String, IndexSet<String>> = IndexMap::new();
-    for rows in tables.values() {
-        for row in rows.as_array().map(|a| a.as_slice()).unwrap_or(&[]).iter().filter_map(|r| r.as_object()) {
-            let Some(home) = text(row, "file") else { continue };
-            for (column, value) in row {
-                if SKIP_COLUMNS.contains(&column.as_str()) {
-                    continue;
-                }
-                let Value::String(id) = value else { continue };
-                if !looks_like_id(id) {
-                    continue;
-                }
-                if let Some(target) = owner.get(id)
-                    && *target != home
-                {
-                    out.entry(target.clone()).or_default().insert(home.clone());
-                }
-            }
-        }
-    }
-
-    // A TEMPLATE IS EXTRACTED BY WALKING ITS COMPONENT, which is an edge in the OTHER direction
-    // from every one above. The walk records that a row POINTING at another must be re-extracted
-    // with it, and by that rule an `.html` depends on the `.ts` it names — true, and not the whole
-    // truth: the template pass runs from the COMPONENT, so a changed `.html` cannot be re-extracted
-    // without re-running the component that owns it. Left out, a changed template was parsed as an
-    // ORPHAN instead: it read `layer=other` where the full run said `main`, lost its `reachable`,
-    // and registered a second component of the same name.
-    for row in rows_of(tables, "templates") {
-        let home = text(row, "file");
-        let component = text(row, "class").and_then(|c| owner.get(&c).cloned());
-        if let (Some(home), Some(component)) = (home, component)
-            && home != component
-        {
-            out.entry(home).or_default().insert(component);
-        }
-    }
-    // AN IMPORT NAMES A FILE DIRECTLY rather than a row in one, so it is not an id reference and
-    // the walk above cannot see it. It is the edge everything else is built on top of.
-    for row in rows_of(tables, "imports") {
-        if let (Some(importer), Some(imported)) = (text(row, "file"), text(row, "resolved_file"))
-            && importer != imported
-        {
-            out.entry(imported).or_default().insert(importer);
-        }
-    }
-
-    // A NAME IMPORTED THROUGH BARRELS depends on the file that declares it AND on every barrel on the way:
-    // re-pointing any of them moves the declaration `import_names.declared` states, and an importer the
-    // graph did not know about kept the stale one. The barrels are paths (`via`); the declaring file an id.
-    let id_of_path: IndexMap<&String, &String> = path_of.iter().map(|(id, path)| (path, id)).collect();
-    for row in rows_of(tables, "import_names") {
-        let Some(importer) = text(row, "file") else { continue };
-        let mut on_the_way: Vec<String> = text(row, "declared_file").into_iter().collect();
-        for path in list(row.get("via")) {
-            if let Some(id) = id_of_path.get(&path) {
-                on_the_way.push((*id).clone());
-            }
-        }
-        for target in on_the_way {
-            if target != importer {
-                out.entry(target).or_default().insert(importer.clone());
-            }
-        }
-    }
-
-    // TO PATHS, dropping any file the `files` table does not name — a row pointing at a file with
-    // no path is a row the reader could not act on anyway, and inventing a key for it would make
-    // the graph claim an edge to nowhere.
-    let mut named: IndexMap<String, Vec<String>> = IndexMap::new();
-    for (target, dependents) in out {
-        let Some(target_path) = path_of.get(&target) else { continue };
-        let mut paths: Vec<String> = dependents
-            .iter()
-            .filter_map(|d| path_of.get(d))
-            .filter(|p| *p != target_path)
-            .cloned()
-            .collect();
-        if paths.is_empty() {
-            continue;
-        }
-        paths.sort();
-        paths.dedup();
-        named.insert(target_path.clone(), paths);
-    }
-    named
+    // ONE DERIVATION, streamed or held: the rows go past a `Digest` (`digest.rs`), which a run streaming its payload
+    // feeds one row at a time.
+    super::digest::Digest::over(tables, &[]).graph()
 }
 
 /// Every file that DECLARES something a template resolves by name — the guard's whole input.
@@ -204,23 +64,7 @@ pub fn graph(tables: Tables<'_>) -> IndexMap<String, Vec<String>> {
 /// defect. This costs nothing and cannot be subtly wrong. Measured: a small share of a large
 /// workspace; the rest stays incremental.
 pub fn scope_files(tables: Tables<'_>) -> Vec<String> {
-    let mut path_of: IndexMap<String, String> = IndexMap::new();
-    for row in rows_of(tables, "files") {
-        if let (Some(id), Some(path)) = (text(row, "id"), text(row, "path")) {
-            path_of.insert(id, path);
-        }
-    }
-    let mut out: IndexSet<String> = IndexSet::new();
-    for table in SCOPE_TABLES {
-        for row in rows_of(tables, table) {
-            if let Some(named) = text(row, "file").and_then(|f| path_of.get(&f).cloned()) {
-                out.insert(named);
-            }
-        }
-    }
-    let mut paths: Vec<String> = out.into_iter().collect();
-    paths.sort();
-    paths
+    super::digest::Digest::over(tables, &[]).scope_files()
 }
 
 /// The stored graph with the re-extracted files' edges recomputed, and every other edge left
@@ -235,7 +79,7 @@ pub fn scope_files(tables: Tables<'_>) -> Vec<String> {
 /// the run replaced is refused before the write (`reads::dangling`), so a kept edge cannot point at nothing.
 pub fn merge(
     previous: &IndexMap<String, Vec<String>>,
-    tables: Tables<'_>,
+    fresh: IndexMap<String, Vec<String>>,
     replaced: &[String],
 ) -> IndexMap<String, Vec<String>> {
     let gone: IndexSet<&str> = replaced.iter().map(String::as_str).collect();
@@ -250,7 +94,7 @@ pub fn merge(
             out.insert(target.clone(), kept);
         }
     }
-    for (target, dependents) in graph(tables) {
+    for (target, dependents) in fresh {
         let merged = out.entry(target).or_default();
         merged.extend(dependents);
         merged.sort();
@@ -261,14 +105,14 @@ pub fn merge(
 
 /// The same repair for the scope set: the replaced files drop out, and whatever they declare now
 /// goes back in.
-pub fn merge_scope(previous: &[String], tables: Tables<'_>, replaced: &[String]) -> Vec<String> {
+pub fn merge_scope(previous: &[String], fresh: Vec<String>, replaced: &[String]) -> Vec<String> {
     let gone: IndexSet<&str> = replaced.iter().map(String::as_str).collect();
     let mut out: IndexSet<String> = previous
         .iter()
         .filter(|p| !gone.contains(p.as_str()))
         .cloned()
         .collect();
-    out.extend(scope_files(tables));
+    out.extend(fresh);
     let mut paths: Vec<String> = out.into_iter().collect();
     paths.sort();
     paths
@@ -278,6 +122,7 @@ pub fn merge_scope(previous: &[String], tables: Tables<'_>, replaced: &[String])
 #[allow(non_snake_case)]
 mod tests {
     use super::*;
+    use super::super::digest::looks_like_id;
     use serde_json::json;
 
     fn tables(value: Value) -> Map<String, Value> {
@@ -384,7 +229,7 @@ mod tests {
             "classes": [{"id": "c:1", "file": "f:2"}],
             "calls": [{"id": "cl:1", "file": "f:1", "target_id": "c:1"}]
         }));
-        let merged = merge(&previous, &t, &["a.ts".to_string()]);
+        let merged = merge(&previous, graph(&t), &["a.ts".to_string()]);
         // `a.ts` was re-extracted, so its edges are re-derived and the one it no longer has is gone.
         assert_eq!(merged.get("b.ts"), Some(&vec!["a.ts".to_string(), "z.ts".to_string()]));
         assert_eq!(merged.get("q.ts"), None, "nothing points at q.ts any more");
@@ -396,7 +241,7 @@ mod tests {
             "files": [{"id": "f:1", "path": "a.ts"}],
             "pipes": [{"id": "p:1", "file": "f:1"}]
         }));
-        let out = merge_scope(&["a.ts".to_string(), "gone.ts".to_string()], &t, &["gone.ts".to_string()]);
+        let out = merge_scope(&["a.ts".to_string(), "gone.ts".to_string()], scope_files(&t), &["gone.ts".to_string()]);
         assert_eq!(out, vec!["a.ts".to_string()]);
     }
 }

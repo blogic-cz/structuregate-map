@@ -18,6 +18,7 @@
 //! in the payload and are served straight out of it; nothing is read back.
 
 use super::deps;
+use super::digest::Digest;
 use super::half::{drop_half, tables_with_half, HALF_COLUMN};
 use super::pyjson;
 use super::schema;
@@ -60,8 +61,9 @@ pub struct TsPayload {
     pub whole: Vec<String>,
     pub shas: Map<String, Value>,
     pub counters: Map<String, Value>,
-    /// Its list and object cells kept as the text node sent - see `rawcells`.
-    #[serde(deserialize_with = "super::rawcells::tables")]
+    /// Rows HELD, for a fixture. A run never parses them into here: they are streamed past twice (`apply_streamed`),
+    /// so the field is skipped when a payload is read.
+    #[serde(skip_deserializing)]
     pub tables: Map<String, Value>,
     /// The feature API the closure needs, which only node has read off the config.
     pub declared: Declared,
@@ -237,63 +239,6 @@ fn replace_affected(db: &Connection, affected: &[String], whole: &[String]) -> R
     Ok(removed)
 }
 
-/// The graph, derived from the rows just written and kept in `_meta` for the next run to read.
-///
-/// `replaced` names the files a PARTIAL run re-extracted: the stored graph is repaired for those
-/// and left alone everywhere else, because this run never saw the other rows.
-///
-/// DELETED AND THEN INSERTED, never `INSERT OR REPLACE`: `_meta` is `(key TEXT, value TEXT)` with
-/// NO unique key, so REPLACE has nothing to replace ON and simply adds a second row. Every reader
-/// takes the first one, so each run stored a graph nobody read and answered with the PREVIOUS run's.
-fn remember_deps(db: &Connection, tables: &Map<String, Value>, replaced: Option<&[String]>) {
-    let read = |key: &str| -> Option<String> {
-        db.query_row("SELECT value FROM _meta WHERE key = ?1", [key], |r| r.get::<_, String>(0))
-            .ok()
-    };
-    let deps_key = format!("deps:{LANG}");
-    let scope_key = format!("scope:{LANG}");
-
-    let (edges, scope) = match replaced {
-        None => (deps::graph(tables), deps::scope_files(tables)),
-        Some(files) => {
-            // READ BACK AS JSON AND NOT AS A MAP TYPE: this crate's ordered map has no serde of its
-            // own, and the stored graph is a plain object of string lists either way.
-            let mut previous: indexmap::IndexMap<String, Vec<String>> = indexmap::IndexMap::new();
-            if let Some(Value::Object(stored)) = read(&deps_key).and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
-                for (target, dependents) in stored {
-                    if let Value::Array(list) = dependents {
-                        previous.insert(
-                            target,
-                            list.iter().filter_map(|d| d.as_str().map(String::from)).collect(),
-                        );
-                    }
-                }
-            }
-            let held: Vec<String> = read(&scope_key)
-                .and_then(|t| serde_json::from_str(&t).ok())
-                .unwrap_or_default();
-            (deps::merge(&previous, tables, files), deps::merge_scope(&held, tables, files))
-        }
-    };
-
-    // A graph that could not be stored costs the next run its incremental parse and nothing else,
-    // so it is not worth failing a map that is otherwise complete.
-    let mut as_object = Map::new();
-    for (target, dependents) in edges {
-        as_object.insert(target, Value::from(dependents));
-    }
-    let compact = |v: &Value| serde_json::to_string(v).unwrap_or_else(|_| "null".into());
-    let edges_json = compact(&Value::Object(as_object));
-    let scope_json = compact(&Value::from(scope));
-    for (key, value) in [(deps_key, edges_json), (scope_key, scope_json)] {
-        let _ = db.execute("DELETE FROM _meta WHERE key = ?1", [key.as_str()]);
-        let _ = db.execute(
-            "INSERT INTO _meta (key, value) VALUES (?1, ?2)",
-            [key.as_str(), value.as_str()],
-        );
-    }
-}
-
 /// THE FOLDER A `files.path` OF THIS HALF IS RELATIVE TO: the workspace node mapped (`fe`), not the root.
 ///
 /// The two are one folder only when the workspace sits AT the root. On a consumer it is often a folder
@@ -311,7 +256,35 @@ fn workspace_of(root: &str, fe: Option<&str>) -> PathBuf {
 /// A full run's `tables` is some gigabytes of parsed rows, and the full path below MOVES them
 /// into the store rather than cloning them; a caller that still needed its payload afterwards
 /// would have forced the copy back.
-pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsReceipt> {
+/// Rows HELD - a fixture's door; a run streams them (`apply_streamed`).
+#[cfg(test)]
+pub fn apply(db_path: &Path, root: &str, payload: TsPayload) -> Result<TsReceipt> {
+    let rebuilt = rebuilt_of(&payload);
+    let digest = Digest::over(&payload.tables, &rebuilt);
+    apply_with(db_path, root, payload, digest, None)
+}
+
+/// A payload STREAMED: `head` is the payload without its rows, `bytes` the whole file (mapped). The rows are walked
+/// twice and never held - once for what they say about each other (`Digest`), once while they are written, in
+/// batches - so the peak is a batch and the digest, not every row of the workspace.
+pub fn apply_streamed(db_path: &Path, root: &str, head: TsPayload, bytes: &[u8]) -> Result<TsReceipt> {
+    let mut digest = Digest::new(&rebuilt_of(&head));
+    super::rawcells::each_row(bytes, &mut |table, row| {
+        digest.first(table, &row);
+        Ok(())
+    })?;
+    apply_with(db_path, root, head, digest, Some(bytes))
+}
+
+/// The tables a rollup rebuilds whole, as the payload's spec names them.
+fn rebuilt_of(payload: &TsPayload) -> Vec<String> {
+    payload.spec.as_ref().map(|s| deps::list(s.get("rebuilt"))).unwrap_or_default()
+}
+
+/// How many rows of one table go into the store at a time when they are streamed.
+const BATCH: usize = 5_000;
+
+fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest, bytes: Option<&[u8]>) -> Result<TsReceipt> {
     if !payload.all && !payload.partial {
         bail!("a payload must say whether it is the whole half or a named set of files");
     }
@@ -362,7 +335,35 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
         extra.insert(format!("{key}:{LANG}"), text);
     }
 
-    let named = text_paths_of(root, payload.tables.get("files"));
+    let named = text_paths_of(root, Some(&Value::Array(digest.files.clone())));
+    // THE SECOND WALK, run by the store as it writes: each row past the digest, then into a batch of its table.
+    let digest = std::cell::RefCell::new(digest);
+    let feed = |sink: &mut dyn FnMut(&str, &[Value]) -> Result<()>| -> Result<()> {
+        let Some(bytes) = bytes else { return Ok(()) };
+        let mut batch: Vec<Value> = Vec::with_capacity(BATCH);
+        let mut current = String::new();
+        super::rawcells::each_row(bytes, &mut |table, row| {
+            digest.borrow_mut().second(table, &row);
+            if table != current {
+                if !batch.is_empty() {
+                    sink(&current, &batch)?;
+                    batch.clear();
+                }
+                current = table.to_string();
+            }
+            batch.push(Value::Object(row));
+            if batch.len() >= BATCH {
+                sink(&current, &batch)?;
+                batch.clear();
+            }
+            Ok(())
+        })?;
+        if !batch.is_empty() {
+            sink(&current, &batch)?;
+        }
+        Ok(())
+    };
+    let stream: Option<&store::Stream<'_>> = bytes.map(|_| &feed as &store::Stream<'_>);
     let texts = store::Texts::OnDisk { root: &workspace, rels: &named };
     let gone: BTreeSet<String> = BTreeSet::new();
 
@@ -374,7 +375,7 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
             let db = Connection::open(db_path)?;
             let deps = super::half::meta(db_path, &format!("deps:{LANG}"));
             let deps: Map<String, Value> = serde_json::from_str(&deps).unwrap_or_default();
-            if let Some((count, first)) = super::reads::dangling(&db, LANG, &payload.affected, &payload.tables, &deps)? {
+            if let Some((count, first)) = super::reads::dangling(&db, LANG, &payload.affected, &digest.borrow().ids, &deps)? {
                 bail!("{} would leave {count} reference(s) to rows it replaced, first {first}", super::reads::STOPPED_SHORT);
             }
         }
@@ -385,6 +386,7 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
         let write_started = std::time::Instant::now();
         let first = store::write(db_path, &WriteRequest {
             tables: &payload.tables,
+            stream,
             texts: &texts,
             root,
             shas: &payload.shas,
@@ -403,8 +405,7 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
         // THE GRAPH NOW, AND THEN THE PAYLOAD GOES. The graph is repaired from the payload's own tables;
         // the closure below reads EVERY row back from the database, and holding the payload beside them
         // put the exe at several GB on a large consumer, much of it rows already written.
-        let rebuilt: Vec<String> = payload.spec.as_ref().map(|s| deps::list(s.get("rebuilt"))).unwrap_or_default();
-        remember_graph(&mut receipt, db_path, &payload.tables, Some(payload.affected.as_slice()), &rebuilt);
+        super::remember::remember_graph(&mut receipt, db_path, &digest.borrow(), Some(payload.affected.as_slice()));
         payload.tables = Map::new();
 
         // THE STYLESHEETS BEFORE THE CLOSURE: `class_hides` says which class gates hide their element, and the
@@ -435,6 +436,7 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
         let closure_written = std::time::Instant::now();
         store::write(db_path, &WriteRequest {
             tables: &emitted,
+            stream: None,
             texts: &store::Texts::Held(&BTreeMap::new()),
             root,
             shas: &Map::new(),
@@ -457,6 +459,7 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
         let write_started = std::time::Instant::now();
         let mut applied = store::write(db_path, &WriteRequest {
             tables: &payload.tables,
+            stream,
             texts: &texts,
             root,
             shas: &payload.shas,
@@ -474,8 +477,7 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
             .phases
             .insert("write the rows".to_string(), write_started.elapsed().as_millis() as u64);
         receipt.write_steps = applied.steps.iter().map(|(n, ms)| (n.to_string(), *ms)).collect();
-        let rebuilt: Vec<String> = payload.spec.as_ref().map(|s| deps::list(s.get("rebuilt"))).unwrap_or_default();
-        remember_graph(&mut receipt, db_path, &payload.tables, None, &rebuilt);
+        super::remember::remember_graph(&mut receipt, db_path, &digest.borrow(), None);
         let freeing = std::time::Instant::now();
         payload.tables = Map::new();
         receipt.phases.insert("free the payload".to_string(), freeing.elapsed().as_millis() as u64);
@@ -509,6 +511,7 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
         let closure_written = std::time::Instant::now();
         let closure = store::write(db_path, &WriteRequest {
             tables: &emitted,
+            stream: None,
             texts: &store::Texts::Held(&BTreeMap::new()),
             root,
             shas: &Map::new(),
@@ -533,37 +536,6 @@ pub fn apply(db_path: &Path, root: &str, mut payload: TsPayload) -> Result<TsRec
     Ok(receipt)
 }
 
-/// WHICH FILES HAVE TO BE RE-EXTRACTED WHEN ONE CHANGES, stored beside the rows it is derived from so the
-/// next run reads it instead of deriving it. A partial run REPAIRS it (`replaced`) rather than deriving
-/// it: it holds a fraction of the rows, and reading the rest back costs close to a minute.
-fn remember_graph(receipt: &mut TsReceipt, db_path: &Path, seen: &Map<String, Value>, replaced: Option<&[String]>, rebuilt: &[String]) {
-    let deps_started = std::time::Instant::now();
-    if let Ok(db) = Connection::open(db_path) {
-        remember_deps(&db, seen, replaced);
-        // THE RECORDED READS ARE PROVED against every row written - see `reads::unread` - and only proved reads
-        // let the next run stop short of every hop of dependents. A full run proves them; a partial one holds
-        // only its own rows, so it can find them wrong and never right.
-        let missed = super::reads::unread(seen, rebuilt);
-        let verdict = match missed.first() {
-            Some((owner, named)) => {
-                receipt.notes.push(format!(
-                    "the typescript half's recorded reads miss {} file(s) its rows name, first {owner} -> {named} -                      the next run reads every dependent again",
-                    missed.len()
-                ));
-                Some(format!("unproven: {owner} -> {named}"))
-            }
-            None => replaced.is_none().then(|| "proven".to_string()),
-        };
-        if let Some(verdict) = verdict {
-            let key = format!("reads:{LANG}");
-            let _ = db.execute("DELETE FROM _meta WHERE key = ?1", [key.as_str()]);
-            let _ = db.execute("INSERT INTO _meta (key, value) VALUES (?1, ?2)", [key.as_str(), verdict.as_str()]);
-        }
-    }
-    receipt
-        .phases
-        .insert("remember the graph".to_string(), deps_started.elapsed().as_millis() as u64);
-}
 
 /// THE STYLESHEETS, AS RULES (`cssmap`) - derived after every other row is in, because `class_hides`
 /// joins node's gates to them; whole on every run, so a partial one needs nothing of its own.
