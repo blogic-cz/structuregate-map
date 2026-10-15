@@ -103,7 +103,7 @@ Test-Case 'csfold: a template of two six-way loops keeps all thirty-six strings'
     $db = Join-Path $tree 'many.sqlite'
     Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
     $r = Invoke-Gate --map-query $db --width 0 --sql ("SELECT 'v=' || count(*) AS v FROM arguments a JOIN calls c ON c.id = a.call " +
-        "JOIN arguments__template s ON s.parent = a.id || '/0' WHERE c.callee = 'Take'")
+        "JOIN arguments__template s ON s.owner = a.id AND s.parent = 0 WHERE c.callee = 'Take'")
     Assert-Exit $r 0
     Assert-Line $r 'v=36'
 }

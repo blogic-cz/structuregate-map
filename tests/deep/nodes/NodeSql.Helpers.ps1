@@ -1,39 +1,66 @@
-# NODE ROWS, read as SQL. A list or an object cell of the deep map is not JSON text: it is rows of `<table>__<column>`, one per node
-# (`id`, `owner`, `parent`, `role`, `ord`, `node`, `value`; an object's scalar members are columns of its own row). A suite that
-# pinned a cell to its old JSON spelling asks these for the SQL that spells it again. Dot-sourced by the helpers of each half.
+# NODE ROWS, read as SQL. A list or an object cell of the deep map is not JSON text: it is rows of `<table>__<column>`, one per node:
+# `owner` (the row's id, `#<rowid>` for a table without one), `n` (its preorder number - the root is 0, a node IS (owner, n)),
+# `parent` (the parent's `n`, NULL for the root), `role`, `ord`, `node`, `value`. EVERY member of an object, a scalar too, is its
+# own row below it, its key in `role` - there are no per-key columns, and no `id`. A suite that pinned a cell to its old JSON
+# spelling asks these for the SQL that spells it again. Dot-sourced by the helpers of each half.
+
+# The `owner` a row's cell is keyed by: `k.rowid` for a table with no `id` is `'#' || k.rowid`, anything else (`x.id`) as it is.
+function Get-NodeOwnerSql([string]$Ref) {
+    if ($Ref.EndsWith('.rowid')) { return "'#' || $Ref" }
+    return $Ref
+}
 
 # A LIST CELL IS NODE ROWS (`<table>__<column>`, one row per node), never JSON text. These are the SQL for a list spelled as JSON
-# text again - ["a","b"], [] for an empty list, NULL for a cell that holds none - for an assertion pinned to that spelling. `Get-NodeListSql` is the list a node
-# `$Item` holds under `$Role`; `Get-NodeRootListSql` is the whole cell of the row `$Ref` names (`k.rowid` for a table with no `id`, else `x.id`).
+# text again - ["a","b"], [] for an empty list, NULL for a cell that holds none - for an assertion pinned to that spelling.
+# `zl` is the list node `$Where` picks, `zx` its items. `Get-NodeListSql` is the list a node `$Item` (an alias) holds under
+# `$Role`; `Get-NodeRootListSql` is the whole cell of the row `$Ref` names (`k.rowid` for a table with no `id`, else `x.id`).
 function Get-NodeTextSql([string]$Table, [string]$Where, [string]$Sep = ',') {
     $item = "CASE WHEN typeof(zx.value) = 'text' THEN char(34) || zx.value || char(34) ELSE coalesce(zx.value, 'null') END"
-    return "(SELECT CASE WHEN count(zx.id) = 0 THEN '[]' ELSE '[' || group_concat($item, '$Sep' ORDER BY zx.ord) || ']' END " +
-        "FROM $Table zl LEFT JOIN $Table zx ON zx.parent = zl.id WHERE $Where GROUP BY zl.id)"
+    return "(SELECT CASE WHEN count(zx.n) = 0 THEN '[]' ELSE '[' || group_concat($item, '$Sep' ORDER BY zx.ord) || ']' END " +
+        "FROM $Table zl LEFT JOIN $Table zx ON zx.owner = zl.owner AND zx.parent = zl.n WHERE $Where GROUP BY zl.owner, zl.n)"
 }
 function Get-NodeListSql([string]$Table, [string]$Item, [string]$Role, [string]$Sep = ',') {
-    return Get-NodeTextSql $Table "zl.parent = ${Item}.id AND zl.role = '$Role'" $Sep
+    return Get-NodeTextSql $Table "zl.owner = ${Item}.owner AND zl.parent = ${Item}.n AND zl.role = '$Role'" $Sep
 }
 function Get-NodeRootListSql([string]$Table, [string]$Ref, [string]$Sep = ',') {
-    $owner = if ($Ref.EndsWith('.rowid')) { "'#' || $Ref" } else { $Ref }
-    return Get-NodeTextSql $Table "zl.id = $owner || '/0'" $Sep
+    return Get-NodeTextSql $Table "zl.owner = $(Get-NodeOwnerSql $Ref) AND zl.n = 0" $Sep
 }
 # The `$Role` list of item number `$Ord` of a row's list-of-objects cell, as JSON text (see Get-NodeListSql).
 function Get-NodeItemListSql([string]$Table, [string]$Ref, [int]$Ord, [string]$Role, [string]$Sep = ',') {
-    $owner = if ($Ref.EndsWith('.rowid')) { "'#' || $Ref" } else { $Ref }
-    return Get-NodeTextSql $Table "zl.role = '$Role' AND zl.parent = (SELECT ji.id FROM $Table ji WHERE ji.owner = $owner AND ji.parent = $owner || '/0' AND ji.ord = $Ord)" $Sep
+    $owner = Get-NodeOwnerSql $Ref
+    return Get-NodeTextSql $Table ("zl.owner = $owner AND zl.role = '$Role' AND " +
+        "zl.parent = (SELECT ji.n FROM $Table ji WHERE ji.owner = $owner AND ji.parent = 0 AND ji.ord = $Ord)") $Sep
 }
 
-# A list of OBJECTS spelled as JSON text again: [{"a":"x","b":1}], the named members in that order (an object's scalar members are
-# columns of its node row). `$Ref` is the row owning the cell, as Get-NodeRootListSql takes it; with `$Role` the list is that member of the cell's root object.
+# ONE MEMBER OF AN OBJECT NODE, by its key - the value of the row below `$Item` (a node's alias) whose `role` is `$Role`,
+# NULL when the object holds no such member. There is no column per key: `v.op` is this, `Get-NodeFieldSql $t 'v' 'op'`.
+function Get-NodeFieldSql([string]$Table, [string]$Item, [string]$Role) {
+    return "(SELECT zf.value FROM $Table zf WHERE zf.owner = ${Item}.owner AND zf.parent = ${Item}.n AND zf.role = '$Role')"
+}
+# The `$Role` member of a row's OBJECT cell - its root node (`$Ref` as Get-NodeRootListSql takes it).
+function Get-NodeRootFieldSql([string]$Table, [string]$Ref, [string]$Role) {
+    return "(SELECT zf.value FROM $Table zf WHERE zf.owner = $(Get-NodeOwnerSql $Ref) AND zf.parent = 0 AND zf.role = '$Role')"
+}
+# The `$Role` member of item number `$Ord` of a row's list-of-objects cell (`$Ref` as Get-NodeRootListSql takes it).
+function Get-NodeItemFieldSql([string]$Table, [string]$Ref, [int]$Ord, [string]$Role) {
+    $owner = Get-NodeOwnerSql $Ref
+    return "(SELECT zf.value FROM $Table zi JOIN $Table zf ON zf.owner = zi.owner AND zf.parent = zi.n AND zf.role = '$Role' " +
+        "WHERE zi.owner = $owner AND zi.parent = 0 AND zi.ord = $Ord)"
+}
+
+# A list of OBJECTS spelled as JSON text again: [{"a":"x","b":1}], the named members in that order (each member is a node row
+# below its item, `role` = its key; one the item does not hold reads null). `$Ref` is the row owning the cell, as
+# Get-NodeRootListSql takes it; with `$Role` the list is that member of the cell's root object.
 function Get-NodeObjectListSql([string]$Table, [string]$Ref, [string[]]$Members, [string]$Role = '') {
-    $owner = if ($Ref.EndsWith('.rowid')) { "'#' || $Ref" } else { $Ref }
+    $owner = Get-NodeOwnerSql $Ref
     $parts = $Members | ForEach-Object {
-        "char(34) || '$_' || char(34) || ':' || CASE WHEN typeof(zi.[$_]) = 'text' THEN char(34) || zi.[$_] || char(34) ELSE coalesce(zi.[$_], 'null') END"
+        "char(34) || '$_' || char(34) || ':' || coalesce((SELECT CASE WHEN zm.node = 'string' THEN char(34) || zm.value || char(34) " +
+            "ELSE coalesce(zm.value, 'null') END FROM $Table zm WHERE zm.owner = zi.owner AND zm.parent = zi.n AND zm.role = '$_'), 'null')"
     }
     $item = "'{' || " + ($parts -join " || ',' || ") + " || '}'"
-    $where = if ($Role) { "zr.parent = $owner || '/0' AND zr.role = '$Role'" } else { "zr.id = $owner || '/0'" }
-    return "(SELECT CASE WHEN count(zi.id) = 0 THEN '[]' ELSE '[' || group_concat($item, ',' ORDER BY zi.ord) || ']' END " +
-        "FROM $Table zr LEFT JOIN $Table zi ON zi.parent = zr.id WHERE $where GROUP BY zr.id)"
+    $where = if ($Role) { "zr.owner = $owner AND zr.parent = 0 AND zr.role = '$Role'" } else { "zr.owner = $owner AND zr.n = 0" }
+    return "(SELECT CASE WHEN count(zi.n) = 0 THEN '[]' ELSE '[' || group_concat($item, ',' ORDER BY zi.ord) || ']' END " +
+        "FROM $Table zr LEFT JOIN $Table zi ON zi.owner = zr.owner AND zi.parent = zr.n WHERE $where GROUP BY zr.owner, zr.n)"
 }
 
 # EVERY CELL OF THE MAP AT $Db THAT IS STILL A STRUCTURE AS TEXT - JSON, or python's literal value (`arguments.value`)

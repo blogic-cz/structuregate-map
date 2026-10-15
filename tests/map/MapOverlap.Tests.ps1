@@ -60,11 +60,25 @@ Test-Case 'mapoverlap: a .ts edit in a tree with no Angular workspace starts no 
     Assert-Equal (Get-MapOverlapAttribute $edited.Spans['deep: plain typescript'] 'structuregate.early.ts') 'used' 'the plain half, started beside the file map'
 }
 
-Test-Case 'mapoverlap: a workspace four folders down is still found, and one five down is not - as node walks' {
-    $found = Use-Tree @{ 'src/a.ts' = "export const A = 1;`n"; 'a/b/c/d/angular.json' = '{"projects":{}}' }
-    $deeper = Use-Tree @{ 'src/a.ts' = "export const A = 1;`n"; 'a/b/c/d/e/angular.json' = '{"projects":{}}' }
-    Assert-Equal (Invoke-MapOverlap $found '.ts').Spans.ContainsKey('typescript: plan (node)') $true 'node asked, with a marker four down'
-    Assert-Equal (Invoke-MapOverlap $deeper '.ts').Spans.ContainsKey('typescript: plan (node)') $false 'no node, with the marker five down'
+# THE WORKSPACE SEARCH HAS NO DEPTH: rust walks for the marker breadth first to the bottom of the tree, as node's
+# `findWorkspaceRoot` does, and the SHALLOWEST marked folder is the workspace. Which one rust took is read off the
+# plain half's rows: it maps every script file OUTSIDE the workspace, so the shallow workspace's file is no row and the
+# deep one's - a folder with a marker of its own, but not the workspace - is.
+Test-Case 'mapoverlap: a workspace is found at any depth, and the shallowest marker wins - as node walks' {
+    $deep = Use-Tree @{ 'src/a.ts' = "export const A = 1;`n"; 'a/b/c/d/e/f/angular.json' = '{"projects":{}}' }
+    Assert-Equal (Invoke-MapOverlap $deep '.ts').Spans.ContainsKey('typescript: plan (node)') $true 'node asked, with the marker six down'
+    $both = Use-Tree @{
+        'src/a.ts' = "export const A = 1;`n"
+        'w/w.ts' = "export const W = 1;`n"; 'w/angular.json' = '{"projects":{}}'
+        'a/b/c/d/e/f/d.ts' = "export const D = 1;`n"; 'a/b/c/d/e/f/angular.json' = '{"projects":{}}'
+    }
+    $run = Invoke-MapOverlap $both '.ts'
+    Assert-Exit $run.Result 0
+    Assert-Equal $run.Spans.ContainsKey('typescript: plan (node)') $true 'node asked, with two markers'
+    $r = Invoke-Gate --map-query (Join-Path $both 'map.sqlite') --width 0 --sql "SELECT 'p=' || group_concat(path, ',' ORDER BY path) AS p FROM files"
+    Assert-Exit $r 0
+    $paths = @($r.Lines | Where-Object { $_.Trim().StartsWith('p=') })[0].Trim()
+    Assert-Equal $paths 'p=a/b/c/d/e/f/d.ts,src/a.ts' 'the plain half mapped everything outside the shallow workspace'
 }
 
 }
