@@ -32,10 +32,8 @@ struct Function {
 /// its paths carry, in `roots:<lang>`; named after the first, the other trees read as if they sat inside it. So
 /// with more than one root it is the deepest folder holding them all.
 fn shown_root(db: &Connection) -> String {
-    let first: String = db.query_row("SELECT value FROM _meta WHERE key = 'root'", [], |r| r.get(0)).unwrap_or_default();
-    let listed: Vec<String> = db.prepare("SELECT value FROM _meta WHERE key LIKE 'roots:%'")
-        .and_then(|mut rows| rows.query_map([], |r| r.get::<_, String>(0)).map(|found| found.flatten().collect()))
-        .unwrap_or_default();
+    let first: String = crate::rows::meta::get(db, "root").unwrap_or_default();
+    let listed: Vec<String> = crate::rows::meta::scan(db, Some("roots:%")).into_iter().map(|(_, v)| v).collect();
     let mut dirs: Vec<String> = listed.iter()
         .filter_map(|text| serde_json::from_str::<Vec<(String, String)>>(text).ok())
         .flatten()

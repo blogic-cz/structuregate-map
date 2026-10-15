@@ -356,13 +356,10 @@ fn unrestored(into: &mut Collector, db: &str, root: &str, projects: &[String]) {
         .map(|p| Path::new(p).strip_prefix(root).map_or_else(|_| p.to_string(), |r| r.to_string_lossy().replace('\\', "/")))
         .collect();
     let Ok(conn) = rusqlite::Connection::open(db) else { return };
-    let _ = conn.execute_batch("CREATE TABLE IF NOT EXISTS _meta (key TEXT, value TEXT)");
     // WRITTEN ONLY WHEN IT CHANGES: a run that changed nothing writes nothing.
     let listed = serde_json::Value::from(named.clone()).to_string();
-    let kept: Option<String> = conn.query_row("SELECT value FROM _meta WHERE key = 'unrestored:csharp'", [], |r| r.get(0)).ok();
-    if kept.as_deref() != Some(listed.as_str()) {
-        let _ = conn.execute("DELETE FROM _meta WHERE key = 'unrestored:csharp'", []);
-        let _ = conn.execute("INSERT INTO _meta (key, value) VALUES ('unrestored:csharp', ?1)", [&listed]);
+    if crate::rows::meta::get(&conn, "unrestored:csharp").as_deref() != Some(listed.as_str()) {
+        let _ = crate::rows::meta::put(&conn, "unrestored:csharp", &listed);
     }
     if named.is_empty() {
         return;

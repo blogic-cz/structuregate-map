@@ -164,19 +164,24 @@ Test-Case 'pystmts: deps:python is stored interned, and a record in the old plai
     }
     $db = Join-Path $tree 'stmts.sqlite'
     Assert-Exit (Invoke-Gate --root $tree --ext .py --map-sqlite $db) 0
-    $meta = Invoke-PyStmtsQ $db --sql "SELECT value FROM _meta WHERE key = 'deps:python'"
-    Assert-Line $meta '"interned":1'
-    # Rewritten in the form an earlier version stored, the record still re-reads caller.py when the module moves.
+    # NODE ROWS in `_meta__value`, read back as the JSON they rebuild.
+    $interned = Get-MetaText $db 'deps:python'
+    if (-not $interned -or -not $interned.Contains('"interned":1')) { throw "deps:python is not interned: $interned" }
+    $record = Join-Path $tree 'record.json.txt'
+    [System.IO.File]::WriteAllText($record, $interned)
+    # Rewritten in the form an earlier version stored - TEXT in the cell, no nodes - the record still re-reads caller.py
+    # when the module moves.
     $script = "import json, sqlite3, sys$nl" + "db = sqlite3.connect(sys.argv[1])$nl" +
-              "v = json.loads(db.execute(`"SELECT value FROM _meta WHERE key = 'deps:python'`").fetchone()[0])$nl" +
+              "v = json.loads(open(sys.argv[2], encoding='utf-8').read())$nl" +
               "plain = {rel: [v['keys'][i] for i in ids] for rel, ids in v['files'].items()}$nl" +
+              "db.execute(`"DELETE FROM _meta__value WHERE owner = 'deps:python'`")$nl" +
               "db.execute(`"UPDATE _meta SET value = ? WHERE key = 'deps:python'`", (json.dumps(plain),))$nl" +
               "db.commit()$nl"
     $file = Join-Path $tree 'plain.py.txt'
     [System.IO.File]::WriteAllText($file, $script)
-    & $script:Python $file $db
+    & $script:Python $file $db $record
     if ($LASTEXITCODE -ne 0) { throw 'the record could not be rewritten in the plain form' }
-    Assert-NoLine (Invoke-PyStmtsQ $db --sql "SELECT value FROM _meta WHERE key = 'deps:python'") '"interned"'
+    if ((Get-MetaText $db 'deps:python').Contains('"interned"')) { throw 'deps:python was not rewritten in the plain form' }
     Move-Item (Join-Path $tree 'pkg/hub/impl.py') (Join-Path $tree 'pkg/moved/impl.py')
     [System.IO.File]::WriteAllText((Join-Path $tree 'pkg/hub/__init__.py'), "from pkg.moved.impl import helper  # noqa$nl")
     Assert-Exit (Invoke-Gate --root $tree --ext .py --map-sqlite $db) 0

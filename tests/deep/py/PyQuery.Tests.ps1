@@ -5,6 +5,8 @@
     because it is the cheapest host; nothing here is about python. Its helpers are its own: `-Only PyQuery`.
 #>
 
+. (Join-Path $PSScriptRoot '../nodes/NodeSql.Helpers.ps1')
+
 $script:PyQueryPython = [bool]$script:Python
 if (-not $script:PyQueryPython) { Write-Host '    (no python on this machine - the query cases are not run)' }
 
@@ -29,15 +31,13 @@ Test-Case 'pyquery: _meta records every --root the map was built from, the first
     $src = Join-Path $tree 'src'
     $test = Join-Path $tree 'test'
     Assert-Exit (Invoke-Gate --root $src --root $test --ext .py --map-sqlite $db) 0
-    $r = Invoke-Gate --map-query $db --sql "SELECT value FROM _meta WHERE key = 'roots'" --width 0
-    Assert-Exit $r 0
-    # Header, rule, the one value: a JSON array of every root, in the order given.
-    $roots = @($r.Lines[2].Trim() | ConvertFrom-Json)
+    # A JSON array of every root, in the order given - node rows in `_meta__value`, read back as the JSON they rebuild.
+    $roots = @(Get-MetaText $db 'roots' | ConvertFrom-Json)
     Assert-Equal $roots.Count 2 'roots recorded'
     Assert-Equal $roots[0] $src 'the first root'
     Assert-Equal $roots[1] $test 'the second root'
     $first = Invoke-Gate --map-query $db --sql "SELECT value FROM _meta WHERE key = 'root'" --width 0
-    Assert-Equal $first.Lines[2].Trim() $src 'root, kept as it was'
+    Assert-Equal $first.Lines[2].Trim() $src 'root, kept as it was, as text'
 }
 
 Test-Case 'pyquery: a stale map is said once on stderr - changed, added and gone counted - and a rebuild clears it' {

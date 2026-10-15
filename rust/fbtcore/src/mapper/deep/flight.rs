@@ -194,9 +194,9 @@ mod tests {
         let db = std::env::temp_dir().join(format!("fbt-flight-{name}-{}.sqlite", std::process::id()));
         let _ = std::fs::remove_file(&db);
         let conn = rusqlite::Connection::open(&db).unwrap();
-        conn.execute_batch("CREATE TABLE _meta (key TEXT, value TEXT)").unwrap();
+        crate::rows::meta::ensure(&conn).unwrap();
         for (prefix, n) in counters {
-            conn.execute("INSERT INTO _meta (key, value) VALUES (?1, ?2)", (format!("counter:{prefix}"), n.to_string())).unwrap();
+            crate::rows::meta::put(&conn, &format!("counter:{prefix}"), &n.to_string()).unwrap();
         }
         Recording(db)
     }
