@@ -6,9 +6,9 @@
 
 | column | meaning |
 |---|---|
-| `id` | `<owner>/<n>`, preorder; the ROOT is always `<owner>/0` |
-| `owner` | the parent row's `id` (`#<rowid>` for a table without one) - indexed, join on it |
-| `parent` | the node it hangs off, NULL for the root |
+| `owner` | the id of the row the cell belongs to (`#<rowid>` for a table without one) |
+| `n` | the node's preorder number in that cell; the ROOT is `n = 0`. A node IS `(owner, n)` |
+| `parent` | the `n` of the node it hangs off, NULL for the root |
 | `role` | its KEY in the parent object (`k`, `name`, `args`); an item of a member list carries the list's key too |
 | `ord` | its index in a list |
 | `node` | `object`, `list`, `string`, `number`, `bool` (0/1) or `null` |
@@ -16,32 +16,32 @@
 
 **THE COLUMNS ARE FIXED: EVERY MEMBER OF AN OBJECT IS A ROW OF ITS OWN**, its name in `role` - never a column of
 its parent, because a name is data as often as it is a field (an object literal's keys, a property map, a
-document's headers). One field is one join: `m.parent = n.id AND m.role = '<name>'`. The items of a top-level list
-are the nodes with `parent = <owner> || '/0'`, in `ord` order. A column that is a scalar in some rows keeps those in
-the parent table.
+document's headers). One field of node `x` is one join: `f.owner = x.owner AND f.parent = x.n AND f.role = '<name>'`.
+The items of a top-level list are `j.owner = t.id AND j.parent = 0`, in `ord` order. A column that is a scalar in
+some rows keeps those in the parent table.
 
 ```sql
 -- the names an expression reads, in order
-SELECT j.value FROM expressions x JOIN expressions__reads j ON j.owner = x.id AND j.parent = x.id || '/0'
+SELECT j.value FROM expressions x JOIN expressions__reads j ON j.owner = x.id AND j.parent = 0
 WHERE x.id = 'x:41' ORDER BY j.ord;
 
 -- how many members an enum has, and one enum's members (each member an object: its `name` is a row below it)
-SELECT e.name, (SELECT count(*) FROM enums__members j WHERE j.parent = e.id || '/0') n FROM enums e;
+SELECT e.name, (SELECT count(*) FROM enums__members j WHERE j.owner = e.id AND j.parent = 0) n FROM enums e;
 SELECT nm.value AS name, v.value FROM enums e
-JOIN enums__members m ON m.parent = e.id || '/0'
-JOIN enums__members nm ON nm.parent = m.id AND nm.role = 'name'
-LEFT JOIN enums__members v ON v.parent = m.id AND v.role = 'value'
+JOIN enums__members m ON m.owner = e.id AND m.parent = 0
+JOIN enums__members nm ON nm.owner = m.owner AND nm.parent = m.n AND nm.role = 'name'
+LEFT JOIN enums__members v ON v.owner = m.owner AND v.parent = m.n AND v.role = 'value'
 WHERE e.name = 'Kinds' ORDER BY m.ord;
 
 -- every expression holding a Read node of a given name: any node of the tree is a row
 SELECT DISTINCT x.id, x.source FROM expressions x
 JOIN expressions__ast n ON n.owner = x.id
-JOIN expressions__ast k ON k.parent = n.id AND k.role = 'k' AND k.value = 'Read'
-JOIN expressions__ast m ON m.parent = n.id AND m.role = 'name' AND m.value = 'DATA_DIR';
+JOIN expressions__ast k ON k.owner = n.owner AND k.parent = n.n AND k.role = 'k' AND k.value = 'Read'
+JOIN expressions__ast m ON m.owner = n.owner AND m.parent = n.n AND m.role = 'name' AND m.value = 'DATA_DIR';
 ```
 
 Absent is `NOT EXISTS (SELECT 1 FROM t__c j WHERE j.owner = t.id)`; an EMPTY list is a root with no child
-(`EXISTS` on `j.id = t.id || '/0'`, `NOT EXISTS` on `j.parent = t.id || '/0'`).
+(`EXISTS` on `j.owner = t.id AND j.n = 0`, `NOT EXISTS` on `j.owner = t.id AND j.parent = 0`).
 
 **Derived across halves, rewritten each run:** `seed_<schema>_<table>` is a VIEW per seeded table, one column
 per seed column, so join on `ProductID` instead of parsing `sql_seeds.row_values`. `duplicate_types` lists a type

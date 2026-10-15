@@ -163,6 +163,8 @@ pub fn store(db_path: &Path, root: &str, workspace: &Path, half: &str, notes: &m
         let db = Connection::open(db_path)?;
         // A TABLE NOT THERE YET HAS NOTHING TO DELETE - the first run of this pass over a database.
         for table in TABLES {
+            // A table's nodes go first, through its rows (`rows/cells`): `style_rules.classes` is one.
+            let _ = crate::rows::cells::delete_children(&db, table, "t.half = ?1", &[&half]);
             let _ = db.execute(&format!("DELETE FROM \"{table}\" WHERE half = ?1"), [half]);
         }
         let _ = db.execute("DELETE FROM diagnostics WHERE half = ?1 AND kind = ?2", [half, UNPARSED]);

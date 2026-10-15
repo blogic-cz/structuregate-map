@@ -171,7 +171,7 @@ SELECT f.lang, f.path, count(*) n FROM branches b JOIN files f ON f.id = b.file 
 
 -- a catch that swallows (calls nothing), in any language
 SELECT f.lang, f.path, h.line FROM handlers h JOIN files f ON f.id = h.file WHERE h.passes = 1
-  AND NOT EXISTS (SELECT 1 FROM handlers__calls c WHERE c.owner = h.id AND c.parent = h.id || '/0');
+  AND NOT EXISTS (SELECT 1 FROM handlers__calls c WHERE c.owner = h.id AND c.parent = 0);
 
 -- every regex the tree builds at run time (no literal pattern), and who uses it
 SELECT f.lang, f.path, r.line, r.api, r.used_by FROM regexes r JOIN files f ON f.id = r.file WHERE r.pattern_kind = '';
