@@ -39,8 +39,9 @@ Test-Case 'tsrows: a template expression eighty terms deep keeps its whole ast' 
             "export class DeepComponent {`n  n = 1;`n}`n"
     })
     Assert-Exit $made.Result 0
-    $deepest = Invoke-TsRowsQ $made.Db ("SELECT 'binary=' || max(n) AS r FROM (SELECT count(*) n FROM expressions__ast " +
-        "WHERE k = 'Binary' GROUP BY owner)")
+    # A node's kind is its `k` member, a row below it by role.
+    $deepest = Invoke-TsRowsQ $made.Db ("SELECT 'binary=' || max(c) AS r FROM (SELECT count(*) c FROM expressions__ast " +
+        "WHERE role = 'k' AND value = 'Binary' GROUP BY owner)")
     Assert-Line $deepest 'binary=79'
 }
 
