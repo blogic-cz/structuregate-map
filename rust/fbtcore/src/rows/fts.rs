@@ -57,6 +57,8 @@ fn indexable(db: &Connection) -> Result<Vec<String>> {
                 && !n.starts_with("file_text")
                 && !n.starts_with("row_map")
                 && !n.starts_with("row_fts")
+                && n != "ts_deps"
+                && n != "ts_scope"
         })
         .filter(|n| cells::parent_of(db, n).is_none())
         .collect();
@@ -70,13 +72,7 @@ fn indexable(db: &Connection) -> Result<Vec<String>> {
 /// that published no spec simply adds nothing.
 fn spec(db: &Connection) -> (BTreeSet<String>, BTreeSet<String>) {
     let (mut joins, mut structures) = (BTreeSet::new(), BTreeSet::new());
-    let Ok(mut stmt) = db.prepare("SELECT value FROM _meta WHERE key LIKE 'spec:%'") else {
-        return (joins, structures);
-    };
-    let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) else {
-        return (joins, structures);
-    };
-    for raw in rows.filter_map(|r| r.ok()) {
+    for (_, raw) in super::meta::scan(db, Some("spec:%")) {
         let Ok(spec) = serde_json::from_str::<Value>(&raw) else { continue };
         if let Some(Value::Object(named)) = spec.get("joins") {
             joins.extend(named.keys().cloned());

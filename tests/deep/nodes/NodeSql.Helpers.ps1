@@ -4,6 +4,20 @@
 # own row below it, its key in `role` - there are no per-key columns, and no `id`. A suite that pinned a cell to its old JSON
 # spelling asks these for the SQL that spells it again. Dot-sourced by the helpers of each half.
 
+# A `_meta` VALUE AS TEXT, or $null when the key is not there. A scalar is its cell; a list or an object is NODE ROWS in
+# `_meta__value` (owner = the key, the cell NULL - `rows::meta`), which `--tables --width 0` prints as the JSON they
+# rebuild. The LAST line naming the key: `--tables` lists the tables first, and a key could spell a table's name.
+function Get-MetaText([string]$Db, [string]$Key) {
+    $r = Invoke-Gate --map-query $Db --tables --width 0
+    Assert-Exit $r 0
+    $found = $null
+    foreach ($line in $r.Lines) {
+        $t = $line.Trim()
+        if ($t.StartsWith("$Key ")) { $found = $t.Substring($Key.Length).Trim() }
+    }
+    return $found
+}
+
 # The `owner` a row's cell is keyed by: `k.rowid` for a table with no `id` is `'#' || k.rowid`, anything else (`x.id`) as it is.
 function Get-NodeOwnerSql([string]$Ref) {
     if ($Ref.EndsWith('.rowid')) { return "'#' || $Ref" }
@@ -68,10 +82,11 @@ function Get-NodeObjectListSql([string]$Table, [string]$Ref, [string[]]$Members,
 # become node rows. A text opening with `[`/`{` that PARSES is a list or an object; `source` is the code as written, which
 # may well look like one (`[]`, a dict literal), and is the one column that is not a structure's. Bookkeeping (`_`), the
 # source text and the search index are not rows. Throws when the listing itself is too small to mean anything.
+# `_meta` IS SCANNED TOO (its structures are `_meta__value` nodes, `rows::meta`); `_cells` and the node tables are not.
 function Get-NodeJsonCell([string]$Db) {
     # `--limit 0` on both: the lens prints 50 rows by default, and the listing then held one table's columns.
     $listing = Invoke-Gate --map-query $Db --width 0 --limit 0 --sql ("SELECT 'c=' || m.name || '|' || p.name AS c FROM sqlite_master m, " +
-        "pragma_table_info(m.name) p WHERE m.type = 'table' AND m.name NOT LIKE '\_%' ESCAPE '\' " +
+        "pragma_table_info(m.name) p WHERE m.type = 'table' AND (m.name NOT LIKE '\_%' ESCAPE '\' OR m.name = '_meta') " +
         "AND m.name NOT LIKE 'file_text%' AND m.name NOT LIKE 'row\_%' ESCAPE '\' AND p.name <> 'source'")
     Assert-Exit $listing 0
     $pairs = @($listing.Lines | Where-Object { $_.Trim().StartsWith('c=') } |

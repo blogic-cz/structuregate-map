@@ -373,8 +373,8 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
         let check_started = std::time::Instant::now();
         {
             let db = Connection::open(db_path)?;
-            let deps = super::half::meta(db_path, &format!("deps:{LANG}"));
-            let deps: Map<String, Value> = serde_json::from_str(&deps).unwrap_or_default();
+            let deps: Map<String, Value> =
+                super::remember::stored_graph(&db).into_iter().map(|(target, dependents)| (target, Value::from(dependents))).collect();
             if let Some((count, first)) = super::reads::dangling(&db, LANG, &payload.affected, &digest.borrow().ids, &deps)? {
                 bail!("{} would leave {count} reference(s) to rows it replaced, first {first}", super::reads::STOPPED_SHORT);
             }

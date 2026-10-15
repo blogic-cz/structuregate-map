@@ -17,7 +17,7 @@ use std::path::Path;
 /// what stops an incremental update leaving rows of the old shape beside the new.
 /// Every half shares one database under this one version, and a version two halves
 /// disagreed on would be a database each of them thinks the other built wrong.
-pub const SCHEMA_VERSION: &str = "11";
+pub const SCHEMA_VERSION: &str = "12";
 
 pub struct Applied {
     /// Rows now in each table. Empty unless this batch said it was the last.
@@ -49,10 +49,7 @@ pub fn usable(path: &Path) -> bool {
 }
 
 fn schema_version(db: &Connection) -> Option<String> {
-    db.query_row("SELECT value FROM _meta WHERE key = 'schema'", [], |r| {
-        r.get::<_, String>(0)
-    })
-    .ok()
+    super::meta::get(db, "schema")
 }
 
 /// `{rel -> sha}` already in the database FOR THIS LANGUAGE, or empty when there is
@@ -117,15 +114,7 @@ pub fn counters(path: &Path) -> BTreeMap<String, i64> {
     let Ok(db) = Connection::open(path) else {
         return out;
     };
-    let Ok(mut stmt) = db.prepare("SELECT key, value FROM _meta WHERE key LIKE 'counter:%'") else {
-        return out;
-    };
-    let Ok(rows) = stmt.query_map([], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-    }) else {
-        return out;
-    };
-    for row in rows.flatten() {
+    for row in super::meta::scan(&db, Some("counter:%")) {
         if let Some((_, prefix)) = row.0.split_once(':')
             && let Ok(n) = row.1.parse::<i64>()
         {
@@ -538,10 +527,7 @@ pub fn write(path: &Path, req: &WriteRequest<'_>) -> Result<Applied> {
 /// The `skip:<lang>` keys a file holds - see `write`.
 fn skip_keys(path: &Path) -> BTreeMap<String, String> {
     let Ok(db) = Connection::open(path) else { return BTreeMap::new() };
-    let Ok(mut stmt) = db.prepare("SELECT key, value FROM _meta WHERE key LIKE 'skip:%'") else { return BTreeMap::new() };
-    stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-        .map(|rows| rows.flatten().collect())
-        .unwrap_or_default()
+    super::meta::scan(&db, Some("skip:%")).into_iter().collect()
 }
 
 /// `_meta`, READ THEN REWRITTEN.
@@ -556,18 +542,9 @@ fn write_meta(
     written: &BTreeMap<String, i64>,
     carried: &BTreeMap<String, String>,
 ) -> Result<()> {
-    db.execute_batch("CREATE TABLE IF NOT EXISTS _meta (key TEXT, value TEXT)")?;
-
-    let mut meta: BTreeMap<String, String> = BTreeMap::new();
-    {
-        let mut stmt = db.prepare("SELECT key, value FROM _meta")?;
-        let rows = stmt.query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-        })?;
-        for row in rows.flatten() {
-            meta.insert(row.0, row.1);
-        }
-    }
+    super::meta::ensure(db)?;
+    let before: BTreeMap<String, String> = super::meta::scan(db, None).into_iter().collect();
+    let mut meta = before.clone();
 
     let root = std::path::absolute(req.root)
         .map(|p| p.to_string_lossy().to_string())
@@ -597,12 +574,14 @@ fn write_meta(
         meta.insert(format!("counter:{prefix}"), n.to_string());
     }
 
-    db.execute_batch("DELETE FROM _meta")?;
-    {
-        let mut stmt = db.prepare("INSERT INTO _meta (key, value) VALUES (?1, ?2)")?;
-        for (key, value) in &meta {
-            stmt.execute((key, value))?;
-        }
+    // REWRITTEN WHOLE, in key order, its node rows with it (`meta::clear`) - unless nothing moved at all.
+    let unchanged = meta.len() == before.len() && meta.iter().zip(&before).all(|(a, b)| a == b);
+    if unchanged {
+        return Ok(());
+    }
+    super::meta::clear(db)?;
+    for (key, value) in &meta {
+        super::meta::put(db, key, value)?;
     }
     Ok(())
 }

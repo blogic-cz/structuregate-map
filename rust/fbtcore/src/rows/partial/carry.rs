@@ -190,13 +190,7 @@ fn held(
 /// `{table: [column, ...]}` — which ids must survive a re-extraction, as the last full run measured it.
 fn identity_of(db: &Connection, lang: &str) -> IndexMap<String, Vec<String>> {
     let mut out = IndexMap::new();
-    let Ok(text) = db.query_row(
-        "SELECT value FROM _meta WHERE key = ?1",
-        [format!("spec:{lang}")],
-        |r| r.get::<_, String>(0),
-    ) else {
-        return out;
-    };
+    let Some(text) = crate::rows::meta::get(db, &format!("spec:{lang}")) else { return out };
     let Ok(spec) = serde_json::from_str::<Value>(&text) else { return out };
     let Some(Value::Object(identity)) = spec.get("identity") else { return out };
     for (table, columns) in identity {

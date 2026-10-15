@@ -81,10 +81,7 @@ impl<'a> Store<'a> {
     /// when the database holds none - a store handed its rows has no `_meta` to read.
     pub fn option_list(&self, name: &str) -> Vec<String> {
         let Some(db) = self.db else { return Vec::new() };
-        let text: String = match db.query_row("SELECT value FROM _meta WHERE key = ?1", [format!("options:{}", self.half)], |r| r.get(0)) {
-            Ok(t) => t,
-            Err(_) => return Vec::new(),
-        };
+        let Some(text) = crate::rows::meta::get(db, &format!("options:{}", self.half)) else { return Vec::new() };
         let parsed: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
         parsed.get(name).and_then(Value::as_array).into_iter().flatten()
             .filter_map(|v| v.as_str().map(str::to_string)).collect()
@@ -344,14 +341,7 @@ fn table_names(db: &Connection) -> Result<HashSet<String>> {
 /// own statement of which columns it encoded.
 fn spec_columns(db: &Connection, half: &str, key: &str) -> HashMap<String, HashSet<String>> {
     let mut out = HashMap::new();
-    let text: String = match db.query_row(
-        "SELECT value FROM _meta WHERE key = ?1",
-        [format!("spec:{half}")],
-        |r| r.get(0),
-    ) {
-        Ok(t) => t,
-        Err(_) => return out,
-    };
+    let Some(text) = crate::rows::meta::get(db, &format!("spec:{half}")) else { return out };
     let Ok(spec) = serde_json::from_str::<Value>(&text) else {
         return out;
     };

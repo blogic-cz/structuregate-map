@@ -7,13 +7,11 @@ use serde_json::json;
 fn db_with(spec: Option<&str>, rows: &[(&str, &str, i64)]) -> Connection {
     let db = Connection::open_in_memory().unwrap();
     db.execute_batch(
-        "CREATE TABLE _meta (key TEXT, value TEXT);
-         CREATE TABLE renders (id TEXT, gate_chain TEXT, n INTEGER, half TEXT);",
+        "CREATE TABLE renders (id TEXT, gate_chain TEXT, n INTEGER, half TEXT);",
     )
     .unwrap();
     if let Some(spec) = spec {
-        db.execute("INSERT INTO _meta VALUES ('spec:typescript', ?1)", [spec])
-            .unwrap();
+        crate::rows::meta::put(&db, "spec:typescript", spec).unwrap();
     }
     for (id, chain, n) in rows {
         db.execute(

@@ -56,7 +56,9 @@ file's readers, and the readers - and readers' readers - of every file whose sur
 in program order. A FULL run proves the reads against every row it wrote (`reads::unread`: whatever a row names
 must be its owner's read, a scope file, a rebuilt table or `node_modules`); only `reads:typescript = proven`
 lets a partial run stop short, otherwise every hop is read. A partial run refuses to write when a kept row
-would point at an id it replaced (`reads::dangling`). **A bounded hop count was built and removed - it kept
+would point at an id it replaced (`reads::dangling`). The graph and the scope set are the tables `ts_deps` (`target`,
+`dependent`, in the graph's order) and `ts_scope`, rewritten by `rows/partial/remember.rs` - whole on a full run,
+repaired on a partial one - and handed to node as JSON. **A bounded hop count was built and removed - it kept
 stale rows.** An importer also depends on the file declaring each name and every barrel between
 (`rust/fbtcore/src/rows/partial/deps.rs`).
 
