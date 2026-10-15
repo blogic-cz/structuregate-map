@@ -281,7 +281,7 @@ function Get-TsObjectListSql([string]$Table, [string]$Ref, [string[]]$Members, [
 function Get-TsRowsSensesSql([string]$Db, [string]$KeyWhere) {
     # A branch id is DATA, so each sense is a `value` row whose `role` is the id - never a column (`rows/cells`).
     $pair = "char(34) || n.role || char(34) || ': ' || char(34) || n.value || char(34)"
-    return "SELECT k.key || ' | {' || coalesce((SELECT group_concat($pair, ', ' ORDER BY n.rowid) " +
+    return "SELECT k.key || ' | {' || coalesce((SELECT group_concat($pair, ', ' ORDER BY n.n) " +
         "FROM key_reach__branch_senses n WHERE n.owner = '#' || k.rowid AND n.parent = 0), '') || '}' AS senses " +
         "FROM key_reach k WHERE $KeyWhere"
 }

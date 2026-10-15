@@ -107,7 +107,10 @@ Test-Case 'tsrows keys: a locale array becomes one row per element, named by its
 # THE WHOLE LIST IS WHAT THE CALL READS, and the file defines it: no gap, and the locale that defines it.
 Test-Case 'tsrows keys: an i18n call reading a whole locale array is a defined key' {
     $made = New-TsRowsDb (New-TsRowsKeysLocaleTree)
-    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || coalesce(defined_in, 'none') AS ix FROM i18n_index " +
+    # `defined_in` is a list, so node rows: its locales are the root's items.
+    $locales = "(SELECT '[' || group_concat(char(34) || d.value || char(34), ',' ORDER BY d.ord) || ']' FROM i18n_index__defined_in d " +
+        "WHERE d.owner = i18n_index.id AND d.parent = 0)"
+    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || coalesce($locales, 'none') AS ix FROM i18n_index " +
         "WHERE key IN ('regions.South', 'regions.Plain')")
     Assert-Line $r 'regions.South | ["en"]'
     Assert-Line $r 'regions.Plain | ["en"]'
