@@ -39,7 +39,7 @@ pub fn built_values(
     if wanted.is_empty() {
         return out;
     }
-    let rows = TsRows::new(store);
+    let rows = TsRows::of(store);
     let none = IndexSet::new();
     // Enum id -> value as printed -> member name, for a hole that interpolates the value.
     let mut printed: IndexMap<String, IndexMap<String, String>> = IndexMap::new();

@@ -76,6 +76,17 @@ windows = { version = "0.62", features = [
   "Win32_Security",
 ] }
 
+# FOR MEASURING, NOT SHIPPING: release's optimisation level without its whole-program pass. `lto` and one codegen
+# unit made every rebuild after a one-file change take minutes; this one takes seconds and runs within a few percent
+# of the shipped code - what a profile or benchmark iteration needs (`.claude/skills/map-lab/`). Build with
+# `cargo build --profile lab` / `cargo test --profile lab`.
+[profile.lab]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+strip = false
+
 [profile.release]
 # The exe is deployed to every consumer, so size is a real cost.
 opt-level = 3

@@ -49,6 +49,8 @@ pub struct Store<'a> {
     /// the rows and will hand them back. `cache` is a `HashMap` and has no order to give back.
     #[cfg(test)]
     order: Vec<String>,
+    /// What a pass builds from the rows and several passes ask for, built once and shared (`shared`).
+    memo: RefCell<HashMap<&'static str, Rc<dyn std::any::Any>>>,
     /// Derived rows this run produced, by table.
     pub emitted: HashMap<String, Vec<Row>>,
 }
@@ -70,6 +72,7 @@ impl<'a> Store<'a> {
             payload: false,
             #[cfg(test)]
             order: Vec::new(),
+            memo: RefCell::new(HashMap::new()),
             emitted: HashMap::new(),
         })
     }
@@ -125,6 +128,7 @@ impl<'a> Store<'a> {
             names: HashSet::new(),
             payload: true,
             order,
+            memo: RefCell::new(HashMap::new()),
             emitted: HashMap::new(),
         }
     }
@@ -182,6 +186,19 @@ impl<'a> Store<'a> {
         if self.db.is_some() {
             self.cache.get_mut().clear();
         }
+        self.memo.get_mut().clear();
+    }
+
+    /// WHAT SEVERAL PASSES BUILD FROM THE SAME ROWS, built by the first to ask and handed to the rest. The rows do
+    /// not change while the passes run, so the answer is the one each would have built - and building it again
+    /// rebuilt the same trees from their node rows each time (`gate_tsrows::TsRows`). Gone with `release`.
+    pub fn shared<T: 'static>(&self, key: &'static str, make: impl FnOnce(&Store<'a>) -> T) -> Rc<T> {
+        if let Some(held) = self.memo.borrow().get(key).cloned().and_then(|h| h.downcast::<T>().ok()) {
+            return held;
+        }
+        let made = Rc::new(make(self));
+        self.memo.borrow_mut().insert(key, made.clone());
+        made
     }
 
     fn read(&self, name: &str) -> Result<Vec<Row>> {

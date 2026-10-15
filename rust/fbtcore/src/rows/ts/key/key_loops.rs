@@ -191,7 +191,7 @@ impl Loops {
         }
         let expressions = store.table("expressions");
         let expr_by_id: HashMap<String, &Row> = expressions.iter().filter_map(|e| id_of(e, "id").map(|i| (i, e))).collect();
-        let rows = super::gate_tsrows::TsRows::new(store);
+        let rows = super::gate_tsrows::TsRows::of(store);
         let returns = store.table("returns");
         let by_member = returns_by_member(&returns);
         let params = super::key_fields::callables(store).0;

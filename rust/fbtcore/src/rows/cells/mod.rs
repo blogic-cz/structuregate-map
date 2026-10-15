@@ -384,7 +384,13 @@ impl Source {
     pub fn new(db: &Connection, child_table: &str) -> Result<Source> {
         match db.path().filter(|p| !p.is_empty()) {
             Some(path) => Ok(Source::Open {
-                conn: Connection::open(path)?,
+                conn: {
+                    let c = Connection::open(path)?;
+                    if std::env::var("SG_MMAP").is_ok() {
+                        c.execute_batch("PRAGMA mmap_size = 68719476736")?;
+                    }
+                    c
+                },
                 sql: format!("SELECT {READ} FROM \"{}\" WHERE owner = ?1 ORDER BY n", schema::escape(child_table)),
             }),
             None => {
@@ -400,9 +406,12 @@ impl Source {
         match self {
             Source::Read(all) => all.get(owner).cloned(),
             Source::Open { conn, sql } => {
+                let t0 = std::time::Instant::now();
                 let mut stmt = conn.prepare_cached(sql).ok()?;
                 let held: Vec<NodeRow> = stmt.query_map([owner_value(owner)], read_row).ok()?.filter_map(|r| r.ok()).collect();
-                rebuild(held)
+                let out = rebuild(held);
+                if probe::on() { probe::record(sql.split('"').nth(1).unwrap_or(""), owner, t0.elapsed().as_nanos()); }
+                out
             }
         }
     }
@@ -443,6 +452,8 @@ pub fn load_all(db: &Connection, table: &str, column: &str) -> Result<HashMap<St
     }
     Ok(out)
 }
+
+pub mod probe;
 
 #[cfg(test)]
 #[path = "tests.rs"]
