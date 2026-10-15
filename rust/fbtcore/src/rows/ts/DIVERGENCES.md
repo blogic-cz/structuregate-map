@@ -117,3 +117,11 @@ the scope is decided over every candidate on every run. Tables that move: `rende
 `renders_out_of_scope` is new; the rust readers of `renders` that did not filter the scope (`key/key_bound.rs`,
 `key/fields/key_inputs.rs`, `key/routes/key_routes.rs`, `key/routes/key_called.rs`, `gate/ts/gate_input_flags.rs`) no
 longer see such an edge, so `key_reach` and `gate_values` move only where one of them read one.
+
+**#50 - an orphan template's gated nodes carry their gate chain** (not yet signed off; `src/TsRows/TsMap.mjs`, `rows` 53):
+an `.html` no component points at is parsed as an ORPHAN template after the inventory, and the gate rollup
+(`TsTpl/TsGateChain.mjs`) ran before it, so an orphan's node under an `*ngIf` had a `gates` row and no `gate_chain`.
+A partial run is handed those nodes back and runs the rollup over them, so it chained them and failed on
+`template_nodes.gate_chain/gate_depth` of rows it had not made. The rollup now runs after the orphans on every run.
+Tables that move: `template_nodes` `gate_chain`/`gate_depth` inside an orphan template, and through them `key_reach`
+only for a key an orphan template spells under a gate.

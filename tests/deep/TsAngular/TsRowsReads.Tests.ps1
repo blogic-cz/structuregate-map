@@ -140,4 +140,24 @@ Test-Case 'tsrows: an expression another file names keeps its id when its own fi
     Assert-Line $joined 'found=1'
 }
 
+# AN ORPHAN TEMPLATE IS GATED TOO, on a full run and on a partial one alike. An `.html` no component points at is
+# parsed after the inventory; the gate rollup ran before it, so a full run left the orphan's node under an `*ngIf`
+# with no chain, and a partial run - handed that node back and rolling up over every node - chained it and refused
+# to store a change to a row it had not made (`template_nodes.gate_chain/gate_depth`).
+Test-Case 'tsrows: an orphan template keeps its gate chain through a partial run' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/alpha-orphan.html' = "<div *ngIf=`"shown`"><span>alpha</span></div>`n"
+    }
+    $depth = "SELECT 'depth=' || coalesce(n.gate_depth, 'none') AS r FROM template_nodes n " +
+        "JOIN files f ON f.id = n.owner_file WHERE f.path = 'apps/shop/src/alpha-orphan.html' AND n.tag = 'span'"
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    Assert-Line (Invoke-TsRowsQ $made.Db $depth) 'depth=1'
+    Add-Content -LiteralPath (Join-Path $tree 'apps/shop/src/cart.ts') -Value '// demo: one comment'
+    $again = New-TsRowsDb $tree
+    Assert-Exit $again.Result 0
+    Assert-Line $again.Result 'again for 1 changed'
+    Assert-Line (Invoke-TsRowsQ $again.Db $depth) 'depth=1'
+}
+
 }
