@@ -226,9 +226,10 @@ async function main() {
   // 51: `files.prop_reads` (every property name a file reads) and `files.this_indexed` (it hands `this` away), for a
   // component field nothing reads (`TsDecls/TsPropReads.mjs`).
   // 52: an `out_of_scope` candidate is a `renders_out_of_scope` row, no longer a `renders` one (#40).
+  // 53: an ORPHAN template's gated nodes carry `gate_chain`/`gate_depth`, as a component's do (divergence #50).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 52, build: args.build,
+    config: config.file, data: config.data, rows: 53, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
@@ -459,12 +460,6 @@ async function main() {
 
   // A TEMPLATE READ BECOMES A DECLARATION. After every template is parsed, because a read can land on a
   // member of a component whose own template has not been reached yet, and after the declarations exist.
-  // WHAT HAS TO HOLD FOR A NODE TO RENDER AT ALL, outermost first - a gate row says what one binding
-  // decides, and this says what the node sits under.
-  const chains = rollupGateChains(store);
-  emit('MAP-NOTE', `the typescript half put ${chains.nodes} node(s) under a gate `
-    + `(deepest chain ${chains.deepest})`);
-
   const reads = rollupTemplateReads(store);
   emit('MAP-NOTE', `the typescript half resolved ${reads.hops} template read(s) in ${reads.chains} chain(s)`);
 
@@ -513,6 +508,14 @@ async function main() {
     if (res) { f.parsed = true; orphans += 1; }
   }
   if (orphans) emit('MAP-NOTE', `the typescript half parsed ${orphans} orphan template(s)`);
+
+  // WHAT HAS TO HOLD FOR A NODE TO RENDER AT ALL, outermost first - a gate row says what one binding
+  // decides, and this says what the node sits under. AFTER THE ORPHANS, which are templates too: run
+  // before them, a full run left an orphan's gated nodes with no chain, and the partial run that was
+  // handed those nodes back chained them and refused to store a change to rows it had not made.
+  const chains = rollupGateChains(store);
+  emit('MAP-NOTE', `the typescript half put ${chains.nodes} node(s) under a gate `
+    + `(deepest chain ${chains.deepest})`);
   // AND NOT AGAIN FOR THE ORPHANS, though it is tempting. They are parsed after the inventory, so the
   // pass above ran before their `templates` rows existed and a few file rows keep no `chars` at all. The
   // tool this map reproduces leaves them empty too, and filling them moved those `files` rows away from
