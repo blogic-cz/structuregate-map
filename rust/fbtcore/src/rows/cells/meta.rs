@@ -88,19 +88,30 @@ pub fn clear(db: &Connection) -> Result<()> {
 
 /// One key REPLACED: a list or an object as nodes, anything else as text. `_meta` has no unique key, so the old
 /// row is deleted first - an `INSERT OR REPLACE` only added a second one.
+///
+/// ONE COMMIT, NOT ONE PER NODE: outside a caller's transaction every insert committed on its own - a sync per row -
+/// and the derived passes' kept key, a few thousand nodes, took most of their time. A savepoint is that one commit,
+/// and nests inside a caller's transaction when there is one.
 pub fn put(db: &Connection, key: &str, value: &str) -> Result<()> {
-    delete(db, key)?;
-    let structure = deep(value).ok().filter(is_structured);
-    match structure {
-        Some(structure) => {
-            db.execute("INSERT INTO _meta (key, value) VALUES (?1, NULL)", [key])?;
-            Writer::new(db, TABLE, COLUMN)?.tree(key, &structure)?;
+    db.execute_batch("SAVEPOINT meta_put")?;
+    let done = (|| -> Result<()> {
+        delete(db, key)?;
+        match deep(value).ok().filter(is_structured) {
+            Some(structure) => {
+                db.execute("INSERT INTO _meta (key, value) VALUES (?1, NULL)", [key])?;
+                Writer::new(db, TABLE, COLUMN)?.tree(key, &structure)?;
+            }
+            None => {
+                db.execute("INSERT INTO _meta (key, value) VALUES (?1, ?2)", [key, value])?;
+            }
         }
-        None => {
-            db.execute("INSERT INTO _meta (key, value) VALUES (?1, ?2)", [key, value])?;
-        }
+        Ok(())
+    })();
+    match done {
+        Ok(()) => db.execute_batch("RELEASE meta_put")?,
+        Err(_) => db.execute_batch("ROLLBACK TO meta_put; RELEASE meta_put")?,
     }
-    Ok(())
+    done
 }
 
 /// A value that is already a structure, put without a trip through its text.
