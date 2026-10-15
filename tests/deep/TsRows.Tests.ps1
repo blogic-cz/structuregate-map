@@ -59,7 +59,7 @@ Test-Case 'tsrows: the tsconfigs that were not chosen are published, and an empt
     # ONE ROW PER CANDIDATE, not the JSON cell: the query lens truncates a column to its width, so a
     # third candidate appearing at the end of the array was cut off and the assertion below could not see
     # it - the case passed against a build that published the empty config.
-    $r = Invoke-TsRowsQ $made.Db "SELECT j.value FROM projects p JOIN projects__tsconfig_candidates j ON j.owner = p.id AND j.parent = p.id || '/0'"
+    $r = Invoke-TsRowsQ $made.Db "SELECT j.value FROM projects p JOIN projects__tsconfig_candidates j ON j.owner = p.id AND j.parent = 0"
     Assert-Line $r 'apps/shop/tsconfig.app.json'
     Assert-Line $r 'apps/shop/tsconfig.spec.json'
     Assert-NoLine $r 'apps/shop/tsconfig.json'
@@ -68,7 +68,7 @@ Test-Case 'tsrows: the tsconfigs that were not chosen are published, and an empt
 Test-Case 'tsrows: every target the project declares is recorded' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db "SELECT j.value AS target FROM projects p JOIN projects__targets j ON j.owner = p.id AND j.parent = p.id || '/0'"
+    $r = Invoke-TsRowsQ $made.Db "SELECT j.value AS target FROM projects p JOIN projects__targets j ON j.owner = p.id AND j.parent = 0"
     Assert-Line $r 'build'
     Assert-Line $r 'test'
     Assert-Line $r 'lint'
@@ -198,16 +198,16 @@ Test-Case 'tsrows: an import records the file the compiler resolved it to' {
 Test-Case 'tsrows: an import records its names, the kind of each, and the name a rename came through' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT n.name AS name, n.kind AS kind, n.[as] AS renamed_from " +
-        "FROM imports i JOIN imports__names n ON n.owner = i.id AND n.parent = i.id || '/0' ORDER BY name")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'imports__names' 'n' 'name') AS name, $(Get-TsFieldSql 'imports__names' 'n' 'kind') AS kind, $(Get-TsFieldSql 'imports__names' 'n' 'as') AS renamed_from " +
+        "FROM imports i JOIN imports__names n ON n.owner = i.id AND n.parent = 0 ORDER BY name")
     Assert-Line $r 'Basket'
     Assert-Line $r 'Cart'
     Assert-Line $r 'namespace'
     Assert-Line $r 'default'
     # THE DIRECTION, which the lines above cannot see - both names appear either way round. `name` is the
     # LOCAL binding and `as` the name the rename came through: the old tool's contract, read by consumers.
-    $dir = Invoke-TsRowsQ $made.Db ("SELECT n.name || '<-' || n.[as] AS d " +
-        "FROM imports i JOIN imports__names n ON n.owner = i.id AND n.parent = i.id || '/0' WHERE n.[as] IS NOT NULL")
+    $dir = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'imports__names' 'n' 'name') || '<-' || $(Get-TsFieldSql 'imports__names' 'n' 'as') AS d " +
+        "FROM imports i JOIN imports__names n ON n.owner = i.id AND n.parent = 0 WHERE $(Get-TsFieldSql 'imports__names' 'n' 'as') IS NOT NULL")
     Assert-Line $dir 'Basket<-Cart'
 }
 
@@ -289,11 +289,11 @@ Test-Case 'tsrows: an enum member carries the value the compiler folded, inherit
     $made = New-TsRowsDb $tree
     # ONE MEMBER, ONE VALUE. Asked over every member at once, a query's output holds the other members'
     # numbers too, and an assertion on `2` passed against a build that published nothing for `High`.
-    $r = Invoke-TsRowsQ $made.Db ("SELECT m.value AS high_value FROM enums e JOIN enums__members m ON m.owner = e.id AND m.parent = e.id || '/0' " +
-        "WHERE m.name = 'High'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'enums__members' 'm' 'value') AS high_value FROM enums e JOIN enums__members m ON m.owner = e.id AND m.parent = 0 " +
+        "WHERE $(Get-TsFieldSql 'enums__members' 'm' 'name') = 'High'")
     Assert-Line $r '2'
-    $s = Invoke-TsRowsQ $made.Db ("SELECT m.value AS on_value FROM enums e JOIN enums__members m ON m.owner = e.id AND m.parent = e.id || '/0' " +
-        "WHERE m.name = 'On'")
+    $s = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'enums__members' 'm' 'value') AS on_value FROM enums e JOIN enums__members m ON m.owner = e.id AND m.parent = 0 " +
+        "WHERE $(Get-TsFieldSql 'enums__members' 'm' 'name') = 'On'")
     Assert-Line $s 'on'
 }
 
@@ -316,7 +316,7 @@ Test-Case 'tsrows: a nested type member is its own row, with the dotted path and
     Assert-Line $r 'cell'
     # AN ANONYMOUS TYPE HAS NO IDENTITY TO CLAIM. The compiler calls its symbol `__type`, which is a
     # placeholder and not a name a consumer can do anything with, so the member resolves to nothing.
-    $ref = Invoke-TsRowsQ $made.Db ("SELECT r.name AS ref_name FROM type_members t LEFT JOIN type_members__type_ref r ON r.id = t.id || '/0' " +
+    $ref = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'type_members__type_ref' 'r' 'name') AS ref_name FROM type_members t LEFT JOIN type_members__type_ref r ON r.owner = t.id AND r.n = 0 " +
         "WHERE t.path = 'cell'")
     Assert-NoLine $ref '__'
 }
@@ -330,8 +330,8 @@ Test-Case 'tsrows: a type member resolves its own type to the declaration it nam
     # resolving nothing passes.
     # `rows: Row[]` resolves to `Array`, and the declared type a consumer is after is its ELEMENT. Both are
     # published, because "an array of Row" and "Row" are different answers and the consumer picks.
-    $r = Invoke-TsRowsQ $made.Db ("SELECT r.name AS ref_name, (SELECT e.name FROM type_members__type_ref e WHERE e.parent = r.id AND e.role = 'element') AS element_name " +
-        "FROM type_members t JOIN type_members__type_ref r ON r.id = t.id || '/0' WHERE t.path = 'rows'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'type_members__type_ref' 'r' 'name') AS ref_name, (SELECT $(Get-TsFieldSql 'type_members__type_ref' 'e' 'name') FROM type_members__type_ref e WHERE e.owner = r.owner AND e.parent = r.n AND e.role = 'element') AS element_name " +
+        "FROM type_members t JOIN type_members__type_ref r ON r.owner = t.id AND r.n = 0 WHERE t.path = 'rows'")
     Assert-Line $r 'Row'
 }
 
@@ -363,7 +363,7 @@ Test-Case 'tsrows: an alias of an array publishes no members of its own' {
 Test-Case 'tsrows: a const referring to an enum member keeps the member AND its value' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT r.[`$enum] AS member, r.value AS folded FROM consts c JOIN consts__value r ON r.id = c.id || '/0' " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'consts__value' 'r' '$enum') AS member, $(Get-TsFieldSql 'consts__value' 'r' 'value') AS folded FROM consts c JOIN consts__value r ON r.owner = c.id AND r.n = 0 " +
         "WHERE c.name = 'LEVEL'")
     Assert-Line $r 'Category.Hardware'
     Assert-Line $r '1'
@@ -374,15 +374,15 @@ Test-Case 'tsrows: a const referring to an enum member keeps the member AND its 
 Test-Case 'tsrows: a static class field resolves, and an instance field deliberately does not' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $static = Invoke-TsRowsQ $made.Db ("SELECT r.value AS folded FROM consts c JOIN consts__value r ON r.id = c.id || '/0' " +
+    $static = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'consts__value' 'r' 'value') AS folded FROM consts c JOIN consts__value r ON r.owner = c.id AND r.n = 0 " +
         "WHERE c.name = 'FLAG'")
     Assert-Line $static 'IsXEnabled'
-    $instance = Invoke-TsRowsQ $made.Db ("SELECT r.value AS folded, r.[`$expr] AS text FROM consts c JOIN consts__value r ON r.id = c.id || '/0' " +
+    $instance = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'consts__value' 'r' 'value') AS folded, $(Get-TsFieldSql 'consts__value' 'r' '$expr') AS text FROM consts c JOIN consts__value r ON r.owner = c.id AND r.n = 0 " +
         "WHERE c.name = 'ONLINE'")
     Assert-Line $instance 'new Runtime().isOnline'
-    # a boolean inside a structure is 0/1 now, so `false` is asked as a folded 0
-    $instanceFalse = Invoke-TsRowsQ $made.Db ("SELECT 'folded_false=' || count(*) AS n FROM consts c JOIN consts__value r ON r.id = c.id || '/0' " +
-        "WHERE c.name = 'ONLINE' AND r.value = 0")
+    # a boolean inside a structure is a `bool` node holding 0/1, so `false` is asked as a folded bool 0
+    $instanceFalse = Invoke-TsRowsQ $made.Db ("SELECT 'folded_false=' || count(*) AS n FROM consts c JOIN consts__value r ON r.owner = c.id AND r.n = 0 " +
+        "JOIN consts__value f ON f.owner = r.owner AND f.parent = r.n AND f.role = 'value' WHERE c.name = 'ONLINE' AND f.node = 'bool' AND f.value = 0")
     Assert-Line $instanceFalse 'folded_false=0'
 }
 
@@ -392,11 +392,11 @@ Test-Case 'tsrows: a spread of a known array is flattened into the value' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
     # THREE elements, the last of them 3: an unflattened spread would be one opaque element plus 3.
-    $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT count(*) FROM consts__value j WHERE j.owner = c.id AND j.parent = c.id || '/0') AS n, " +
-        "(SELECT j.value FROM consts__value j WHERE j.owner = c.id AND j.parent = c.id || '/0' AND j.ord = 2) AS last " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT count(*) FROM consts__value j WHERE j.owner = c.id AND j.parent = 0) AS n, " +
+        "(SELECT j.value FROM consts__value j WHERE j.owner = c.id AND j.parent = 0 AND j.ord = 2) AS last " +
         "FROM consts c WHERE c.name = 'ALL'")
     Assert-Line $r '3'
-    $first = Invoke-TsRowsQ $made.Db "SELECT j.value AS first FROM consts c JOIN consts__value j ON j.owner = c.id AND j.parent = c.id || '/0' AND j.ord = 0 WHERE c.name = 'ALL'"
+    $first = Invoke-TsRowsQ $made.Db "SELECT j.value AS first FROM consts c JOIN consts__value j ON j.owner = c.id AND j.parent = 0 AND j.ord = 0 WHERE c.name = 'ALL'"
     Assert-Line $first '1'
 }
 
@@ -405,9 +405,9 @@ Test-Case 'tsrows: a spread of a known array is flattened into the value' {
 Test-Case 'tsrows: a conditional value keeps the operator and both operands' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT r.[`$logic] AS op, " +
-        "(SELECT o.[.id] FROM consts__value l JOIN consts__value o ON o.parent = l.id WHERE l.parent = r.id AND l.role = '`$operands' AND o.ord = 1) AS then_id " +
-        "FROM consts c JOIN consts__value r ON r.id = c.id || '/0' WHERE c.name = 'MAYBE'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'consts__value' 'r' '$logic') AS op, " +
+        "(SELECT $(Get-TsFieldSql 'consts__value' 'o' 'id') FROM consts__value l JOIN consts__value o ON o.owner = l.owner AND o.parent = l.n WHERE l.owner = r.owner AND l.parent = r.n AND l.role = '`$operands' AND o.ord = 1) AS then_id " +
+        "FROM consts c JOIN consts__value r ON r.owner = c.id AND r.n = 0 WHERE c.name = 'MAYBE'")
     Assert-Line $r '&&'
     Assert-Line $r '1'
 }
@@ -417,13 +417,13 @@ Test-Case 'tsrows: a conditional value keeps the operator and both operands' {
 Test-Case 'tsrows: a value that cannot be known still publishes what it reads' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $text = Invoke-TsRowsQ $made.Db ("SELECT r.[`$expr] AS text FROM consts c JOIN consts__value r ON r.id = c.id || '/0' " +
+    $text = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'consts__value' 'r' '$expr') AS text FROM consts c JOIN consts__value r ON r.owner = c.id AND r.n = 0 " +
         "WHERE c.name = 'DYNAMIC'")
     Assert-Line $text 'window.location.href'
     # THE SUMMARY, ON ITS OWN. Asked beside the text, the text answers the assertion and a build that
     # publishes no summary at all passes - which is how this case first went green against one.
-    $reads = Invoke-TsRowsQ $made.Db ("SELECT o.value AS first_read FROM consts c JOIN consts__value r ON r.id = c.id || '/0' " +
-        "JOIN consts__value l ON l.parent = r.id AND l.role = '`$reads' JOIN consts__value o ON o.parent = l.id AND o.ord = 0 WHERE c.name = 'DYNAMIC'")
+    $reads = Invoke-TsRowsQ $made.Db ("SELECT o.value AS first_read FROM consts c JOIN consts__value r ON r.owner = c.id AND r.n = 0 " +
+        "JOIN consts__value l ON l.owner = r.owner AND l.parent = r.n AND l.role = '`$reads' JOIN consts__value o ON o.owner = l.owner AND o.parent = l.n AND o.ord = 0 WHERE c.name = 'DYNAMIC'")
     Assert-Line $reads 'window.location.href'
 }
 

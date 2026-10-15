@@ -9,9 +9,9 @@
 
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
-$script:TsKeyArmsSql = "SELECT k.key || ' | ' || v.dimension || ' ' || " +
-    "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
-    "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'ov.%' ORDER BY 1"
+$script:TsKeyArmsSql = "SELECT k.key || ' | ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || ' ' || " +
+    "$(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
+    "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = 0 WHERE k.key LIKE 'ov.%' ORDER BY 1"
 
 # THE SHAPES OF A KEY CHOSEN IN A CONDITIONAL ARM, all through a wrapper `t` around the configured `instant`: a ternary choosing between
 # two calls inside a SERVICE call's argument, under a `case` - the case alone was all `ov.e` carried - an `&&`
@@ -108,8 +108,8 @@ Test-Case 'tsrows: a dimension no way permits anything for is in nothing, never 
             '"tp":{"red":"a","nested":"b"},"bt":{"tagBlue":"c","tagTealX":"d"}}'
     }
     $made = New-TsRowsDb $tree
-    $r = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT key || ' | ' || (SELECT '[' || group_concat('{' || char(34) || 'enum' || char(34) || ': ' || char(34) || v.enum || char(34) || ', ' || char(34) || 'dimension' || char(34) || ': ' || char(34) || v.dimension || char(34) || ', ' || char(34) || 'op' || char(34) || ': ' || char(34) || v.op || char(34) || ', ' || char(34) || 'values' || char(34) || ': ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values' ', ') || ', ' || char(34) || 'domain' || char(34) || ': ' || v.domain || '}', ', ' ORDER BY v.ord) || ']' FROM key_reach__always_values v WHERE v.owner = '#' || key_reach.rowid AND v.parent = '#' || key_reach.rowid || '/0') || ' | ' || " +
-        "(SELECT count(*) FROM key_reach__unreadable_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') || ' ' || coalesce((SELECT jn.dimension FROM key_reach__unreadable_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0' AND jn.ord = 0), '-') AS reach " +
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT key || ' | ' || (SELECT '[' || group_concat('{' || char(34) || 'enum' || char(34) || ': ' || char(34) || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'enum') || char(34) || ', ' || char(34) || 'dimension' || char(34) || ': ' || char(34) || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || char(34) || ', ' || char(34) || 'op' || char(34) || ': ' || char(34) || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || char(34) || ', ' || char(34) || 'values' || char(34) || ': ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values' ', ') || ', ' || char(34) || 'domain' || char(34) || ': ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'domain') || '}', ', ' ORDER BY v.ord) || ']' FROM key_reach__always_values v WHERE v.owner = '#' || key_reach.rowid AND v.parent = 0) || ' | ' || " +
+        "(SELECT count(*) FROM key_reach__unreadable_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) || ' ' || coalesce($(Get-TsItemFieldSql 'key_reach__unreadable_values' 'key_reach.rowid' 0 'dimension'), '-') AS reach " +
         "FROM key_reach WHERE key LIKE 'tp.%' OR key LIKE 'bt.%'")
     Assert-Exit $r 0
     Assert-Line $r '"dimension": "colorFilter.include", "op": "in", "values": [], "domain": 6}] | 0 -'

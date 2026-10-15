@@ -373,7 +373,7 @@ Test-Case 'tsrows: an AST a partial run re-extracted is stored as the object it 
     Assert-Line $again.Result 'put back'
     $of = "FROM expressions WHERE EXISTS (SELECT 1 FROM expressions__ast a WHERE a.owner = expressions.id) AND file = (SELECT id FROM files WHERE path = 'apps/shop/src/helpers.ts')"
     Assert-NoLine (Invoke-TsRowsQ $again.Db "SELECT 'n=' || count(*) AS n $of") 'n=0'
-    Assert-Line (Invoke-TsRowsQ $again.Db "SELECT 'bad=' || count(*) AS n $of AND NOT EXISTS (SELECT 1 FROM expressions__ast r WHERE r.id = expressions.id || '/0' AND r.k IS NOT NULL)") 'bad=0'
+    Assert-Line (Invoke-TsRowsQ $again.Db "SELECT 'bad=' || count(*) AS n $of AND NOT EXISTS (SELECT 1 FROM expressions__ast r JOIN expressions__ast rk ON rk.owner = r.owner AND rk.parent = r.n AND rk.role = 'k' WHERE r.owner = expressions.id AND r.n = 0 AND rk.value IS NOT NULL)") 'bad=0'
 }
 
 # A PARTIAL RUN REPAIRS THE GRAPH it read its own plan from: the next run decides what to re-read from it,

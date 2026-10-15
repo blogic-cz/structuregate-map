@@ -13,10 +13,10 @@ if ($script:TsRowsModules -and $script:TsRowsPython) {
 
 # key | always_gates | maybe_gates | always_values, each gate by its source text, `-` for none.
 $script:TsOutletsSql = "SELECT k.key || ' | ' || " +
-    "COALESCE((SELECT group_concat(g.source, ' & ') FROM key_reach__always_gates a JOIN gates g ON g.id = a.value WHERE a.owner = '#' || k.rowid AND a.parent = '#' || k.rowid || '/0'), '-') || ' | ' || " +
-    "COALESCE((SELECT group_concat(g.source, ' & ') FROM key_reach__maybe_gates m JOIN gates g ON g.id = m.value WHERE m.owner = '#' || k.rowid AND m.parent = '#' || k.rowid || '/0'), '-') || ' | ' || " +
-    "COALESCE((SELECT group_concat(v.dimension || ' ' || v.op || ' ' || " +
-    "$(Get-NodeListSql 'key_reach__always_values' 'v' 'values'), ' & ') FROM key_reach__always_values v WHERE v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0'), '-') AS reach " +
+    "COALESCE((SELECT group_concat(g.source, ' & ') FROM key_reach__always_gates a JOIN gates g ON g.id = a.value WHERE a.owner = '#' || k.rowid AND a.parent = 0), '-') || ' | ' || " +
+    "COALESCE((SELECT group_concat(g.source, ' & ') FROM key_reach__maybe_gates m JOIN gates g ON g.id = m.value WHERE m.owner = '#' || k.rowid AND m.parent = 0), '-') || ' | ' || " +
+    "COALESCE((SELECT group_concat($(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || ' ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || " +
+    "$(Get-NodeListSql 'key_reach__always_values' 'v' 'values'), ' & ') FROM key_reach__always_values v WHERE v.owner = '#' || k.rowid AND v.parent = 0), '-') AS reach " +
     "FROM key_reach k WHERE k.key LIKE 'demo.list.%' ORDER BY 1"
 
 Test-Case 'tsrows: a key in an ng-template only outlets render takes the gates of the outlets' {

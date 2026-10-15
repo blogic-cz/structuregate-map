@@ -50,7 +50,7 @@ Test-Case 'tsrows keys: a let local that is written after its initializer hands 
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
-        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     Assert-Line $r 'demo.branch.Alpha.extra | field_binding | HostComponent'
     Assert-Line $r 'demo.branch2.Alpha | field_binding | HostComponent'
     Assert-Line $r 'demo.branch2.Beta | field_binding | HostComponent'

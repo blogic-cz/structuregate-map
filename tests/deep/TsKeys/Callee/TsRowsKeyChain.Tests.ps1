@@ -10,8 +10,8 @@
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
 $script:ChainQ = @"
-SELECT k.key || ' | ' || k.route || ' | ' || k.n_paths || ' | ' || COALESCE((SELECT group_concat(v.dimension || ' ' ||
-v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values'), '; ') FROM key_reach__always_values v WHERE v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0'), 'none') AS r
+SELECT k.key || ' | ' || k.route || ' | ' || k.n_paths || ' | ' || COALESCE((SELECT group_concat($(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || ' ' ||
+$(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values'), '; ') FROM key_reach__always_values v WHERE v.owner = '#' || k.rowid AND v.parent = 0), 'none') AS r
 FROM key_reach k WHERE k.key LIKE 'demo.%'
 "@
 

@@ -128,9 +128,9 @@ Test-Case 'tsrows: a flag assigned from a service method restricts what the meth
     Assert-Line $r 'showNorth && model.selected => Brand brand in ["North"]'
     Assert-Line $r 'showNorth && model.selected => Size size in ["Large","Medium"]'
     Assert-Line $r 'showNorthNow => Brand brand in ["North"]'
-    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || v.dimension || ' ' || " +
-        "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
-        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key = 'beta.north'")
+    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || ' ' || " +
+        "$(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
+        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = 0 WHERE k.key = 'beta.north'")
     Assert-Line $k 'beta.north | brand in ["North"]'
     Assert-Line $k 'beta.north | size in ["Large","Medium"]'
 }
@@ -246,9 +246,9 @@ Test-Case 'tsrows: a list handed to a structural directive restricts what the di
     Assert-Line $r '[Kind.Coral, Kind.Jade] => Kind items.kind in ["Coral","Jade"]'
     Assert-Line $r 'chosen => Kind items.kind unknown []'
     Assert-Line $r '[Kind.Jade] => Kind current in ["Jade"]'
-    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || v.dimension || ' ' || " +
-        "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
-        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key = 'promo.amber'")
+    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || ' ' || " +
+        "$(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
+        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = 0 WHERE k.key = 'promo.amber'")
     Assert-Line $k 'promo.amber | items.kind in ["Amber"]'
 }
 
@@ -413,9 +413,9 @@ Test-Case 'tsrows: a config listing an ngFor item property restricts each key to
     Assert-Exit $r 0
     Assert-Line $r '{ grades: [t.grade] } => appOnlyFor.grades not_in ["Gamma"] listed ["Alpha","Beta"]'
     Assert-Line $r '{ grades: [Grade.Alpha] } => appOnlyFor.grades in ["Alpha"] listed ["Alpha"]'
-    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || v.dimension || ' ' || " +
-        "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
-        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.cards.%' OR k.key LIKE 'demo.later.%'")
+    $k = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || ' ' || " +
+        "$(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS reach " +
+        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = 0 WHERE k.key LIKE 'demo.cards.%' OR k.key LIKE 'demo.later.%'")
     Assert-Line $k 'demo.cards.alpha | appOnlyFor.grades in ["Alpha"]'
     Assert-Line $k 'demo.cards.beta | appOnlyFor.grades in ["Beta"]'
     Assert-Line $k 'demo.cards.lit | appOnlyFor.grades in ["Alpha"]'
@@ -423,7 +423,7 @@ Test-Case 'tsrows: a config listing an ngFor item property restricts each key to
     Assert-Line $k 'demo.later.beta | appOnlyFor.grades in ["Beta"]'
     # ONE LINK, the config's: the `*ngFor` gate on the same chain reads no element, so it carries none.
     $b = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || (SELECT count(*) FROM key_reach__always_branches " +
-        "WHERE owner = '#' || k.rowid AND parent = '#' || k.rowid || '/0' AND value LIKE 'loop:%') AS links FROM key_reach k WHERE k.key = 'demo.cards.alpha'")
+        "WHERE owner = '#' || k.rowid AND parent = 0 AND value LIKE 'loop:%') AS links FROM key_reach k WHERE k.key = 'demo.cards.alpha'")
     Assert-Line $b 'demo.cards.alpha | 1'
 }
 }

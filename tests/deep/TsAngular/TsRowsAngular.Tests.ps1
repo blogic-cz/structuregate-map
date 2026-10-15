@@ -13,13 +13,13 @@ if ($script:TsRowsModules -and $script:TsRowsPython) {
 Test-Case 'tsrows: a class records its heritage, resolved, and the decorators on it' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT name, abstract, exported, (SELECT r.text FROM classes__extends r WHERE r.id = classes.id || '/0') AS base, " +
-        "(SELECT j.text FROM classes__implements j WHERE j.owner = classes.id AND j.parent = classes.id || '/0' AND j.ord = 0) AS iface FROM classes WHERE name = 'CartComponent'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT name, abstract, exported, $(Get-TsRootFieldSql 'classes__extends' 'classes.id' 'text') AS base, " +
+        "$(Get-TsItemFieldSql 'classes__implements' 'classes.id' 0 'text') AS iface FROM classes WHERE name = 'CartComponent'")
     Assert-Line $r 'Base'
     Assert-Line $r 'Item'
     # THE RESOLVED DECLARATION, ON ITS OWN. Asked beside the text, `Item` answers the assertion and a build
     # that resolves no heritage at all passes.
-    $where = Invoke-TsRowsQ $made.Db ("SELECT (SELECT j.[.file] FROM classes__implements j WHERE j.owner = classes.id AND j.parent = classes.id || '/0' AND j.ord = 0) AS iface_file " +
+    $where = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsItemFieldSql 'classes__implements' 'classes.id' 0 'file') AS iface_file " +
         "FROM classes WHERE name = 'CartComponent'")
     Assert-Line $where 'apps/shop/src/cart.ts'
 }
@@ -29,7 +29,7 @@ Test-Case 'tsrows: a class records its heritage, resolved, and the decorators on
 Test-Case 'tsrows: an Angular decorator is told apart from a local one by where it is declared' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT j.value FROM classes__angular j WHERE j.owner = classes.id AND j.parent = classes.id || '/0' AND j.ord = 0) AS ng FROM classes " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT j.value FROM classes__angular j WHERE j.owner = classes.id AND j.parent = 0 AND j.ord = 0) AS ng FROM classes " +
         "WHERE name = 'CartComponent'")
     Assert-Line $r 'Component'
 }
@@ -39,7 +39,7 @@ Test-Case 'tsrows: an Angular decorator is told apart from a local one by where 
 Test-Case 'tsrows: a decorator publishes its arguments as values' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT name, (SELECT j.selector FROM class_decorators__args j WHERE j.owner = class_decorators.id AND j.parent = class_decorators.id || '/0' AND j.ord = 0) AS selector " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT name, $(Get-TsItemFieldSql 'class_decorators__args' 'class_decorators.id' 0 'selector') AS selector " +
         "FROM class_decorators WHERE name = 'Component'")
     Assert-Line $r 'app-cart'
 }
@@ -75,8 +75,8 @@ Test-Case 'tsrows: --find reaches a member and names the file that owns it' {
 Test-Case 'tsrows: a method member carries its parameters' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT kind, (SELECT j.name FROM members__params j WHERE j.owner = members.id AND j.parent = members.id || '/0' AND j.ord = 0) AS first_param, " +
-        "(SELECT j.type FROM members__params j WHERE j.owner = members.id AND j.parent = members.id || '/0' AND j.ord = 0) AS first_type FROM members WHERE name = 'greet'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT kind, $(Get-TsItemFieldSql 'members__params' 'members.id' 0 'name') AS first_param, " +
+        "$(Get-TsItemFieldSql 'members__params' 'members.id' 0 'type') AS first_type FROM members WHERE name = 'greet'")
     Assert-Line $r 'method'
     Assert-Line $r 'name'
 }
@@ -86,7 +86,7 @@ Test-Case 'tsrows: a method member carries its parameters' {
 Test-Case 'tsrows: a constructor parameter is a di row, with the type it resolves to' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT param, type, (SELECT r.[.file] FROM di__resolved r WHERE r.id = di.id || '/0') AS declared_in " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT param, type, $(Get-TsRootFieldSql 'di__resolved' 'di.id' 'file') AS declared_in " +
         "FROM di ORDER BY param")
     Assert-Line $r 'cart'
     Assert-Line $r 'apps/shop/src/cart.ts'
@@ -98,7 +98,7 @@ Test-Case 'tsrows: a constructor parameter is a di row, with the type it resolve
 Test-Case 'tsrows: a call records its callee, its target and every argument' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT callee, method, (SELECT count(*) FROM calls__args j WHERE j.owner = calls.id AND j.parent = calls.id || '/0') AS n FROM calls " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT callee, method, (SELECT count(*) FROM calls__args j WHERE j.owner = calls.id AND j.parent = 0) AS n FROM calls " +
         "WHERE method = 'compute'")
     Assert-Line $r 'this.compute'
     Assert-Line $r '4'
@@ -111,8 +111,8 @@ Test-Case 'tsrows: a call argument is labelled with the parameter it fills, rest
     $made = New-TsRowsDb $tree
     # THE FOURTH argument: at position 2 the rest parameter is simply the third entry of the list, so a
     # build with no absorb rule labels it correctly anyway and the case proves nothing.
-    $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT j.value FROM calls__arg_params j WHERE j.owner = calls.id AND j.parent = calls.id || '/0' AND j.ord = 0) AS first, " +
-        "(SELECT j.value FROM calls__arg_params j WHERE j.owner = calls.id AND j.parent = calls.id || '/0' AND j.ord = 3) AS fourth FROM calls WHERE method = 'compute'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT j.value FROM calls__arg_params j WHERE j.owner = calls.id AND j.parent = 0 AND j.ord = 0) AS first, " +
+        "(SELECT j.value FROM calls__arg_params j WHERE j.owner = calls.id AND j.parent = 0 AND j.ord = 3) AS fourth FROM calls WHERE method = 'compute'")
     Assert-Line $r 'a'
     Assert-Line $r 'rest'
 }
@@ -133,7 +133,7 @@ Test-Case 'tsrows: an assignment to a class property records the target, its sco
 Test-Case 'tsrows: a destructuring local records each binding and the shared initializer' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT destructured, (SELECT j.local FROM locals__bindings j WHERE j.owner = locals.id AND j.parent = locals.id || '/0' AND j.ord = 0) AS first, " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT destructured, $(Get-TsItemFieldSql 'locals__bindings' 'locals.id' 0 'local') AS first, " +
         "source FROM locals WHERE destructured = 1")
     Assert-Line $r 'id'
     Assert-Line $r 'this.state()'
@@ -155,7 +155,7 @@ Test-Case 'tsrows: an if produces a then and an else branch, each carrying the c
 Test-Case 'tsrows: a fallthrough case group is one row carrying every label' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT count(*) FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0') AS n, discriminant_source, is_default " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT count(*) FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = 0) AS n, discriminant_source, is_default " +
         "FROM switch_cases WHERE is_default = 0")
     Assert-Line $r '2'
     Assert-Line $r 'kind'
@@ -209,7 +209,7 @@ Test-Case 'tsrows: a component resolves its templateUrl to the file row for that
 Test-Case 'tsrows: a component records its stylesheet under either spelling' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT j.value FROM components__style_urls j WHERE j.owner = components.id AND j.parent = components.id || '/0' AND j.ord = 0) AS style FROM components " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT j.value FROM components__style_urls j WHERE j.owner = components.id AND j.parent = 0 AND j.ord = 0) AS style FROM components " +
         "WHERE name = 'BasketComponent'")
     Assert-Line $r './basket.scss'
 }
@@ -254,8 +254,8 @@ Test-Case 'tsrows: a signal input is an io row, marked as a signal' {
 Test-Case 'tsrows: a nested NgModule array is flattened, so the module exports what it really exports' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT count(*) FROM ng_modules__exports j WHERE j.owner = ng_modules.id AND j.parent = ng_modules.id || '/0') AS n, " +
-        "(SELECT j.name FROM ng_modules__exports j WHERE j.owner = ng_modules.id AND j.parent = ng_modules.id || '/0' AND j.ord = 0) AS first FROM ng_modules WHERE name = 'BasketModule'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT count(*) FROM ng_modules__exports j WHERE j.owner = ng_modules.id AND j.parent = 0) AS n, " +
+        "$(Get-TsItemFieldSql 'ng_modules__exports' 'ng_modules.id' 0 'name') AS first FROM ng_modules WHERE name = 'BasketModule'")
     Assert-Line $r '2'
     Assert-Line $r 'HighlightDirective'
 }

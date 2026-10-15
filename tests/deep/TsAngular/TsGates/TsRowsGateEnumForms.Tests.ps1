@@ -76,9 +76,9 @@ Test-Case 'tsrows: a [hidden] binding gates its subtree on the negation of its c
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"gateInputs":["hidden"]}'
     }
     $made = New-TsRowsDb $tree
-    $sql = "SELECT k.key || ' | ' || v.dimension || ' ' || v.op || ' ' || " +
-        "$(Get-NodeListSql 'key_reach__always_values' 'v' 'values') || ' | ' || (SELECT gate_kind FROM gates WHERE id = (SELECT jn.value FROM key_reach__always_gates jn WHERE jn.owner = '#' || k.rowid AND jn.parent = '#' || k.rowid || '/0' AND jn.ord = 0)) AS r " +
-        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.hid.%'"
+    $sql = "SELECT k.key || ' | ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || ' ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || " +
+        "$(Get-NodeListSql 'key_reach__always_values' 'v' 'values') || ' | ' || (SELECT gate_kind FROM gates WHERE id = (SELECT jn.value FROM key_reach__always_gates jn WHERE jn.owner = '#' || k.rowid AND jn.parent = 0 AND jn.ord = 0)) AS r " +
+        "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = 0 WHERE k.key LIKE 'demo.hid.%'"
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $sql
     Assert-Exit $r 0
     Assert-Line $r 'demo.hid.own | kind not_in ["Alpha"] | hidden'
@@ -159,8 +159,8 @@ Test-Case 'tsrows: a key under a guarded method returning a bare optional read i
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $sql = "SELECT k.key || ' | ' || coalesce((SELECT group_concat(v.dimension || ' ' || " +
-        "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values'), ' & ') FROM key_reach__always_values v WHERE v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0'), '-') AS r " +
+    $sql = "SELECT k.key || ' | ' || coalesce((SELECT group_concat($(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || ' ' || " +
+        "$(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values'), ' & ') FROM key_reach__always_values v WHERE v.owner = '#' || k.rowid AND v.parent = 0), '-') AS r " +
         "FROM key_reach k WHERE k.key LIKE 'demo.gm.%'"
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $sql
     Assert-Exit $r 0

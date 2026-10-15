@@ -205,8 +205,8 @@ Test-Case 'tsrows: an arrow-function property returns like a method and its call
     }
     $made = New-TsRowsDb $tree
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT m.name || ' | ' || coalesce(r.implicit, 0) || ' | ' || " +
-        "(SELECT rv.[`$method] FROM returns__value rv WHERE rv.id = r.id || '/0') || ' | ' || $(Get-NodeObjectListSql 'returns__value' 'r.id' @('$enum', 'value') '$receiver') || ' | ' || " +
-        "(SELECT count(*) FROM members__params j WHERE j.owner = m.id AND j.parent = m.id || '/0') AS ret FROM returns r JOIN members m ON m.id = r.member " +
+        "$(Get-TsRootFieldSql 'returns__value' 'r.id' '$method') || ' | ' || $(Get-TsObjectListSql 'returns__value' 'r.id' @('$enum', 'value') '$receiver') || ' | ' || " +
+        "(SELECT count(*) FROM members__params j WHERE j.owner = m.id AND j.parent = 0) AS ret FROM returns r JOIN members m ON m.id = r.member " +
         "WHERE m.name IN ('isUs', 'isEu', 'isMethod')")
     Assert-Exit $r 0
     Assert-Line $r 'isUs | 1 | some | [{"$enum":"PlanIDs.UsA","value":1},{"$enum":"PlanIDs.UsB","value":2}] | 1'

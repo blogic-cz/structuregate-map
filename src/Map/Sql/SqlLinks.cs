@@ -158,22 +158,39 @@ internal static partial class SqlLinks
     private sealed record TemplatePiece(string Text, bool Hole, string Symbol);
 
     /// <summary>Every argument's template, by argument id, rebuilt from its node rows: the root list's items are the
-    /// strings, each string's items its pieces - a `value` node is text, an `object` node a hole.</summary>
+    /// strings, each string's items its pieces - a `string` node is text, an `object` node a hole. A hole's `hole`
+    /// and `symbol` are node rows BELOW it, their key in `role`: the columns of a node table are fixed. A node is
+    /// (`owner`, `n`), its `parent` the `n` of its parent within the same owner, NULL for the root (`n` = 0).</summary>
     private static Dictionary<string, List<List<TemplatePiece>>> Templates(string db)
     {
         var templates = new Dictionary<string, List<List<TemplatePiece>>>(StringComparer.Ordinal);
         var columns = (Query(db, "SELECT name FROM pragma_table_info('arguments__template')") ?? []).Select(r => Str(r[0])).ToHashSet();
         if (!columns.Contains("owner")) return templates;
-        var hole = columns.Contains("hole") ? "hole" : "''";
-        var symbol = columns.Contains("symbol") ? "symbol" : "''";
-        var strings = new Dictionary<string, List<TemplatePiece>>(StringComparer.Ordinal);
-        foreach (var row in Query(db, $"SELECT owner, id, parent, node, value, {hole}, {symbol} FROM arguments__template ORDER BY rowid") ?? [])
+        // Keyed `owner` + `n`: a node number is unique only within its owner.
+        var strings = new Dictionary<(string, long), List<TemplatePiece>>();
+        // A HOLE'S MEMBERS FOLLOW IT in preorder, so each hole is found by its number and filled in place.
+        var holes = new Dictionary<(string, long), (List<TemplatePiece> Pieces, int At)>();
+        foreach (var row in Query(db, "SELECT owner, n, parent, node, value, role FROM arguments__template ORDER BY owner, n") ?? [])
         {
-            var (owner, id, parent, node) = (Str(row[0]), Str(row[1]), Str(row[2]), Str(row[3]));
-            if (parent.Length == 0) { templates[owner] = []; continue; }
-            if (parent == owner + "/0") { var one = new List<TemplatePiece>(); strings[id] = one; templates[owner].Add(one); continue; }
+            var (owner, n, node) = (Str(row[0]), Num(row[1]), Str(row[3]));
+            if (row[2].ValueKind != JsonValueKind.Number) { templates[owner] = []; continue; }
+            var parent = (owner, Num(row[2]));
+            if (!templates.TryGetValue(owner, out var all)) continue;
+            if (parent.Item2 == 0) { var one = new List<TemplatePiece>(); strings[(owner, n)] = one; all.Add(one); continue; }
+            if (holes.TryGetValue(parent, out var of))
+            {
+                var piece = of.Pieces[of.At];
+                of.Pieces[of.At] = Str(row[5]) switch
+                {
+                    "hole" => piece with { Text = Str(row[4]) },
+                    "symbol" => piece with { Symbol = Str(row[4]) },
+                    _ => piece,
+                };
+                continue;
+            }
             if (!strings.TryGetValue(parent, out var pieces)) continue;
-            pieces.Add(node == "object" ? new TemplatePiece(Str(row[5]), true, Str(row[6])) : new TemplatePiece(Str(row[4]), false, ""));
+            if (node == "object") { holes[(owner, n)] = (pieces, pieces.Count); pieces.Add(new TemplatePiece("", true, "")); }
+            else pieces.Add(new TemplatePiece(Str(row[4]), false, ""));
         }
         return templates;
     }

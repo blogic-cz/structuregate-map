@@ -48,14 +48,14 @@ Test-Case 'tsrows keys: a const object member bound through a field is a field b
 # read into, and the node binding that field, name the component it renders in.
 Test-Case 'tsrows keys: a const object from another file reaches the component that binds its member' {
     $made = New-TsRowsDb (New-TsRowsKeysConstTree)
-    $r = Invoke-TsRowsQ $made.Db ("SELECT 'hits=' || count(*) AS reach FROM key_reach k JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'hits=' || count(*) AS reach FROM key_reach k JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 " +
         "JOIN components c ON c.id = j.value WHERE k.key = 'set.sharedhint' AND c.name = 'SettingsComponent'")
     Assert-Line $r 'hits=1'
 }
 
 Test-Case 'tsrows keys: a const object member assigned under an if carries that branch' {
     $made = New-TsRowsDb (New-TsRowsKeysConstTree)
-    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || (SELECT count(*) FROM key_reach__always_branches jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') || ' | ' || " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || (SELECT count(*) FROM key_reach__always_branches jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) || ' | ' || " +
         "$(Get-NodeItemListSql 'key_reach__always_values' 'key_reach.rowid' 0 'values') AS reach FROM key_reach WHERE key = 'set.guarded'")
     Assert-Line $r 'set.guarded | 1 | ["B"]'
 }
@@ -129,7 +129,7 @@ Test-Case 'tsrows keys: a locale array element is referenced exactly when its ar
 # static key, so no i18n ref names `labels.laptop` - the chain is the only evidence it is used here.
 Test-Case 'tsrows keys: a key built by a + chain reaches the component it is built in' {
     $made = New-TsRowsDb (New-TsRowsKeysLocaleTree)
-    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || route || ' | ' || (SELECT count(*) FROM key_reach__components jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') AS reach " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || route || ' | ' || (SELECT count(*) FROM key_reach__components jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) AS reach " +
         "FROM key_reach WHERE key = 'labels.laptop'")
     Assert-Line $r 'labels.laptop | literal | 1'
 }
@@ -184,7 +184,7 @@ Test-Case 'tsrows keys: a field holding an injected method call, and a list of o
             '"featureChecks":["FlagService.isOn"],"featureEnum":"FlagCodes"}'
     }
     $made = New-TsRowsDb $tree
-    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || route || ' | ' || (SELECT count(*) FROM key_reach__components jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') AS reach " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || route || ' | ' || (SELECT count(*) FROM key_reach__components jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) AS reach " +
         "FROM key_reach WHERE key LIKE 'demo.%'")
     Assert-Line $r 'demo.grades.Alpha | field_binding | 1'
     Assert-Line $r 'demo.grades.Beta | field_binding | 1'
@@ -199,7 +199,7 @@ Test-Case 'tsrows keys: a field holding an injected method call, and a list of o
     Assert-Line $r 'demo.told.Alpha | field_binding | 1'
     Assert-Line $r 'demo.told.Beta | field_binding | 1'
     Assert-Line $r 'demo.later.tip | field_binding | 1'
-    $g = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || (SELECT count(*) FROM key_reach__always_gates jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') AS g " +
+    $g = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || (SELECT count(*) FROM key_reach__always_gates jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) AS g " +
         "FROM key_reach WHERE key = 'demo.tips.alpha'")
     Assert-Line $g 'demo.tips.alpha | 1'
 }
@@ -246,7 +246,7 @@ Test-Case 'tsrows keys: a service key reaches its caller through a hop, a ?? or 
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
-        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     Assert-Line $r 'demo.hop.Alpha | field_binding | HostComponent'
     Assert-Line $r 'demo.hop.Beta | field_binding | HostComponent'
     Assert-Line $r 'demo.wrapped.Alpha | field_binding | HostComponent'
@@ -304,7 +304,7 @@ Test-Case 'tsrows keys: a service key reaches its caller through a hop from a me
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
-        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     Assert-Line $r 'demo.oneif.Alpha | field_binding | HostComponent'
     Assert-Line $r 'demo.oneif.Beta | field_binding | HostComponent'
     Assert-Line $r 'demo.dflt.Alpha | field_binding | HostComponent'
@@ -380,7 +380,7 @@ Test-Case 'tsrows keys: a service key reaches its caller through a callback and 
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
-        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     Assert-Line $r 'demo.letvar.Alpha | field_binding | HostComponent'
     Assert-Line $r 'demo.lambda.Alpha | field_binding | HostComponent'
     Assert-Line $r 'demo.lambda.Beta | field_binding | HostComponent'

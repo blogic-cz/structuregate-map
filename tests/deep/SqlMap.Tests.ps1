@@ -151,7 +151,7 @@ Test-Case 'sqlseeds: a VALUES row lands in its table - through a #temp MERGE, @v
     # Active is left out and takes its DEFAULT; DateCreated's GETDATE() is the server's, and is no value.
     Assert-SqlMapRow $db $rows 'App.Accounts||["Name","Active"]|["first",1]|bound|1|Main/Scripts/Post.sql' 'a direct INSERT, its DEFAULT filled'
     # @acme is 7 where Temp.sql runs; the SET to 8 comes after its `:r`.
-    Assert-SqlMapRow $db "SELECT 'v=' || s.via || '|' || (SELECT j.value FROM sql_seeds__row_values j WHERE j.owner = s.id AND j.parent = s.id || '/0' AND j.ord = 0) || '|' || s.status FROM sql_seeds s WHERE s.name = 'Accounts' AND s.via <> ''" '#Accounts|7|bound' 'a temp row merged into its table'
+    Assert-SqlMapRow $db "SELECT 'v=' || s.via || '|' || (SELECT j.value FROM sql_seeds__row_values j WHERE j.owner = s.id AND j.parent = 0 AND j.ord = 0) || '|' || s.status FROM sql_seeds s WHERE s.name = 'Accounts' AND s.via <> ''" '#Accounts|7|bound' 'a temp row merged into its table'
     Assert-SqlMapRow $db "SELECT 'v=' || ($(Get-NodeRootListSql 'sql_seeds__row_values' 's.id') LIKE '%' || char(209) || 'ame%') FROM sql_seeds s WHERE s.via = '#Accounts' AND s.status = 'bound'" '1' 'a string as the script spells it, not escaped'
     Assert-SqlMapRow $db "SELECT 'v=' || s.status || '|' || s.detail FROM sql_seeds s WHERE s.via = '#Accounts' AND s.status <> 'bound'" 'partial|not known before run time: Name = GETDATE()' 'a value the deploy computes'
     Assert-SqlMapRow $db "SELECT 'v=' || s.status || '|' || $(Get-NodeRootListSql 'sql_seeds__unbound' 's.id') FROM sql_seeds s WHERE s.via = '#Accounts'" 'partial|["Name"]' 'the column a deploy computes, as a list'
@@ -164,10 +164,10 @@ Test-Case 'sqlseeds: a VALUES row lands in its table - through a #temp MERGE, @v
     Assert-SqlMapRow $db "SELECT 'v=' || s.status || '|' || s.detail FROM sql_seeds s JOIN files f ON f.id = s.file WHERE f.path = 'Main/Scripts/Seed.sql' AND s.line = 2" "bound|a string without N, so the database's code page decides which characters it keeps: Name" 'a varchar literal'
     Assert-SqlMapRow $db "SELECT 'v=' || s.detail FROM sql_seeds s JOIN files f ON f.id = s.file WHERE f.path = 'Main/Scripts/Seed.sql' AND s.line = 1" '' 'an N string'
     # The UPDATE after the MERGE changes row 7 and names itself; row 2 keeps the DEFAULT and no mark.
-    $updated = "SELECT 'v=' || (SELECT j.value FROM sql_seeds__row_values j WHERE j.owner = s.id AND j.parent = s.id || '/0' AND j.ord = 0) || '|' || (SELECT j.value FROM sql_seeds__row_values j WHERE j.owner = s.id AND j.parent = s.id || '/0' AND j.ord = 2) || '|' || $(Get-NodeRootListSql 'sql_seeds__defaults' 's.id') || '|' || $(Get-NodeRootListSql 'sql_seeds__updates' 's.id') FROM sql_seeds s WHERE s.via = '#Accounts'"
+    $updated = "SELECT 'v=' || (SELECT j.value FROM sql_seeds__row_values j WHERE j.owner = s.id AND j.parent = 0 AND j.ord = 0) || '|' || (SELECT j.value FROM sql_seeds__row_values j WHERE j.owner = s.id AND j.parent = 0 AND j.ord = 2) || '|' || $(Get-NodeRootListSql 'sql_seeds__defaults' 's.id') || '|' || $(Get-NodeRootListSql 'sql_seeds__updates' 's.id') FROM sql_seeds s WHERE s.via = '#Accounts'"
     Assert-SqlMapRow $db $updated '7|0|["Active"]|["Main/Scripts/Temp.sql:9"]' 'a seeded row an UPDATE changes'
     Assert-SqlMapRow $db $updated '2|1|["Active"]|[]' 'a row the UPDATE does not name'
-    $condition = "SELECT 'v=' || (SELECT j.value FROM sql_seeds__row_values j WHERE j.owner = s.id AND j.parent = s.id || '/0' AND j.ord = 0) || '|' || s.condition FROM sql_seeds s WHERE s.name = 'Orders'"
+    $condition = "SELECT 'v=' || (SELECT j.value FROM sql_seeds__row_values j WHERE j.owner = s.id AND j.parent = 0 AND j.ord = 0) || '|' || s.condition FROM sql_seeds s WHERE s.name = 'Orders'"
     Assert-SqlMapRow $db $condition "30|'`$(Mode)' = 'Full'" 'a row only one deploy writes'
     Assert-SqlMapRow $db $condition '20|' 'a row every deploy writes'
     $all = Get-SqlMapRows $db "SELECT 'v=' || $(Get-NodeRootListSql 'sql_seeds__row_values' 's.id') FROM sql_seeds s"

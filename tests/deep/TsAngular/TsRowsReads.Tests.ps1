@@ -135,8 +135,8 @@ Test-Case 'tsrows: an expression another file names keeps its id when its own fi
     Assert-Line $again.Result 'read 2 file(s) again for 1 changed'
     Assert-NoLine $again.Result 'reading every hop of dependents again'
     # AND THE KEPT ROW NAMES A ROW THAT IS THERE.
-    $joined = Invoke-TsRowsQ $again.Db ("SELECT 'found=' || count(*) AS r FROM members m JOIN members__value mv ON mv.id = m.id || '/0' JOIN expressions e " +
-        "ON e.id = mv.[`$expr_id] WHERE m.name = 'v'")
+    $joined = Invoke-TsRowsQ $again.Db ("SELECT 'found=' || count(*) AS r FROM members m JOIN members__value mv ON mv.owner = m.id AND mv.n = 0 JOIN expressions e " +
+        "ON e.id = $(Get-TsFieldSql 'members__value' 'mv' '$expr_id') WHERE m.name = 'v'")
     Assert-Line $joined 'found=1'
 }
 

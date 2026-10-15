@@ -45,7 +45,7 @@ Test-Case 'tsrows keys: a call of a free function hands the keys it returns to t
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
-        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     Assert-Line $r 'demo.plain.a | field_binding | HostComponent'
     Assert-Line $r 'demo.svc.a | field_binding | HostComponent'
     Assert-Line $r 'demo.fn.alpha.label | field_binding | HostComponent'
@@ -83,7 +83,7 @@ Test-Case 'tsrows keys: a list a free function returns is read per element where
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
-        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     Assert-Line $r 'demo.box.alpha.label | field_binding | HostComponent'
     Assert-Line $r 'demo.box.beta.label | field_binding | HostComponent'
     Assert-Line $r 'demo.box.tips.alphaTip | field_binding | HostComponent'
@@ -118,7 +118,7 @@ Test-Case 'tsrows keys: a local arrow spells its hole by its calls, a ternary of
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
-        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'p.%' OR k.key LIKE 'q.%'")
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN components c ON c.id = j.value WHERE k.key LIKE 'p.%' OR k.key LIKE 'q.%'")
     Assert-Line $r 'p.lit | field_binding | HostComponent'
     Assert-Line $r 'q.x | field_binding | HostComponent'
     Assert-Line $r 'q.y | field_binding | HostComponent'
@@ -155,7 +155,7 @@ Test-Case 'tsrows keys: a local arrow handed a string enum member spells its val
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
-        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     # pushed into a list no template reads, so only the arrow's own site reaches the host.
     # every call spells its hole, by the enum member's value
     Assert-Line $r 'demo.mod.IsAlpha | literal | HostComponent'
@@ -200,7 +200,7 @@ Test-Case 'tsrows keys: a getter returning a call hands the template the keys th
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
-        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     Assert-Line $r 'demo.single | field_binding | HostComponent'
     Assert-Line $r 'demo.free | field_binding | HostComponent'
     Assert-Line $r 'demo.other | field_binding | HostComponent'
@@ -234,7 +234,7 @@ Test-Case 'tsrows keys: a getter returning the translate call itself keeps its c
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
-        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     Assert-Line $r 'demo.shared | field_binding | AlphaComponent'
     Assert-Line $r 'demo.shared | field_binding | BetaComponent'
     Assert-Line $r 'demo.beta | field_binding | BetaComponent'
@@ -267,7 +267,7 @@ Test-Case 'tsrows keys: a stronger route in one component never drops the compon
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
-        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     # the route is the strongest present; every component any site reaches stays listed - Gamma's field is READ
     # (`label`): a field nothing reads is no site at all (divergence #44)
     Assert-Line $r 'demo.shared | field_binding | AlphaComponent'
@@ -305,7 +305,7 @@ Test-Case 'tsrows keys: a component method its template calls hands the template
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
-        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     Assert-Line $r 'demo.single | field_binding | HostComponent'
     Assert-Line $r 'demo.direct | field_binding | HostComponent'
     Assert-Line $r 'demo.tip.alpha | field_binding | HostComponent'
