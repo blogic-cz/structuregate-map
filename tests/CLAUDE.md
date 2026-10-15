@@ -33,7 +33,8 @@ test around an internal method passes while all of that regresses. (The rust uni
 can move into a subfolder without changing the order; a suite helper named like a harness function replaces
 it for every later suite; a suite must never lean on another suite's helper, or `-Only` breaks it. Shared
 helpers for a folder live in a non-suite file (`map/Map.Helpers.ps1`, `deep/TsRows.Helpers.ps1`,
-`deep/cs/CsRows.Helpers.ps1`). This folder holds the top-level suites; new ones go into a topic subfolder.
+`deep/cs/CsRows.Helpers.ps1`); `deep/nodes/NodeSql.Helpers.ps1` is the SQL every half's suites read node rows with
+(`<table>__<column>`, `(owner, n)`), and `Get-NodeJsonCell`, the scan that fails on a structure left as text. This folder holds the top-level suites; new ones go into a topic subfolder.
 
 ## What each suite pins
 

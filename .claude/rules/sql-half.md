@@ -87,8 +87,9 @@ keep their parse order.
   the server keeps only what the code page has.
 - An `IF` whose condition spells a SQLCMD variable is the DEPLOY's choice: rows under it carry `condition`
   (`'$(Mode)' = 'A'`). Compare a deployed database only with the rows its value allows.
-- The values column is `row_values`, JSON escaped by `serde_json` - the text as the script spells it, a no-break
-  space included: `values` is SQL-reserved, and PowerShell 5 strips the quotes a consumer would need around it.
+- The values column is `row_values`, node rows of `sql_seeds__row_values` (one item per column, in order) - the text
+  as the script spells it, a no-break space included: `values` is SQL-reserved, and PowerShell 5 strips the quotes a
+  consumer would need around it.
 - **Every seeded table is also a TYPED VIEW `seed_<schema>_<table>`** (`rust/fbtcore/src/rows/seeds/views.rs`): a
   column per column any seed row sets, read by NAME whatever order the INSERT listed it, beside `id, file, line,
   database, condition, status` (a clash is `<table>_<column>`). Views hold nothing, so they cannot disagree with
