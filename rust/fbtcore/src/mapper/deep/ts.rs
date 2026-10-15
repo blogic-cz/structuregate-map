@@ -406,7 +406,9 @@ pub(super) fn parse_tree(into: &mut Collector, deep: &Deep, parse: &str, root: &
     }
     // ROOM FOR THE PAYLOAD: hundreds of MB of JSON on a workspace of thousands of files, and node's default ceiling killed it
     // (`exit 134`) after minutes of parsing. Through the environment, since only node reads it.
-    let environment = [("NODE_OPTIONS".to_string(), "--max-old-space-size=8192".to_string())];
+    // `STRUCTUREGATE_NODE_OPTIONS` is APPENDED (a `--cpu-prof` to profile the parse: `.claude/skills/map-lab/`).
+    let extra = std::env::var("STRUCTUREGATE_NODE_OPTIONS").map(|o| format!(" {o}")).unwrap_or_default();
+    let environment = [("NODE_OPTIONS".to_string(), format!("--max-old-space-size=8192{extra}"))];
     let launch = crate::trace::stage("typescript: parse (node)");
     let ran = hosts::process(&deep.ts_host, &arguments, root, &environment);
     drop(launch);
