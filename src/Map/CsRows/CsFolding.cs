@@ -40,10 +40,6 @@ internal static class CsFolding
         public static readonly Value None = new("", "", "");
     }
 
-    /// <summary>How far an operand chain is followed. A constant built out of constants is a few links deep;
-    /// a limit is what stops a cycle in a tree that does not compile from being an infinite walk.</summary>
-    private const int MaxDepth = 6;
-
     /// <summary>
     /// What an attribute is written WITH, one string per argument in order: the folded text of a positional
     /// argument, `Name=text` of a named one, and "" for an argument that is not a constant. `[Route(Base + "x")]`
@@ -67,14 +63,18 @@ internal static class CsFolding
     public static Value Of(SemanticModel? model, SyntaxNode? node)
     {
         if (model is null || node is not ExpressionSyntax expression) return Value.None;
-        try { return Fold(model, expression, 0); }
+        try { return Fold(model, expression, new HashSet<ISymbol>(SymbolEqualityComparer.Default)); }
         catch (ArgumentException) { return Value.None; }
     }
 
-    private static Value Fold(SemanticModel model, ExpressionSyntax expression, int depth)
+    /// <summary>
+    /// <paramref name="path"/>: the symbols whose declarations are being folded on the way here. NOT A DEPTH:
+    /// a constant built out of constants is followed to the end however many links it has, and only a symbol
+    /// already on the path - `A = B + "x"`, `B = A + "y"`, two readonly fields that compile - stops the walk,
+    /// as the symbol it is.
+    /// </summary>
+    private static Value Fold(SemanticModel model, ExpressionSyntax expression, HashSet<ISymbol> path)
     {
-        if (depth > MaxDepth) return Value.None;
-
         var constant = model.GetConstantValue(expression);
         if (constant.HasValue)
         {
@@ -85,21 +85,21 @@ internal static class CsFolding
         switch (expression)
         {
             case ParenthesizedExpressionSyntax inner:
-                return Fold(model, inner.Expression, depth);
+                return Fold(model, inner.Expression, path);
             case TypeOfExpressionSyntax typed:
                 return new Value(CsSemantics.Type(model, typed.Type) is { Length: > 0 } name
                     ? name : typed.Type.ToString(), "typeof", "");
             case DefaultExpressionSyntax:
                 return new Value("", "default", "");
             case InterpolatedStringExpressionSyntax interpolated:
-                return Text(model, interpolated, depth);
+                return Text(model, interpolated, path);
             case BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.AddExpression):
-                return Joined(model, binary, depth);
+                return Joined(model, binary, path);
             case IdentifierNameSyntax or MemberAccessExpressionSyntax:
-                return Named(model, expression, depth);
+                return Named(model, expression, path);
             // `string.Format("DELETE FROM T")` - a format whose every `{n}` folds is the string it builds.
             case InvocationExpressionSyntax invocation:
-                return CsTemplate.Format(model, invocation, e => Fold(model, e, depth + 1)) is { } pieces && !pieces.Any(p => p.Hole)
+                return CsTemplate.Format(model, invocation, e => Fold(model, e, path)) is { } pieces && !pieces.Any(p => p.Hole)
                     ? new Value(string.Concat(pieces.Select(p => p.Text)), "folded", "") : Value.None;
             default:
                 return Value.None;
@@ -155,7 +155,7 @@ internal static class CsFolding
     /// resolved is not the string the code produces, and half a path is worse than none because it looks
     /// like a path.
     /// </summary>
-    private static Value Text(SemanticModel model, InterpolatedStringExpressionSyntax node, int depth)
+    private static Value Text(SemanticModel model, InterpolatedStringExpressionSyntax node, HashSet<ISymbol> path)
     {
         var built = new StringBuilder();
         foreach (var content in node.Contents)
@@ -169,7 +169,7 @@ internal static class CsFolding
                     // A hole with an alignment or a format (`{x,-8:N2}`) is formatting this pass does not
                     // reproduce, and a value that ignored it would not be the string that is produced.
                     if (hole.AlignmentClause is not null || hole.FormatClause is not null) return Value.None;
-                    var piece = Fold(model, hole.Expression, depth + 1);
+                    var piece = Fold(model, hole.Expression, path);
                     if (piece.Kind is not ("const" or "folded" or "enum")) return Value.None;
                     built.Append(piece.Text);
                     break;
@@ -184,16 +184,35 @@ internal static class CsFolding
     /// `a + b` as the string it builds. ONLY A STRING `+` IS A CONCATENATION: `i + 1` over a loop variable
     /// was recorded as "01" and `head + 18` as "-118". A numeric sum the compiler could not fold is not known
     /// here either, so it stays unknown rather than being added by hand.
+    ///
+    /// THE CHAIN IS FLATTENED, NOT RECURSED: `a + b + ... + z` is a left-leaning tree as deep as it is long,
+    /// so its operands are listed with an explicit stack and folded one by one, in source order.
     /// </summary>
-    private static Value Joined(SemanticModel model, BinaryExpressionSyntax node, int depth)
+    private static Value Joined(SemanticModel model, BinaryExpressionSyntax node, HashSet<ISymbol> path)
     {
-        if (model.GetTypeInfo(node).Type?.SpecialType != SpecialType.System_String) return Value.None;
-        var left = Fold(model, node.Left, depth + 1);
-        var right = Fold(model, node.Right, depth + 1);
-        if (left.Kind is not ("const" or "folded" or "enum")) return Value.None;
-        if (right.Kind is not ("const" or "folded" or "enum")) return Value.None;
-        return new Value(left.Text + right.Text, "folded", "");
+        if (!IsConcatenation(model, node)) return Value.None;
+        var built = new StringBuilder();
+        var pending = new Stack<ExpressionSyntax>();
+        pending.Push(node);
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            if (current is BinaryExpressionSyntax inner && IsConcatenation(model, inner))
+            {
+                pending.Push(inner.Right);
+                pending.Push(inner.Left);
+                continue;
+            }
+            var piece = Fold(model, current, path);
+            if (piece.Kind is not ("const" or "folded" or "enum")) return Value.None;
+            built.Append(piece.Text);
+        }
+        return new Value(built.ToString(), "folded", "");
     }
+
+    /// <summary>A `+` that builds a string - the only `+` that is a concatenation.</summary>
+    internal static bool IsConcatenation(SemanticModel model, BinaryExpressionSyntax node) =>
+        node.IsKind(SyntaxKind.AddExpression) && model.GetTypeInfo(node).Type?.SpecialType == SpecialType.System_String;
 
     /// <summary>
     /// A name: followed to its declaration and folded there, or reported as the symbol it binds to.
@@ -202,7 +221,7 @@ internal static class CsFolding
     /// followed only into SOURCE this compilation holds — a constant from a package is already a compiler
     /// constant and was folded above, and a field of a package type has no initializer to read.
     /// </summary>
-    private static Value Named(SemanticModel model, ExpressionSyntax expression, int depth)
+    private static Value Named(SemanticModel model, ExpressionSyntax expression, HashSet<ISymbol> path)
     {
         var symbol = CsSemantics.Bound(model, expression);
         if (symbol is null) return Value.None;
@@ -216,9 +235,12 @@ internal static class CsFolding
             // own tree and throws for any other.
             var owner = tree == model.SyntaxTree ? model
                 : model.Compilation.ContainsSyntaxTree(tree) ? model.Compilation.GetSemanticModel(tree) : null;
-            if (owner is not null)
+            // A symbol already being folded is a CYCLE: it is reported as the symbol, never followed again.
+            if (owner is not null && path.Add(symbol))
             {
-                var folded = Fold(owner, initializer, depth + 1);
+                Value folded;
+                try { folded = Fold(owner, initializer, path); }
+                finally { path.Remove(symbol); }
                 if (folded.Kind is "const" or "folded" or "enum")
                     return folded with { Kind = folded.Kind == "enum" ? "enum" : "folded", Symbol = name };
             }

@@ -255,10 +255,10 @@
     }
 
     /**
-     * NESTED WHILE THERE IS ROOM: a folder is a labelled frame its children are laid out inside, a file a filled
+     * NESTED WHILE THERE IS ROOM - and only room, never a level count: a folder is a labelled frame its children are laid out inside, a file a filled
      * block. A folder holding nothing but one folder (`rust/fbtcore/src`) is one frame, not three levels spent.
      */
-    nest(g, folder, x, y, w, h, depth) {
+    nest(g, folder, x, y, w, h, nesting) {
       const through = (f) => {
         let at = f;
         while (at.files.length === 0 && at.folders.length === 1) at = at.folders[0];
@@ -268,26 +268,26 @@
         ...folder.files.map((f) => ({ item: f, weight: Math.max(1, f.lines) }))];
       const style = this.style;
       for (const box of M.squarify(kids, x, y, w, h)) {
-        if (depth === 0) this.boxes.push(box);
+        if (nesting === 0) this.boxes.push(box);
         const item = box.item;
         const inner = box.shown || item;
         const room = box.w > 60 && box.h > 40 && box.w * box.h > 6000;
-        if (item.files && depth < 4 && room) {
-          g.fillStyle = depth % 2 ? style.getPropertyValue('--grid') : style.getPropertyValue('--panel');
+        if (item.files && room) {
+          g.fillStyle = nesting % 2 ? style.getPropertyValue('--grid') : style.getPropertyValue('--panel');
           g.fillRect(box.x, box.y, box.w, box.h);
-          this.nest(g, inner, box.x + 2, box.y + 16, box.w - 4, box.h - 18, depth + 1);
+          this.nest(g, inner, box.x + 2, box.y + 16, box.w - 4, box.h - 18, nesting + 1);
         } else {
           g.fillStyle = this.fill(item);
           g.globalAlpha = item.files ? 0.6 : 0.9;
           g.fillRect(box.x, box.y, Math.max(0, box.w - 1), Math.max(0, box.h - 1));
           g.globalAlpha = 1;
         }
-        g.strokeStyle = style.getPropertyValue(depth ? '--line' : '--bg');
-        g.lineWidth = depth ? 1 : 2;
+        g.strokeStyle = style.getPropertyValue(nesting ? '--line' : '--bg');
+        g.lineWidth = nesting ? 1 : 2;
         g.strokeRect(box.x, box.y, box.w, box.h);
         if (box.w > 40 && box.h > 14) {
-          g.fillStyle = item.files && depth < 4 && room ? style.getPropertyValue('--text') : '#fff';
-          g.font = (depth ? 11 : 12) + 'px system-ui, sans-serif';
+          g.fillStyle = item.files && room ? style.getPropertyValue('--text') : '#fff';
+          g.font = (nesting ? 11 : 12) + 'px system-ui, sans-serif';
           g.textBaseline = 'top';
           const name = item.files ? (inner === item ? item.name : item.name + inner.path.slice(item.path.length)) + '/' : item.name;
           g.fillText(name + '  ' + item.lines, box.x + 4, box.y + 3, box.w - 8);

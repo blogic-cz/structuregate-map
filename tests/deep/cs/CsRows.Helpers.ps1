@@ -4,6 +4,9 @@
     named like another suite's would silently replace it for every suite that sorts later.
 #>
 
+# The node rows' SQL (a list cell is `<table>__<column>`, never JSON text).
+. (Join-Path $PSScriptRoot '../nodes/NodeSql.Helpers.ps1')
+
 $script:CsRowsPython = [bool]$script:Python
 if (-not $script:CsRowsPython) { Write-Host '    (no python on this machine - the deep C# map cases are not run)' }
 

@@ -30,21 +30,15 @@ pub(crate) fn files_of(conn: &Connection, lang: &str) -> rusqlite::Result<std::c
     rows.collect()
 }
 
-/// A stored cell as the value it was written from: the halves keep a string as itself and everything else as JSON.
-pub(crate) fn cell_value(cell: &str) -> serde_json::Value {
-    if matches!(cell.chars().next(), Some('{' | '[' | '"')) {
-        if let Ok(v) = serde_json::from_str(cell) {
-            return v;
-        }
-    }
-    serde_json::Value::String(cell.to_string())
-}
-
 /// The three tables rewritten whole. Their sizes.
 pub fn write(conn: &Connection) -> rusqlite::Result<Counts> {
     // A database no half has written to has no `files` and nothing to join.
     if !has_columns(conn, "files", &["id", "path", "lang"]) {
         return Ok(Counts::default());
+    }
+    // Rewritten whole, node tables and all - these hold none today, and one a later column made would outlive them.
+    for table in ["http_endpoints", "http_calls", "http_links"] {
+        super::cells::drop_children(conn, table).map_err(|e| rusqlite::Error::InvalidParameterName(format!("{e:#}")))?;
     }
     conn.execute_batch(
         "DROP TABLE IF EXISTS http_endpoints; DROP TABLE IF EXISTS http_calls; DROP TABLE IF EXISTS http_links;

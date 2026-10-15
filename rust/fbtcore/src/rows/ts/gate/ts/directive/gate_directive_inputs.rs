@@ -203,16 +203,16 @@ fn pair_test<'p>(cx: &'p Ctx<'_>, pair: (&'p str, &'p str)) -> impl Fn(&Value) -
 /// Every polarity of the test `ast` cannot be true without, in `member`. A `const` local is read
 /// as what it was initialised to, and an `||` whose other side can never hold (`lists::never`) as
 /// the side that can.
-fn required(mx: &Mirror<'_>, member: &str, ast: &Value, negated: bool, test: Test<'_>, depth: usize, out: &mut Vec<bool>) {
+///
+/// NO DEPTH: the tree is walked to its leaves, and `locals` holds the initialisers being read on the way, so
+/// only a local that comes back to itself (`const a = b, b = a`) stops a walk - by proving nothing.
+fn required(mx: &Mirror<'_>, member: &str, ast: &Value, negated: bool, test: Test<'_>, locals: &mut Vec<*const Value>, out: &mut Vec<bool>) {
     let n = unwrap(ast);
-    if depth > 8 {
-        return;
-    }
     match n.get("k").and_then(|k| k.as_str()) {
         Some("Not") | Some("NonNull") => {
             let flip = n.get("k").and_then(|k| k.as_str()) == Some("Not");
             if let Some(e) = n.get("expr") {
-                required(mx, member, e, negated != flip, test, depth + 1, out);
+                required(mx, member, e, negated != flip, test, locals, out);
             }
             return;
         }
@@ -220,18 +220,25 @@ fn required(mx: &Mirror<'_>, member: &str, ast: &Value, negated: bool, test: Tes
             let op = str_of(n.get("op")).unwrap_or_default();
             let (Some(l), Some(r)) = (n.get("left"), n.get("right")) else { return };
             if (op == "&&" && !negated) || (op == "||" && negated) {
-                required(mx, member, l, negated, test, depth + 1, out);
-                required(mx, member, r, negated, test, depth + 1, out);
+                required(mx, member, l, negated, test, locals, out);
+                required(mx, member, r, negated, test, locals, out);
             } else if op == "||" && lists::never(mx, member, l) {
-                required(mx, member, r, negated, test, depth + 1, out);
+                required(mx, member, r, negated, test, locals, out);
             } else if op == "||" && lists::never(mx, member, r) {
-                required(mx, member, l, negated, test, depth + 1, out);
+                required(mx, member, l, negated, test, locals, out);
             }
             return;
         }
         Some("Read") => {
             if let Some(tree) = mx.local(member, n) {
-                return required(mx, member, tree, negated, test, depth + 1, out);
+                let at = std::ptr::from_ref(tree);
+                if locals.contains(&at) {
+                    return;
+                }
+                locals.push(at);
+                required(mx, member, tree, negated, test, locals, out);
+                locals.pop();
+                return;
             }
         }
         _ => {}
@@ -243,27 +250,46 @@ fn required(mx: &Mirror<'_>, member: &str, ast: &Value, negated: bool, test: Tes
 
 /// What `call` cannot run without, through its own method and then every `this.` call into it.
 /// `None` when nothing proves a polarity or two contradict; an unreachable call is `Some(None)`.
+///
+/// FOLLOWED TO THE END: `on_path` is the methods whose callers are being read, and only a method already on
+/// it - a recursion, direct or through others - stops the walk, proving nothing. A depth of nine cut a
+/// legitimate chain of helpers the same way.
 fn site(
     cx: &Ctx<'_>,
     mx: &Mirror<'_>,
     chain: &[Class],
     call: &Row,
     test: Test<'_>,
-    depth: usize,
+    on_path: &mut Vec<String>,
 ) -> Option<Option<bool>> {
-    if depth > 8 {
+    let member = id_of(call, "member")?;
+    if on_path.contains(&member) {
         return None;
     }
+    on_path.push(member.clone());
+    let answer = site_in(cx, mx, chain, call, &member, test, on_path);
+    on_path.pop();
+    answer
+}
+
+fn site_in(
+    cx: &Ctx<'_>,
+    mx: &Mirror<'_>,
+    chain: &[Class],
+    call: &Row,
+    member: &str,
+    test: Test<'_>,
+    on_path: &mut Vec<String>,
+) -> Option<Option<bool>> {
     let mut found = Vec::new();
     let own = mx.chain(id_of(call, "branch"));
-    let member = id_of(call, "member")?;
     for (b, negated) in &own {
         if let Some(ast) = mx.condition(b) {
-            required(mx, &member, ast, *negated, test, 0, &mut found);
+            required(mx, member, ast, *negated, test, &mut Vec::new(), &mut found);
         }
     }
     let line = int_of(call.get("line")).unwrap_or(0);
-    for r in mx.returns.get(&member).map(Vec::as_slice).unwrap_or(&[]) {
+    for r in mx.returns.get(member).map(Vec::as_slice).unwrap_or(&[]) {
         if int_of(r.get("line")).unwrap_or(0) >= line {
             continue;
         }
@@ -275,14 +301,14 @@ fn site(
             // two proves nothing either way.
             [(b, negated)] => {
                 if let Some(ast) = mx.condition(b) {
-                    required(mx, &member, ast, !*negated, test, 0, &mut found);
+                    required(mx, member, ast, !*negated, test, &mut Vec::new(), &mut found);
                 }
             }
             _ => {}
         }
     }
     if found.is_empty() {
-        let name = cx.midx.name_of.get(&member)?;
+        let name = cx.midx.name_of.get(member)?;
         let callee = format!("this.{name}");
         let mut via: Option<bool> = None;
         for cls in chain {
@@ -294,7 +320,7 @@ fn site(
                     if str_of(c.get("callee")).as_deref() != Some(callee.as_str()) {
                         continue;
                     }
-                    match site(cx, mx, chain, c, test, depth + 1)? {
+                    match site(cx, mx, chain, c, test, on_path)? {
                         None => {}
                         Some(p) if via.is_none_or(|v| v == p) => via = Some(p),
                         Some(_) => return None,
@@ -318,7 +344,7 @@ fn renders_on(cx: &Ctx<'_>, mx: &Mirror<'_>, chain: &[Class], test: Test<'_>) ->
                 if str_of(c.get("method")).as_deref() != Some("createEmbeddedView") {
                     continue;
                 }
-                match site(cx, mx, chain, c, test, 0)? {
+                match site(cx, mx, chain, c, test, &mut Vec::new())? {
                     None => {}
                     Some(p) if on.is_none_or(|o| o == p) => on = Some(p),
                     Some(_) => return None,

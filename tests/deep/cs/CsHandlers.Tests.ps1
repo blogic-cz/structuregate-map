@@ -6,6 +6,9 @@
     Its helpers are its own - `-Only CsHandlers` runs this suite alone.
 #>
 
+# The node rows' SQL (a list cell is `<table>__<column>`, never JSON text).
+. (Join-Path $PSScriptRoot '../nodes/NodeSql.Helpers.ps1')
+
 $script:CsHandlersProject = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
 
 # Lines as numbered in the cases: the `try` on 7, the catches on 8, 14 and 18.
@@ -61,20 +64,20 @@ function Assert-CsHandlersRow($Result, [string]$Expected) {
 Test-Case 'cshandlers: one row per catch clause says what it catches, binds and does' {
     $db = New-CsHandlersDb @{ 'Guard.cs' = $script:CsHandlersGuard; 'Demo.csproj' = $script:CsHandlersProject }
     # Digits: bare, name_read, passes, raises, reraises, finally.
-    $r = Get-CsHandlersRows $db ("SELECT 'h=' || line || ':' || types || ':' || name || ':' || bare || name_read || passes" +
-        " || raises || reraises || finally || ':' || guard || ':' || comment || ':' || calls || ':' || symbol FROM handlers ORDER BY line")
+    $r = Get-CsHandlersRows $db ("SELECT 'h=' || line || ':' || $(Get-NodeRootListSql 'handlers__types' 'handlers.id' ', ') || ':' || name || ':' || bare || name_read || passes" +
+        " || raises || reraises || finally || ':' || guard || ':' || comment || ':' || $(Get-NodeRootListSql 'handlers__calls' 'handlers.id' ', ') || ':' || symbol FROM handlers ORDER BY line")
     # The lambda's `throw ex` is not the clause's own: one raise, and `throw;` is the reraise.
     Assert-CsHandlersRow $r 'h=8:["InvalidOperationException"]:ex:010111:ex.HResult == 5:// known: retried upstream:["log"]:System.InvalidOperationException'
     # A comment is no statement, and one on a later line is not the catch line's.
     Assert-CsHandlersRow $r 'h=14:["Demo.Fault"]::001001:::[]:Demo.Fault'
     Assert-CsHandlersRow $r 'h=18:[]::100101:::["ArgumentException"]:'
-    Assert-CsHandlersRow (Get-CsHandlersRows $db "SELECT 'r=' || reads FROM handlers WHERE line = 14") 'r=["Demo", "Demo.Fault"]'
+    Assert-CsHandlersRow (Get-CsHandlersRows $db "SELECT 'r=' || $(Get-NodeRootListSql 'handlers__reads' 'handlers.id' ', ') FROM handlers WHERE line = 14") 'r=["Demo", "Demo.Fault"]'
     Assert-CsHandlersRow (Get-CsHandlersRows $db "SELECT 'try=' || test FROM branches WHERE kind = 'try'") 'try=InvalidOperationException, Demo.Fault, *'
 }
 
 Test-Case 'cshandlers: without a project the bound type is empty and the written one stays' {
     $db = New-CsHandlersDb @{ 'Guard.cs' = $script:CsHandlersGuard }
-    $r = Get-CsHandlersRows $db "SELECT 'h=' || line || ':' || types || ':' || symbol FROM handlers ORDER BY line"
+    $r = Get-CsHandlersRows $db "SELECT 'h=' || line || ':' || $(Get-NodeRootListSql 'handlers__types' 'handlers.id' ', ') || ':' || symbol FROM handlers ORDER BY line"
     Assert-CsHandlersRow $r 'h=8:["InvalidOperationException"]:'
     Assert-CsHandlersRow $r 'h=14:["Demo.Fault"]:'
 }

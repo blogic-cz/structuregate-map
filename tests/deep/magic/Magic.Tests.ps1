@@ -77,6 +77,29 @@ Test-Case 'magic: numbers, strings and splitting nothing names - python, C# and 
     Assert-Line $kind 'v=3|3'
 }
 
+
+Test-Case 'magic: a compare literal names what it is compared with - python, C# and rust' {
+    $nl = $script:MagicNl
+    $tree = Use-Tree @{
+        'cmp.py'     = "def go(depth, x, d):" + $nl + "    if depth > 60: pass" + $nl + "    if x.kind == `"qa`": pass" + $nl +
+                       "    match d:" + $nl + "        case 5151: pass" + $nl
+        'Cmp.cs'     = "namespace D;" + $nl + "public static class C" + $nl + "{" + $nl +
+                       "    public static int Go(int depth, string kind, int d)" + $nl + "    {" + $nl +
+                       "        if (depth > 61) return 1;" + $nl + "        if (kind == `"qb`") return 2;" + $nl +
+                       "        return d switch { 5252 => 3, _ => 4 };" + $nl + "    }" + $nl + "}" + $nl
+        'src/cmp.rs' = "pub fn go(depth: u32, kind: &str, d: u32) {" + $nl + "    if depth > 62 {}" + $nl +
+                       "    if kind == `"qc`" {}" + $nl + "    match d { 5353 => {}, _ => {} }" + $nl + "}" + $nl
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext '.py,.cs,.rs' --map-sqlite $db) 0
+    $rows = Invoke-Gate --map-query $db --width 0 --sql ("SELECT 'c=' || value || '|' || use || '|' || target AS c FROM number_literals " +
+        "WHERE use = 'compare' UNION ALL SELECT 'c=' || value || '|' || use || '|' || target FROM string_literals WHERE use = 'compare'")
+    foreach ($expected in 'c=60|compare|depth', 'c=qa|compare|x.kind', 'c=5151|compare|d', 'c=61|compare|depth', 'c=qb|compare|kind',
+                          'c=5252|compare|d', 'c=62|compare|depth', 'c=qc|compare|kind', 'c=5353|compare|d') {
+        Assert-Line $rows $expected
+    }
+}
+
 }
 
 $script:MagicTs = Get-TypeScriptPath 'typescript@5'
@@ -107,6 +130,21 @@ Test-Case 'magic: TypeScript and JavaScript too - and the first string a call is
     # A call's FIRST string was taken for a module specifier and never written - `t('menu.save')` included.
     $first = Invoke-Gate --map-query $db --sql "SELECT 'v=' || use || '|' || callee FROM string_literals WHERE value = 'menu.save'"
     Assert-Line $first 'v=argument|t'
+}
+
+
+Test-Case 'magic: a TypeScript compare literal names the other operand or the switch subject' {
+    $nl = $script:MagicNl
+    $tree = Use-Tree @{
+        'c.ts' = "export function go(depth: number, x: { kind: string }, d: number): number {" + $nl +
+                 "  if (depth > 64) return 1;" + $nl + "  if (x.kind === 'qd') return 2;" + $nl +
+                 "  switch (d) { case 5454: return 3; }" + $nl + "  return 0;" + $nl + "}" + $nl
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext '.ts' --map-sqlite $db --ts-node-modules $script:MagicTs) 0
+    $rows = Invoke-Gate --map-query $db --width 0 --sql ("SELECT 'c=' || value || '|' || target AS c FROM number_literals WHERE use = 'compare' " +
+        "UNION ALL SELECT 'c=' || value || '|' || target FROM string_literals WHERE use = 'compare'")
+    foreach ($expected in 'c=64|depth', 'c=qd|x.kind', 'c=5454|d') { Assert-Line $rows $expected }
 }
 
 }

@@ -111,22 +111,76 @@ def arguments(tree, node: ast.Call, callee: str, path: str, qual: str, src) -> l
 
 
 def row(position: int, keyword: str, star: str, value, param: str, src) -> tuple:
-    """`value` is the literal's repr - `None` is `'None'`, and "" means the argument is not a literal.
-    NOTHING IS CUT: `source` is the argument as written, however long."""
+    """`value` is a scalar literal's repr - `None` is `'None'` - or a container literal AS A STRUCTURE (see
+    `literal_of`), and "" means the argument is not a literal. NOTHING IS CUT: `source` is the argument as written,
+    however long."""
     return ({"position": position, "keyword": keyword, "star": star, "source": src(value),
              "value": literal_of(value), "param": param}, value)
 
 
-def literal_of(value) -> str:
-    """The repr of what `value` evaluates to when python can say without running anything, or "".
+def literal_of(value):
+    """What `value` evaluates to when python can say without running anything, or "".
 
     A LITERAL IS MORE THAN A CONSTANT NODE. `-1`, `(1, 2)`, `{"a": 1}` and `["x", "y"]` are what
     `ast.literal_eval` reads, and read as constants only they had no value at all - so "which calls pass
     retries=-1" found nothing. Anything that needs a name, a call or an operator on non-literals stays "".
+    A SCALAR is its repr (`-1`, `'x'`, `None`); A CONTAINER is a structure the store keeps as node rows
+    (`arguments__value`), never its repr: text would be a structure only a parser could open again.
     """
     if isinstance(value, ast.Constant):
         return repr(value.value)
     try:
-        return repr(ast.literal_eval(value))
+        evaluated = ast.literal_eval(value)
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
         return ""
+    if isinstance(evaluated, CONTAINERS):
+        return structure(evaluated)
+    return repr(evaluated)
+
+
+CONTAINERS = (tuple, list, set, frozenset, dict)
+KINDS = {tuple: "tuple", list: "list", set: "set", frozenset: "frozenset", dict: "dict"}
+# A python int past the store's 64 bits is kept as its digits rather than rounded.
+INT_LIMIT = 2 ** 63
+
+
+def leaf(item):
+    """A scalar inside a container, as the store keeps one: str, number, bool, None - anything else its repr."""
+    if item is None or isinstance(item, (bool, str)):
+        return item
+    if isinstance(item, int):
+        return item if -INT_LIMIT <= item < INT_LIMIT else repr(item)
+    if isinstance(item, float) and item == item and item not in (float("inf"), float("-inf")):
+        return item
+    return repr(item)
+
+
+def structure(evaluated):
+    """A container literal as `{"k": kind, "items": [...]}`, a dict's items `{"key": .., "value": ..}`. Built with an
+    explicit stack: a literal nests as deep as its source wrote it."""
+    root = {"k": KINDS[type(evaluated)], "items": []}
+    stack = [(evaluated, root["items"])]
+    while stack:
+        held, into = stack.pop()
+        pairs = [(k, v) for k, v in held.items()] if isinstance(held, dict) else None
+        # A SET HAS NO ORDER, and python's differs run to run (hash randomization): its items go sorted by repr.
+        items = pairs if pairs is not None else (sorted(held, key=repr) if isinstance(held, (set, frozenset)) else held)
+        for item in items:
+            if pairs is not None:
+                key, val = item
+                entry = {"key": None, "value": None}
+                for slot, part in (("key", key), ("value", val)):
+                    if isinstance(part, CONTAINERS):
+                        node = {"k": KINDS[type(part)], "items": []}
+                        entry[slot] = node
+                        stack.append((part, node["items"]))
+                    else:
+                        entry[slot] = leaf(part)
+                into.append(entry)
+            elif isinstance(item, CONTAINERS):
+                node = {"k": KINDS[type(item)], "items": []}
+                into.append(node)
+                stack.append((item, node["items"]))
+            else:
+                into.append(leaf(item))
+    return root

@@ -234,7 +234,8 @@ pub(super) fn lens_file(db: &Connection, out: &mut String, fragment: &str, limit
         }
         let mut counts = Vec::new();
         for table in tables_of(db) {
-            if table == "files" || table == "file_text" {
+            // A node table's rows are the structures of other rows, counted with them already.
+            if table == "files" || table == "file_text" || is_nodes(db, &table) {
                 continue;
             }
             let sql = format!("SELECT count(*) FROM \"{}\" WHERE file = ?", escape(&table));
@@ -285,7 +286,8 @@ pub(super) fn lens_grep(db: &Connection, out: &mut String, needle: &str, table: 
         if table.is_empty() { tables_of(db) } else { vec![table.to_string()] };
     let mut rows = Vec::new();
     for name in names {
-        if name == "file_text" {
+        // A node table holds a structure of another table's rows, and is no row anyone greps for.
+        if name == "file_text" || is_nodes(db, &name) {
             continue;
         }
         let columns = columns_of(db, &name);
@@ -314,9 +316,19 @@ pub(super) fn lens_reads(db: &Connection, out: &mut String, name: &str, limit: u
     let mut rows = Vec::new();
     for (table, what) in READ_SOURCES {
         // A READ THROUGH AN ALIAS IS A READ OF WHAT IT BINDS: `binds` beside `reads` - see `bound::reads_bound`.
+        // `reads` is a LIST, so nodes: a row reads the name when one of its items is LIKE it.
+        let read = match crate::rows::dups::nodes_of(db, table, "reads") {
+            Some(_) => format!(
+                "EXISTS (SELECT 1 FROM {} j WHERE j.owner = {} AND j.value LIKE ?2)",
+                crate::rows::dups::items_sql(db, table, "reads", &["value"]),
+                crate::rows::dups::owner_sql(db, table, "t")
+            ),
+            None => "0".to_string(),
+        };
+        let scalar = if columns_of(db, table).iter().any(|c| c == "reads") { "t.reads LIKE ?2 OR " } else { "" };
         let sql = format!(
             "SELECT ?1, f.path, t.line, t.func, t.\"{}\" FROM \"{}\" t \
-             LEFT JOIN files f ON f.id = t.file WHERE t.reads LIKE ?2 OR {}",
+             LEFT JOIN files f ON f.id = t.file WHERE {scalar}{read} OR {}",
             escape(what),
             escape(table),
             super::bound::reads_bound(db, table)

@@ -39,15 +39,18 @@ pub fn run(db: &str, config: &Config) -> Result<Made, String> {
 }
 
 fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
+    // A fact's `cells` is an object, so nodes (`doc_facts__cells`): dropped with the table it belongs to.
+    crate::rows::cells::drop_children(conn, "doc_facts").map_err(failed)?;
+    crate::rows::cells::drop_children(conn, "doc_links").map_err(failed)?;
     conn.execute_batch(
         "DROP TABLE IF EXISTS doc_facts; DROP TABLE IF EXISTS doc_links;
-         CREATE TABLE doc_facts (id, facts, source, section, subsection, key, label, cells, file, line, version);
+         CREATE TABLE doc_facts (id, facts, source, section, subsection, key, label, file, line, version);
          CREATE TABLE doc_links (id, facts, kind, fact, key, label, target, file, line, value, name, condition, status);",
     )?;
     let mut made = Made { facts: 0, links: [0; 3], notes: Vec::new() };
     // EACH LIST'S ROWS, kept for its links: (fact id, key, label).
     let mut lists: Vec<(String, Vec<(String, String, String)>)> = Vec::new();
-    let mut insert = conn.prepare("INSERT INTO doc_facts VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)")?;
+    let mut written: Vec<Value> = Vec::new();
     for facts in &config.facts {
         let Some(source) = config.sources.iter().find(|s| s.name == facts.source) else { continue };
         let Ok(text) = std::fs::read(&source.path) else {
@@ -69,14 +72,16 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
         for row in found {
             made.facts += 1;
             let id = format!("df:{}", made.facts);
-            insert.execute(params![
-                id, facts.name, source.name, facts.section, row.subsection, row.key, row.label, Value::Object(row.cells).to_string(),
-                source.shown, row.at as i64, version,
-            ])?;
+            written.push(serde_json::json!({
+                "id": id, "facts": facts.name, "source": source.name, "section": facts.section, "subsection": row.subsection,
+                "key": row.key, "label": row.label, "cells": Value::Object(row.cells), "file": source.shown,
+                "line": row.at as i64, "version": version,
+            }));
             rows.push((id, row.key, row.label));
         }
         lists.push((facts.name.clone(), rows));
     }
+    crate::rows::store::insert_rows(conn, "doc_facts", &written).map_err(failed)?;
 
     let mut insert = conn.prepare("INSERT INTO doc_links VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)")?;
     let mut n = 0;
@@ -113,6 +118,10 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
     }
     conn.execute_batch("CREATE INDEX ix_doc_links_status ON doc_links(status); CREATE INDEX ix_doc_links_target ON doc_links(target);")?;
     Ok(made)
+}
+
+fn failed(e: anyhow::Error) -> rusqlite::Error {
+    rusqlite::Error::InvalidParameterName(format!("{e:#}"))
 }
 
 /// The document version `--facts-pull` recorded beside the snapshot, or "" for a snapshot kept by hand.

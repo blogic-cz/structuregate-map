@@ -44,7 +44,7 @@ impl Use {
 }
 
 pub fn read(file: &syn::File, starts: &LineStarts<'_>) -> Vec<Literal> {
-    let mut walker = Walker { starts, next: Use::of("other"), negative: false, out: Vec::new(), func: Vec::new(), cls: Vec::new(), tests: 0 };
+    let mut walker = Walker { starts, next: Use::of("other"), negative: false, scrutinee: String::new(), out: Vec::new(), func: Vec::new(), cls: Vec::new(), tests: 0 };
     walker.visit_file(file);
     walker.out
 }
@@ -53,6 +53,8 @@ struct Walker<'s, 't> {
     starts: &'s LineStarts<'t>,
     next: Use,
     negative: bool,
+    /// The text a pattern is matched against - the `target` of a literal pattern's `compare`.
+    scrutinee: String,
     out: Vec<Literal>,
     func: Vec<String>,
     cls: Vec<String>,
@@ -169,10 +171,10 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
     fn visit_pat(&mut self, p: &'ast syn::Pat) {
         match p {
             // A literal PATTERN is a comparison: `match code { 404 => .. }`.
-            syn::Pat::Lit(l) => self.lit(&l.lit, Use::of("compare")),
+            syn::Pat::Lit(l) => self.lit(&l.lit, Use { uses: "compare", callee: String::new(), target: self.scrutinee.clone() }),
             syn::Pat::Range(r) => {
                 for end in [&r.start, &r.end].into_iter().flatten() {
-                    self.with(Use::of("compare"), end);
+                    self.with(Use { uses: "compare", callee: String::new(), target: self.scrutinee.clone() }, end);
                 }
             }
             _ => visit::visit_pat(self, p),
@@ -205,8 +207,26 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
             syn::Expr::Binary(b) => {
                 let op = quote::ToTokens::to_token_stream(&b.op).to_string();
                 let uses = if COMPARES.contains(&op.as_str()) { "compare" } else { "arith" };
-                self.with(Use::of(uses), &b.left);
-                self.with(Use::of(uses), &b.right);
+                // A comparison's literal is told the TEXT of the operand it is compared with.
+                let side = |other: &syn::Expr| Use { uses, callee: String::new(), target: if uses == "compare" { self.text(other) } else { String::new() } };
+                let (left, right) = (side(&b.right), side(&b.left));
+                self.with(left, &b.left);
+                self.with(right, &b.right);
+            }
+            // A `match` arm and an `if let` / `while let` pattern are compared with the scrutinee.
+            syn::Expr::Match(m) => {
+                self.visit_expr(&m.expr);
+                let subject = self.text(&*m.expr);
+                let kept = std::mem::replace(&mut self.scrutinee, subject);
+                m.arms.iter().for_each(|arm| self.visit_arm(arm));
+                self.scrutinee = kept;
+            }
+            syn::Expr::Let(l) => {
+                self.visit_expr(&l.expr);
+                let subject = self.text(&*l.expr);
+                let kept = std::mem::replace(&mut self.scrutinee, subject);
+                self.visit_pat(&l.pat);
+                self.scrutinee = kept;
             }
             syn::Expr::Assign(a) => {
                 self.visit_expr(&a.left);
@@ -270,16 +290,25 @@ mod tests {
         let rows: Vec<String> = literals(text).iter().map(row).collect();
         assert_eq!(rows, [
             "2:450:declared::",
-            "4:3:compare::",
+            "4:3:compare::n",
             "4:::argument:split:line",
             "4:2:argument:nth:line.split(':')",
             "4:-1:argument:map_or:line.split(':').nth(2)",
             "4:60:arith::",
             "5:,:argument:split:line",
             "6:1:index::parts",
-            "7:404:compare::",
+            "7:404:compare::n",
             "7:0:other::",
         ]);
+    }
+
+    #[test]
+    fn a_compare_literal_names_the_other_operand_or_the_scrutinee() {
+        let text = "fn f(depth: u32, k: &str) {\n    if depth > 60 {}\n    if \"a\" == k.trim() {}\n    \
+                    match depth { 1..=9 => {}, 404 => {}, _ => {} }\n    if let 7 = depth {}\n}\n";
+        let rows: Vec<String> = literals(text).iter().map(row).collect();
+        assert_eq!(rows, ["2:60:compare::depth", "3:a:compare::k.trim()", "4:1:compare::depth", "4:9:compare::depth",
+                          "4:404:compare::depth", "5:7:compare::depth"]);
     }
 
     #[test]

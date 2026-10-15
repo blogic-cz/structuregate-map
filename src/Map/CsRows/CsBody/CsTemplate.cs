@@ -28,67 +28,47 @@ internal static class CsTemplate
     /// field's symbol, so the links can read its value off the `consts` row a referenced project wrote.</summary>
     public sealed record Piece(string Text, bool Hole, string Symbol = "");
 
-    /// <summary>How deep a template is followed, and how many strings one argument may stand for.</summary>
-    private const int MaxDepth = 6;
-    private const int MaxStrings = 32;
-
-    /// <summary>The template of an argument whose value did not fold, as JSON; "" when there is nothing to say:
-    /// a value that folded, no model, or no literal text around the holes.</summary>
-    public static string Of(SemanticModel? model, ExpressionSyntax expression, CsFolding.Value value)
+    /// <summary>The template of an argument whose value did not fold, as a STRUCTURE the store keeps as node rows
+    /// (`arguments__template`): a list of the strings the argument can be, each a list of pieces - a string, or a
+    /// hole `{hole, symbol}`. "" when there is nothing to say: a value that folded, no model, or no literal text
+    /// around the holes.</summary>
+    public static object Of(SemanticModel? model, ExpressionSyntax expression, CsFolding.Value value)
     {
         if (model is null || value.Kind is "const" or "folded") return "";
         List<List<Piece>>? strings;
-        try { strings = Strings(model, expression, 0); }
+        try { strings = Strings(model, expression, new HashSet<ISymbol>(SymbolEqualityComparer.Default)); }
         catch (ArgumentException) { return ""; }
         if (strings is null || !strings.Any(s => s.Any(p => !p.Hole && p.Text.Trim().Length > 0))) return "";
-        using var stream = new MemoryStream();
-        using (var json = new Utf8JsonWriter(stream))
-        {
-            json.WriteStartArray();
-            foreach (var pieces in strings)
-            {
-                json.WriteStartArray();
-                foreach (var piece in pieces)
-                {
-                    if (!piece.Hole) { json.WriteStringValue(piece.Text); continue; }
-                    json.WriteStartObject();
-                    json.WriteString("hole", piece.Text);
-                    if (piece.Symbol.Length > 0) json.WriteString("symbol", piece.Symbol);
-                    json.WriteEndObject();
-                }
-                json.WriteEndArray();
-            }
-            json.WriteEndArray();
-        }
-        return Encoding.UTF8.GetString(stream.ToArray());
+        return strings.Select(pieces => (object)pieces.Select(piece => piece.Hole
+            ? (object)(piece.Symbol.Length > 0
+                ? new (string Key, object? Value)[] { ("hole", piece.Text), ("symbol", piece.Symbol) }
+                : new (string Key, object? Value)[] { ("hole", piece.Text) })
+            : piece.Text).ToList()).ToList();
     }
 
     /// <summary>Every string an expression can be, or null when it is one value only the run time knows.</summary>
-    private static List<List<Piece>>? Strings(SemanticModel model, ExpressionSyntax expression, int depth)
+    private static List<List<Piece>>? Strings(SemanticModel model, ExpressionSyntax expression, HashSet<ISymbol> path)
     {
-        if (depth > MaxDepth) return null;
         var folded = CsFolding.Of(model, expression);
         if (folded.Kind is "const" or "folded") return [[new Piece(folded.Text, false)]];
         switch (expression)
         {
             case ParenthesizedExpressionSyntax inner:
-                return Strings(model, inner.Expression, depth);
+                return Strings(model, inner.Expression, path);
             case InterpolatedStringExpressionSyntax interpolated:
-                return Interpolated(model, interpolated, depth);
-            case BinaryExpressionSyntax binary when binary.IsKind(SyntaxKind.AddExpression)
-                    && model.GetTypeInfo(binary).Type?.SpecialType == SpecialType.System_String:
-                return Product(Strings(model, binary.Left, depth + 1) ?? [[Hole(binary.Left, model)]],
-                    Strings(model, binary.Right, depth + 1) ?? [[Hole(binary.Right, model)]]);
+                return Interpolated(model, interpolated, path);
+            case BinaryExpressionSyntax binary when CsFolding.IsConcatenation(model, binary):
+                return Chain(model, binary, path);
             case InvocationExpressionSyntax invocation:
                 return Format(model, invocation, e => CsFolding.Of(model, e)) is { } pieces ? [pieces] : null;
             case IdentifierNameSyntax or MemberAccessExpressionSyntax:
-                return Named(model, expression, depth);
+                return Named(model, expression, path);
             default:
                 return null;
         }
     }
 
-    private static List<List<Piece>>? Interpolated(SemanticModel model, InterpolatedStringExpressionSyntax node, int depth)
+    private static List<List<Piece>>? Interpolated(SemanticModel model, InterpolatedStringExpressionSyntax node, HashSet<ISymbol> path)
     {
         var pieces = new List<Piece>();
         foreach (var content in node.Contents)
@@ -104,7 +84,7 @@ internal static class CsTemplate
                     break;
                 case InterpolationSyntax hole:
                     var inner = model.GetTypeInfo(hole.Expression).Type?.SpecialType == SpecialType.System_String
-                        ? Strings(model, hole.Expression, depth + 1) : null;
+                        ? Strings(model, hole.Expression, path) : null;
                     if (inner is { Count: 1 }) pieces.AddRange(inner[0]);
                     else pieces.Add(Hole(hole.Expression, model));
                     break;
@@ -158,7 +138,7 @@ internal static class CsTemplate
 
     /// <summary>A name: the string its declaration gives it where nothing writes it again (`CsFolding.Initializer`),
     /// or each element of what a `foreach` runs over.</summary>
-    private static List<List<Piece>>? Named(SemanticModel model, ExpressionSyntax expression, int depth)
+    private static List<List<Piece>>? Named(SemanticModel model, ExpressionSyntax expression, HashSet<ISymbol> path)
     {
         var symbol = CsSemantics.Bound(model, expression);
         if (symbol is ILocalSymbol { IsForEach: true })
@@ -166,19 +146,18 @@ internal static class CsTemplate
             foreach (var reference in symbol.DeclaringSyntaxReferences)
             {
                 if (reference.GetSyntax() is ForEachStatementSyntax loop && Owner(model, loop) is { } loopModel)
-                    return Elements(loopModel, loop.Expression, depth + 1);
+                    return Following(path, symbol, () => Elements(loopModel, loop.Expression, path));
             }
             return null;
         }
         if (symbol is null || CsFolding.Initializer(symbol) is not { } initializer || CsFolding.Written(symbol, model.Compilation)) return null;
-        return Owner(model, initializer) is { } owner ? Strings(owner, initializer, depth + 1) : null;
+        return Owner(model, initializer) is { } owner ? Following(path, symbol, () => Strings(owner, initializer, path)) : null;
     }
 
     /// <summary>The strings of a collection written out in the code - an array, a collection expression -
     /// directly or through a name that is never written again.</summary>
-    private static List<List<Piece>>? Elements(SemanticModel model, ExpressionSyntax expression, int depth)
+    private static List<List<Piece>>? Elements(SemanticModel model, ExpressionSyntax expression, HashSet<ISymbol> path)
     {
-        if (depth > MaxDepth) return null;
         IEnumerable<ExpressionSyntax>? items = expression switch
         {
             ArrayCreationExpressionSyntax { Initializer: { } init } => init.Expressions,
@@ -196,15 +175,49 @@ internal static class CsTemplate
             if (expression is not (IdentifierNameSyntax or MemberAccessExpressionSyntax)) return null;
             var symbol = CsSemantics.Bound(model, expression);
             if (symbol is null || CsFolding.Initializer(symbol) is not { } initializer || CsFolding.Written(symbol, model.Compilation)) return null;
-            return Owner(model, initializer) is { } owner ? Elements(owner, initializer, depth + 1) : null;
+            return Owner(model, initializer) is { } owner ? Following(path, symbol, () => Elements(owner, initializer, path)) : null;
         }
         var all = new List<List<Piece>>();
         foreach (var item in items)
         {
-            all.AddRange(Strings(model, item, depth + 1) ?? [[Hole(item, model)]]);
-            if (all.Count > MaxStrings) return null;
+            all.AddRange(Strings(model, item, path) ?? [[Hole(item, model)]]);
         }
         return all.Count > 0 ? all : null;
+    }
+
+    /// <summary>
+    /// A walk into a symbol's declaration, unless that symbol is already being walked: `A = B + x` and
+    /// `B = A + y` is a CYCLE, and the name that closes it is a value only the run time knows (null), however
+    /// long a chain without one is followed.
+    /// </summary>
+    private static List<List<Piece>>? Following(HashSet<ISymbol> path, ISymbol symbol, Func<List<List<Piece>>?> walk)
+    {
+        if (!path.Add(symbol)) return null;
+        try { return walk(); }
+        finally { path.Remove(symbol); }
+    }
+
+    /// <summary>
+    /// A string `+` chain as every string it can be. WALKED DOWN ITS LEFT SPINE IN A LOOP: `a + b + ... + z`
+    /// is a left-leaning tree as deep as it is long. EVERY string it can be is kept: `a + b` of 8 and 8 is 64
+    /// strings, never a hole standing in for a product that grew.
+    /// </summary>
+    private static List<List<Piece>>? Chain(SemanticModel model, BinaryExpressionSyntax node, HashSet<ISymbol> path)
+    {
+        var spine = new List<BinaryExpressionSyntax>();
+        ExpressionSyntax head = node;
+        while (head is BinaryExpressionSyntax link && CsFolding.IsConcatenation(model, link))
+        {
+            spine.Add(link);
+            head = link.Left;
+        }
+        var strings = Strings(model, head, path) ?? [[Hole(head, model)]];
+        for (var i = spine.Count - 1; i >= 0; i--)
+        {
+            var right = spine[i].Right;
+            strings = Product(strings, Strings(model, right, path) ?? [[Hole(right, model)]]);
+        }
+        return strings;
     }
 
     /// <summary>The model for the tree a node lives in - a model answers about its own tree only.</summary>
@@ -212,11 +225,8 @@ internal static class CsTemplate
         node.SyntaxTree == model.SyntaxTree ? model
             : model.Compilation.ContainsSyntaxTree(node.SyntaxTree) ? model.Compilation.GetSemanticModel(node.SyntaxTree) : null;
 
-    private static List<List<Piece>>? Product(List<List<Piece>> left, List<List<Piece>> right)
-    {
-        if (left.Count * right.Count > MaxStrings) return null;
-        return [.. left.SelectMany(l => right.Select(r => Joined([.. l, .. r])))];
-    }
+    private static List<List<Piece>> Product(List<List<Piece>> left, List<List<Piece>> right) =>
+        [.. left.SelectMany(l => right.Select(r => Joined([.. l, .. r])))];
 
     private static Piece Hole(ExpressionSyntax expression, SemanticModel model) =>
         new(CsFacts.Text(expression), true, CsSemantics.Bound(model, expression) is IFieldSymbol field ? CsSemantics.Name(field) : "");

@@ -7,6 +7,9 @@
     Its helpers are its own - `-Only` runs this suite alone.
 #>
 
+# The node rows' SQL (a list cell is `<table>__<column>`, never JSON text).
+. (Join-Path $PSScriptRoot '../nodes/NodeSql.Helpers.ps1')
+
 $script:CsMarkupNl = [string][char]10
 
 function New-CsMarkupDb([hashtable]$Files, [string]$Ext) {
@@ -46,7 +49,7 @@ Test-Case 'csmarkup: a component is walked as its .razor - rows on the markup li
     Assert-CsMarkupRow $db "SELECT 'v=' || c.line || '|' || c.symbol FROM calls c JOIN files f ON f.id = c.file WHERE f.path = 'Docs/Pages/Page.razor' AND c.callee = 'Title'" '1|Docs.Pages.Page.Title' 'a markup call on its markup line'
     $plumbing = Get-CsMarkupRows $db "SELECT 'v=' || c.callee FROM calls c JOIN files f ON f.id = c.file WHERE f.razor = 'component' AND c.callee GLOB '__*'"
     if ($plumbing.Count -gt 0) { throw "the generator's calls are not the author's: $($plumbing -join ', ')" }
-    Assert-CsMarkupRow $db "SELECT 'v=' || r.line || '|' || r.component || '|' || r.tag || '|' || r.attributes FROM razor_renders r JOIN files f ON f.id = r.file WHERE f.path = 'Docs/Pages/Page.razor'" '2|Docs.Shared.Badge|Badge|["Text"]' 'a component render'
+    Assert-CsMarkupRow $db "SELECT 'v=' || r.line || '|' || r.component || '|' || r.tag || '|' || $(Get-NodeRootListSql 'razor_renders__attributes' 'r.id') FROM razor_renders r JOIN files f ON f.id = r.file WHERE f.path = 'Docs/Pages/Page.razor'" '2|Docs.Shared.Badge|Badge|["Text"]' 'a component render'
     Assert-CsMarkupRow $db "SELECT 'v=' || c.symbol FROM calls c WHERE c.callee GLOB '*.Twice'" 'Docs.Shared.Badge.Twice' 'C# calling into @code'
     # The Razor trees of a project reached as a reference first must not stand in for its C# ones.
     Assert-CsMarkupRow $db "SELECT 'v=' || path || '|' || semantic FROM files" 'Docs/Layout.cs|1' 'the C# of a Razor project reached as a reference'

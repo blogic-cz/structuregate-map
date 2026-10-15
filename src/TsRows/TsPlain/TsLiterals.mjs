@@ -3,7 +3,7 @@
  * BOTH TypeScript halves (plain and Angular), and in the vocabulary the python, C# and rust halves share - so one
  * `--magic` query reads every language.
  *
- * `use` is `compare` (an operand of `===`/`<`, a `case`; `typeof` when the other side is a `typeof`), `arith`, `index` (an element access), `argument` (with
+ * `use` is `compare` (an operand of `===`/`<`, a `case`, with the OTHER operand or the `switch` subject as `target`; `typeof` when the other side is a `typeof`), `arith`, `index` (an element access), `argument` (with
  * the `callee` it is passed to), `assign`, `return`, `default` (a parameter's), `declared` (the initializer of a
  * top-level `const`, an enum member or a `static readonly` field), `format` (a template hole) or `other`. `target`
  * is what an index or a method call applies to: `line.split(':')[2]` is a ':' passed to `split` on `line`, and a
@@ -47,12 +47,16 @@ function useOf(ts, node, text, enter) {
       K.LessThanToken, K.LessThanEqualsToken, K.GreaterThanToken, K.GreaterThanEqualsToken].includes(op)) {
       // `typeof x === 'string'` names a TYPE the language spells as a string - an idiom, not a magic value.
       const other = parent.left === child ? parent.right : parent.left;
-      return { ...OTHER, use: ts.isTypeOfExpression(other) ? 'typeof' : 'compare' };
+      return ts.isTypeOfExpression(other) ? { ...OTHER, use: 'typeof' } : { ...OTHER, use: 'compare', target: text(other) };
     }
     if (op === K.EqualsToken) return { ...OTHER, use: parent.right === child ? 'assign' : 'other' };
     return { ...OTHER, use: 'arith' };
   }
-  if (ts.isCaseClause(parent)) return { ...OTHER, use: 'compare' };
+  if (ts.isCaseClause(parent)) {
+    // The `switch (scrutinee)` the clause belongs to is what the literal is compared with.
+    const block = parent.parent;
+    return { ...OTHER, use: 'compare', target: block && block.parent && block.parent.expression ? text(block.parent.expression) : '' };
+  }
   if (ts.isElementAccessExpression(parent) && parent.argumentExpression === child) {
     return { ...OTHER, use: 'index', target: text(parent.expression) };
   }

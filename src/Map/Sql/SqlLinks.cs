@@ -60,10 +60,10 @@ internal static partial class SqlLinks
         Dictionary<string, Dictionary<string, string>> columns, List<Link> links)
     {
         var globs = string.Join(" OR ", config.SqlText.Select(p => $"c.symbol GLOB {Quote(p)}"));
-        // `template` is there once a C# file of this gate has been read; a map written before it has none.
-        var template = (Query(db, "SELECT 1 FROM pragma_table_info('arguments') WHERE name = 'template'") ?? []).Count > 0 ? "a.template" : "''";
+        // AN ARGUMENT'S TEMPLATE IS NODE ROWS (`arguments__template`), read once and joined by the argument's id.
+        var templates = Templates(db);
         var rows = Query(db, "SELECT c.id, c.file, c.line, c.cls, c.func, a.const, a.const_kind, a.name, a.position, a.type, "
-            + $"{template} FROM calls c JOIN arguments a ON a.call = c.id WHERE ({globs}) ORDER BY c.id, a.position") ?? [];
+            + $"a.id FROM calls c JOIN arguments a ON a.call = c.id WHERE ({globs}) ORDER BY c.id, a.position") ?? [];
         // WHAT A FIELD FOLDED TO WHERE IT IS DECLARED, by symbol: a `static readonly` built from consts in a REFERENCED
         // project is compiled here without its source, so the template could only keep it as a hole.
         var folded = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -97,7 +97,7 @@ internal static partial class SqlLinks
             Link Row(string action, string database, string schema, string name, string column, string obj, string columnId,
                 string status, string detail) => new("sql_text", Str(first[1]), Num(first[2]), call.Key, Str(first[3]), Str(first[4]),
                     "", "", action, database, schema, name, column, obj, columnId, status, detail);
-            var strings = Str(sql[6]) is "const" or "folded" ? [[(Str(sql[5]), false)]] : Strings(Str(sql[10]), folded);
+            var strings = Str(sql[6]) is "const" or "folded" ? [[(Str(sql[5]), false)]] : Strings(templates.GetValueOrDefault(Str(sql[10])), folded);
             if (strings.Count == 0)
             {
                 links.Add(Row("", "", "", "", "", "", "", "unknown", "the SQL is built at run time"));
@@ -154,21 +154,37 @@ internal static partial class SqlLinks
         }
     }
 
+    /// <summary>A template piece as stored: a string, or a hole with the symbol it names ("" for none).</summary>
+    private sealed record TemplatePiece(string Text, bool Hole, string Symbol);
+
+    /// <summary>Every argument's template, by argument id, rebuilt from its node rows: the root list's items are the
+    /// strings, each string's items its pieces - a `value` node is text, an `object` node a hole.</summary>
+    private static Dictionary<string, List<List<TemplatePiece>>> Templates(string db)
+    {
+        var templates = new Dictionary<string, List<List<TemplatePiece>>>(StringComparer.Ordinal);
+        var columns = (Query(db, "SELECT name FROM pragma_table_info('arguments__template')") ?? []).Select(r => Str(r[0])).ToHashSet();
+        if (!columns.Contains("owner")) return templates;
+        var hole = columns.Contains("hole") ? "hole" : "''";
+        var symbol = columns.Contains("symbol") ? "symbol" : "''";
+        var strings = new Dictionary<string, List<TemplatePiece>>(StringComparer.Ordinal);
+        foreach (var row in Query(db, $"SELECT owner, id, parent, node, value, {hole}, {symbol} FROM arguments__template ORDER BY rowid") ?? [])
+        {
+            var (owner, id, parent, node) = (Str(row[0]), Str(row[1]), Str(row[2]), Str(row[3]));
+            if (parent.Length == 0) { templates[owner] = []; continue; }
+            if (parent == owner + "/0") { var one = new List<TemplatePiece>(); strings[id] = one; templates[owner].Add(one); continue; }
+            if (!strings.TryGetValue(parent, out var pieces)) continue;
+            pieces.Add(node == "object" ? new TemplatePiece(Str(row[5]), true, Str(row[6])) : new TemplatePiece(Str(row[4]), false, ""));
+        }
+        return templates;
+    }
+
     /// <summary>The strings `arguments.template` says an argument can be, as pieces; none without a template. A hole
     /// naming a field whose declaration folded (`folded`, by symbol) is that value.</summary>
-    private static List<List<(string Text, bool Hole)>> Strings(string template, Dictionary<string, string> folded)
-    {
-        if (template.Length == 0) return [];
-        try
-        {
-            using var document = JsonDocument.Parse(template);
-            return [.. document.RootElement.EnumerateArray().Select(s => s.EnumerateArray().Select(p =>
-                p.ValueKind == JsonValueKind.String ? (p.GetString() ?? "", false)
-                : p.TryGetProperty("symbol", out var symbol) && folded.TryGetValue(symbol.GetString() ?? "", out var value) ? (value, false)
-                : (p.GetProperty("hole").GetString() ?? "", true)).ToList())];
-        }
-        catch (Exception e) when (e is JsonException or InvalidOperationException or KeyNotFoundException) { return []; }
-    }
+    private static List<List<(string Text, bool Hole)>> Strings(List<List<TemplatePiece>>? template, Dictionary<string, string> folded) =>
+        template is null ? [] : [.. template.Select(s => s.Select(p =>
+            !p.Hole ? (p.Text, false)
+            : p.Symbol.Length > 0 && folded.TryGetValue(p.Symbol, out var value) ? (value, false)
+            : (p.Text, true)).ToList())];
 
     private static bool Marked(string name) => name.Contains(SqlHoles.Marker(0)[..6], StringComparison.OrdinalIgnoreCase);
 

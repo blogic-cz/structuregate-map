@@ -34,9 +34,6 @@ CLASS_MEMBERS = {}
 # `module_binder`.
 MODULE_BINDER = {}
 
-# How many re-exports are followed before giving up. A chain longer than this is a cycle in practice.
-MAX_HOPS = 8
-
 # The names a method reaches its own class through. Not a keyword in python, only the convention every
 # tree follows - which is why a method written `def go(this)` simply stays unbound.
 RECEIVERS = ("self", "cls")
@@ -278,9 +275,14 @@ def follow(tree: Tree, rel: str, qual: str) -> tuple:
     A PACKAGE RE-EXPORTS. `from rx import run` binds to `rx/__init__.py`, and that file only says
     `from .impl import run` - the def is in `rx/impl.py`. Stopping at the `__init__` bound the call to a file
     that defines nothing, and the def it really runs read as called by nobody.
+
+    FOLLOWED TO THE END, NOT FOR A NUMBER OF HOPS: a chain of re-exports of any length is walked whole, and only
+    a step the walk has already stood on - two modules re-exporting each other - ends it, where it stands.
     """
     head, _, tail = qual.partition(".")
-    for _ in range(MAX_HOPS):
+    walked = set()
+    while (rel, head, tail) not in walked:
+        walked.add((rel, head, tail))
         binding = module_scope(tree, rel).get(head)
         if not binding:
             break

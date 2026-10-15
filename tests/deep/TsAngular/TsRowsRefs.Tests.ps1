@@ -36,7 +36,7 @@ Test-Case 'tsrows: di carries the @Inject token and the inject() calls of proper
     $tree = New-TsRowsWorkspace $script:TsRefsFiles
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $r = Invoke-TsRowsQ $made.Db ("SELECT param || ' | ' || coalesce(token,'') || ' | ' || coalesce(json_extract(resolved,'`$.name'),'') || ' | ' || coalesce(inject,0) AS r " +
+    $r = Invoke-TsRowsQ $made.Db ("SELECT param || ' | ' || coalesce(token,'') || ' | ' || coalesce((SELECT rn.name FROM di__resolved rn WHERE rn.id = di.id || '/0'),'') || ' | ' || coalesce(inject,0) AS r " +
         "FROM di WHERE class = (SELECT id FROM classes WHERE name = 'DemoService')")
     Assert-Line $r 'd | DEMO_TOKEN | IDemo | 0'
     Assert-Line $r 'other | Other | Other | 1'
@@ -58,12 +58,12 @@ Test-Case 'tsrows: an export alias still joins a route and a module declaration 
     Assert-Exit $made.Result 0
     $route = Invoke-TsRowsQ $made.Db ("SELECT r.path || ' | ' || c.name AS r FROM routes r JOIN classes c ON c.id = r.component_id WHERE r.path = 'a'")
     Assert-Line $route 'a | AlphaComponent'
-    $decl = Invoke-TsRowsQ $made.Db ("SELECT c.name AS r FROM ng_modules m JOIN classes c ON c.id = json_extract(m.declarations, '`$[0].id') WHERE m.name = 'DemoModule'")
+    $decl = Invoke-TsRowsQ $made.Db ("SELECT c.name AS r FROM ng_modules m JOIN ng_modules__declarations d ON d.owner = m.id AND d.parent = m.id || '/0' AND d.ord = 0 JOIN classes c ON c.id = d.[.id] WHERE m.name = 'DemoModule'")
     Assert-Line $decl 'AlphaComponent'
-    $reach = Invoke-TsRowsQ $made.Db ("SELECT m.name AS r FROM component_reach cr JOIN ng_modules m ON m.id = json_extract(cr.areas, '`$[0]') WHERE cr.name = 'AlphaComponent'")
+    $reach = Invoke-TsRowsQ $made.Db ("SELECT m.name AS r FROM component_reach cr JOIN component_reach__areas a ON a.owner = cr.id AND a.parent = cr.id || '/0' AND a.ord = 0 JOIN ng_modules m ON m.id = a.value WHERE cr.name = 'AlphaComponent'")
     Assert-Line $reach 'DemoModule'
     # an IMPORT alias: the module names `DemoBeta`, which only its own `import_names` row ties to the class
-    $beta = Invoke-TsRowsQ $made.Db ("SELECT 'beta=' || c.name AS r FROM ng_modules m JOIN classes c ON c.id = json_extract(m.declarations, '`$[1].id') WHERE m.name = 'DemoModule'")
+    $beta = Invoke-TsRowsQ $made.Db ("SELECT 'beta=' || c.name AS r FROM ng_modules m JOIN ng_modules__declarations d ON d.owner = m.id AND d.parent = m.id || '/0' AND d.ord = 1 JOIN classes c ON c.id = d.[.id] WHERE m.name = 'DemoModule'")
     Assert-Line $beta 'beta=BetaComponent'
 }
 

@@ -43,7 +43,7 @@ Test-Case 'tsrows: an imported name is traced through its barrel to the file tha
         "WHERE n.local = 'Why'")
     Assert-Line $id 'cls=Y'
     # AND THE BARRELS ON THE WAY, which is what a partial run re-reads the importer for.
-    $via = Invoke-TsRowsQ $made.Db "SELECT 'via=' || via AS r FROM import_names WHERE local = 'Z'"
+    $via = Invoke-TsRowsQ $made.Db "SELECT 'via=' || $(Get-NodeRootListSql 'import_names__via' 'import_names.id') AS r FROM import_names WHERE local = 'Z'"
     Assert-Line $via 'apps/shop/src/lib/inner/index.ts'
     # `[from]`, not `\"from\"`: a double quote inside a native argument survives 5.1 and pwsh 7 differently.
     $ex = Invoke-TsRowsQ $made.Db ("SELECT 'ex=' || e.[from] || '>' || f.path AS r FROM exports e JOIN files f ON f.id = e.resolved_file " +

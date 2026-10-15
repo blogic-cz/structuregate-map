@@ -126,10 +126,11 @@ function projectAt(ts, feRoot, dir, meta, discoveredBy) {
   };
 }
 
-function findProjectJsons(root, depth = 3) {
+/** Every `project.json` under the workspace, AT ANY DEPTH: a cut at three folders left an Nx library at
+ *  `libs/a/b/c` with no project at all. A link is never followed (`isDirectory` is false for one). */
+function findProjectJsons(root) {
   const out = [];
-  const walk = (dir, d) => {
-    if (d < 0) return;
+  const walk = (dir) => {
     let entries;
     try {
       entries = readdirSync(dir, { withFileTypes: true });
@@ -139,11 +140,11 @@ function findProjectJsons(root, depth = 3) {
     for (const e of entries) {
       if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
       const p = path.join(dir, e.name);
-      if (e.isDirectory()) walk(p, d - 1);
+      if (e.isDirectory()) walk(p);
       else if (e.name === 'project.json') out.push(p);
     }
   };
-  walk(root, depth);
+  walk(root);
   return out;
 }
 
@@ -223,26 +224,26 @@ export function discoverProjects(ts, feRoot) {
 }
 
 /** The workspace root a map is taken of: the directory holding `angular.json` / `nx.json` /
- *  `workspace.json`, at or under the root this gate was pointed at. */
+ *  `workspace.json`, at the root this gate was pointed at or in the SHALLOWEST folder under it that holds one -
+ *  breadth first, at any depth (a link is never followed: `isDirectory` is false for one). `workspace` in
+ *  `rust/fbtcore/src/mapper/deep/ts.rs` walks it the same way and has to agree. */
 export function findWorkspaceRoot(root) {
   const marks = ['angular.json', 'nx.json', 'workspace.json'];
   if (marks.some((m) => existsSync(path.join(root, m)))) return slash(path.resolve(root));
-  const walk = (dir, depth) => {
-    if (depth < 0) return '';
+  const queue = [path.resolve(root)];
+  for (let i = 0; i < queue.length; i++) {
     let entries;
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      entries = readdirSync(queue[i], { withFileTypes: true });
     } catch {
-      return '';
+      continue;
     }
     for (const e of entries) {
       if (!e.isDirectory() || e.name === 'node_modules' || e.name.startsWith('.')) continue;
-      const p = path.join(dir, e.name);
+      const p = path.join(queue[i], e.name);
       if (marks.some((m) => existsSync(path.join(p, m)))) return slash(p);
-      const deeper = walk(p, depth - 1);
-      if (deeper) return deeper;
+      queue.push(p);
     }
-    return '';
-  };
-  return walk(path.resolve(root), 3);
+  }
+  return '';
 }

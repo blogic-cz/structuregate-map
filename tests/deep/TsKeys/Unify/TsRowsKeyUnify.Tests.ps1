@@ -7,8 +7,8 @@
 
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
-$script:UnifyQ = "SELECT k.key || ' | ' || json_extract(v.value,'$.dimension') || ' ' || json_extract(v.value,'$.op') || ' ' || json_extract(v.value,'$.values') AS r " +
-    "FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'demo.multi.%'"
+$script:UnifyQ = "SELECT k.key || ' | ' || v.dimension || ' ' || v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS r " +
+    "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.multi.%'"
 
 function New-UnifyFiles([hashtable] $Extra) {
     $f = @{

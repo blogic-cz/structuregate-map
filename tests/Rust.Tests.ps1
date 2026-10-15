@@ -10,6 +10,9 @@
     Helpers here are prefixed `Rs`: suites share ONE scope, and `Get-Map` is the map suite's.
 #>
 
+# The node rows' SQL (a list cell is `<table>__<column>`, never JSON text).
+. (Join-Path $PSScriptRoot 'deep/nodes/NodeSql.Helpers.ps1')
+
 function Get-RsMap {
     param([Parameter(ValueFromRemainingArguments)][object[]]$GateArgs)
     $path = Join-Path ([System.IO.Path]::GetTempPath()) "sgrs-$([System.Guid]::NewGuid().ToString('N').Substring(0,8)).json"
@@ -177,7 +180,7 @@ Test-Case 'rs rows: every const and static is a consts row - value, type, owner,
     Assert-Equal (Get-RsDeep $db $max) 'const|usize|450|1|src/limits.rs|rust' 'MAX'
     $name = "SELECT 'v=' || kind || '|' || value || '|' || exported FROM consts WHERE name = 'NAME'"
     Assert-Equal (Get-RsDeep $db $name) 'static|gate|0' 'NAME, a private static'
-    $sum = "SELECT 'v=' || source || '|' || value || '|' || reads FROM consts WHERE name = 'SUM'"
+    $sum = "SELECT 'v=' || source || '|' || value || '|' || $(Get-NodeRootListSql 'consts__reads' 'consts.id') FROM consts WHERE name = 'SUM'"
     Assert-Equal (Get-RsDeep $db $sum) 'MAX * 2||["MAX"]' 'SUM is an expression: no value, and it reads MAX'
     Assert-Equal (Get-RsDeep $db "SELECT 'v=' || owner || '|' || value FROM consts WHERE name = 'STEP'") 'Cfg|-3' 'STEP belongs to Cfg'
 }
@@ -227,7 +230,7 @@ Test-Case 'rs rows: every way rust deals with an error is a handlers row, beside
             "WHERE f.lang = 'rust' ORDER BY h.line, h.shape)"
     Assert-Equal (Get-RsDeep $db $rust) ('2:let_else::10000:open 5:match::01000:open 6:match:e:10100:open 8:question::10100:open ' +
         '9:discard::11000:open 10:fallback::10000:open 14:unwrap::10011:t') 'line:shape:name:bare passes reraises panics test:func'
-    Assert-Equal (Get-RsDeep $db "SELECT 'v=' || types FROM handlers WHERE line = 5 AND shape = 'match'") '["Kind::Gone"]' 'what the arm catches'
+    Assert-Equal (Get-RsDeep $db "SELECT 'v=' || $(Get-NodeRootListSql 'handlers__types' 'handlers.id') FROM handlers WHERE line = 5 AND shape = 'match'") '["Kind::Gone"]' 'what the arm catches'
     $sharp = "SELECT 'v=' || count(*) FROM handlers h JOIN files f ON f.id = h.file WHERE f.lang = 'csharp'"
     Assert-Equal (Get-RsDeep $db $sharp) '1' 'the C# catch is in the same table'
 }

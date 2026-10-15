@@ -16,7 +16,7 @@ use std::path::Path;
 
 const LANG: &str = "rust";
 /// Part of every file's sha: changing what a file's rows hold changes this, and every file is read again.
-const ROWS_VERSION: &str = "rust-rows 3";
+const ROWS_VERSION: &str = "rust-rows 4";
 
 pub fn run(into: &mut Collector, db: &str, root: &str, files: &[(String, String)]) {
     let state = rows::state(Path::new(db), LANG, false);

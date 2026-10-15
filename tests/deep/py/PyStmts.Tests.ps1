@@ -6,6 +6,9 @@
     Its helpers are its own - `-Only PyStmts` runs this suite alone.
 #>
 
+# The node rows' SQL (a list cell is `<table>__<column>`, never JSON text).
+. (Join-Path $PSScriptRoot '../nodes/NodeSql.Helpers.ps1')
+
 $script:PyStmtsPython = [bool]$script:Python
 if (-not $script:PyStmtsPython) { Write-Host '    (no python on this machine - the statement cases are not run)' }
 
@@ -43,7 +46,7 @@ Test-Case 'pystmts: a handler of a DOTTED type is caught, on the try row and on 
     }
     $r = Invoke-PyStmtsQ $made.Db --sql "SELECT 'try=' || test FROM branches WHERE kind = 'try'"
     Assert-PyStmtsRow $r 'try=subprocess.TimeoutExpired, OSError, subprocess.CalledProcessError'
-    $h = Invoke-PyStmtsQ $made.Db --sql "SELECT 'h=' || line || ':' || types FROM handlers ORDER BY line"
+    $h = Invoke-PyStmtsQ $made.Db --sql "SELECT 'h=' || line || ':' || $(Get-NodeRootListSql 'handlers__types' 'handlers.id' ', ') FROM handlers ORDER BY line"
     Assert-PyStmtsRow $h 'h=5:["subprocess.TimeoutExpired"]'
     Assert-PyStmtsRow $h 'h=7:["OSError", "subprocess.CalledProcessError"]'
 }
@@ -56,7 +59,7 @@ Test-Case 'pystmts: a handler row says what its body does, and the waiver on its
                  "    except:$nl        pass$nl"
     }
     $r = Invoke-PyStmtsQ $made.Db --sql ("SELECT 'h=' || line || ':' || name || ':' || bare || name_read || passes || raises || " +
-        "reraises || exc_info || noqa || ':' || codes || ':' || calls FROM handlers ORDER BY line")
+        "reraises || exc_info || noqa || ':' || $(Get-NodeRootListSql 'handlers__codes' 'handlers.id' ', ') || ':' || $(Get-NodeRootListSql 'handlers__calls' 'handlers.id' ', ') FROM handlers ORDER BY line")
     Assert-PyStmtsRow $r 'h=4:e:0001111:["BLE001"]:["log.warning"]'
     Assert-PyStmtsRow $r 'h=7:v:0100000:[]:[]'
     Assert-PyStmtsRow $r 'h=9::1010000:[]:[]'
@@ -70,13 +73,13 @@ Test-Case 'pystmts: with, global, nonlocal, del, assert and match are rows, and 
                  "    assert READY, 'no'$nl    match x:$nl        case Color.RED if READY:$nl            pass$nl" +
                  "    def inner():$nl        nonlocal x$nl"
     }
-    $w = Invoke-PyStmtsQ $made.Db --sql "SELECT 'w=' || position || ':' || source || ':' || target || ':' || binds FROM withs"
+    $w = Invoke-PyStmtsQ $made.Db --sql "SELECT 'w=' || position || ':' || source || ':' || target || ':' || $(Get-NodeRootListSql 'withs__binds' 'withs.id' ', ') FROM withs"
     Assert-PyStmtsRow $w 'w=0:LOCK::["a.py::LOCK"]'
     Assert-PyStmtsRow $w 'w=1:open(x):h:["", ""]'
     $g = Invoke-PyStmtsQ $made.Db --sql "SELECT 'g=' || kind || ':' || name || ':' || func FROM globals ORDER BY line"
     Assert-PyStmtsRow $g 'g=global:CACHE:go'
     Assert-PyStmtsRow $g 'g=nonlocal:x:inner'
-    $d = Invoke-PyStmtsQ $made.Db --sql "SELECT 'd=' || target || ':' || reads FROM deletes"
+    $d = Invoke-PyStmtsQ $made.Db --sql "SELECT 'd=' || target || ':' || $(Get-NodeRootListSql 'deletes__reads' 'deletes.id' ', ') FROM deletes"
     Assert-PyStmtsRow $d 'd=CACHE[x]:["CACHE", "x"]'
     $b = Invoke-PyStmtsQ $made.Db --sql "SELECT 'b=' || kind || ':' || test FROM branches WHERE kind IN ('assert', 'match', 'case') ORDER BY line"
     Assert-PyStmtsRow $b 'b=assert:READY'
@@ -90,7 +93,7 @@ Test-Case 'pystmts: a comment is a row with its scope, and a # inside a string i
         'a.py' = "# top$nl" + "class Thing:$nl    def go(self):$nl        x = '# not a comment'  # type: ignore  # noqa: E501, F401$nl" +
                  "        return x$nl"
     }
-    $r = Invoke-PyStmtsQ $made.Db --sql ("SELECT 'c=' || line || ':' || col || ':' || coalesce(context, '-') || ':' || inline || noqa || ':' || codes " +
+    $r = Invoke-PyStmtsQ $made.Db --sql ("SELECT 'c=' || line || ':' || col || ':' || coalesce(context, '-') || ':' || inline || noqa || ':' || $(Get-NodeRootListSql 'comments__codes' 'comments.id' ', ') " +
         "FROM comments ORDER BY line")
     Assert-PyStmtsRow $r 'c=1:1:-:00:[]'
     Assert-PyStmtsRow $r 'c=4:32:Thing.go:11:["E501", "F401"]'

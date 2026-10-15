@@ -19,7 +19,7 @@ before concluding a method is dead.
   concatenation followed operand by operand to its declarations), `enum` (`Demo.Region.US`; a cast naming
   no member reads `Demo.Region=6`). A local or field folds only where nothing writes it again, so the value is
   the one READ there. A piece that cannot be known folds to NOTHING: half a path looks like a path. A string that does not fold whole has
-  `template` instead - JSON, each string it can be as literal text and `{"hole": "<C# source>"}` pieces.
+  `template` instead - node rows (`<table>__template`), each string it can be as literal text and `hole` pieces holding C# source.
 * **`refs`**: one row per bound identifier that is not a call - `kind` (`field`, `property`, `namedtype`,
   `method` as a group or delegate), `name`, `symbol`. "Which code reads this property" is this table - writes
   (`x.P = ...`) and uses inside lambdas included. A member access the compiler could NOT bind (a lambda whose
@@ -27,11 +27,12 @@ before concluding a method is dead.
   MAYBE, found by name - `WHERE symbol = 'Ns.T.P' OR (kind = 'unbound' AND name LIKE '%.P')`. `diagnostics`
   says why it did not bind.
 * **`objects`**: a construct - `kind` is `tuple`, `array`, `collection`, `initializer` - whose slots are
-  `arguments` rows carrying an `object` id instead of a `call` id. `new Foo(x)` stays a CALL.
+  `arguments` rows carrying an `object` id instead of a `call` id - `name` the member (`Region = ..`), the tuple
+  element, or an index entry's KEY (`["EU"] = 3` is `name = 'EU'`). `new Foo(x)` stays a CALL.
 * `decorators` are the attributes (`DllImport`, `Fact`, ...) - `target_kind` the declaration's kind (`class`, `method`,
   `parameter`, `field`, `const`, `event`, `enum_member` for `[ExternalId(7001)] Alpha`, `target` the member's name -
-  one row per declarator of `int a, b;`); `arg_values` is the JSON list of what each argument folds to
-  (`Name=text` for a named one, an enum member by its qualified name, a `typeof` by its type, "" for a value that is not constant) - `[Route(Base + "x")]` reads `["api/x"]`; `exports` the public types (`kind` `class`,
+  one row per declarator of `int a, b;`); `arg_values` is the list (node rows) of what each argument folds to
+  (`Name=text` for a named one, an enum member by its qualified name, a `typeof` by its type, "" for a value that is not constant) - `[Route(Base + "x")]` reads one item, `api/x`; `exports` the public types (`kind` `class`,
   `record`, ...); `imports` the `using`s (`kind = 'using'`); `diagnostics` every compile error, and
   `files.errors` its count. `diagnostics.kind` is `error`, `generator` (a partial a source generator was going to
   write - not counted), or `generated` (counted): an error a generator's output on disk takes part in - a `CS0229`
@@ -115,7 +116,7 @@ Two tables are DERIVED after both halves and rewritten whole each run:
   `DbContext` or a connection name reaches is the consumer's `structuregate.sql.json`, never guessed.
 * **`sql_seeds`**: one row per VALUES tuple a deploy script writes and the table it lands in, the `:r`
   chain walked as SQLCMD runs it - `schema`/`name`/`object` the target, `via` the `#temp`/`@table` chain,
-  `columns` + `row_values` (JSON, pairwise, as the table holds it after the deploy), `defaults` (columns
+  `columns` + `row_values` (node rows, pairwise, as the table holds it after the deploy), `defaults` (columns
   the INSERT left out that a constant DEFAULT filled), `updates` (`file:line` of each later UPDATE),
   `condition` (`'$(Mode)' = 'A'`), `root`/`deployed`, `unbound` (values not known before run
   time), `status` `bound`/`partial`/`temp`.
@@ -162,11 +163,14 @@ SELECT DISTINCT f.path, m.line, m.kind, m.class_symbol FROM refs r JOIN members 
 JOIN files f ON f.id = m.file WHERE r.symbol LIKE '%.Reference';
 
 -- a backend enum member and every C# switch that handles it, by the member's NUMBER
-SELECT json_extract(m.value, '$.name') member, f.path, s.line, s.guard
-FROM enums e JOIN files ef ON ef.id = e.file, json_each(e.members) m,
-     switch_cases s JOIN files f ON f.id = s.file, json_each(s.label_values) v
-WHERE ef.lang = 'csharp' AND e.name = 'Kinds' AND s.discriminant_type = e.symbol
-  AND v.value = CAST(json_extract(m.value, '$.value') AS TEXT);
+SELECT mn.value member, f.path, s.line, s.guard
+FROM enums e JOIN files ef ON ef.id = e.file
+JOIN enums__members m ON m.parent = e.id || '/0'
+JOIN enums__members mn ON mn.parent = m.id AND mn.role = 'name'
+JOIN enums__members mv ON mv.parent = m.id AND mv.role = 'value'
+JOIN switch_cases s ON s.discriminant_type = e.symbol JOIN files f ON f.id = s.file
+JOIN switch_cases__label_values v ON v.parent = s.id || '/0'
+WHERE ef.lang = 'csharp' AND e.name = 'Kinds' AND v.value = CAST(mv.value AS TEXT);
 
 -- which components render a component, and where
 SELECT f.path, r.line, r.attributes FROM razor_renders r JOIN files f ON f.id = r.file

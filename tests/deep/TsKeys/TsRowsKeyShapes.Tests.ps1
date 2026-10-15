@@ -75,8 +75,8 @@ Test-Case 'tsrows keys: a constant object indexed by a variable, a pushed list a
     $tree = New-KeyShapesTree
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
-        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     Assert-Line $r 'demo.map.a | field_binding | HostComponent'
     Assert-Line $r 'demo.map.b | field_binding | HostComponent'
     # the component's own call of it: its call site, `ts_call`
@@ -91,8 +91,8 @@ Test-Case 'tsrows keys: a constant object indexed by a variable, a pushed list a
     Assert-Line $r 'demo.hole.d | field_binding | HostComponent'
     Assert-Line $r 'demo.push.e | field_binding | HostComponent'
     # THE PUSH'S BRANCH rides with its element, a way beside the call's own branchless `ts_call` one (a returned local's pushes carry none)
-    $b = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || coalesce((SELECT group_concat(json_extract(k.branch_senses, '$.""' || b.value || '""'), ',') " +
-        "FROM json_each(k.maybe_branches) b WHERE b.value NOT LIKE 'loop:%'), 'none') AS senses FROM key_reach k WHERE k.key LIKE 'demo.push.%'")
+    $b = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || coalesce((SELECT group_concat(coalesce((SELECT br.sense FROM branches br WHERE br.id = b.value), 'then'), ',') " +
+        "FROM key_reach__maybe_branches b WHERE b.owner = '#' || k.rowid AND b.parent = '#' || k.rowid || '/0' AND b.value NOT LIKE 'loop:%'), 'none') AS senses FROM key_reach k WHERE k.key LIKE 'demo.push.%'")
     Assert-Line $b 'demo.push.e | then'
     Assert-Line $b 'demo.push.c | none'
     Assert-Line $b 'demo.push.b | none'

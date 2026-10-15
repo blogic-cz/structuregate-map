@@ -69,7 +69,7 @@ LANG = "python"
 # has to re-read THESE files: a new salt makes every recorded python sha disagree, and each file is read
 # again on the next run. Without it `calls.target_path` existed only for files edited since the upgrade,
 # and a query naming it failed with `no such column` on every tree that had a database already.
-ROWS_VERSION = "16"
+ROWS_VERSION = "18"
 
 
 def emit(*fields: object) -> None:

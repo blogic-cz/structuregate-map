@@ -90,3 +90,24 @@ fn the_subject_is_the_last_compound_and_a_pseudo_element_is_not_the_element() {
     assert!(!subject(".x:before", Syntax::Css).expect("parses").on_element);
     assert_eq!(subject(".y:not(.x)", Syntax::Css).expect("parses").classes, vec!["y".to_string()]);
 }
+
+#[test]
+fn a_hiding_rule_meets_an_ng_class_and_its_own_sheet_through_their_nodes() {
+    // `components.style_urls` is a list and `expressions.ast` an object: both NODES, the way the store writes them.
+    use serde_json::json;
+    let db = rusqlite::Connection::open_in_memory().unwrap();
+    let put = |table: &str, rows: Vec<serde_json::Value>| crate::rows::store::insert_rows(&db, table, &rows).unwrap();
+    put("files", vec![
+        json!({"id": "f:1", "path": "app/card.component.ts", "half": "typescript"}),
+        json!({"id": "f:2", "path": "app/card.component.scss", "half": "typescript"}),
+    ]);
+    put("components", vec![json!({"id": "cmp:1", "file": "f:1", "half": "typescript", "style_urls": ["./card.component.scss"]})]);
+    put("expressions", vec![json!({"id": "e:1", "template": "t:1", "node": "n:1", "component": "cmp:1", "half": "typescript",
+        "name": "ngClass", "source": "{gone: off}",
+        "ast": {"k": "Source", "ast": {"k": "Map", "keys": [{"key": "gone"}], "values": [{"k": "Read", "name": "off"}]}}})]);
+    let rule = json!({"id": "css:1", "file": "f:2", "hides": 1, "live": 1, "on_element": 1, "classes": ["gone"],
+                      "resolved": ".gone", "property": "display", "value": "none"});
+    let joined = super::hides::join(&db, "typescript", &[rule]);
+    assert_eq!(joined.len(), 1);
+    assert_eq!((joined[0]["via"].clone(), joined[0]["scope"].clone()), (json!("ngClass"), json!("own")));
+}

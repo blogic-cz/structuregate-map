@@ -24,7 +24,7 @@
 //! A folder the hook skips (`tests/`) and a file outside every root are not in the map. A re-export only a
 //! test imports is listed here; check those before deleting the line.
 
-use super::{columns_of, named, query, show, tables_of};
+use super::{held, items_of, named, query, show, tables_of};
 use anyhow::Result;
 use rusqlite::Connection;
 use std::fmt::Write as _;
@@ -35,9 +35,8 @@ const READS: &[&str] = &[
 
 pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, limit: usize, width: usize) -> Result<()> {
     let tables = tables_of(db);
-    let has = |table: &str, column: &str| {
-        tables.iter().any(|t| t == table) && columns_of(db, table).iter().any(|c| c == column)
-    };
+    // `reads` is a list, so nodes (`rows::cells`): held there, not as a column.
+    let has = |table: &str, column: &str| tables.iter().any(|t| t == table) && held(db, table, column);
     if !has("imports", "used") {
         let _ = writeln!(out, "no import usage in this map - rebuild it with the current structuregate");
         return Ok(());
@@ -54,7 +53,7 @@ pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, limit: usi
     let mut values: Vec<String> = READS
         .iter()
         .filter(|t| has(t, "reads"))
-        .map(|t| format!("SELECT r.file, j.value FROM {t} r, json_each(r.reads) j"))
+        .map(|t| format!("SELECT r.file, j.value FROM {t} r {}", items_of(db, t, "r", "reads", "j")))
         .collect();
     values.push("SELECT file, callee FROM calls".to_string());
 

@@ -99,30 +99,35 @@ pub(super) fn settle(db: &str, key: &dyn Fn(Option<&str>) -> Option<String>, abs
 }
 
 /// WHERE NODE WOULD FIND A WORKSPACE - `findWorkspaceRoot` in `TsProjects.mjs`, walked the same way and returning the
-/// first match as it does: a marker at the root, or in a folder up to four below it, never inside `node_modules` or a
-/// dot folder, and a link to a folder not followed. Rust never passes `--fe`, so this walk is the whole of node's
-/// answer; `pub(super)` for the plain half, which maps every script file OUTSIDE this folder.
+/// first match as it does: a marker at the root, or in the SHALLOWEST folder below it that holds one (breadth first, at
+/// any depth), never inside `node_modules` or a dot folder, and a link to a folder not followed. Rust never passes
+/// `--fe`, so this walk is the whole of node's answer; `pub(super)` for the plain half, which maps every script file
+/// OUTSIDE this folder.
 pub(super) fn workspace(root: &Path) -> Option<PathBuf> {
     const MARKS: [&str; 3] = ["angular.json", "nx.json", "workspace.json"];
     fn marked(dir: &Path) -> bool {
         MARKS.iter().any(|mark| dir.join(mark).exists())
     }
-    fn walk(dir: &Path, depth: i32) -> Option<PathBuf> {
-        if depth < 0 {
-            return None;
-        }
-        let entries = std::fs::read_dir(dir).ok()?;
-        entries.flatten().find_map(|entry| {
+    if marked(root) {
+        return Some(root.to_path_buf());
+    }
+    let mut queue = std::collections::VecDeque::from([root.to_path_buf()]);
+    while let Some(dir) = queue.pop_front() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
             if !entry.file_type().is_ok_and(|t| t.is_dir()) || name == "node_modules" || name.starts_with('.') {
-                return None;
+                continue;
             }
             let path = entry.path();
-            if marked(&path) { Some(path) } else { walk(&path, depth - 1) }
-        })
+            if marked(&path) {
+                return Some(path);
+            }
+            queue.push_back(path);
+        }
     }
-    if marked(root) { Some(root.to_path_buf()) } else { walk(root, 3) }
+    None
 }
 
 /// Whether node would find a workspace at all.

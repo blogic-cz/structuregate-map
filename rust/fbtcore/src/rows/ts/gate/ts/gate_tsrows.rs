@@ -235,21 +235,29 @@ impl TsRows {
     /// `resolve`, with the `const` locals of `member` in scope.
     pub fn resolve_in(&self, ast: &Value, bound: &IndexSet<String>, idx: &EnumIndex, member: Option<&str>) -> Value {
         let mut out = ast.clone();
-        self.walk(&mut out, bound, idx, member, 0);
+        self.walk(&mut out, bound, idx, member, &mut Vec::new());
         out
     }
 
-    fn walk(&self, n: &mut Value, bound: &IndexSet<String>, idx: &EnumIndex, member: Option<&str>, depth: usize) {
+    /// `inlined`: the `const` locals whose initialisers are being walked on the way here. A local is inlined
+    /// however long the chain of locals is; only one already on the way (`const a = b, b = a`) is left as
+    /// the bare name it is - a cycle guard, not a depth.
+    fn walk(&self, n: &mut Value, bound: &IndexSet<String>, idx: &EnumIndex, member: Option<&str>, inlined: &mut Vec<String>) {
         // A CONST LOCAL, before anything reads the node as the bare name it is.
         let local = match (member, n.as_object().and_then(bare)) {
-            (Some(m), Some(name)) if !bound.contains(name) => self.locals.get(&format!("{m} {name}")).filter(|(row, _)| !row.is_empty()),
+            (Some(m), Some(name)) if !bound.contains(name) => {
+                let key = format!("{m} {name}");
+                self.locals.get(&key).filter(|(row, _)| !row.is_empty()).map(|found| (key, found))
+            }
             _ => None,
         };
-        if let Some((row, arrow)) = local {
+        if let Some((key, (row, arrow))) = local {
             match arrow {
-                Some(tree) if depth < 4 => {
+                Some(tree) if !inlined.contains(&key) => {
                     *n = tree.clone();
-                    self.walk(n, bound, idx, member, depth + 1);
+                    inlined.push(key);
+                    self.walk(n, bound, idx, member, inlined);
+                    inlined.pop();
                 }
                 Some(_) => {}
                 None => {
@@ -262,7 +270,7 @@ impl TsRows {
         }
         let object = match n {
             Value::Array(items) => {
-                items.iter_mut().for_each(|i| self.walk(i, bound, idx, member, depth));
+                items.iter_mut().for_each(|i| self.walk(i, bound, idx, member, inlined));
                 return;
             }
             Value::Object(o) => o,
@@ -270,7 +278,7 @@ impl TsRows {
         };
         // CHILDREN FIRST: a member read learns its enum from its RECEIVER's row.
         for v in object.values_mut() {
-            self.walk(v, bound, idx, member, depth);
+            self.walk(v, bound, idx, member, inlined);
         }
         // `this.<field>.<Member>`: the checker anchors the outer read and leaves `this.<field>` bare, so the
         // field an enum OBJECT was assigned to (`itemType = ItemType`) is tied here, as a template's alias is.

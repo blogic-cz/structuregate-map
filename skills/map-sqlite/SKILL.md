@@ -114,7 +114,8 @@ file's path is relative to its WORKSPACE folder (`src/app/...`), not the root.
 `decorators` `consts` `exports` `string_literals` `number_literals` `expressions` `arguments` `handlers` `comments`
 `regexes` `diagnostics` `file_text` - and C#'s `file_refs` (file -> the mapped `.cs` files its bound symbols are declared in)
 
-A literal's `use` is what it does there (`compare`, `index`, `argument`, `declared`…), with its `callee` and `target`.
+A literal's `use` is what it does there (`compare`, `index`, `argument`, `declared`…), with its `callee` and `target` (a `compare` literal's `target` is the
+OTHER operand's text - `depth` for `depth > 60` - or the `match`/`switch` subject).
 Every row carries `file` (joins to `files.id`), `line`, and the scope it sits in — `cls` and `func`, so
 "which calls happen inside `build_index`" is a WHERE clause rather than a line-number reconstruction.
 `functions.func` + `qualname` carry the PARENT of a nested function (`outer.inner`).
@@ -148,30 +149,19 @@ off it:
 
 ```
 source   (STORE.get(name) or {}).items()
-reads    ["STORE", "STORE.get", "name"]
-calls    ["STORE.get"]
+reads    STORE, STORE.get, name        (rows of expressions__reads)
+calls    STORE.get                     (rows of expressions__calls)
 ```
 
-**So do not pattern-match over `source`.** `reads`, `calls` and `strings` are JSON arrays already resolved
-from the tree; a regex over the text re-implements them badly and misses everything written across two
-lines. Use `LIKE` on those columns, or `json_each`.
+**So do not pattern-match over `source`.** `reads`, `calls` and `strings` are lists already resolved from the
+tree, held as node rows (below); a regex over the text re-implements them badly and misses everything written
+across two lines. Join the node table; `LIKE` over `source` only for a phrase.
 
-**Derived across halves, rewritten each run:** `seed_<schema>_<table>` is a VIEW per seeded table, one column
-per seed column, so join on `ProductID` instead of parsing `sql_seeds.row_values`. `duplicate_types` lists a type
-name declared in more than one place, and for an enum whether the copies' members differ. With a
-`structuregate.facts.json`, `doc_facts` holds the tables of a document outside the tree, and `doc_links` holds
-each fact against the code: `bound`, `missing in code` or `missing in doc` - the config, `--facts-pull` and
-the token are in [facts.md](facts.md).
+## A list or an object is NODE ROWS, never text
 
-**Angular HTTP calls against C# actions** (rewritten each run): `http_endpoints` is every attribute-routed C#
-action, written for a C#-only tree too (`cls`, `method`, `line`, `verb` - `ANY` for a `[Route]` with no verb -,
-`template` as written with the class route and tokens applied, one row per class `[Route]`, `route` normalized);
-the two tables below need the TypeScript half in the same database, and are empty without it: `http_calls` every `HttpClient` request (not `HttpHeaders`/`HttpParams`), a wrapper's callers standing for the wrapper's own call
-(`url` is the folded pattern - `{}` a parameter, `*` an unknown part, `via` the wrapper); `http_links` which call
-reaches which endpoint (`how` `exact` or `ambiguous`; a call with no row there matched nothing). An unknown base URL
-is a leading `*` and matches any leading segments; of the endpoints a url matches, only those with the most
-segments it names literally are linked, and one it names none of (only parameters in common) is not. Only `@angular/common/http` calls and only attribute-routed
-actions are rows: minimal APIs, python routes and `fetch` are not endpoints or calls yet.
+No cell holds JSON. A list or an object is one row per node in `<table>__<column>` (`expressions__ast`,
+`assignments__reads`), joined by `owner` to the row's `id`; the root is `<owner>/0`. Never `json_each` - the
+columns, the joins and worked queries: [nodes.md](nodes.md).
 
 ## Worked queries, across halves
 
@@ -179,8 +169,9 @@ actions are rows: minimal APIs, python routes and `fetch` are not endpoints or c
 -- the densest branching in the tree, per language
 SELECT f.lang, f.path, count(*) n FROM branches b JOIN files f ON f.id = b.file GROUP BY f.lang, f.path ORDER BY n DESC;
 
--- a catch that swallows, in any language
-SELECT f.lang, f.path, h.line FROM handlers h JOIN files f ON f.id = h.file WHERE h.passes = 1 AND h.calls = '[]';
+-- a catch that swallows (calls nothing), in any language
+SELECT f.lang, f.path, h.line FROM handlers h JOIN files f ON f.id = h.file WHERE h.passes = 1
+  AND NOT EXISTS (SELECT 1 FROM handlers__calls c WHERE c.owner = h.id AND c.parent = h.id || '/0');
 
 -- every regex the tree builds at run time (no literal pattern), and who uses it
 SELECT f.lang, f.path, r.line, r.api, r.used_by FROM regexes r JOIN files f ON f.id = r.file WHERE r.pattern_kind = '';

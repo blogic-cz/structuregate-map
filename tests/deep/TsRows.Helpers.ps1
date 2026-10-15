@@ -4,6 +4,8 @@
     that needs them dot-sources this file itself, and `-Only` still runs any of them alone.
 #>
 
+. (Join-Path $PSScriptRoot 'nodes/NodeSql.Helpers.ps1')
+
 # The compiler this half BORROWS. Both packages, in one prefix, because the half checks for them together -
 # a root satisfying only `typescript` would let discovery work and template parsing fail one step later.
 function Get-TsRowsModules {
@@ -235,4 +237,30 @@ function Invoke-TsRowsQ([string]$Path, [string]$Sql) {
     $result = Invoke-Gate --map-query $Path --sql $Sql
     Assert-Exit $result 0
     return $result
+}
+
+
+# `key_reach.branch_senses` is an object whose KEYS are branch ids: one `value` row per id in `key_reach__branch_senses`,
+# spelled back `key | {"id": "sense", ...}` as the cell was.
+function Get-TsRowsSensesSql([string]$Db, [string]$KeyWhere) {
+    # A branch id is DATA, so each sense is a `value` row whose `role` is the id - never a column (`rows/cells`).
+    $pair = "char(34) || n.role || char(34) || ': ' || char(34) || n.value || char(34)"
+    return "SELECT k.key || ' | {' || coalesce((SELECT group_concat($pair, ', ' ORDER BY n.rowid) " +
+        "FROM key_reach__branch_senses n WHERE n.parent = '#' || k.rowid || '/0'), '') || '}' AS senses " +
+        "FROM key_reach k WHERE $KeyWhere"
+}
+
+# A `_meta` value that is a structure (`spec:typescript`, `deps:typescript`, `scope:typescript`) is kept as JSON TEXT, which SQLite
+# is not asked to open: it is read whole here and walked as an object.
+function Get-TsRowsMeta([string]$Db, [string]$Key) {
+    $result = Invoke-Gate --map-query $Db --width 0 --sql "SELECT value FROM _meta WHERE key = '$Key'"
+    Assert-Exit $result 0
+    $line = @($result.Lines | ForEach-Object { $_.Trim() } | Where-Object { $_ -and ($_[0] -eq '{' -or $_[0] -eq '[') }) | Select-Object -First 1
+    if (-not $line) { throw "no `_meta` value for '$Key'. Output:`n$($result.Text)" }
+    return $line | ConvertFrom-Json
+}
+
+# Lines a case computed itself, shaped like a gate result so Assert-Line / Assert-NoLine read them.
+function New-TsRowsLines([string[]]$Lines) {
+    return [pscustomobject]@{ Exit = 0; Lines = @($Lines); Text = ($Lines -join "`n") }
 }

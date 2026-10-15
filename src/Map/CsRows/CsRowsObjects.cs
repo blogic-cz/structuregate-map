@@ -109,6 +109,10 @@ internal sealed partial class CsRows
     {
         var (name, value) = slot switch
         {
+            // `new() { ["EU"] = 3 }` — an entry's KEY is its name. Named by the left side as written, the
+            // cell read `["EU"]`: a list spelled as text, where the key itself is the fact.
+            AssignmentExpressionSyntax { Left: ImplicitElementAccessSyntax key } assigned =>
+                (Key(key), (ExpressionSyntax?)assigned.Right),
             // `new Options { Region = "US" }` — the member is the name, the right-hand side is the value.
             AssignmentExpressionSyntax assigned =>
                 (CsFacts.Dotted(assigned.Left) is { Length: > 0 } written ? written : assigned.Left.ToString(),
@@ -166,6 +170,12 @@ internal sealed partial class CsRows
                 break;
         }
     }
+
+    /// <summary>The key of an index initializer's entry: the value it folds to (`EU`, `Demo.Region.US`), else
+    /// the key as written without the brackets around it.</summary>
+    private string Key(ImplicitElementAccessSyntax key) =>
+        key.ArgumentList.Arguments is [{ } only] && CsFolding.Of(model, only.Expression).Text is { Length: > 0 } folded
+            ? folded : key.ArgumentList.Arguments.ToString();
 
     /// <summary>Whether an initializer names members (`{ A = 1 }`) or lists values (`{ 1, 2 }`). A
     /// collection initializer on a `new` is the second, and its slots have no names to record.</summary>

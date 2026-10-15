@@ -70,11 +70,12 @@ internal sealed partial class CsRows
         switch (parent)
         {
             case BinaryExpressionSyntax binary:
-                return (binary.Kind() is SyntaxKind.EqualsExpression or SyntaxKind.NotEqualsExpression
+                return binary.Kind() is SyntaxKind.EqualsExpression or SyntaxKind.NotEqualsExpression
                     or SyntaxKind.LessThanExpression or SyntaxKind.LessThanOrEqualExpression
-                    or SyntaxKind.GreaterThanExpression or SyntaxKind.GreaterThanOrEqualExpression ? "compare" : "arith", "", "");
+                    or SyntaxKind.GreaterThanExpression or SyntaxKind.GreaterThanOrEqualExpression
+                    ? ("compare", "", CsFacts.Text(binary.Left == child ? binary.Right : binary.Left)) : ("arith", "", "");
             case ConstantPatternSyntax or RelationalPatternSyntax or CaseSwitchLabelSyntax:
-                return ("compare", "", "");
+                return ("compare", "", CsFacts.Text(Scrutinee(parent)));
             case AssignmentExpressionSyntax assignment when assignment.Right == child:
                 return (assignment.IsKind(SyntaxKind.SimpleAssignmentExpression) ? "assign" : "arith", "", "");
             case ArgumentSyntax { Parent: BracketedArgumentListSyntax { Parent: ElementAccessExpressionSyntax access } }:
@@ -103,6 +104,21 @@ internal sealed partial class CsRows
             default:
                 return ("other", "", "");
         }
+    }
+
+    /// <summary>What a pattern or a `case` label is matched against: the `is` operand, the `switch` governing expression.</summary>
+    private static SyntaxNode? Scrutinee(SyntaxNode pattern)
+    {
+        for (var node = pattern.Parent; node is not null; node = node.Parent)
+        {
+            switch (node)
+            {
+                case IsPatternExpressionSyntax test: return test.Expression;
+                case SwitchExpressionSyntax arms: return arms.GoverningExpression;
+                case SwitchStatementSyntax statement: return statement.Expression;
+            }
+        }
+        return null;
     }
 
     /// <summary>A `const` or `static readonly` field, or a `const` local - what `consts` calls a constant.</summary>

@@ -40,18 +40,7 @@ use model::*;
 
 pub fn build(db: &Connection) -> Value {
     let meta = meta_of(db);
-    let spec: Value = meta
-        .get(&format!("spec:{HALF}"))
-        .and_then(|t| serde_json::from_str(t).ok())
-        .unwrap_or(Value::Null);
-    let json_of = |table: &str| -> IndexSet<String> {
-        spec.get("json_columns")
-            .and_then(|c| c.get(table))
-            .and_then(Value::as_array)
-            .map(|c| c.iter().filter_map(Value::as_str).map(str::to_string).collect())
-            .unwrap_or_default()
-    };
-    let table = |name: &str| rows(db, name, &json_of(name));
+    let table = |name: &str| rows(db, name);
 
     let files = table("files");
     let mut file_by_id = IndexMap::new();

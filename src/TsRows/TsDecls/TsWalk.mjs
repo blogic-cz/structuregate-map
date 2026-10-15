@@ -399,10 +399,11 @@ export function runTemplatePass({ ng, store, diag, fe, registry, components, con
   const extractor = makeTemplateExtractor({ ng, store, diag, feRoot: fe, matcher, carriers, gateInputs });
 
   const byId = new Map(components.map((c) => [c.id, c]));
-  const limit = typeof config.data?.templateDepth === 'number' ? config.data.templateDepth : 1;
+  // THE RENDER QUEUE RUNS DRY, IT IS NOT CUT. A component one template renders is parsed in turn, however long
+  // the chain - once each, by `done`, which is all a render cycle (`<a>` rendering `<b>` rendering `<a>`) needs.
+  // A `templateDepth` (default 1) stopped it after the first ring and left the rest of the tree unread.
   const done = new Set();
   let queue = components.slice();
-  let depth = 0;
   let parsed = 0;
   while (queue.length) {
     const batch = queue;
@@ -421,8 +422,7 @@ export function runTemplatePass({ ng, store, diag, fe, registry, components, con
       store.enterFile(null);
       for (const r of store.table('renders').slice(before)) rendered.add(r.to);
     }
-    depth += 1;
-    if (depth > limit || !expand) break;
+    if (!expand) break;
     for (const id of rendered) {
       const c = byId.get(id);
       if (c && !done.has(c.id) && c.is_component) queue.push(c);
@@ -435,7 +435,6 @@ export function runTemplatePass({ ng, store, diag, fe, registry, components, con
     // DECLARED subset and `given` is what was asked for; a consumer that sees only one of them
     // cannot tell a carrier that does nothing from one that was never named.
     options: {
-      template_depth: limit,
       i18n_carriers: [...carriers].map(([name, input]) => ({ name, input })),
       i18n_carriers_given: given,
       gate_inputs: [...gateInputs],

@@ -72,7 +72,7 @@ Test-Case 'tsrows: a stylesheet is a row per declaration, its SCSS nesting resol
     Assert-Line $r 'sr=13|13|.bold.gone|.bold.gone|-|-|display|none|011#'
     Assert-Line (Invoke-TsStylesQ $made.Db ("SELECT 'n=' || count(*) || '#' FROM style_rules r JOIN files f ON f.id = r.file " +
         "WHERE f.path = 'apps/shop/src/legend.component.scss'")) 'n=10#'
-    $s = Invoke-TsStylesQ $made.Db ("SELECT 'subject=' || r.subject || '|' || r.classes || '|' || r.on_element || '#' " +
+    $s = Invoke-TsStylesQ $made.Db ("SELECT 'subject=' || r.subject || '|' || $(Get-NodeRootListSql 'style_rules__classes' 'r.id') || '|' || r.on_element || '#' " +
         "FROM style_rules r WHERE r.resolved = '.legend-item .label'")
     Assert-Line $s 'subject=.label|["label"]|1#'
 }
@@ -146,12 +146,12 @@ Test-Case 'tsrows: a class gate restricts its key only when its class hides, and
         'apps/shop/src/assets/locales/en.json' = '{"demo":{"cls":{"hid":"1","style":"2"}}}'
     })
     Assert-Exit $made.Result 0
-    $v = Invoke-TsStylesQ $made.Db ("SELECT 'v=' || k.key || ' | ' || json_extract(v.value,'$.dimension') || ' ' || " +
-        "json_extract(v.value,'$.op') || ' ' || json_extract(v.value,'$.values') AS r FROM key_reach k, " +
-        "json_each(k.always_values) v WHERE k.key LIKE 'demo.cls.%'")
+    $v = Invoke-TsStylesQ $made.Db ("SELECT 'v=' || k.key || ' | ' || v.dimension || ' ' || " +
+        "v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS r FROM key_reach k " +
+        "JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.cls.%'")
     Assert-Line $v 'v=demo.cls.hid | kind not_in ["Alpha"]'
     Assert-NoLine $v 'v=demo.cls.style |'
-    Assert-Line (Invoke-TsStylesQ $made.Db ("SELECT 'g=' || key || ' ' || json_array_length(always_gates) AS r " +
+    Assert-Line (Invoke-TsStylesQ $made.Db ("SELECT 'g=' || key || ' ' || (SELECT count(*) FROM key_reach__always_gates jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = '#' || key_reach.rowid || '/0') AS r " +
         "FROM key_reach WHERE key = 'demo.cls.style'")) 'g=demo.cls.style 1'
 }
 

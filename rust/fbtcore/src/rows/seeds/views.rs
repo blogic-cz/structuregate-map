@@ -1,12 +1,14 @@
 //! ONE TYPED VIEW PER SEEDED TABLE - `seed_<schema>_<name>`, a column per column any seed row of it sets, beside
-//! `id, file, line, database, condition, status`. `sql_seeds` keeps each row's columns and values as two JSON
-//! arrays in the order its INSERT wrote them, and two INSERTs into one table can list them in different orders:
+//! `id, file, line, database, condition, status`. `sql_seeds` keeps each row's columns and values as two LISTS
+//! (`sql_seeds__columns`, `sql_seeds__row_values`, one node per item) in the order its INSERT wrote them, and two INSERTs into one table can list them in different orders:
 //! a join on `ProductID` had to find the column's position row by row. The view does it once, for every row.
 //!
 //! VIEWS, NOT TABLES: they hold nothing, so they cannot disagree with `sql_seeds`, and they are dropped and made
 //! again whenever it is rewritten. A `#temp` is no table and gets none.
 
 use super::schema;
+use crate::rows::dups::{items_sql, Column};
+use rusqlite::types::Value;
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 
@@ -25,21 +27,25 @@ pub fn write(conn: &Connection) -> rusqlite::Result<usize> {
     // different column lists has the union of both.
     let mut tables: BTreeMap<(String, String), (String, String, Vec<String>)> = BTreeMap::new();
     {
-        let mut stmt = conn.prepare("SELECT schema, name, columns FROM sql_seeds WHERE status <> 'temp' ORDER BY id")?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
-        for row in rows {
-            let (schema_name, name, columns) = row?;
+        let mut list = Column::new(conn, "sql_seeds", "columns")?;
+        let mut stmt = conn.prepare("SELECT schema, name, id FROM sql_seeds WHERE status <> 'temp' ORDER BY id")?;
+        let rows: Vec<(String, String, String)> =
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
+        for (schema_name, name, id) in rows {
+            let columns = list.strings(&id, &Value::Null)?;
             let schema_name = schema(&schema_name);
             let entry = tables
                 .entry((schema_name.to_lowercase(), name.to_lowercase()))
                 .or_insert_with(|| (schema_name.clone(), name.clone(), Vec::new()));
-            for column in serde_json::from_str::<Vec<String>>(&columns).unwrap_or_default() {
+            for column in columns {
                 if !entry.2.iter().any(|c| c.eq_ignore_ascii_case(&column)) {
                     entry.2.push(column);
                 }
             }
         }
     }
+    // A value is the item of `row_values` at the position its column has in `columns`.
+    let (names, values) = (items_sql(conn, "sql_seeds", "columns", &["value"]), items_sql(conn, "sql_seeds", "row_values", &["value"]));
     let mut made = 0;
     let mut taken: Vec<String> = Vec::new();
     for (schema_name, name, columns) in tables.values() {
@@ -61,8 +67,8 @@ pub fn write(conn: &Connection) -> rusqlite::Result<usize> {
                 column.clone()
             };
             select.push_str(&format!(
-                ", (SELECT json_extract(s.row_values, '$[' || c.key || ']') FROM json_each(s.columns) c \
-                 WHERE lower(c.value) = '{}') AS \"{}\"",
+                ", (SELECT v.value FROM {names} c JOIN {values} v ON v.owner = c.owner AND v.ord = c.ord \
+                 WHERE c.owner = s.id AND lower(c.value) = '{}') AS \"{}\"",
                 literal(&column.to_lowercase()),
                 quoted(&shown)
             ));
@@ -95,14 +101,18 @@ mod tests {
     #[test]
     fn a_column_is_read_by_name_whatever_its_position_in_the_row() {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE files (id, path); INSERT INTO files VALUES ('f:1', 'Seed.sql');
-             CREATE TABLE sql_seeds (id, file, line, database, condition, schema, name, columns, row_values, status);
-             INSERT INTO sql_seeds VALUES ('sd:1', 'f:1', 1, 'Main', '', 'Sales', 'Products', '[\"ProductID\",\"Name\"]', '[1,\"Widget\"]', 'bound');
-             INSERT INTO sql_seeds VALUES ('sd:2', 'f:1', 2, 'Main', 'US', 'Sales', 'Products', '[\"Name\",\"ProductID\",\"Status\"]', '[\"Old\",503,1]', 'bound');
-             INSERT INTO sql_seeds VALUES ('sd:3', 'f:1', 3, 'Main', '', '', '#tmp', '[\"A\"]', '[1]', 'temp');",
-        )
-        .unwrap();
+        conn.execute_batch("CREATE TABLE files (id, path); INSERT INTO files VALUES ('f:1', 'Seed.sql');").unwrap();
+        // The seeds as `seeds::write` stores them: the two lists are nodes.
+        let seed = |id: &str, line: i64, condition: &str, schema: &str, name: &str, columns: serde_json::Value, values: serde_json::Value, status: &str| {
+            serde_json::json!({"id": id, "file": "f:1", "line": line, "database": "Main", "condition": condition, "schema": schema,
+                               "name": name, "columns": columns, "row_values": values, "status": status})
+        };
+        let rows = [
+            seed("sd:1", 1, "", "Sales", "Products", serde_json::json!(["ProductID", "Name"]), serde_json::json!([1, "Widget"]), "bound"),
+            seed("sd:2", 2, "US", "Sales", "Products", serde_json::json!(["Name", "ProductID", "Status"]), serde_json::json!(["Old", 503, 1]), "bound"),
+            seed("sd:3", 3, "", "", "#tmp", serde_json::json!(["A"]), serde_json::json!([1]), "temp"),
+        ];
+        crate::rows::store::insert_rows(&conn, "sql_seeds", &rows).unwrap();
         assert_eq!(write(&conn).unwrap(), 1);
         let rows: Vec<(i64, String, String, Option<i64>)> = conn
             .prepare("SELECT ProductID, Name, condition, Products_Status FROM seed_Sales_Products ORDER BY line")

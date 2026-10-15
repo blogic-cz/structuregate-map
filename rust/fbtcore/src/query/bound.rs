@@ -62,16 +62,17 @@ pub(super) fn aliased(db: &Connection, like: &str) -> Result<Vec<Vec<Value>>> {
     Ok(rows)
 }
 
-/// A JSON-list column with an element matching `element` (on `?2`), or false where the table has no such
-/// column - still naming `?2`, since a statement handed a parameter it does not use is refused. Guarded by
-/// `json_valid`, so a cell another half wrote as plain text is a miss rather than a failed query.
+/// A list column with an item `j` matching `element` (on `?2`), or false where the table has no such list - still
+/// naming `?2`, since a statement handed a parameter it does not use is refused. A list is NODES (`rows::cells`), so
+/// a cell another half wrote as plain text is in no node table and is a miss, as before.
 fn holds(db: &Connection, table: &str, alias: &str, column: &str, element: &str) -> String {
-    if !has(db, table, column) {
+    if crate::rows::dups::nodes_of(db, table, column).is_none() {
         return "(?2 IS NULL)".to_string();
     }
     format!(
-        "(CASE WHEN json_valid({alias}.\"{column}\") THEN EXISTS (SELECT 1 FROM json_each({alias}.\"{column}\") j \
-         WHERE {element}) ELSE 0 END)"
+        "EXISTS (SELECT 1 FROM {} j WHERE j.owner = {} AND {element})",
+        crate::rows::dups::items_sql(db, table, column, &["value"]),
+        crate::rows::dups::owner_sql(db, table, alias)
     )
 }
 
@@ -90,4 +91,66 @@ pub(super) fn key_spelled(db: &Connection) -> &'static str {
 /// `--key`: an assignment whose value looks the key up, by its `keys` - `SERVICE_URL = _svc.get("url")`.
 pub(super) fn key_built(db: &Connection, table: &str, alias: &str) -> String {
     holds(db, table, alias, "keys", "j.value = ?2")
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+    use serde_json::json;
+
+    /// A python-shaped map whose lists - `reads`, `binds`, `args` - are NODES, the way the store writes them.
+    fn map() -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        let put = |table: &str, rows: Vec<serde_json::Value>| crate::rows::store::insert_rows(&db, table, &rows).unwrap();
+        put("files", vec![json!({"id": "f:1", "path": "app.py", "module": "app"})]);
+        put("functions", vec![
+            json!({"id": "fn:1", "file": "f:1", "name": "spelled", "qualname": "spelled", "line": 1, "launched": 0, "cls": "", "func": ""}),
+            json!({"id": "fn:2", "file": "f:1", "name": "bound_one", "qualname": "bound_one", "line": 2, "launched": 0, "cls": "", "func": ""}),
+            json!({"id": "fn:3", "file": "f:1", "name": "orphan", "qualname": "orphan", "line": 3, "launched": 0, "cls": "", "func": ""}),
+        ]);
+        put("calls", vec![json!({"id": "c:1", "file": "f:1", "line": 9, "callee": "print", "target_path": "", "target_name": ""})]);
+        // `spelled` is read by name and bound to nothing; `alias` is bound to `bound_one`.
+        put("expressions", vec![json!({"id": "e:1", "file": "f:1", "line": 9, "func": "", "source": "spelled(alias)",
+                                       "reads": ["spelled", "alias"], "binds": ["", "app.py::bound_one"]})]);
+        put("decorators", vec![json!({"id": "d:1", "file": "f:1", "line": 4, "name": "app.get", "target": "orphan",
+                                      "target_kind": "function", "args": ["\"/items\"", "response_model=Item"]})]);
+        put("string_literals", vec![json!({"id": "s:1", "file": "f:1", "line": 6, "func": "", "value": "other", "key": ""})]);
+        put("consts", vec![json!({"id": "k:1", "file": "f:1", "line": 7, "name": "PLAIN", "cls": "", "func": "", "source": "1", "reads": [], "binds": []})]);
+        put("assignments", vec![json!({"id": "a:1", "file": "f:1", "line": 5, "func": "", "target": "URL", "source": "cfg.get(k)",
+                                       "reads": [], "binds": [], "keys": ["service.url"]})]);
+        db
+    }
+
+    #[test]
+    fn the_lenses_read_a_list_from_its_nodes() {
+        let db = map();
+        // `--dead`: `spelled` is kept by its unbound read, `bound_one` by the bind at the same position, and only
+        // `orphan` is left - which `@app.get` then hands to an object, so nothing is.
+        let mut out = String::new();
+        super::super::dead::lens(&db, &mut out, "", 50, 0).unwrap();
+        assert!(!out.contains("spelled") && !out.contains("bound_one") && !out.contains("orphan"), "{out}");
+        // `--reads`: by an item LIKE the name, and by what an item binds.
+        for name in ["spelled", "bound_one"] {
+            let mut out = String::new();
+            super::super::lenses::lens_reads(&db, &mut out, name, 50, 0).unwrap();
+            assert!(out.contains("expressions") && out.contains("app.py"), "{name}: {out}");
+        }
+        // `--decorators`: the arguments joined in order.
+        let mut out = String::new();
+        super::super::decorators::lens(&db, &mut out, "app.py", 50, 0).unwrap();
+        assert!(out.contains("\"/items\", response_model=Item"), "{out}");
+        // `--key`: an assignment found by the key it looks up.
+        let mut out = String::new();
+        super::super::lenses::lens_key(&db, &mut out, "service.url", 50, 0).unwrap();
+        assert!(out.contains("URL"), "{out}");
+    }
+
+    #[test]
+    fn a_def_nothing_reads_is_dead_whatever_the_lists_hold() {
+        let db = map();
+        db.execute("DELETE FROM decorators", []).unwrap();
+        let mut out = String::new();
+        super::super::dead::lens(&db, &mut out, "", 50, 0).unwrap();
+        assert!(out.contains("orphan") && !out.contains("spelled") && !out.contains("bound_one"), "{out}");
+    }
 }

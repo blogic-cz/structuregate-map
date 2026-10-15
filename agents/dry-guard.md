@@ -50,7 +50,7 @@ Every query below is `buildtools/structuregate.exe --map-query buildmap.sqlite -
 
 ## Step 1 - exact copies
 
-Start from the JSON lists (they are already filtered: a body under 3 statements, an expression under 12
+Start from the JSON map's lists (they are already filtered: a body under 3 statements, an expression under 12
 leaves, and an expression repeated inside one file only are left out). Then open each group in SQL:
 
 ```sql
@@ -63,7 +63,9 @@ SELECT fn.body_shape FROM functions fn JOIN files f ON f.id = fn.file
 WHERE f.path = '<path>' AND fn.line = <line>;
 
 -- every copy of one expression, with the function it sits in and what it reads
-SELECT f.path, x.line, x.func, x.role, x.reads, x.source
+SELECT f.path, x.line, x.func, x.role, x.source,
+  (SELECT group_concat(j.value, ',' ORDER BY j.ord) FROM expressions__reads j
+   WHERE j.owner = x.id AND j.parent = x.id || '/0') reads
 FROM expressions x JOIN files f ON f.id = x.file WHERE x.shape = '<digest>';
 ```
 

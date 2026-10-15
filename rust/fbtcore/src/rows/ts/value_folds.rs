@@ -534,14 +534,10 @@ pub fn write_gate_values(store: &mut Store<'_>, gates: &GateMap, idx: &EnumIndex
             };
             row.insert("dimension_row".into(), dim_row);
             row.insert("op".into(), Value::String(field(r, "op")));
-            // COMPACT, unlike a cell the row store writes: this one names its separators
-            // `(",", ":")`, so the space python puts after a comma by default is absent
-            // here and serde_json's own compact form is the right one.
+            // THE LIST ITSELF, never its text: the store writes it as nodes, `gate_values__values_json`
+            // (the column keeps its name). No values is `[]` - a root node with no item.
             let values = r.get("values").cloned().unwrap_or_else(|| json!([]));
-            row.insert(
-                "values_json".into(),
-                Value::String(serde_json::to_string(&values).unwrap_or_else(|_| "[]".into())),
-            );
+            row.insert("values_json".into(), values);
             row.insert("domain".into(), Value::from(info.domain.len() as i64));
             row.insert(
                 "component".into(),
@@ -552,13 +548,12 @@ pub fn write_gate_values(store: &mut Store<'_>, gates: &GateMap, idx: &EnumIndex
             // the dimension, resolved whatever the `op` (an exclusion list is `unknown` - the map
             // cannot say whether it hides or disables - and still names its members). Null when
             // no config object lists the dimension. Added, never folded into `values_json`,
-            // whose `unknown` has always meant `[]`.
+            // whose `unknown` has always meant `[]`. The list itself, as nodes: null is NO node
+            // in `gate_values__listed_json`, an empty list is a root with no item.
             row.insert(
                 "listed_json".into(),
                 match r.get("listed") {
-                    Some(listed @ Value::Array(_)) => Value::String(
-                        serde_json::to_string(listed).unwrap_or_else(|_| "[]".into()),
-                    ),
+                    Some(listed @ Value::Array(_)) => listed.clone(),
                     _ => Value::Null,
                 },
             );

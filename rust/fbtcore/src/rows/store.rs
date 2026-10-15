@@ -4,6 +4,7 @@
 //! as a payload file of tens of megabytes arrives here as memory the extractor already owns.
 
 use super::half;
+use super::cells;
 use super::schema::{self, cell};
 use anyhow::{Context, Result};
 use rusqlite::Connection;
@@ -16,7 +17,7 @@ use std::path::Path;
 /// what stops an incremental update leaving rows of the old shape beside the new.
 /// Every half shares one database under this one version, and a version two halves
 /// disagreed on would be a database each of them thinks the other built wrong.
-pub const SCHEMA_VERSION: &str = "10";
+pub const SCHEMA_VERSION: &str = "11";
 
 pub struct Applied {
     /// Rows now in each table. Empty unless this batch said it was the last.
@@ -226,8 +227,19 @@ fn drop_files(db: &Connection, rels: &BTreeSet<String>, lang: &str) -> Result<()
 ///
 /// A stamped column the rows already carry is overwritten, which is what inserting into the row
 /// object did. The column list is SORTED (`columns_of`), so appending here changes no schema.
-fn insert(db: &Connection, table: &str, rows: &[Value], stamp: &[(String, Value)]) -> Result<()> {
-    let mut columns = schema::columns_of(rows);
+/// Rows into a table the way every half's are: scalars as columns, every list and object as nodes in its
+/// child table (`cells`). For a pass that writes a table of its own - it must never spell a structure as text.
+pub fn insert_rows(db: &Connection, table: &str, rows: &[Value]) -> Result<()> {
+    insert(db, table, rows, &[])
+}
+
+pub(super) fn insert(db: &Connection, table: &str, rows: &[Value], stamp: &[(String, Value)]) -> Result<()> {
+    // A LIST OR AN OBJECT IS NOT A COLUMN of this table: its nodes go to `<table>__<column>` (`cells`).
+    let (structured, scalar) = cells::structured_columns(rows);
+    let mut columns: Vec<String> = schema::columns_of(rows)
+        .into_iter()
+        .filter(|c| !structured.contains(c) || scalar.contains(c))
+        .collect();
     if columns.is_empty() {
         return Ok(());
     }
@@ -258,7 +270,11 @@ fn insert(db: &Connection, table: &str, rows: &[Value], stamp: &[(String, Value)
         quoted,
         marks
     );
+    for column in &structured {
+        cells::register(db, table, column)?;
+    }
 
+    let mut nodes: Vec<Vec<Value>> = vec![Vec::new(); structured.len()];
     let mut stmt = db.prepare(&sql)?;
     for row in rows {
         let object = row.as_object();
@@ -266,10 +282,32 @@ fn insert(db: &Connection, table: &str, rows: &[Value], stamp: &[(String, Value)
             .iter()
             .map(|c| {
                 let stamped = stamp.iter().find(|(name, _)| name == *c).map(|(_, v)| v);
-                cell(stamped.or_else(|| object.and_then(|o| o.get(c.as_str()))))
+                cell(stamped.or_else(|| object.and_then(|o| o.get(c.as_str())).filter(|v| !cells::is_structured(v))))
             })
             .collect();
         stmt.execute(rusqlite::params_from_iter(values))?;
+        let Some(object) = object else { continue };
+        if structured.is_empty() {
+            continue;
+        }
+        // THE OWNER IS THE ROW'S ID; a table without one is joined by its rowid.
+        let owner = match object.get("id") {
+            Some(Value::String(id)) => id.clone(),
+            Some(Value::Number(n)) => n.to_string(),
+            _ => format!("#{}", db.last_insert_rowid()),
+        };
+        let inherit = cells::inherited(object);
+        for (at, column) in structured.iter().enumerate() {
+            let Some(value) = object.get(column).filter(|v| cells::is_structured(v)) else { continue };
+            let value = cells::decoded(value);
+            cells::flatten(&owner, &value, &inherit, &mut nodes[at]);
+            if nodes[at].len() >= cells::NODE_CHUNK {
+                cells::write_nodes(db, table, column, &mut nodes[at], stamp)?;
+            }
+        }
+    }
+    for (at, column) in structured.iter().enumerate() {
+        cells::write_nodes(db, table, column, &mut nodes[at], stamp)?;
     }
     Ok(())
 }

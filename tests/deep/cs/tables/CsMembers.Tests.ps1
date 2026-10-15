@@ -7,6 +7,9 @@
     Its helpers are its own - `-Only CsMembers` runs this suite alone.
 #>
 
+# The node rows' SQL (a list cell is `<table>__<column>`, never JSON text).
+. (Join-Path $PSScriptRoot '../../nodes/NodeSql.Helpers.ps1')
+
 $script:CsMembersProject = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
 
 $script:CsMembersSource = @'
@@ -52,7 +55,7 @@ function Assert-CsMembersRow([string]$Db, [string]$Sql, [string]$Expected, [stri
 
 Test-Case 'csmembers: every member of a type is a row, and joins to its uses by symbol' {
     $db = New-CsMembersDb
-    $members = "SELECT 'v=' || m.name || '|' || m.kind || '|' || m.symbol || '|' || m.type || '|' || m.visibility || '|' || m.accessors FROM members m JOIN files f ON f.id = m.file WHERE f.lang = 'csharp'"
+    $members = "SELECT 'v=' || m.name || '|' || m.kind || '|' || m.symbol || '|' || m.type || '|' || m.visibility || '|' || $(Get-NodeRootListSql 'members__accessors' 'm.id' ', ') FROM members m JOIN files f ON f.id = m.file WHERE f.lang = 'csharp'"
     Assert-CsMembersRow $db $members 'Reference|property|Demo.Models.Account.Reference|string|public|["get", "private set"]' 'a property'
     Assert-CsMembersRow $db $members 'total|field|Demo.Models.Account.total|int|private|[]' 'the second declarator of a field'
     Assert-CsMembersRow $db $members 'Max|const|Demo.Models.Account.Max|int|public|[]' 'a constant'

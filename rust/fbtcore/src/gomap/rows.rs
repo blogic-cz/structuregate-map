@@ -227,18 +227,18 @@ pub(crate) fn rows_of(text: &str, root: &Path, abs: &Path, index: &Index) -> Res
         }
         parts.reverse();
         let member = head >= 1 && is_op(head - 1, Operator::Dot);
-        let (mut depth, mut commas, mut close) = (0usize, 0usize, None);
+        let (mut nesting, mut commas, mut close) = (0usize, 0usize, None);
         for k in at..tokens.len() {
             match &tokens[k].token {
-                Token::Operator(Operator::ParenLeft | Operator::BarackLeft | Operator::BraceLeft) => depth += 1,
+                Token::Operator(Operator::ParenLeft | Operator::BarackLeft | Operator::BraceLeft) => nesting += 1,
                 Token::Operator(Operator::ParenRight | Operator::BarackRight | Operator::BraceRight) => {
-                    depth = depth.saturating_sub(1);
-                    if depth == 0 {
+                    nesting = nesting.saturating_sub(1);
+                    if nesting == 0 {
                         close = Some(k);
                         break;
                     }
                 }
-                Token::Operator(Operator::Comma) if depth == 1 => commas += 1,
+                Token::Operator(Operator::Comma) if nesting == 1 => commas += 1,
                 _ => {}
             }
         }
@@ -288,24 +288,24 @@ fn consts_of(out: &mut Vec<Const>, kind: &'static str, names: &[gosyn::ast::Iden
             k += 1;
         }
         k += 1;
-        let (mut first, mut depth) = (k, 0i32);
+        let (mut first, mut nesting) = (k, 0i32);
         let mut end = tokens.len();
         let mut segments: Vec<(usize, usize)> = Vec::new();
         while k < tokens.len() {
             match &tokens[k].token {
-                Token::Operator(Operator::ParenLeft | Operator::BarackLeft | Operator::BraceLeft) => depth += 1,
+                Token::Operator(Operator::ParenLeft | Operator::BarackLeft | Operator::BraceLeft) => nesting += 1,
                 Token::Operator(Operator::ParenRight | Operator::BarackRight | Operator::BraceRight) => {
-                    if depth == 0 {
+                    if nesting == 0 {
                         end = k;
                         break;
                     }
-                    depth -= 1;
+                    nesting -= 1;
                 }
-                Token::Operator(Operator::SemiColon) if depth == 0 => {
+                Token::Operator(Operator::SemiColon) if nesting == 0 => {
                     end = k;
                     break;
                 }
-                Token::Operator(Operator::Comma) if depth == 0 => {
+                Token::Operator(Operator::Comma) if nesting == 0 => {
                     segments.push((first, k));
                     first = k + 1;
                     k += 1;
@@ -315,7 +315,7 @@ fn consts_of(out: &mut Vec<Const>, kind: &'static str, names: &[gosyn::ast::Iden
             }
             let ends_statement = !matches!(&tokens[k].token, Token::Operator(o)
                 if !matches!(o, Operator::ParenRight | Operator::BarackRight | Operator::BraceRight | Operator::Inc | Operator::Dec));
-            if depth == 0 && ends_statement && k + 1 < tokens.len()
+            if nesting == 0 && ends_statement && k + 1 < tokens.len()
                 && starts.line(tokens[k + 1].start) > starts.line(tokens[k].end.saturating_sub(1).max(tokens[k].start)) {
                 end = k + 1;
                 break;

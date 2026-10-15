@@ -55,6 +55,7 @@ never a sentence: a message can stay right while a count drifts.
 | `deep/Ts*`, `deep/TsAngular/*`, `deep/TsKeys/*`, `deep/TsPlain/*` | the TypeScript deep map with and without Angular |
 | `deep/SqlMap`, `deep/sql/*` | the T-SQL half, `sql_links`, document facts |
 | `deep/FullText`, `deep/magic/*` | nothing stored is cut; `--magic` over every half |
+| `self/SelfMap` | the gate's OWN sources through its deep map: no SQLite JSON function in a string, no `*DEPTH*`/`*LEVELS*` constant, no literal compared with a `depth`/`level` |
 | `Connect`, `update/UpdateGate`, `trace/Trace` | the consumer wiring, `Update-Gate.ps1 -Trace`, the trace file and `--trace-report` |
 
 ## Mutation-proving a case

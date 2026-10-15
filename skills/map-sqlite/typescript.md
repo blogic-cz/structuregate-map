@@ -48,11 +48,11 @@ Beside the shared tables it adds the FRAMEWORK tables:
   edge to every candidate. A render created in code names the method that returned the class
   (`returned_by`) and each way it was returned (`return_ways`, `returns` ids); a `case` or `if` every way sits
   in lands in `render_path.branches`. `templates`/`template_nodes`/`bindings` are the template side; `gates`/
-  `gate_values` what hides a node (`gates.gate_kind = 'hidden'` is `[hidden]`/`[attr.hidden]`, whose `expression` is a row holding the NEGATED condition) (`op` in/not_in/unknown; `listed_json` what a config object lists, even an
+  `gate_values` what hides a node (`gates.gate_kind = 'hidden'` is `[hidden]`/`[attr.hidden]`, whose `expression` is a row holding the NEGATED condition) (`op` in/not_in/unknown; `listed_json` (child table `gate_values__listed_json`) what a config object lists, even an
   exclusion the map cannot polarise); `state_*` NgRx; `di`/`injectables` injection.
-* **`key_reach.paths`** lists a key's ways, one `{path, own}` per way (`n_paths` entries). `path` joins `render_path.id`, may repeat, and is renumbered every build, so only join within one DB. `own` holds the ids the way holds beyond that row's `gates`/`branches`. Fold a per-way fact the map does not compute over `json_each(k.paths)` joined to `render_path` (AND along `gates ∪ branches ∪ own`, UNION over entries). Never filter `render_path` by `key_reach.components`.
+* **`key_reach.paths`** lists a key's ways, one `{path, own}` per way (`n_paths` entries). `path` joins `render_path.id`, may repeat, and is renumbered every build, so only join within one DB. `own` holds the ids the way holds beyond that row's `gates`/`branches`. Fold a per-way fact the map does not compute over the items of `key_reach__paths` (each item's `path` is a row below it, `role = 'path'`; `own` a child list, `role = 'own'`) joined to `render_path` (AND along `gates ∪ branches ∪ own`, UNION over entries). Never filter `render_path` by `key_reach.components`.
 * **A component field NOTHING reads is no site of the key its initializer holds**: `labelCode = 'k'` in a class whose
-  template binds only another field adds no way to `key_reach`. `files.prop_reads` (`{name: count}`, every property name the file reads,
+  template binds only another field adds no way to `key_reach`. `files.prop_reads` (node rows `files__prop_reads`: one row per property name the file reads - the name its `role`, the count its `value` -
   unresolved) and `files.this_indexed` (1 when the file hands `this` to anything but `this.x`/`.bind`) are what proves it.
 * **A branch around the call of a PRIVATE method holds inside it**: a component the method creates in code
   (`render_path.branches`) and a key it translates (`key_reach.always_branches`) carry the `if` every call of it sits in,

@@ -32,7 +32,7 @@
 //! A TABLE IS THERE ONLY WHEN A ROW FILLED IT - the schema is derived from the rows - so a tree with no
 //! `raise` has no `raises`. Each set is built from the tables this database has, never assumed.
 
-use super::{columns_of, named, query, show, tables_of};
+use super::{held, items_of, named, query, show, tables_of};
 use anyhow::Result;
 use rusqlite::Connection;
 use std::fmt::Write as _;
@@ -52,9 +52,8 @@ const NONE: &str = "SELECT NULL WHERE 0";
 
 pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, limit: usize, width: usize) -> Result<()> {
     let tables = tables_of(db);
-    let has = |table: &str, column: &str| {
-        tables.iter().any(|t| t == table) && columns_of(db, table).iter().any(|c| c == column)
-    };
+    // A LIST IS NODES (`rows::cells`): `reads`, `binds`, `bases` and `bases_bind` are held there, not as columns.
+    let has = |table: &str, column: &str| tables.iter().any(|t| t == table) && held(db, table, column);
     if !has("functions", "launched") || !has("calls", "target_path") {
         let _ = writeln!(out, "no bound calls in this map - rebuild it with the current structuregate");
         return Ok(());
@@ -93,7 +92,7 @@ pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, limit: usi
     let mut uses: Vec<String> = READS
         .iter()
         .filter(|t| has(t, "reads"))
-        .map(|t| format!("SELECT r.file, {} FROM {t} r, json_each(r.reads) j", HEAD.replace('V', "j.value")))
+        .map(|t| format!("SELECT r.file, {} FROM {t} r {}", HEAD.replace('V', "j.value"), items_of(db, t, "r", "reads", "j")))
         .collect();
     uses.push(format!("SELECT file, {} FROM calls", HEAD.replace('V', "callee")));
     let used_imports = if imports_bound {
@@ -106,22 +105,25 @@ pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, limit: usi
     // `file::qualname` each read names; only a read the map could not place still protects by NAME.
     // Counted by name, `run()` in main.py kept a dead `legacy.py::run` alive for as long as anything called
     // ANY `run` - which is the bare-name join binding exists to replace.
+    // Position for position: the read at `ord` and the bind at the same `ord`.
     let reads: Vec<String> = READS
         .iter()
         .filter(|t| has(t, "reads") && has(t, "binds"))
-        .map(|t| format!("SELECT reads, binds FROM {t}"))
+        .map(|t| format!("SELECT j.value AS read, b.value AS bind FROM {t} r {} {} AND b.ord = j.ord", items_of(db, t, "r", "reads", "j"), items_of(db, t, "r", "binds", "b")))
+        .collect();
+    let binds: Vec<String> = READS
+        .iter()
+        .filter(|t| has(t, "reads") && has(t, "binds"))
+        .map(|t| format!("SELECT b.value AS bind FROM {t} r {}", items_of(db, t, "r", "binds", "b")))
         .collect();
     let mut bound = vec!["SELECT DISTINCT target_path, target_name FROM calls WHERE target_path <> ''".to_string()];
     if !reads.is_empty() {
         let rows = reads.join(" UNION ALL ");
-        names.push(format!(
-            "SELECT {} FROM ({rows}) r, json_each(r.reads) j, json_each(r.binds) b \
-             WHERE b.key = j.key AND b.value = ''",
-            TAIL.replace('V', "j.value")
-        ));
+        let binds = binds.join(" UNION ALL ");
+        names.push(format!("SELECT {} FROM ({rows}) p WHERE p.bind = ''", TAIL.replace('V', "p.read")));
         bound.push(format!(
-            "SELECT substr(b.value, 1, instr(b.value, '::') - 1), substr(b.value, instr(b.value, '::') + 2) \
-             FROM ({rows}) r, json_each(r.binds) b WHERE b.value <> ''"
+            "SELECT substr(b.bind, 1, instr(b.bind, '::') - 1), substr(b.bind, instr(b.bind, '::') + 2) \
+             FROM ({binds}) b WHERE b.bind <> ''"
         ));
     }
     if imports_bound {
@@ -140,15 +142,19 @@ pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, limit: usi
     // THE CLASS TREE, from the BOUND bases. `parents` is every resolved edge; `outside` is every class with
     // a base the map does not hold (`object` excepted, which defines nothing a method overrides by name).
     let (parents, outside) = if has("classes", "bases_bind") {
+        let (bases, binds) = (items_of(db, "classes", "k", "bases", "b"), items_of(db, "classes", "k", "bases_bind", "bb"));
         (
-            "SELECT f.path || '::' || k.qualname, bb.value FROM classes k JOIN files f ON f.id = k.file, \
-             json_each(k.bases_bind) bb WHERE bb.value <> ''",
-            "SELECT f.path || '::' || k.qualname FROM classes k JOIN files f ON f.id = k.file, \
-             json_each(k.bases) b, json_each(k.bases_bind) bb \
-             WHERE b.key = bb.key AND bb.value = '' AND b.value <> 'object'",
+            format!(
+                "SELECT f.path || '::' || k.qualname, bb.value FROM classes k JOIN files f ON f.id = k.file \
+                 {binds} WHERE bb.value <> ''"
+            ),
+            format!(
+                "SELECT f.path || '::' || k.qualname FROM classes k JOIN files f ON f.id = k.file \
+                 {bases} {binds} AND bb.ord = b.ord WHERE bb.value = '' AND b.value <> 'object'"
+            ),
         )
     } else {
-        ("SELECT NULL, NULL WHERE 0", NONE)
+        ("SELECT NULL, NULL WHERE 0".to_string(), NONE.to_string())
     };
     // The class a method sits in, as `file::qualname`: its own qualname less the last segment.
     let owner = "f.path || '::' || substr(fn.qualname, 1, length(fn.qualname) - length(fn.name) - 1)";

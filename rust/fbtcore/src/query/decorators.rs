@@ -12,7 +12,16 @@ use rusqlite::Connection;
 
 pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, limit: usize, width: usize) -> Result<()> {
     let like = format!("%{fragment}%");
-    let args = if columns_of(db, "decorators").iter().any(|c| c == "args") { "d.args" } else { "NULL" };
+    // `args` is a list, so nodes: its items joined in order, or the cell itself where it was a scalar.
+    let scalar = if columns_of(db, "decorators").iter().any(|c| c == "args") { "d.args" } else { "NULL" };
+    let args = match crate::rows::dups::nodes_of(db, "decorators", "args") {
+        Some(_) => format!(
+            "coalesce({scalar}, (SELECT group_concat(j.value, ', ' ORDER BY j.ord) FROM {} j WHERE j.owner = {}))",
+            crate::rows::dups::items_sql(db, "decorators", "args", &["value"]),
+            crate::rows::dups::owner_sql(db, "decorators", "d")
+        ),
+        None => scalar.to_string(),
+    };
     let sql = format!(
         "SELECT f.path, d.line, d.name, {args}, d.target, d.target_kind, \
          (SELECT count(*) FROM decorators o WHERE o.file = d.file AND o.target = d.target \
@@ -46,12 +55,8 @@ pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, limit: usi
     Ok(())
 }
 
-/// The arguments as they are written, comma-separated - `"/items", response_model=Item` - from the JSON
-/// list the row holds; a cell that is not one is shown as it is.
+/// The arguments as they are written, comma-separated - `"/items", response_model=Item` - joined from the list's
+/// nodes by the query; a cell that is not a list is shown as it is.
 fn given(raw: &Value) -> String {
-    let text = cell(raw);
-    match serde_json::from_str::<Vec<String>>(&text) {
-        Ok(list) => list.join(", "),
-        Err(_) => text,
-    }
+    cell(raw)
 }

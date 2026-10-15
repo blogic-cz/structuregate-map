@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -22,14 +21,6 @@ namespace StructureGate;
 /// </summary>
 internal static class CsFacts
 {
-    /// <summary>How deep the structural skeleton of an expression goes. The shape is for recognising a
-    /// pattern; the code itself is in `source`, in full, in the same row.</summary>
-    private const int MaxDepth = 4;
-
-    /// <summary>Children kept at each level of the shape. A long argument list says nothing more about the
-    /// shape after the first few.</summary>
-    private const int MaxChildren = 8;
-
     /// <summary>The names generators write when they leave no marker inside the file.</summary>
     private static readonly string[] GeneratedNames = [".designer.cs", ".g.cs", ".generated.cs"];
 
@@ -177,32 +168,46 @@ internal static class CsFacts
         _ => false,
     };
 
-    /// <summary>The structural skeleton of an expression: kinds only, no names, capped.</summary>
-    public static string Shape(SyntaxNode node)
+    /// <summary>
+    /// The structural skeleton of an expression: kinds only, no names - WHOLE, every level and every child,
+    /// as a STRUCTURE (`k` the kind, `c` the child nodes) that the store keeps as node rows, never as JSON
+    /// text in a cell.
+    ///
+    /// NO CAP, AND NO RECURSION. A cut at four levels and eight children described the top of a tree only,
+    /// and `a + b + ... + z` is a left-leaning chain as deep as it is long - so the tree is listed in
+    /// preorder with an explicit stack and its nodes are built from the leaves up, and no expression a source
+    /// can hold overflows the stack this runs on.
+    /// </summary>
+    public static (string Key, object? Value)[] Shape(SyntaxNode node)
     {
-        var buffer = new MemoryStream();
-        using (var json = new Utf8JsonWriter(buffer))
+        var order = new List<(SyntaxNode Syntax, int Parent)>();
+        var pending = new Stack<(SyntaxNode Syntax, int Parent)>();
+        pending.Push((node, -1));
+        while (pending.Count > 0)
         {
-            Skeleton(json, node, 0);
+            var (syntax, parent) = pending.Pop();
+            var at = order.Count;
+            order.Add((syntax, parent));
+            // Pushed last-first, so they come off - and are listed - in source order.
+            foreach (var kid in syntax.ChildNodes().OfType<ExpressionSyntax>().Reverse()) pending.Push((kid, at));
         }
-        return Encoding.UTF8.GetString(buffer.ToArray());
-    }
-
-    private static void Skeleton(Utf8JsonWriter json, SyntaxNode node, int depth)
-    {
-        json.WriteStartObject();
-        // THE KIND, NOT THE TYPE NAME. Every operator in C# is a `BinaryExpressionSyntax`, so a shape built
-        // from type names would fingerprint `a + b` and `a == b` alike and the table would group two
-        // expressions that share nothing.
-        json.WriteString("k", node.Kind().ToString());
-        var kids = node.ChildNodes().OfType<ExpressionSyntax>().Take(MaxChildren).ToList();
-        if (depth < MaxDepth && kids.Count > 0)
+        var kids = new List<(string Key, object? Value)[]>?[order.Count];
+        var built = new (string Key, object? Value)[order.Count][];
+        for (var i = order.Count - 1; i >= 0; i--)
         {
-            json.WriteStartArray("c");
-            foreach (var kid in kids) Skeleton(json, kid, depth + 1);
-            json.WriteEndArray();
+            // THE KIND, NOT THE TYPE NAME. Every operator in C# is a `BinaryExpressionSyntax`, so a shape built
+            // from type names would fingerprint `a + b` and `a == b` alike and the table would group two
+            // expressions that share nothing.
+            var kind = order[i].Syntax.Kind().ToString();
+            var children = kids[i];
+            // Built from the last index down, so a node's children arrived last-first.
+            children?.Reverse();
+            if (children is null) built[i] = [("k", kind)];
+            else built[i] = [("k", kind), ("c", children)];
+            var up = order[i].Parent;
+            if (up >= 0) (kids[up] ??= new List<(string Key, object? Value)[]>()).Add(built[i]);
         }
-        json.WriteEndObject();
+        return built[0];
     }
 
     /// <summary>The source text of a node, IN FULL. Trivia inside the span is kept — a comment written into

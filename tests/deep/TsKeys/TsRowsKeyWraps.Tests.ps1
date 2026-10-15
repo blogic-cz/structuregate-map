@@ -45,8 +45,8 @@ Test-Case 'tsrows keys: a translate call wrapped in an object, a concat, a Promi
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k, " +
-        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || c.name AS reach FROM key_reach k " +
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     Assert-Line $r 'demo.obj.title | field_binding | HostComponent'
     Assert-Line $r 'demo.cat.part | field_binding | HostComponent'
     Assert-Line $r 'demo.prom.x | field_binding | HostComponent'
@@ -77,8 +77,8 @@ Test-Case 'tsrows keys: a key a callee returns inside a filtered list reaches th
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || k.n_paths || ' | ' || c.name AS reach FROM key_reach k, " +
-        "json_each(k.components) j JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
+    $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.route || ' | ' || k.n_paths || ' | ' || c.name AS reach FROM key_reach k " +
+        "JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = '#' || k.rowid || '/0' JOIN components c ON c.id = j.value WHERE k.key LIKE 'demo.%'")
     # a `filter` keeps some of the receiver's elements, so it hands back what they do
     Assert-Line $r 'demo.a.title | field_binding | 1 | RootComponent'
 }

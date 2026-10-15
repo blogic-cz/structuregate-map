@@ -94,21 +94,26 @@ impl Class {
     }
 
     /// Every render site reachable from `member`, as its path.
+    ///
+    /// FOLLOWED TO THE END: `on_path` is the members the walk is inside, and only a member already on it - a
+    /// cycle, `a` calling `b` calling `a` - stops the walk, as an unreadable condition. A depth number cut a
+    /// legitimate chain of nine helpers the same way.
     fn walk(
         &self,
         member: &str,
         entry: bool,
         prefix: &[Cond],
         chain: &[String],
-        depth: usize,
+        on_path: &mut Vec<String>,
         visited: &mut IndexSet<String>,
         out: &mut Vec<Vec<Cond>>,
     ) {
         visited.insert(member.to_string());
-        if depth > 8 {
+        if on_path.iter().any(|m| m == member) {
             out.push(vec![Cond::Unreadable]);
             return;
         }
+        on_path.push(member.to_string());
         let empty = Vec::new();
         let returns = self.returns.get(member).unwrap_or(&empty);
         for c in self.calls.get(member).unwrap_or(&empty) {
@@ -140,9 +145,10 @@ impl Class {
                 && let Some(next) = self.dispatch(&method, chain)
                 && next != member
             {
-                self.walk(&next, false, &path, chain, depth + 1, visited, out);
+                self.walk(&next, false, &path, chain, on_path, visited, out);
             }
         }
+        on_path.pop();
     }
 
     /// Whether a render the walk did not reach can still run: inside a callback in the chain's
@@ -391,7 +397,7 @@ pub fn guard_restrictions(store: &Store<'_>, mem: &MemberEnums, idx: &EnumIndex)
 
         let mut paths = Vec::new();
         let mut visited = IndexSet::new();
-        ctx.walk(setter, true, &[], &chain, 0, &mut visited, &mut paths);
+        ctx.walk(setter, true, &[], &chain, &mut Vec::new(), &mut visited, &mut paths);
         // A RENDER THE WALK DID NOT REACH IS A WAY IN IT CANNOT SEE: a lifecycle hook, a
         // subscription callback. Reading the reached sites alone would then claim a condition
         // one way in does not have, so the whole directive is refused.

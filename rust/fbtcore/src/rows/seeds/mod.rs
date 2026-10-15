@@ -17,8 +17,9 @@ mod value;
 mod views;
 mod walk;
 
+use super::dups::{owner_sql, scalar_sql, Column};
 use rusqlite::types::Value;
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use value::Val;
@@ -101,9 +102,23 @@ pub type Files = HashMap<String, File>;
 /// `{counts: [[status, n], ...], total}`, or `{skipped: true}` when there is no `sql_steps` to walk.
 pub(crate) fn run(db: &str) -> Result<serde_json::Value, String> {
     let mut conn = Connection::open(db).map_err(|e| format!("the database could not be opened - {e}"))?;
-    let Some(raw) = query(&conn, "SELECT id, file, line, action, schema, name, source, columns, targets, kinds, exprs, text \
-                                   FROM sql_steps ORDER BY file, line, seq") else {
+    // `columns`, `targets`, `kinds` and `exprs` are lists, so nodes: each read back by the step's id.
+    const LISTS: [&str; 4] = ["columns", "targets", "kinds", "exprs"];
+    let held: Vec<String> = LISTS.iter().map(|c| scalar_sql(&conn, "sql_steps", "s", c)).collect();
+    let sql = format!(
+        "SELECT s.id, s.file, s.line, s.action, s.schema, s.name, s.source, {}, s.text, {} FROM sql_steps s ORDER BY s.file, s.line, s.seq",
+        held.join(", "),
+        owner_sql(&conn, "sql_steps", "s")
+    );
+    let Some(raw) = query(&conn, &sql) else {
         return Ok(json!({ "skipped": true }));
+    };
+    let mut lists: Vec<Column> = Vec::new();
+    for column in LISTS {
+        lists.push(Column::new(&conn, "sql_steps", column).map_err(|e| format!("the steps could not be read - {e}"))?);
+    }
+    let mut list = |at: usize, row: &[Value]| -> Result<Vec<String>, String> {
+        lists[at].strings(&text(&row[12]), &row[7 + at]).map_err(|e| format!("the steps could not be read - {e}"))
     };
     let mut files: Files = HashMap::new();
     let mut by_path: HashMap<String, String> = HashMap::new();
@@ -112,14 +127,17 @@ pub(crate) fn run(db: &str) -> Result<serde_json::Value, String> {
         files.insert(text(&row[0]), File { path: text(&row[1]), database: text(&row[2]), kind: text(&row[3]) });
     }
     let mut steps: HashMap<String, Vec<Step>> = HashMap::new();
-    for row in &raw {
+    for row in raw.iter().map(Vec::as_slice) {
         let step = Step {
             id: text(&row[0]), file: text(&row[1]), line: num(&row[2]), action: text(&row[3]), schema: text(&row[4]),
-            name: text(&row[5]), source: text(&row[6]), columns: list(&row[7]), targets: list(&row[8]), kinds: list(&row[9]),
-            exprs: list(&row[10]), text: text(&row[11]),
+            name: text(&row[5]), source: text(&row[6]), columns: list(0, row)?, targets: list(1, row)?, kinds: list(2, row)?,
+            exprs: list(3, row)?, text: text(&row[11]),
         };
         steps.entry(step.file.clone()).or_default().push(step);
     }
+    // The readers hold the connection; the table is written over it below.
+    drop(list);
+    drop(lists);
     let mut included = HashSet::new();
     for row in query(&conn, "SELECT id, file, line, name FROM sql_refs WHERE lang = 'sql' AND action = 'include'").unwrap_or_default() {
         let from = text(&row[1]);
@@ -161,29 +179,37 @@ pub(crate) fn run(db: &str) -> Result<serde_json::Value, String> {
     Ok(json!({ "counts": counts.into_iter().collect::<Vec<_>>(), "total": seeds.len(), "views": views }))
 }
 
-/// The table, rewritten whole, in one transaction.
+/// The table, rewritten whole, in one transaction. Its lists - `columns`, `row_values`, `defaults`, `updates`,
+/// `unbound` - are nodes (`sql_seeds__columns`, ..), written with it by the store.
 fn write(conn: &mut Connection, seeds: &[Seed], files: &Files) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;
+    super::cells::drop_children(&tx, "sql_seeds").map_err(failed)?;
     tx.execute_batch("DROP TABLE IF EXISTS sql_seeds; CREATE TABLE sql_seeds (id, step, file, line, root, deployed, \
-        condition, database, schema, name, object, via, columns, row_values, defaults, updates, unbound, status, detail, text);")?;
-    {
-        let mut insert = tx.prepare("INSERT INTO sql_seeds VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)")?;
-        for (i, s) in seeds.iter().enumerate() {
+        condition, database, schema, name, object, via, status, detail, text);")?;
+    let rows: Vec<serde_json::Value> = seeds
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
             // A chain whose root no `.sqlproj` deploys is a script someone may run by hand - or nobody.
             let root = files.get(&s.row.root);
             let deployed = root.is_some_and(|r| r.kind == "postdeploy" || r.kind == "predeploy") as i64;
-            insert.execute(params![
-                format!("sd:{}", i + 1), s.row.step.id, s.row.step.file, s.row.step.line,
-                root.map(|r| r.path.clone()).unwrap_or_default(), deployed, s.row.condition, s.row.database, s.schema, s.name,
-                s.object, s.row.via.join(" > "), value::columns(&s.row.columns), value::values(&s.row.values),
-                value::columns(&s.row.defaulted), value::columns(&s.row.updates), value::columns(&s.unbound()), s.status, s.detail,
-                s.row.step.text,
-            ])?;
-        }
-    }
+            json!({
+                "id": format!("sd:{}", i + 1), "step": s.row.step.id, "file": s.row.step.file, "line": s.row.step.line,
+                "root": root.map(|r| r.path.clone()).unwrap_or_default(), "deployed": deployed, "condition": s.row.condition,
+                "database": s.row.database, "schema": s.schema, "name": s.name, "object": s.object, "via": s.row.via.join(" > "),
+                "columns": s.row.columns, "row_values": value::listed(&s.row.values), "defaults": s.row.defaulted,
+                "updates": s.row.updates, "unbound": s.unbound(), "status": s.status, "detail": s.detail, "text": s.row.step.text,
+            })
+        })
+        .collect();
+    super::store::insert_rows(&tx, "sql_seeds", &rows).map_err(failed)?;
     tx.execute_batch("CREATE INDEX ix_sql_seeds_name ON sql_seeds(name); CREATE INDEX ix_sql_seeds_object ON sql_seeds(object); \
         CREATE INDEX ix_sql_seeds_file ON sql_seeds(file); CREATE INDEX ix_sql_seeds_step ON sql_seeds(step);")?;
     tx.commit()
+}
+
+fn failed(e: anyhow::Error) -> rusqlite::Error {
+    rusqlite::Error::InvalidParameterName(format!("{e:#}"))
 }
 
 /// Every row of a query, or `None` when it fails - a table no half wrote.
@@ -208,15 +234,6 @@ pub fn num(cell: &Value) -> i64 {
     match cell {
         Value::Integer(n) => *n,
         other => text(other).parse().unwrap_or(0),
-    }
-}
-
-/// A JSON array of strings held in a text cell.
-fn list(cell: &Value) -> Vec<String> {
-    let Value::Text(t) = cell else { return Vec::new() };
-    match serde_json::from_str::<serde_json::Value>(t) {
-        Ok(serde_json::Value::Array(items)) => items.iter().map(|i| i.as_str().unwrap_or("").to_string()).collect(),
-        _ => Vec::new(),
     }
 }
 

@@ -2,10 +2,14 @@
     The C# deep map's `enums` and `switch_cases` rows: an enum with every
     member and its NUMBER, and a row per `case` section and per switch-expression arm - written into the tables
     the TypeScript half writes, in its shape, so a backend value joins a frontend one. See
-    `src/Map/CsRows/CsBody/CsRowsCases.cs`.
+    `src/Map/CsRows/CsBody/CsRowsCases.cs`. And, over a file of every structured cell the C# half writes, that
+    none of them is left as text (`Get-NodeJsonCell`).
 
     Its helpers are its own - `-Only CsCases` runs this suite alone.
 #>
+
+# The node rows' SQL (a list cell is `<table>__<column>`, never JSON text).
+. (Join-Path $PSScriptRoot '../../nodes/NodeSql.Helpers.ps1')
 
 $script:CsCasesProject = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
 
@@ -53,15 +57,15 @@ function Get-CsCasesValue([string]$Db, [string]$Sql) {
 
 # ONE MEMBER, ONE QUERY: asked over every member at once, the output holds the other members' numbers too.
 function Get-CsCasesMember([string]$Db, [string]$Name) {
-    return Get-CsCasesValue $Db ("SELECT coalesce(json_extract(m.value, '$.value'), 'null') FROM enums e, json_each(e.members) m " +
-        "WHERE e.name = 'Kinds' AND json_extract(m.value, '$.name') = '$Name'")
+    return Get-CsCasesValue $Db ("SELECT coalesce(m.value, 'null') FROM enums e JOIN enums__members m ON m.owner = e.id AND m.parent = e.id || '/0' " +
+        "WHERE e.name = 'Kinds' AND m.name = '$Name'")
 }
 
 Test-Case 'cscases: a bound enum carries every member with the number the compiler folded' {
     $db = New-CsCasesDb @{ 'Ids.cs' = $script:CsCasesSource; 'Demo.csproj' = $script:CsCasesProject }
     Assert-Equal (Get-CsCasesValue $db "SELECT count(*) FROM enums") '1' 'enums rows'
     Assert-Equal (Get-CsCasesValue $db "SELECT symbol || '|' || exported || '|' || underlying || '|' || (owner_file = file) FROM enums") 'Demo.Kinds|1|int|1' 'the enum row'
-    Assert-Equal (Get-CsCasesValue $db "SELECT json_array_length(members) FROM enums") '6' 'members'
+    Assert-Equal (Get-CsCasesValue $db "SELECT (SELECT count(*) FROM enums__members j WHERE j.owner = enums.id AND j.parent = enums.id || '/0') FROM enums") '6' 'members'
     Assert-Equal (Get-CsCasesMember $db 'Extra') '40' 'Extra'
     Assert-Equal (Get-CsCasesMember $db 'Next') '41' 'Next, inherited from Extra'
     Assert-Equal (Get-CsCasesMember $db 'Neg') '-2' 'Neg'
@@ -85,10 +89,10 @@ Test-Case 'cscases: each case section is a switch_cases row - labels, the member
     $db = New-CsCasesDb @{ 'Ids.cs' = $script:CsCasesSource; 'Demo.csproj' = $script:CsCasesProject }
     Assert-Equal (Get-CsCasesValue $db "SELECT count(*) FROM switch_cases WHERE kind = 'case'") '3' 'case sections'
     # TWO LABELS, ONE SECTION: `case Extra: case Next:` share their statements, so they share their row.
-    $both = "SELECT json_array_length(labels) || '|' || json_extract(labels, '$[1]') || '|' || json_extract(label_symbols, '$[0]') || '|' || json_extract(label_values, '$[0]') || ',' || json_extract(label_values, '$[1]') FROM switch_cases WHERE line = 9"
+    $both = "SELECT (SELECT count(*) FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0') || '|' || (SELECT j.value FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0' AND j.ord = 1) || '|' || (SELECT j.value FROM switch_cases__label_symbols j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0' AND j.ord = 0) || '|' || (SELECT j.value FROM switch_cases__label_values j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0' AND j.ord = 0) || ',' || (SELECT j.value FROM switch_cases__label_values j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0' AND j.ord = 1) FROM switch_cases WHERE line = 9"
     Assert-Equal (Get-CsCasesValue $db $both) '2|Kinds.Next|Demo.Kinds.Extra|40,41' 'the two-label section'
     Assert-Equal (Get-CsCasesValue $db "SELECT guard || '|' || is_default FROM switch_cases WHERE line = 12") 'flag|0' 'the guarded section'
-    Assert-Equal (Get-CsCasesValue $db "SELECT json_array_length(labels) || '|' || is_default FROM switch_cases WHERE line = 14") '0|1' 'default'
+    Assert-Equal (Get-CsCasesValue $db "SELECT (SELECT count(*) FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0') || '|' || is_default FROM switch_cases WHERE line = 14") '0|1' 'default'
     # WHICH SWITCH: every section points at the `branches` row of its own switch.
     $joined = "SELECT count(*) FROM switch_cases s JOIN branches b ON b.id = s.branch WHERE b.kind = 'switch' AND b.line = 7"
     Assert-Equal (Get-CsCasesValue $db $joined) '3' 'sections joined to their switch'
@@ -98,9 +102,9 @@ Test-Case 'cscases: each case section is a switch_cases row - labels, the member
 Test-Case 'cscases: each switch-expression arm is a row, with what it evaluates to' {
     $db = New-CsCasesDb @{ 'Ids.cs' = $script:CsCasesSource; 'Demo.csproj' = $script:CsCasesProject }
     Assert-Equal (Get-CsCasesValue $db "SELECT count(*) FROM switch_cases WHERE kind = 'arm'") '3' 'arms'
-    Assert-Equal (Get-CsCasesValue $db "SELECT json_extract(label_values, '$[0]') || '|' || result FROM switch_cases WHERE line = 20") '0|"base"' 'the first arm'
+    Assert-Equal (Get-CsCasesValue $db "SELECT (SELECT j.value FROM switch_cases__label_values j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0' AND j.ord = 0) || '|' || result FROM switch_cases WHERE line = 20") '0|"base"' 'the first arm'
     Assert-Equal (Get-CsCasesValue $db "SELECT guard FROM switch_cases WHERE line = 21") 'true' 'the guarded arm'
-    Assert-Equal (Get-CsCasesValue $db "SELECT is_default || '|' || json_array_length(labels) FROM switch_cases WHERE line = 22") '1|0' 'the discard arm'
+    Assert-Equal (Get-CsCasesValue $db "SELECT is_default || '|' || (SELECT count(*) FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = switch_cases.id || '/0') FROM switch_cases WHERE line = 22") '1|0' 'the discard arm'
 }
 
 Test-Case 'cscases: a re-read file REPLACES its enum and case rows' {
@@ -152,16 +156,16 @@ namespace Demo.Models
 }
 '@
     $db = New-CsCasesDb @{ 'Hue.cs' = $source; 'Demo.csproj' = $script:CsCasesProject }
-    $row = "SELECT name || '|' || target_kind || '|' || arg_values FROM decorators WHERE target = '{0}'"
+    $row = "SELECT name || '|' || target_kind || '|' || $(Get-NodeRootListSql 'decorators__arg_values' 'decorators.id') FROM decorators WHERE target = '{0}'"
     Assert-Equal (Get-CsCasesValue $db ($row -f 'Alpha')) 'ExternalId|enum_member|["7001"]' 'Alpha'
     Assert-Equal (Get-CsCasesValue $db ($row -f 'Beta')) 'ExternalId|enum_member|["7002"]' 'Beta'
     # bound: the attribute's constructor, as every `decorators.symbol`
     Assert-Equal (Get-CsCasesValue $db "SELECT symbol FROM decorators WHERE target = 'Alpha'") 'Demo.Models.ExternalIdAttribute.ExternalIdAttribute' 'symbol'
     Assert-Equal (Get-CsCasesValue $db "SELECT count(*) FROM decorators WHERE target = 'Gamma'") '0' 'Gamma has none'
     # an enum argument is a constant too: it once read [""] beside the int arguments that folded
-    Assert-Equal (Get-CsCasesValue $db "SELECT arg_values FROM decorators WHERE name = 'AttributeUsage'") '["System.AttributeTargets.Field"]' 'enum argument'
-    $entry = "SELECT coalesce(json_extract(m.value, '$.attributes'), 'null') FROM enums e, json_each(e.members) m " +
-        "WHERE e.name = 'HueKind' AND json_extract(m.value, '$.name') = '{0}'"
+    Assert-Equal (Get-CsCasesValue $db "SELECT $(Get-NodeRootListSql 'decorators__arg_values' 'decorators.id') FROM decorators WHERE name = 'AttributeUsage'") '["System.AttributeTargets.Field"]' 'enum argument'
+    $entry = "SELECT coalesce($(Get-NodeListSql 'enums__members' 'm' 'attributes'), 'null') FROM enums e JOIN enums__members m ON m.owner = e.id AND m.parent = e.id || '/0' " +
+        "WHERE e.name = 'HueKind' AND m.name = '{0}'"
     Assert-Equal (Get-CsCasesValue $db ($entry -f 'Alpha')) '["ExternalId"]' 'Alpha entry'
     Assert-Equal (Get-CsCasesValue $db ($entry -f 'Gamma')) '[]' 'Gamma entry'
 }
@@ -181,9 +185,86 @@ namespace Demo.Models
 }
 '@
     $db = New-CsCasesDb @{ 'Order.cs' = $source; 'Demo.csproj' = $script:CsCasesProject }
-    $row = "SELECT target_kind || '|' || arg_values || '|' || (symbol = 'Demo.Models.TagAttribute.TagAttribute') FROM decorators WHERE name = 'Tag' AND target = '{0}'"
+    $row = "SELECT target_kind || '|' || $(Get-NodeRootListSql 'decorators__arg_values' 'decorators.id') || '|' || (symbol = 'Demo.Models.TagAttribute.TagAttribute') FROM decorators WHERE name = 'Tag' AND target = '{0}'"
     Assert-Equal (Get-CsCasesValue $db ($row -f 'Alpha')) 'field|["f"]|1' 'Alpha'
     Assert-Equal (Get-CsCasesValue $db ($row -f 'Beta')) 'field|["f"]|1' 'Beta'
     Assert-Equal (Get-CsCasesValue $db ($row -f 'Gamma')) 'const|["c"]|1' 'Gamma'
     Assert-Equal (Get-CsCasesValue $db ($row -f 'Changed')) 'event|["e"]|1' 'Changed'
+}
+
+# EVERY STRUCTURED CELL THE C# HALF WRITES, in one file: an enum with an attributed member, attributes with
+# positional, named and array arguments, a dictionary's index initializer, collection expressions, tuples,
+# case sections with several labels, a switch expression, an interpolated SQL template, catch clauses.
+$script:CsCasesShapes = @'
+using System;
+using System.Collections.Generic;
+using System.Linq;
+namespace Demo;
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
+public sealed class TagAttribute : Attribute
+{
+    public TagAttribute(string name, params string[] more) { }
+    public int Rank { get; set; }
+    public Type[] Kinds { get; set; } = [];
+}
+[Flags]
+public enum Hue { [Obsolete("old")] Alpha = 1, Beta = 2, Gamma = Alpha | Beta, Delta = 1 << 3 }
+public record Order(int Id, string Region, Hue Hue);
+[Tag("orders", "a", "b", Rank = 2, Kinds = new[] { typeof(Order), typeof(Hue) })]
+public class Orders
+{
+    private static readonly Dictionary<string, int> Limits = new() { ["EU"] = 3, ["US"] = 5 };
+    private static readonly string[] Regions = ["EU", "US", "APAC"];
+    private static readonly (string Code, int Rank)[] Pairs = [("EU", 1), (Code: "US", Rank: 2)];
+    private readonly List<Order> items = new() { new Order(1, "EU", Hue.Alpha), new(2, "US", Hue.Beta) };
+    private const string Table = "Orders";
+    [Tag("query")]
+    public string Query(int id, string region) =>
+        $"SELECT Id, Region FROM {Table} WHERE Id = {id} AND Region = '{region}'";
+    public string Label(Hue hue, int n)
+    {
+        switch (hue)
+        {
+            case Hue.Alpha:
+            case Hue.Beta when n > 1:
+                return "low";
+            case Hue.Gamma or Hue.Delta:
+                return "high";
+            default:
+                return n switch { 0 => "none", > 10 and < 20 => "teen", _ => $"n={n}" };
+        }
+    }
+    public int Total(IEnumerable<Order> orders)
+    {
+        try
+        {
+            var picked = orders.Where(o => Regions.Contains(o.Region)).Select(o => new { o.Id, o.Region }).ToList();
+            var (a, b) = (picked.Count, Limits["EU"]);
+            int[] grid = { 1, 2, 3 };
+            return a + b + grid.Sum() + Pairs.Length + items.Count;
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Length > 0)
+        {
+            throw new ArgumentException($"bad {nameof(orders)}", ex);
+        }
+        catch (Exception)
+        {
+            return -1;
+        }
+    }
+}
+'@
+
+Test-Case 'cscases: no cell of the C# map is a structure as text - every list and object is node rows' {
+    $db = New-CsCasesDb @{ 'Shapes.cs' = $script:CsCasesShapes; 'Demo.csproj' = $script:CsCasesProject }
+    # The fixture must keep reaching the node tables, or a clean scan proves nothing.
+    $cells = [int](Get-CsCasesValue $db 'SELECT count(*) FROM _cells')
+    if ($cells -lt 28) { throw "only $cells structured column(s) in _cells - the fixture no longer reaches the node tables" }
+    # `members.initializer` is the initializer AS WRITTEN - `[]`, `["EU", "US", "APAC"]` - code like `source`; the
+    # collection itself is an `objects` row with its slots.
+    $found = @(Get-NodeJsonCell $db | Where-Object { -not $_.StartsWith('members.initializer = ') })
+    if ($found) { throw "$($found.Count) structure(s) as text:`n$($found -join "`n")" }
+    # An index entry is named by its KEY: `["EU"] = 3` once wrote `["EU"]`, a list spelled as text.
+    Assert-Equal (Get-CsCasesValue $db ("SELECT group_concat(a.name || '=' || a.const, ',' ORDER BY a.position) FROM arguments a " +
+        "JOIN objects o ON o.id = a.object WHERE o.target = 'Limits'")) 'EU=3,US=5' 'the index entries'
 }

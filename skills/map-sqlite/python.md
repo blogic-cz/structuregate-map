@@ -52,7 +52,7 @@ scopes and through package re-exports (`self.help()` is `Thing.help`), and throu
 module-level instance (`STORE.get()` is `Store.get`). EMPTY when the tree cannot say: a
 parameter, an inherited method. **Every `reads` has a `binds` beside it**, position for position: the
 `file::qualname` each read names, or "" - so config.py's `ROOT` is told from every other `ROOT` by
-`json_each(binds)`, never by the name. `imports.bind` and `classes.bases_bind` are the same for an imported
+a join of `<table>__binds` to `<table>__reads` on `owner` and `ord`, never by the name. `imports.bind` and `classes.bases_bind` are the same for an imported
 name and a base class; `--dead` walks the latter to keep an override, and a method of a class whose base is
 outside the map, off its list. `getattr(mod, name)` gives `target_name = '*'` - any def in that file.
 `functions.launched = 1` is a def a launcher calls. `--find` follows `imports.bind` (an alias, or a
@@ -75,11 +75,12 @@ SELECT callee, count(*) n FROM calls WHERE callee LIKE 'STORE.%' GROUP BY callee
 
 -- which functions read a given constant (`--reads DATA_DIR` is this query over all ten tables)
 SELECT f.path, x.func, count(*) n FROM expressions x JOIN files f ON f.id = x.file
-WHERE x.reads LIKE '%DATA_DIR%' AND x.func <> '' GROUP BY f.path, x.func ORDER BY n DESC;
+JOIN expressions__reads r ON r.owner = x.id AND r.parent = x.id || '/0'
+WHERE r.value = 'DATA_DIR' AND x.func <> '' GROUP BY f.path, x.func ORDER BY n DESC;
 
 -- a constant reached through a parameter default, which the query above cannot see
 SELECT f.path, p.qualname, p.name, p.default_expr FROM parameters p JOIN files f ON f.id = p.file
-WHERE p.reads LIKE '%DATA_DIR%';
+JOIN parameters__reads r ON r.owner = p.id AND r.parent = p.id || '/0' WHERE r.value = 'DATA_DIR';
 
 -- one decorator applied twice to one def: silent at run time, invisible in a diff
 SELECT file, target, name, count(*) n FROM decorators GROUP BY file, target, name HAVING n > 1;

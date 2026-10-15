@@ -9,8 +9,8 @@
 
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
-$script:CalleeQ = "SELECT k.key || ' | ' || k.route || ' | ' || json_extract(k.always_values, '$[0].dimension') || ' ' || " +
-    "json_extract(k.always_values, '$[0].op') || ' ' || json_extract(k.always_values, '$[0].values') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'"
+$script:CalleeQ = "SELECT k.key || ' | ' || k.route || ' | ' || (SELECT jn.dimension FROM key_reach__always_values jn WHERE jn.owner = '#' || k.rowid AND jn.parent = '#' || k.rowid || '/0' AND jn.ord = 0) || ' ' || " +
+    "(SELECT jn.op FROM key_reach__always_values jn WHERE jn.owner = '#' || k.rowid AND jn.parent = '#' || k.rowid || '/0' AND jn.ord = 0) || ' ' || $(Get-NodeItemListSql 'key_reach__always_values' 'k.rowid' 0 'values') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'"
 
 Test-Case 'tsrows keys: a callee branch on an enum parameter restricts the key by the argument the caller hands' {
     $tree = New-TsRowsWorkspace @{
@@ -74,7 +74,7 @@ Test-Case 'tsrows keys: a local arrow named like an i18nCalls method is entered,
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $r = Invoke-TsRowsQ $made.Db "SELECT k.key || ' | ' || k.route || ' | ' || k.components AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'"
+    $r = Invoke-TsRowsQ $made.Db "SELECT k.key || ' | ' || k.route || ' | ' || $(Get-NodeRootListSql 'key_reach__components' 'k.rowid') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'"
     Assert-Line $r 'demo.arrow.first | field_binding | ["ng:'
     Assert-Line $r 'demo.arrow.second | field_binding | ["ng:'
 }
@@ -211,8 +211,8 @@ Test-Case 'tsrows keys: a parameter a callee hands on to another method carries 
     Assert-NoLine $r 'demo.shape.round.b | field_binding'
 }
 # A CHILD'S INPUT IS THE PARENT'S EXPRESSION on a way through the edge that binds it (`key/key_scopes.rs`).
-$script:BoundQ = "SELECT k.key || ' | ' || json_extract(v.value, '`$.dimension') || ' ' || json_extract(v.value, '`$.op') || ' ' || " +
-    "json_extract(v.value, '`$.values') AS r FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'demo.kind.%'"
+$script:BoundQ = "SELECT k.key || ' | ' || v.dimension || ' ' || v.op || ' ' || " +
+    "$(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS r FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.kind.%'"
 
 function New-BoundKindTree([string]$ChildBody) {
     $tip = @'
@@ -302,8 +302,8 @@ Test-Case 'tsrows keys: a child that writes its own input is not renamed to the 
     Assert-Line $r 'demo.kind.home.a | ctx.context.kind | item.kind in ["Flat","Home"]'
 }
 
-$script:ArgQ = "SELECT k.key || ' | ' || json_extract(v.value,'$.dimension') || ' ' || json_extract(v.value,'$.op') || ' ' || json_extract(v.value,'$.values') AS r " +
-    "FROM key_reach k, json_each(k.always_values) v WHERE k.key LIKE 'demo.%'"
+$script:ArgQ = "SELECT k.key || ' | ' || v.dimension || ' ' || v.op || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS r " +
+    "FROM key_reach k JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = '#' || k.rowid || '/0' WHERE k.key LIKE 'demo.%'"
 
 Test-Case 'tsrows keys: a constant bound to an input through the parent alias is no variable to rename into (#49)' {
     $tree = New-TsRowsWorkspace @{

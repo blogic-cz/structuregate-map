@@ -35,7 +35,7 @@ pub(super) fn properties(new: &Value, reader: &Returned<'_, '_>) -> IndexMap<Str
             add(&mut out, name, found);
             let written = chain.iter().flat_map(|k| inst.written.get(&(k.clone(), name.clone())).into_iter().flatten());
             for value in inst.initial.get(member).into_iter().chain(written) {
-                leaf(name, value, class, reader, &mut out, 0);
+                leaf(name, value, class, reader, &mut out);
             }
         }
     }
@@ -57,14 +57,22 @@ fn this_member(value: &Value) -> Option<&str> {
 
 /// The keys a value written to a property holds: a key it spells, a translate call's arguments, the returns of a function
 /// it is (`$fn_id`) or names (`this.tipText`), and - for an object literal - each property under its own path.
-fn leaf(path: &str, value: &Value, class: &str, reader: &Returned<'_, '_>, out: &mut IndexMap<String, Found>, depth: usize) {
-    if depth > 4 {
-        return;
+///
+/// EVERY LEVEL of a nested literal, in source order: a stack, not a depth - an object four levels down once
+/// held keys no path ever named.
+fn leaf(path: &str, value: &Value, class: &str, reader: &Returned<'_, '_>, out: &mut IndexMap<String, Found>) {
+    let mut pending = vec![(path.to_string(), value)];
+    while let Some((path, value)) = pending.pop() {
+        if let Some(object) = value.as_object().filter(|o| o.keys().all(|k| !k.starts_with('$'))) {
+            pending.extend(object.iter().rev().map(|(k, v)| (format!("{path}.{k}"), v)));
+            continue;
+        }
+        value_leaf(&path, value, class, reader, out);
     }
-    if let Some(object) = value.as_object().filter(|o| o.keys().all(|k| !k.starts_with('$'))) {
-        object.iter().for_each(|(k, v)| leaf(&format!("{path}.{k}"), v, class, reader, out, depth + 1));
-        return;
-    }
+}
+
+/// One property's value that is not an object literal of its own.
+fn value_leaf(path: &str, value: &Value, class: &str, reader: &Returned<'_, '_>, out: &mut IndexMap<String, Found>) {
     let mut found = Found::new();
     spelled(value, reader, &mut found);
     if let Some(function) = value.get("$fn_id").and_then(Value::as_str) {

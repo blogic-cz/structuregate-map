@@ -68,7 +68,10 @@ VALUES ARE FOLDED PAST THE COMPILER (`CsFolding.cs`): an interpolation or a conc
 operand by operand to each declaration, an enum is a NAME (`Demo.Region.US`, or `Demo.Region=6` when the
 number names none), and an expression that is not constant still records the symbol it binds to.
 `const_kind`/`value_kind` says who worked it out — `const` the compiler, `folded` this pass. A piece that
-cannot be known folds to NOTHING: half a path looks like a path.
+cannot be known folds to NOTHING: half a path looks like a path. It is followed TO THE END, never to a depth
+(`CsTemplate.cs` too): only a symbol already on the way - two readonlies built out of each other - stops it, as
+the symbol; a `+` chain is flattened, not recursed. `expressions.shape` is the WHOLE skeleton (`k`, `c`), a
+structure the store keeps as `expressions__shape` node rows, built with an explicit stack (`CsFacts.Shape`).
 
 The C# rows are SEMANTIC where a compilation can be built: files are sent PROJECT BY PROJECT
 (`CsModels.Order`), one compilation alive at a time, every file of the project parsed so a partial class

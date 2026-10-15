@@ -229,14 +229,14 @@ internal static class CsRazor
     /// <summary>The `}` closing the `{` at `open`, braces inside double quotes not counted.</summary>
     private static int Matching(string text, int open)
     {
-        var depth = 0;
+        var nesting = 0;
         var quoted = false;
         for (var i = open; i < text.Length; i++)
         {
             if (text[i] == '"') quoted = !quoted;
             if (quoted) continue;
-            if (text[i] == '{') depth++;
-            else if (text[i] == '}' && --depth == 0) return i;
+            if (text[i] == '{') nesting++;
+            else if (text[i] == '}' && --nesting == 0) return i;
         }
         return -1;
     }
