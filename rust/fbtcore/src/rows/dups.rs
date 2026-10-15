@@ -175,12 +175,7 @@ pub(crate) fn scalar_sql(conn: &Connection, table: &str, alias: &str, column: &s
 
 /// What a node row's `owner` is for a row of `table`, in SQL: its id, or `#<rowid>` where it has none (`store`).
 pub(crate) fn owner_sql(conn: &Connection, table: &str, alias: &str) -> String {
-    let rowid = format!("'#' || {alias}.rowid");
-    if super::schema::existing_columns(conn, table).unwrap_or_default().iter().any(|c| c == "id") {
-        format!("(CASE WHEN typeof({alias}.id) IN ('text', 'integer', 'real') THEN CAST({alias}.id AS TEXT) ELSE {rowid} END)")
-    } else {
-        rowid
-    }
+    super::cells::owner_expr(conn, table, alias)
 }
 
 /// The ITEMS of a list column as a table: `owner`, `ord` and each of `members` (`value` for a scalar item, a member's

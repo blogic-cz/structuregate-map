@@ -206,9 +206,18 @@ pub fn columns_of(db: &Connection, table: &str) -> Vec<(String, String)> {
 }
 
 /// The SQL a row of `table` (aliased `alias`) is owned by: its id, or `'#' || rowid` for a table without one.
+///
+/// AS TEXT, because `owner` is text and an `id` need not be: `render_path` numbers its rows, and `'1' IN (SELECT 1)`
+/// is false - a delete through such rows reached none of their nodes, and the next write collided with them. A row
+/// whose id is NULL is owned by its rowid, as `store::insert` names it.
 pub fn owner_expr(db: &Connection, table: &str, alias: &str) -> String {
+    let rowid = format!("'#' || {alias}.rowid");
     let has_id = schema::existing_columns(db, table).map(|c| c.iter().any(|c| c == "id")).unwrap_or(false);
-    if has_id { format!("{alias}.id") } else { format!("'#' || {alias}.rowid") }
+    if has_id {
+        format!("(CASE WHEN typeof({alias}.id) IN ('text', 'integer', 'real') THEN CAST({alias}.id AS TEXT) ELSE {rowid} END)")
+    } else {
+        rowid
+    }
 }
 
 /// THE NODES OF THE ROWS ABOUT TO GO, deleted first - `where_sql` is the same WHERE the caller deletes `table`'s rows
