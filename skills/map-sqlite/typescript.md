@@ -92,7 +92,8 @@ Beside the shared tables it adds the FRAMEWORK tables:
   `token_ref` and `token_id` name the injection token - an `@Inject(TOKEN)` or `inject()`'s argument - where `resolved`
   stays the declared TYPE; a token that is a property of a const object (`Tokens.X`)
   joins that const in `token_id`. An `export { A as B }` alias resolves to `A` (`routes.component_id`, the `id` on each
-  `ng_modules` ref). `in_module` marks an interface or type alias declared inside `declare module`, `declare global` or a
+  `ng_modules` ref). A ref INSIDE an `ng_modules` list element carries its `id` too: a lazy route's `$module` in
+  `RouterModule.forChild([...])` (the class `routes.load_children_module` names) and each `$ref` of a provider object. `in_module` marks an interface or type alias declared inside `declare module`, `declare global` or a
   namespace, and a namespace's class, function, const or enum. `state_selectors.factory` is set on a function that RETURNS `createSelector`. A static attribute that
   matches an input counts in `input_usage` (its `expression` is null) and `io.bound_count`.
 * **`state_effects`** is one row per `createEffect` member: `actions` the `ofType` refs it listens to (as `state_handlers.action_source` spells them), `dispatch` 0 for `{ dispatch: false }`, `emits` the calls its callbacks return, as written.
