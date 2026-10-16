@@ -99,7 +99,9 @@ pub fn put(db: &Connection, key: &str, value: &str) -> Result<()> {
         match deep(value).ok().filter(is_structured) {
             Some(structure) => {
                 db.execute("INSERT INTO _meta (key, value) VALUES (?1, NULL)", [key])?;
-                Writer::new(db, TABLE, COLUMN)?.tree(key, &structure)?;
+                let mut writer = Writer::new(db, TABLE, COLUMN)?;
+                writer.tree(key, &structure)?;
+                writer.finish()?;
             }
             None => {
                 db.execute("INSERT INTO _meta (key, value) VALUES (?1, ?2)", [key, value])?;

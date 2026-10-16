@@ -292,6 +292,9 @@ fn insert(db: &Connection, table: &str, rows: &[Value], stamp: &[(String, Value)
             writers[at].tree(&owner, &value)?;
         }
     }
+    for writer in &mut writers {
+        writer.finish()?;
+    }
     Ok(())
 }
 
