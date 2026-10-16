@@ -766,6 +766,9 @@ async function main() {
     emit('MAP-NOTE', `the typescript half kept ${store.reclaimed} id(s) that already named these rows`);
   }
 
+  // ...AND AGAIN ON THE WAY OUT: a pass after the walk mints a re-extracted file's row late (a template's render),
+  // taking its old id back, and it would land after every carried row.
+  if (partial) store.inMintOrder();
   const wholly = new Set(whole);
   const sending = {};
   for (const name of Object.keys(store.tables)) {

@@ -23,9 +23,12 @@ using (var json = new Utf8JsonWriter(input))
     // Where `structuregate.sql.json` is looked for when --sql-config is not given: beside the exe.
     json.WriteString("base_dir", AppContext.BaseDirectory);
     // WHICH BUILD IS RUNNING, for what the deep map derives from its rows: the process, and under `dotnet` the
-    // managed assembly and the rust library beside it - each by size and time.
+    // managed assembly and the rust library beside it - each by size and time. The library is `libfbtcore.so` on linux and
+    // `libfbtcore.dylib` on macOS: named only as `fbtcore.dll`, a rust-only change there kept the stamp, and the deep map
+    // kept a closure the new build would derive differently.
     json.WriteString("build", string.Join(";", new[] { Environment.ProcessPath,
-        Path.Combine(AppContext.BaseDirectory, "structuregate.dll"), Path.Combine(AppContext.BaseDirectory, "fbtcore.dll") }
+        Path.Combine(AppContext.BaseDirectory, "structuregate.dll"), Path.Combine(AppContext.BaseDirectory, "fbtcore.dll"),
+        Path.Combine(AppContext.BaseDirectory, "libfbtcore.so"), Path.Combine(AppContext.BaseDirectory, "libfbtcore.dylib") }
         .Where(p => !string.IsNullOrEmpty(p) && File.Exists(p))
         .Select(p => $"{p}|{new FileInfo(p!).Length}|{File.GetLastWriteTimeUtc(p!).Ticks}")));
     json.WriteEndObject();
