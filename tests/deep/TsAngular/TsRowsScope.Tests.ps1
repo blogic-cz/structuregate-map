@@ -136,4 +136,38 @@ Test-Case 'tsrows: renders holds only the edges the module scope allows, the res
     Assert-Line $walked '0'
 }
 
+# AN OUT-OF-SCOPE CANDIDATE IS NO RENDER (#77). Two lazy modules each declare a `demo-box`; only `HostAComponent`
+# writes the tag, so `BBoxComponent` is reached by nothing but `HostA`'s foreign candidate. Counted as rendered, it
+# read `unused = 0` with no template instantiating it. No module-less host here: `unknown` would still count.
+Test-Case 'tsrows: a component only an out-of-scope candidate names is unused' {
+    $box = { param($Class) "@Component({ selector: 'demo-box', template: '<b>box</b>' })`nexport class $Class {}`n" }
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/a.module.ts' = "import { Component, NgModule } from '@angular/core';`n" +
+            "import { RouterModule } from '@angular/router';`n" + (& $box 'ABoxComponent') +
+            "@Component({ selector: 'demo-host-a', template: '<demo-box></demo-box>' })`nexport class HostAComponent {}`n" +
+            "@NgModule({ declarations: [ABoxComponent, HostAComponent], imports: [RouterModule.forChild([{ path: 'a', component: HostAComponent }])] })`n" +
+            "export class AModule {}`n"
+        'apps/shop/src/b.module.ts' = "import { Component, NgModule } from '@angular/core';`n" +
+            "import { RouterModule } from '@angular/router';`n" + (& $box 'BBoxComponent') +
+            "@Component({ selector: 'demo-host-b', template: '<p>b</p>' })`nexport class HostBComponent {}`n" +
+            "@NgModule({ declarations: [BBoxComponent, HostBComponent], imports: [RouterModule.forChild([{ path: 'b', component: HostBComponent }])] })`n" +
+            "export class BModule {}`n"
+        'apps/shop/src/app.routes.ts' = "import { RouterModule } from '@angular/router';`n" +
+            "export const routing = RouterModule.forRoot([`n" +
+            "  { path: 'a', loadChildren: () => import('./a.module').then((m) => m.AModule) },`n" +
+            "  { path: 'b', loadChildren: () => import('./b.module').then((m) => m.BModule) },`n" +
+            "]);`n"
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    # THE FOREIGN CANDIDATE IS STILL A ROW: without it the case proves nothing about how one is counted.
+    $aside = Invoke-TsRowsQ $made.Db ("SELECT p.name || '>' || r.to_name AS edge FROM renders_out_of_scope r " +
+        "JOIN classes p ON p.id = r.from_class")
+    Assert-Line $aside 'HostAComponent>BBoxComponent'
+    $r = Invoke-TsRowsQ $made.Db ("SELECT name || '=' || unused AS u FROM components " +
+        "WHERE name IN ('ABoxComponent', 'BBoxComponent')")
+    Assert-Line $r 'ABoxComponent=0'
+    Assert-Line $r 'BBoxComponent=1'
+}
+
 }
