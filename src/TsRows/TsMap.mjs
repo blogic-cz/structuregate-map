@@ -50,7 +50,7 @@ import { shapeOfText } from './TsShape.mjs';
 import { affectedFiles, fingerprint, inventory, knownLines, markParsed, plannedHashes } from './TsInventory.mjs';
 import { discoverProjects, findWorkspaceRoot } from './TsProjects.mjs';
 import { loadToolchain, resolveToolchain, versionMismatch } from './TsResolve.mjs';
-import { Diagnostics, Store } from './TsStore.mjs';
+import { Diagnostics, REWRITTEN, Store } from './TsStore.mjs';
 import { createHash } from 'node:crypto';
 import { awaitCarry, emit, parseArgs, readCarry, readJson, revisionOf, writePayload } from './TsRunIo.mjs';
 import { markReachable, runTemplatePass, walkProjects } from './TsWalk.mjs';
@@ -737,9 +737,9 @@ async function main() {
   // tree, `components.unused` on the whole render graph, `io.bound_count` on every binding. They are
   // named, and `verifyUntouched` is what proves the list complete - it fails the run on the fourth one
   // nobody noticed rather than storing a change that would never be written. It found `io` this way.
-  const rewritten = ['translations', 'components', 'io'];
+  // `REWRITTEN` in `TsStore.mjs`.
   // A WHOLE `renders` takes its set-aside candidates with it: they are one table split by `scope`.
-  const whole = withAside([...new Set([...rewritten, ...store.rollupTables, ...Object.entries(store.tables)
+  const whole = withAside([...new Set([...REWRITTEN, ...store.rollupTables, ...Object.entries(store.tables)
     .filter(([, rows]) => rows.length && rows.some((r) => r.owner_file === undefined))
     .map(([name]) => name)])].sort());
 

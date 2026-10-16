@@ -64,6 +64,13 @@ function blankIds(value) {
 }
 
 /**
+ * THE TABLES THREE ROLLUPS REWRITE WITHOUT MINTING A ROW - `translations.referenced` depends on refs from the whole tree,
+ * `components.unused` on the whole render graph, `io.bound_count` on every binding - so a partial run sends them WHOLE
+ * (`TsMap.mjs`, `whole`). `verifyUntouched` is what proves the list complete: it fails the run on a fourth.
+ */
+export const REWRITTEN = ['translations', 'components', 'io'];
+
+/**
  * A ROW AS THE DATABASE WOULD HOLD IT, which is the only form two of them can honestly be compared in.
  *
  * SQLite has no boolean and no absent-versus-null: `true` comes back an integer 1, and a column set to
@@ -257,7 +264,10 @@ export class Store {
       list.push(row);
       if (row.id) this.rowById.set(row.id, row);
       this.hydrated.add(row);
-      if (row.id) this.loadedAs.set(row.id, storedForm(row));
+      // AS IT ARRIVED, for `verifyUntouched` - in the one serialization the engine does natively, never sorted or copied:
+      // that was most of a partial run's per-row cost. Not a row whose table goes back WHOLE whatever happens to it:
+      // a row without `owner_file` makes its table whole, and so does a table a rollup rewrites (`REWRITTEN`).
+      if (row.id && row.owner_file !== undefined && !REWRITTEN.includes(name)) this.loadedAs.set(row.id, asStored(() => JSON.stringify(row)));
       // AN INTERNED ROW GOES BACK INTO THE KEY INDEX, or the identity `intern` exists to protect
       // is lost the moment the row arrives from somewhere else: the next `intern` of the same key
       // finds nothing, mints a SECOND row for the one file, and every id already pointing at the
@@ -285,6 +295,11 @@ export class Store {
    * So every hydrated row is remembered as it arrived, and compared again afterwards. A mismatch is a
    * FATAL rather than a repair: the row proves the WHOLE list is out of date, and guessing which other
    * rows are affected is exactly the kind of silence this check exists to break.
+   *
+   * THE SAME TEXT IS NO CHANGE, and almost every row gives it back; only a row whose text moved is compared in the
+   * database's terms (`storedForm`, both sides read back from text), so a key a pass set again, a `true` that is
+   * stored as 1 or a null that is stored as nothing changes nothing. A row with no remembered form moved: it was not
+   * remembered because its table went back whole, and here it is in one that does not.
    */
   verifyUntouched(whole) {
     const wholly = new Set(whole);
@@ -299,9 +314,11 @@ export class Store {
       const columns = new Set();
       for (const row of rows) {
         if (!this.hydrated.has(row) || !row.id) continue;
-        const was = this.loadedAs.get(row.id);
-        const now = storedForm(row);
-        if (was === now) continue;
+        const held = this.loadedAs.get(row.id);
+        const text = asStored(() => JSON.stringify(row));
+        if (held === text) continue;
+        const was = held === undefined ? '{}' : storedForm(JSON.parse(held));
+        if (was === storedForm(JSON.parse(text))) continue;
         count += 1;
         if (first === null) first = row.id;
         // WHICH COLUMN MOVED, AND WHETHER IT MOVED A FACT, because those are two different findings.
