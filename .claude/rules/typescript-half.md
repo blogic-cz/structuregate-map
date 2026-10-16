@@ -76,7 +76,7 @@ row of a whole table the payload sends (`Digest::named`) for an id the replace r
 again (`nested`), which node once asked of every row it held; a string that only looks like an id is no reason to retry. THE CARRY IS WRITTEN BESIDE THE PARSE
 (`carried_parse`, `mapper/deep/ts.rs`): node builds every program ahead without a checker (`prewarm`,
 `TsSetup/TsProgram.mjs` - each parse given back as it was parsed, or a compiler before 5.3 resolves and notes less)
-and waits for the rows only to load them.
+and then loads the rows as rust writes them (`readCarry`, `--carry-part`: the file read while it grows, whole once renamed).
 
 **A PARTIAL RUN KEEPS THE CLOSURE WHEN NOTHING IT READ MOVED** (`rust/fbtcore/src/rows/partial/unchanged.rs`). Every
 derivation records what its passes READ - each column asked of a row (`Store::reads`, flagged by `Row::get`) - in

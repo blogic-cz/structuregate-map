@@ -52,7 +52,7 @@ import { discoverProjects, findWorkspaceRoot } from './TsProjects.mjs';
 import { loadToolchain, resolveToolchain, versionMismatch } from './TsResolve.mjs';
 import { Diagnostics, REWRITTEN, Store } from './TsStore.mjs';
 import { createHash } from 'node:crypto';
-import { awaitCarry, emit, parseArgs, readCarry, readJson, revisionOf, writePayload } from './TsRunIo.mjs';
+import { emit, parseArgs, readCarry, readJson, revisionOf, writePayload } from './TsRunIo.mjs';
 import { markReachable, runTemplatePass, walkProjects } from './TsWalk.mjs';
 import { forgetParses, prewarm } from './TsProgram.mjs';
 import { stubSent, uncarriedRead, UNREAD_WHEN_CARRIED } from './TsCarried.mjs';
@@ -333,21 +333,12 @@ async function main() {
   const store = new Store(partial ? (state.counters ?? {}) : (state.alone ? {} : (state.counters ?? {})), state.floor ?? 0);
   const affected = partial ? new Set(planned.affected) : null;
   let repointLater = null;
-  // THE PROGRAMS BEFORE THE ROWS: a partial run builds them while rust is still writing what it hands back (`prewarm`).
+  // THE PROGRAMS BEFORE THE ROWS: a partial run builds them while rust is still writing what it hands back (`prewarm`),
+  // and then loads the rows as they are written (`readCarry`).
   const projects = discoverProjects(ts, fe);
-  if (partial && args.carryLate) {
-    prewarm(ts, projects, found.nodeModules);
-    if (!awaitCarry(args.carry)) { emit('MAP-NOCARRY', `${args.carry} was not written`); return 0; }
-  }
+  if (partial && args.carryPart) prewarm(ts, projects, found.nodeModules);
   const diag = new Diagnostics(() => store.currentFile);
   if (partial) {
-    const carried = readCarry(args.carry);
-    if (!carried || typeof carried.tables !== 'object' || carried.tables === null) {
-      // NOT A FULL RUN INSTEAD. The caller asked for a partial one and this half was going to
-      // extract a fraction; falling back silently would write that fraction over a whole map.
-      emit('MAP-FATAL', `the rows handed back could not be read from ${args.carry}`);
-      return 1;
-    }
     // A CELL THAT HELD A STRUCTURE COMES BACK AS TEXT, and has to be turned back before a pass reads
     // it. SQLite has no array and no object, the carrying side passes those cells through WITHOUT
     // decoding them - which is what makes it cheap - and a reader cannot tell one from a string that
@@ -356,38 +347,40 @@ async function main() {
     // published `enums.members` as text and made every member read as one character.
     const structured = state.json_columns ?? {};
     const booleans = state.bool_columns ?? {};
+    const heldProjects = [];
+    let loaded = 0;
+    let skipped = 0;
+    const carried = readCarry(args.carry, args.carryPart, (name, row) => {
+      // A TABLE A ROLLUP BUILDS FROM SCRATCH IS NOT PUT BACK - see `Store.rebuiltTables`. The pass
+      // that owns it runs again in full, so a carried row would sit beside a fresh copy of itself.
+      if (name === 'projects') { heldProjects.push(row); skipped += 1; return; }
+      if (rebuilt.has(name)) { skipped += 1; return; }
+      for (const column of structured[name] ?? []) {
+        if (typeof row[column] !== 'string') continue;
+        try { row[column] = JSON.parse(row[column]); } catch { /* left as the text it is */ }
+      }
+      // A BOOLEAN COMES BACK AN INTEGER, and a pass that asks `=== true` of it gets false. The
+      // column is turned back the same way a structured one is, off the same measurement.
+      for (const column of booleans[name] ?? []) {
+        if (row[column] === 0 || row[column] === 1) row[column] = row[column] === 1;
+      }
+      // `files` is the one INTERNED table, keyed by the absolute path - see `makeFileId`.
+      store.load(name === ASIDE ? 'renders' : name, [row], name === 'files' ? (held) => held.abs : null);
+      loaded += 1;
+    });
+    if (carried === false) { emit('MAP-NOCARRY', `${args.carry} was not written`); return 0; }
+    if (!carried) {
+      // NOT A FULL RUN INSTEAD. The caller asked for a partial one and this half was going to
+      // extract a fraction; falling back silently would write that fraction over a whole map.
+      emit('MAP-FATAL', `the rows handed back could not be read from ${args.carry}`);
+      return 1;
+    }
     // THE IDS THE RE-EXTRACTED FILES' ROWS ALREADY HAVE. Handed over beside the rows, because the
     // rows themselves are the ones being replaced and these are all that is kept of them.
     // AN OUT-OF-SCOPE CANDIDATE IS A RENDER WHILE THIS RUN HOLDS IT (#40): back into `renders`, its claims and its rows
-    // below, so the scope is decided over every candidate again - `setAsideOutOfScope` moves it out on the way to the store.
+    // above, so the scope is decided over every candidate again - `setAsideOutOfScope` moves it out on the way to the store.
     const reclaimable = store.loadClaims(claimsBack(carried.claims), state.identity ?? {});
     store.loadRollup(carried.rollup);
-    let heldProjects = [];
-    let loaded = 0;
-    let skipped = 0;
-    for (const [name, rows] of Object.entries(carried.tables)) {
-      if (!Array.isArray(rows)) continue;
-      // A TABLE A ROLLUP BUILDS FROM SCRATCH IS NOT PUT BACK - see `Store.rebuiltTables`. The pass
-      // that owns it runs again in full, so a carried row would sit beside a fresh copy of itself.
-      if (name === 'projects') { heldProjects = rows; skipped += rows.length; continue; }
-      if (rebuilt.has(name)) { skipped += rows.length; continue; }
-      const columns = structured[name] ?? [];
-      const flags = booleans[name] ?? [];
-      for (const row of rows) {
-        for (const column of columns) {
-          if (typeof row[column] !== 'string') continue;
-          try { row[column] = JSON.parse(row[column]); } catch { /* left as the text it is */ }
-        }
-        // A BOOLEAN COMES BACK AN INTEGER, and a pass that asks `=== true` of it gets false. The
-        // column is turned back the same way a structured one is, off the same measurement.
-        for (const column of flags) {
-          if (row[column] === 0 || row[column] === 1) row[column] = row[column] === 1;
-        }
-      }
-      // `files` is the one INTERNED table, keyed by the absolute path - see `makeFileId`.
-      store.load(name === ASIDE ? 'renders' : name, rows, name === 'files' ? (row) => row.abs : null);
-      loaded += rows.length;
-    }
     emptyChanged(store, planned.changed);
     repointLater = heldProjects;
     emit('MAP-NOTE', `the typescript half put back ${loaded} row(s) it is not re-extracting and `
