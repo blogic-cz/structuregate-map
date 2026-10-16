@@ -35,6 +35,8 @@ mod rawcells;
 pub mod reads;
 #[path = "partial/remember.rs"]
 mod remember;
+#[path = "partial/uncarried.rs"]
+mod uncarried;
 #[path = "partial/unchanged.rs"]
 mod unchanged;
 pub mod schema;

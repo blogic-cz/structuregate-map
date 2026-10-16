@@ -75,7 +75,7 @@ fn rows_probe(db: &str, root: &str, p: &Probe) -> Result<String, String> {
     }
     if let Some(carry) = &p.rows_carry {
         let receipt: Value = serde_json::from_str(&calls::carry(Path::new(db), &p.rows_lang,
-            p.rows_affected.as_deref().unwrap_or(""), carry)?).unwrap_or_default();
+            p.rows_affected.as_deref().unwrap_or(""), carry, false)?).unwrap_or_default();
         let count = |name: &str| receipt[name].as_i64().unwrap_or(0);
         return Ok(format!("MAP-CARRY|{}|{}", count("rows"), count("tables")));
     }

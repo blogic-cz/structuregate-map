@@ -6,9 +6,9 @@ use super::super::gate_features::GateFeatures;
 
 fn path(hops: &[&str], gates: &[&str]) -> RenderPath {
     RenderPath {
-        hops: hops.iter().map(|h| std::rc::Rc::from(&**h)).collect(),
+        hops: hops.iter().map(|h| std::sync::Arc::from(&**h)).collect(),
         edges: Vec::new(),
-        gates: gates.iter().map(|g| std::rc::Rc::from(&**g)).collect(),
+        gates: gates.iter().map(|g| std::sync::Arc::from(&**g)).collect(),
         branches: Vec::new(),
     }
 }

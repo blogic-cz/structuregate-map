@@ -20,6 +20,8 @@
  * from above it, recorded or not, so the ids the other half hands out meanwhile are never these.
  */
 
+import { asStored, isStub, refuse, UNCARRIED } from './TsCarried.mjs';
+
 /** What every row of this half is stamped with, so the database can drop exactly its own rows again.
  *
  * NOT `lang`: the map being reproduced already has an `expressions.lang` that says whether an expression
@@ -50,6 +52,7 @@ function isId(value) {
 /** The same value with every id it holds reduced to its prefix, so two of them can be compared for what
  *  they SAY rather than for which rows they happen to name. */
 function blankIds(value) {
+  if (isStub(value)) return value;
   if (isId(value)) return `${value.slice(0, value.indexOf(':') + 1)}`;
   if (Array.isArray(value)) return value.map(blankIds);
   if (value && typeof value === 'object') {
@@ -78,7 +81,8 @@ function storedForm(row) {
     if (value === null || value === undefined) continue;
     out[key] = typeof value === 'boolean' ? (value ? 1 : 0) : value;
   }
-  return JSON.stringify(out);
+  // A STUB (`TsSetup/TsCarried.mjs`) is one value here, the same until a pass replaces it.
+  return asStored(() => JSON.stringify(out));
 }
 
 // The sparse keys tried after every other candidate - see below.
@@ -114,6 +118,7 @@ const KEY_CANDIDATES = [
 
 /** Every id a cell holds, however deeply it is nested. */
 function idsIn(value) {
+  if (isStub(value)) return [];
   if (isId(value)) return [value];
   if (Array.isArray(value)) return value.flatMap(idsIn);
   if (value && typeof value === 'object') return Object.values(value).flatMap(idsIn);
@@ -305,8 +310,12 @@ export class Store {
         // reading dozens of identical-looking values to find out which.
         const before = JSON.parse(was);
         for (const key of new Set([...Object.keys(before), ...Object.keys(row)])) {
-          if (JSON.stringify(before[key]) === JSON.stringify(row[key])) continue;
-          const sameFact = JSON.stringify(blankIds(before[key])) === JSON.stringify(blankIds(row[key]));
+          const [cellWas, cellIs, wasFact, isFact] = asStored(() => [JSON.stringify(before[key]), JSON.stringify(row[key]),
+            JSON.stringify(blankIds(before[key])), JSON.stringify(blankIds(row[key]))]);
+          if (cellWas === cellIs) continue;
+          // A STUB A PASS REPLACED: the run is asked again with the cell carried, never told it moved a row it kept.
+          if (before[key] === UNCARRIED) refuse(`${name}.${key}`);
+          const sameFact = wasFact === isFact;
           columns.add(sameFact ? `${key} (ids only)` : key);
         }
       }

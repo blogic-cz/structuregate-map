@@ -92,6 +92,14 @@ pub fn clear(db: &Connection) -> Result<()> {
 /// ONE COMMIT, NOT ONE PER NODE: outside a caller's transaction every insert committed on its own - a sync per row -
 /// and the derived passes' kept key, a few thousand nodes, took most of their time. A savepoint is that one commit,
 /// and nests inside a caller's transaction when there is one.
+/// `put`, unless the key already holds `value`.
+pub fn put_moved(db: &Connection, key: &str, value: &str) -> Result<()> {
+    if get(db, key).as_deref() == Some(value) {
+        return Ok(());
+    }
+    put(db, key, value)
+}
+
 pub fn put(db: &Connection, key: &str, value: &str) -> Result<()> {
     db.execute_batch("SAVEPOINT meta_put")?;
     let done = (|| -> Result<()> {
@@ -99,7 +107,9 @@ pub fn put(db: &Connection, key: &str, value: &str) -> Result<()> {
         match deep(value).ok().filter(is_structured) {
             Some(structure) => {
                 db.execute("INSERT INTO _meta (key, value) VALUES (?1, NULL)", [key])?;
-                Writer::new(db, TABLE, COLUMN)?.tree(key, &structure)?;
+                let mut writer = Writer::new(db, TABLE, COLUMN)?;
+                writer.tree(key, &structure)?;
+                writer.finish()?;
             }
             None => {
                 db.execute("INSERT INTO _meta (key, value) VALUES (?1, ?2)", [key, value])?;

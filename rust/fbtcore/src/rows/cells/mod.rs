@@ -185,28 +185,66 @@ pub fn index_values(db: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Writes one column's structures straight into its child table: one prepared statement, every node bound as the
-/// walk reaches it - no row map per node. Made once per column per insert.
+/// How many node rows one INSERT writes: a statement per node was most of a structure's write - millions of
+/// them for one closure table - and one per `BATCH` writes the same rows in the same order.
+const BATCH: usize = 64;
+
+/// Writes one column's structures straight into its child table: every node bound as the walk reaches it - no row map
+/// per node - and written `BATCH` at a time. Made once per column per insert; `finish` writes what is left.
 pub struct Writer<'c> {
     stmt: rusqlite::Statement<'c>,
+    many: rusqlite::Statement<'c>,
+    held: Vec<SqlValue>,
 }
 
 impl<'c> Writer<'c> {
     pub fn new(db: &'c Connection, table: &str, column: &str) -> Result<Writer<'c>> {
         let child_table = create(db, table, column)?;
-        let marks = vec!["?"; COLUMNS.len()].join(", ");
-        let stmt = db.prepare(&format!("INSERT INTO \"{}\" ({}) VALUES ({marks})", schema::escape(&child_table), COLUMNS.join(", ")))?;
-        Ok(Writer { stmt })
+        let marks = format!("({})", vec!["?"; COLUMNS.len()].join(", "));
+        let insert = format!("INSERT INTO \"{}\" ({}) VALUES ", schema::escape(&child_table), COLUMNS.join(", "));
+        let stmt = db.prepare(&format!("{insert}{marks}"))?;
+        let many = db.prepare(&format!("{insert}{}", vec![marks.as_str(); BATCH].join(", ")))?;
+        Ok(Writer { stmt, many, held: Vec::with_capacity(BATCH * COLUMNS.len()) })
     }
 
     /// One cell's structure, every node a row.
     pub fn tree(&mut self, owner: &str, value: &Value) -> Result<()> {
-        let stmt = &mut self.stmt;
         let owner = owner_value(owner);
         walk(value, |node| {
-            stmt.execute(rusqlite::params![owner, node.n, node.parent, node.role, node.ord, node.node, schema::cell(Some(&node.value))])?;
+            let value = match schema::cell(Some(&node.value)) {
+                rusqlite::types::ToSqlOutput::Owned(v) => v,
+                // `schema::cell` owns every value it makes.
+                _ => SqlValue::Null,
+            };
+            let int = |v: Option<i64>| v.map_or(SqlValue::Null, SqlValue::Integer);
+            self.held.extend([owner.clone(), SqlValue::Integer(node.n), int(node.parent),
+                node.role.map_or(SqlValue::Null, |r| SqlValue::Text(r.to_string())), int(node.ord),
+                SqlValue::Text(node.node.to_string()), value]);
+            if self.held.len() == BATCH * COLUMNS.len() {
+                self.many.execute(rusqlite::params_from_iter(self.held.iter()))?;
+                self.held.clear();
+            }
             Ok(())
         })
+    }
+
+    /// The rows still held, written.
+    pub fn finish(&mut self) -> Result<()> {
+        for row in self.held.chunks(COLUMNS.len()) {
+            self.stmt.execute(rusqlite::params_from_iter(row.iter()))?;
+        }
+        self.held.clear();
+        Ok(())
+    }
+}
+
+impl Drop for Writer<'_> {
+    /// A writer let go unfinished still writes its rows; one that cannot has already failed its caller's `finish`.
+    fn drop(&mut self) {
+        if !self.held.is_empty() {
+            debug_assert!(false, "a node writer was dropped with {} value(s) unwritten", self.held.len());
+            let _ = self.finish();
+        }
     }
 }
 

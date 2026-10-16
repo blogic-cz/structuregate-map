@@ -118,7 +118,7 @@ pub(super) fn method_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
     }
     let nodes = store.table("template_nodes");
     let node_by_id: std::collections::HashMap<String, &Row> = nodes.iter().filter_map(|n| id_of(n, "id").map(|id| (id, n))).collect();
-    let branches = Branches::new(store);
+    let branches = store.shared("branches", Branches::new);
     let mut hit_nodes = std::collections::HashSet::new();
     super::key_lists::with_reader(store, |reader| {
         for e in store.table("expressions").iter() {
