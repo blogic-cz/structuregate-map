@@ -71,7 +71,7 @@ pub(super) fn skipped(into: &mut Collector, deep: &Deep, db: &str, root: &str, k
 pub(super) fn grounded(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: &dyn Fn(Option<&str>) -> Option<String>, fe_kept: Option<String>) -> bool {
     let (errors, notes) = (into.errors.len(), into.notes.len());
     let mut fe = None;
-    let absent = launched(into, deep, db, root, &mut fe, &[false, true]);
+    let absent = launched(into, deep, db, root, &mut fe, &[false, true], false);
     let absence = absence(&into.notes[notes..]);
     settle(db, key, absent, fe, fe_kept, into.errors.len() == errors, absence);
     absent
@@ -138,7 +138,10 @@ pub(super) fn has_workspace(root: &Path) -> bool {
 /// State, then plan, parse and store - over `hops`: a run that stopped short of every hop and found it could not
 /// (`MAP-RETRY`, or a kept row that would point at nothing) wrote nothing, and is asked once more over every hop - see
 /// `rows/partial/reads.rs`. `[true]` is that second ask alone.
-pub(super) fn launched(into: &mut Collector, deep: &Deep, db: &str, root: &str, fe: &mut Option<String>, hops: &[bool]) -> bool {
+///
+/// A run that READ A CELL IT WAS HANDED BACK WITHOUT (`MAP-UNCARRIED`, `rows/partial/uncarried.rs`) wrote nothing either,
+/// and is asked again over the same hops with every cell carried (`whole`) - and so is every ask after it.
+pub(super) fn launched(into: &mut Collector, deep: &Deep, db: &str, root: &str, fe: &mut Option<String>, hops: &[bool], whole: bool) -> bool {
     let Some(parse) = staged(into, deep) else { return false };
     let handing = crate::trace::stage("typescript: read and hand over the state");
     let Some(state) = state(into, deep, db) else { return false };
@@ -149,18 +152,29 @@ pub(super) fn launched(into: &mut Collector, deep: &Deep, db: &str, root: &str, 
     match written {
         Err(e) => into.errors.push(format!("HALF      {LANGUAGE}: the payload could not be written ({e})")),
         Ok(()) => {
-            for &every_hop in hops {
+            let mut whole = whole;
+            let mut asks: std::collections::VecDeque<bool> = hops.iter().copied().collect();
+            while let Some(every_hop) = asks.pop_front() {
                 let mut carried = None;
-                let planned = plan(into, deep, &parse, root, db, &work, every_hop, &mut carried);
+                let planned = plan(into, deep, &parse, root, db, &work, every_hop);
                 absent = planned == Planned::Absent;
                 if planned != Planned::Full && planned != Planned::Partial {
                     break;
                 }
-                let carry = (planned == Planned::Partial).then_some(&work.carry);
-                let retry = match parse_tree(into, deep, &parse, root, db, &work, carry, every_hop, &|| {}) {
+                let parsed = if planned == Planned::Partial {
+                    carried_parse(into, deep, &parse, root, db, &work, every_hop, whole, &|| {}, &mut carried)
+                } else {
+                    parse_tree(into, deep, &parse, root, db, &work, None, every_hop, &|| {}, false)
+                };
+                let retry = match parsed {
                     Parsed::Rows => store(into, db, root, &work.rows, carried, fe),
                     Parsed::Retry => true,
-                    Parsed::Nothing => false,
+                    Parsed::Uncarried if !whole => {
+                        whole = true;
+                        asks.push_front(every_hop);
+                        continue;
+                    }
+                    Parsed::Uncarried | Parsed::Nothing => false,
                 };
                 if !retry || every_hop {
                     break;
@@ -268,11 +282,10 @@ fn shared(deep: &Deep, arguments: &mut Vec<String>) {
     arguments.extend(["--build".into(), deep.build.clone()]);
 }
 
-/// ASK WHAT WOULD HAVE TO BE READ, then fetch the rows that would not be. A PLAN THAT CANNOT BE READ IS A
-/// FULL RUN, never a partial one: a fraction read because the answer was unavailable would be written over
-/// a whole map. How long the carry took goes to `carried`, for the note `store` writes.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn plan(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &str, work: &Work, every_hop: bool, carried: &mut Option<u64>) -> Planned {
+/// ASK WHAT WOULD HAVE TO BE READ - the rows that would not be are fetched beside the parse (`carried_parse`). A PLAN
+/// THAT CANNOT BE READ IS A FULL RUN, never a partial one: a fraction read because the answer was unavailable would be
+/// written over a whole map.
+pub(super) fn plan(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &str, work: &Work, every_hop: bool) -> Planned {
     let mut arguments = vec![parse.to_string(), "--root".into(), root.into(), "--rows".into(), text(&work.rows),
         "--state".into(), text(&work.state), "--plan".into(), text(&work.plan), "--db".into(), db.into()];
     if every_hop {
@@ -318,30 +331,55 @@ pub(super) fn plan(into: &mut Collector, deep: &Deep, parse: &str, root: &str, d
         return Planned::Full;
     }
     why(into, &plan["why"], "what moved");
-    // A PARTIAL RUN WITHOUT THE REST OF THE ROWS IS NOT A PARTIAL RUN: it reads everything instead.
-    let carry_started = std::time::Instant::now();
-    let fetched = calls::carry(Path::new(db), LANG, &text(&work.plan), &text(&work.carry));
-    *carried = Some(carry_started.elapsed().as_millis() as u64);
-    let receipt = match fetched {
-        Ok(receipt) if work.carry.is_file() => receipt,
-        Ok(_) => {
-            into.notes.push("the typescript half is reading everything: the rows it would not have re-extracted could not be fetched ()".into());
-            return Planned::Full;
-        }
+    Planned::Partial
+}
+
+/// A PARTIAL RUN'S CARRY AND PARSE, BESIDE EACH OTHER: node is launched as the carry starts and parses every project
+/// while it is written (`prewarm` in `TsProgram.mjs`), and waits for it only to load it - it is written under another
+/// name and renamed when whole, or `<carry>.failed` is left. Carried one after the other, the carry was a quarter of the
+/// run and node sat idle through it. `read` is told when the carry has read the database - its last read - not when node
+/// starts. A carry that failed is no partial run: it reads everything instead. How long the carry took goes to `carried`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn carried_parse(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &str, work: &Work, every_hop: bool, whole: bool,
+    read: &(dyn Fn() + Sync), carried: &mut Option<u64>) -> Parsed {
+    let part = work.carry.with_extension("part");
+    let failed = work.carry.with_extension("json.failed");
+    let anchor = crate::trace::anchor();
+    let (parsed, fetched, ms) = std::thread::scope(|scope| {
+        let carrying = scope.spawn(|| {
+            let _adopted = crate::trace::adopt(anchor);
+            let _stage = crate::trace::stage("typescript: carry the rows");
+            let started = std::time::Instant::now();
+            let fetched = calls::carry(Path::new(db), LANG, &text(&work.plan), &text(&part), whole || deep.ts_html.is_some())
+                .and_then(|receipt| std::fs::rename(&part, &work.carry).map(|_| receipt).map_err(|e| e.to_string()));
+            if fetched.is_err() {
+                let _ = std::fs::write(&failed, b"");
+            }
+            read();
+            (fetched, started.elapsed().as_millis() as u64)
+        });
+        let parsed = parse_tree(into, deep, parse, root, db, work, Some(&work.carry), every_hop, &|| {}, true);
+        let (fetched, ms) = carrying.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        (parsed, fetched, ms)
+    });
+    *carried = Some(ms);
+    match fetched {
+        Ok(receipt) => match serde_json::from_str::<Value>(&receipt) {
+            Ok(receipt) => into.notes.push(format!(
+                "the typescript half kept {} row(s) it does not have to re-extract, across {} table(s)",
+                receipt["rows"].as_i64().unwrap_or(0),
+                receipt["tables"].as_i64().unwrap_or(0)
+            )),
+            Err(e) => into.notes.push(format!("the typescript half kept rows it does not have to re-extract, and could not say how many ({e})")),
+        },
+        // A PARTIAL RUN WITHOUT THE REST OF THE ROWS IS NOT A PARTIAL RUN: it reads everything instead.
         Err(why) => {
             into.notes.push(format!("the typescript half is reading everything: the rows it would not have re-extracted could not be fetched ({why})"));
-            return Planned::Full;
+            *carried = None;
+            return parse_tree(into, deep, parse, root, db, work, None, every_hop, &|| {}, false);
         }
-    };
-    match serde_json::from_str::<Value>(&receipt) {
-        Ok(receipt) => into.notes.push(format!(
-            "the typescript half kept {} row(s) it does not have to re-extract, across {} table(s)",
-            receipt["rows"].as_i64().unwrap_or(0),
-            receipt["tables"].as_i64().unwrap_or(0)
-        )),
-        Err(e) => into.notes.push(format!("the typescript half kept rows it does not have to re-extract, and could not say how many ({e})")),
     }
-    Planned::Partial
+    parsed
 }
 
 /// WHY THE HALF RUNS, said on every run that does and kept for `_meta.last_refresh`: a pull that moved a hundred-odd `.ts`
@@ -371,22 +409,28 @@ fn why(into: &mut Collector, why: &Value, reads: &str) {
     into.refresh.insert("typescript".into(), Value::Object(kept));
 }
 
-/// What a parse run left: a payload to store, nothing, or a run that stopped short and has to be asked again.
+/// What a parse run left: a payload to store, nothing, a run that stopped short and has to be asked again, or one that
+/// read a cell it was handed back without and has to be asked again with every cell carried.
 pub(super) enum Parsed {
     Rows,
     Nothing,
     Retry,
+    Uncarried,
 }
 
 /// node, with the workspace's own compiler. `read` is told once the last read of the database is behind it, before node starts.
+/// `late`: the carry is still being written as node starts (`carried_parse`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn parse_tree(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &str, work: &Work, carry: Option<&PathBuf>, every_hop: bool,
-    read: &dyn Fn()) -> Parsed {
+    read: &dyn Fn(), late: bool) -> Parsed {
     // `--db`: WHERE ITS OWN OUTPUT GOES, so a database inside the tree is not read as a file of it.
     let mut arguments = vec![parse.to_string(), "--root".into(), root.into(), "--rows".into(), text(&work.rows),
         "--state".into(), text(&work.state), "--db".into(), db.into()];
     if let Some(carry) = carry {
         arguments.extend(["--carry".into(), text(carry)]);
+        if late {
+            arguments.push("--carry-late".into());
+        }
     }
     if every_hop {
         arguments.push("--every-hop".into());
@@ -422,6 +466,14 @@ pub(super) fn parse_tree(into: &mut Collector, deep: &Deep, parse: &str, root: &
     if let Some(why) = records(&ran.stdout, "MAP-RETRY|").into_iter().next() {
         into.notes.push(format!("the typescript half is reading every hop of dependents again: {why}"));
         return Parsed::Retry;
+    }
+    if let Some(why) = records(&ran.stdout, "MAP-NOCARRY|").into_iter().next() {
+        into.notes.push(format!("the typescript half was handed back no rows: {why}"));
+        return Parsed::Nothing;
+    }
+    if let Some(cell) = records(&ran.stdout, "MAP-UNCARRIED|").into_iter().next() {
+        into.notes.push(format!("the typescript half reads again with every cell carried: a pass read {cell}, which it was handed back without"));
+        return Parsed::Uncarried;
     }
     into.halves.insert(format!("{LANGUAGE} via {}", deep.ts_host));
     into.notes.extend(records(&ran.stdout, "MAP-NOTE|"));
@@ -472,13 +524,14 @@ pub(super) fn store(into: &mut Collector, db: &str, root: &str, rows: &Path, car
     };
     into.notes.extend(receipt["notes"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(String::from)));
     *fe = receipt["fe"].as_str().map(String::from);
-    // WHERE THE TIME WENT, as one note. The carry was timed here, before node parsed: the store never saw it.
+    for (phase, ms) in receipt["phases"].as_object().into_iter().flatten() {
+        crate::trace::reported(&format!("typescript: {phase}"), ms.as_u64().unwrap_or(0));
+    }
+    // WHERE THE TIME WENT, as one note. The carry was timed before node parsed, as a stage of its own: the store never
+    // saw it, so it joins the note and is not laid back under the store's span.
     if let (Some(ms), Some(phases)) = (carried, receipt["phases"].as_object_mut()) {
         phases.insert("carry the rows".into(), json!(ms));
         phases.sort_keys();
-    }
-    for (phase, ms) in receipt["phases"].as_object().into_iter().flatten() {
-        crate::trace::reported(&format!("typescript: {phase}"), ms.as_u64().unwrap_or(0));
     }
     // WHAT `write the rows` IS MADE OF, as a breakdown: it explains that phase and adds nothing to the store.
     for step in receipt["write_steps"].as_array().into_iter().flatten() {

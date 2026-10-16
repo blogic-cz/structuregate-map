@@ -19,7 +19,7 @@
 
 use super::deps;
 use super::digest::Digest;
-use super::half::{drop_half, tables_with_half, HALF_COLUMN};
+use super::half::{drop_half_tables, tables_with_half, HALF_COLUMN};
 use super::pyjson;
 use super::schema;
 use super::store::{self, WriteRequest};
@@ -69,6 +69,9 @@ pub struct TsPayload {
     /// The tables this run rebuilt ENTIRELY, so their old rows go rather than the affected
     /// files'. node measures it; see its `Store.rollupTables`.
     pub whole: Vec<String>,
+    /// Whether this partial run stopped short of every hop - then a kept row's structures are asked too
+    /// (`reads::dangling`, `nested`), as node asked every row it held.
+    pub cut: bool,
     pub shas: Map<String, Value>,
     pub counters: Map<String, Value>,
     /// Rows HELD, for a fixture. A run never parses them into here: they are streamed past twice (`apply_streamed`),
@@ -349,12 +352,16 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
         let db = Connection::open(db_path)?;
         db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; BEGIN")?;
         unchanged::forget(&db, LANG)?;
-        drop_half(&db, LANG)?;
+        drop_half_tables(&db, LANG)?;
         db.execute_batch("COMMIT")?;
         receipt.phases.insert("drop the old rows".to_string(), dropping.elapsed().as_millis() as u64);
     }
 
-    let named = text_paths_of(root, Some(&Value::Array(digest.files.clone())));
+    let mut named = text_paths_of(root, Some(&Value::Array(digest.files.clone())));
+    // A PARTIAL RUN'S TEXTS ARE ITS FILES': `files` comes back whole, and every other text was deleted and written again.
+    if payload.partial && Connection::open(db_path)?.prepare("SELECT 1 FROM file_text LIMIT 1").and_then(|mut s| s.exists([])).unwrap_or(false) {
+        named.retain(|p| payload.affected.contains(p));
+    }
     // THE SECOND WALK, run by the store as it writes: each row past the digest, then into a batch of its table.
     let digest = std::cell::RefCell::new(digest);
     let feed = |sink: &mut dyn FnMut(&str, &[Value]) -> Result<()>| -> Result<()> {
@@ -394,7 +401,7 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
             let db = Connection::open(db_path)?;
             let deps: Map<String, Value> =
                 super::remember::stored_graph(&db).into_iter().map(|(target, dependents)| (target, Value::from(dependents))).collect();
-            if let Some((count, first)) = super::reads::dangling(&db, LANG, &payload.affected, &digest.borrow().ids, &deps)? {
+            if let Some((count, first)) = super::reads::dangling(&db, LANG, &payload.affected, &digest.borrow().ids, &deps, payload.cut)? {
                 bail!("{} would leave {count} reference(s) to rows it replaced, first {first}", super::reads::STOPPED_SHORT);
             }
         }
@@ -594,6 +601,8 @@ fn rewrites<'a>(ids: &'a [String], affected: &'a [String], whole: &'a BTreeSet<S
 fn styles(receipt: &mut TsReceipt, written: &mut BTreeMap<String, i64>, db_path: &Path, root: &str, workspace: &Path) -> Result<()> {
     let started = std::time::Instant::now();
     written.extend(crate::cssmap::store(db_path, root, workspace, LANG, &mut receipt.notes)?);
+    // THE TALLY OF EVERY ROW, as the write that counts every table states it - over the stylesheets' new counts.
+    super::meta::put_moved(&Connection::open(db_path)?, "rows", &written.values().filter(|n| **n > 0).sum::<i64>().to_string())?;
     receipt.phases.insert("read the stylesheets".to_string(), started.elapsed().as_millis() as u64);
     Ok(())
 }

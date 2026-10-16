@@ -195,7 +195,7 @@ fn keys_by_member(store: &Store<'_>) -> IndexMap<String, IndexMap<String, Vec<Ve
 /// `keys_by_member`, over the reader `key_lists::with_reader` built - the one place its maps are made.
 fn member_keys(store: &Store<'_>, reader: &Returned<'_, '_>) -> IndexMap<String, IndexMap<String, Vec<Vec<String>>>> {
     let keys = reader.keys;
-    let branches = Branches::new(store);
+    let branches = store.shared("branches", Branches::new);
     let returns = store.table("returns");
     let assignments = store.table("assignments");
     let mut owner: IndexMap<String, Option<String>> = IndexMap::new();
@@ -307,7 +307,9 @@ fn member_keys(store: &Store<'_>, reader: &Returned<'_, '_>) -> IndexMap<String,
 /// build to print, because a chain that silently stops matching looks exactly like a
 /// frontend that stopped binding fields.
 pub fn field_sites(store: &Store<'_>) -> (Vec<FieldSite>, Stats) {
+    let step = crate::trace::stage("field sites: keys by member");
     let by_member = keys_by_member(store);
+    drop(step);
     let mut out = Vec::new();
     let mut stats = Stats { fields: by_member.len(), nodes: 0, sites: 0 };
     if by_member.is_empty() {
@@ -316,6 +318,7 @@ pub fn field_sites(store: &Store<'_>) -> (Vec<FieldSite>, Stats) {
         return (out, stats);
     }
 
+    let step = crate::trace::stage("field sites: template reads");
     let nodes = store.table("template_nodes");
     let node_by_id: std::collections::HashMap<String, &Row> = nodes
         .iter()
@@ -358,7 +361,11 @@ pub fn field_sites(store: &Store<'_>) -> (Vec<FieldSite>, Stats) {
             stats.nodes += 1;
         }
     }
+    drop(step);
+    let step = crate::trace::stage("field sites: methods");
     add_methods(store, &mut out, &mut stats);
+    drop(step);
+    let _step = crate::trace::stage("field sites: loops");
     add_loops(store, &mut out, &mut stats);
     (out, stats)
 }

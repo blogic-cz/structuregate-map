@@ -145,10 +145,19 @@ pub fn extra_restrictions(
     store: &Store<'_>,
     idx: &EnumIndex,
 ) -> (IndexMap<String, Vec<Value>>, IndexMap<String, Vec<Value>>) {
+    let step = crate::trace::stage("restrictions: member enums");
     let mem = member_enums(store, idx);
+    drop(step);
+    let step = crate::trace::stage("restrictions: configs");
     let (cfg, per_loop, _) = gate_config::config_restrictions_all(store, &mem, idx);
+    drop(step);
+    let step = crate::trace::stage("restrictions: switches");
     let (sw, _) = gate_switch::switch_restrictions(store, &mem, idx);
+    drop(step);
+    let step = crate::trace::stage("restrictions: directives");
     let (dir, _) = gate_directives::directive_restrictions(store, &mem, idx);
+    drop(step);
+    let _step = crate::trace::stage("restrictions: guards");
     let guards = super::gate_guards::guard_restrictions(store, &mem, idx);
     let mut extra = cfg;
     for (gate, rows) in sw.into_iter().chain(dir).chain(guards) {
@@ -171,7 +180,9 @@ pub fn build_closure(
 ) -> (Closure, Derived) {
     let stage = crate::trace::stage("closure: branches");
     let step = crate::trace::stage("branches: index");
-    let branches = Branches::new(store);
+    // BUILT ONCE FOR EVERY PASS THAT ASKS (`Store::shared`): six passes made their own, each over every row.
+    let shared_branches = store.shared("branches", Branches::new);
+    let branches: &Branches = &shared_branches;
     let idx0 = enum_index(store);
     drop(step);
     let step = crate::trace::stage("branches: edges");
@@ -185,10 +196,18 @@ pub fn build_closure(
     let gf = gate_features_with(store, checks, enum_name, &conds, note);
     drop(stage);
     let stage = crate::trace::stage("closure: routes");
+    let step = crate::trace::stage("routes: literal gates");
     let lit_gates = literal_gates(store, &gf.ternary_writes);
+    drop(step);
+    let step = crate::trace::stage("routes: field sites");
     let (fields, _) = field_sites(store);
+    drop(step);
+    let step = crate::trace::stage("routes: key routes");
     let routes = key_routes(store, &lit_gates, &fields);
+    drop(step);
+    let step = crate::trace::stage("routes: locales");
     let locales = locale_index(store);
+    drop(step);
 
     // Paths per COMPONENT, computed once for every component any key reaches, then shared by
     // all its keys. Summed over the keyed render sites the paths come to several times as many as
@@ -205,18 +224,29 @@ pub fn build_closure(
     drop(stage);
     let stage = crate::trace::stage("closure: gate_values");
 
+    // EVERY STEP A SPAN: most of this stage was in none of its children.
+    let step = crate::trace::stage("gate_values: write gate_features");
     let gf_rows = write_gate_features(store, &gf.map);
+    drop(step);
+    let step = crate::trace::stage("gate_values: config restrictions");
     let (extra, per_loop) = extra_restrictions(store, &idx0);
+    drop(step);
     // A FLAG THE PARENTS BIND DIFFERENTLY IS ONE CONDITION PER RENDER EDGE (`key_bound`).
+    let step = crate::trace::stage("gate_values: bound flags");
     let bound = bound_conds(store);
+    drop(step);
     let mut conds = conds;
     conds.extend(bound.conds.clone());
     // A CALLEE'S BRANCH CARRIED THROUGH A CALL, its parameters read as the caller's arguments (`key_args`).
+    let step = crate::trace::stage("gate_values: carried arguments");
     let carried = routes.values().flat_map(|h| h.sites.values().flatten().flatten());
     let (arg_found, arg_params) = super::key_args::arg_conds(store, &branches, carried, &idx0);
+    drop(step);
     conds.extend(arg_found);
     let (gv, idx) = gate_values_with(store, &extra, &conds);
+    let step = crate::trace::stage("gate_values: write gate_values");
     let gv_rows = write_gate_values(store, &gv.map, &idx);
+    drop(step);
     // THE FOLDS READ GATES AND BRANCHES ALIKE; only the published tables are gates alone.
     let mut feature_map = gf.map.clone();
     feature_map.extend(gf.conds.iter().map(|(id, f)| (id.clone(), (None, f.clone()))));
@@ -256,7 +286,11 @@ pub fn build_closure(
     // every tree decoded on the way, were held to the end and were most of the closure's peak.
     store.release();
     let scopes = Scopes::new(store);
-    for (key, loc) in &locales {
+    // EVERY KEY ON EVERY CORE: a key's row is folded from what the passes above derived and nothing else, so the
+    // keys are folded apart and written in the locales' order - the order the rows were always written in.
+    use rayon::prelude::*;
+    let keyed: Vec<_> = locales.iter().collect();
+    let folded: Vec<(String, Option<String>, Vec<(String, Value)>)> = keyed.par_iter().map(|&(key, loc)| {
         let hit = routes.get(key);
         // The map publishes its OWN `referenced` flag over the whole source, counted by an
         // exact literal join. A key it calls referenced that none of the routes located is
@@ -269,11 +303,9 @@ pub fn build_closure(
             None if loc.referenced > 0 => "referenced".to_string(),
             None => "none".to_string(),
         };
-        *counts.entry(route.clone()).or_default() += 1;
 
         let (tr, tr_file) = if route == "none" {
             let (how, file) = trace.of(key);
-            *traces.entry(how.name().to_string()).or_default() += 1;
             (Some(how.name().to_string()), file)
         } else {
             (None, None)
@@ -287,8 +319,9 @@ pub fn build_closure(
         let Ways { sets, path_sets, renames, aliases, roots, mods, rts, depth, cut, on } = ways;
         let mut on = on;
 
-        let (always, always_br) = split_branches(fold(&sets).0, &branches);
-        let (maybe, maybe_br) = split_branches(fold(&sets).1, &branches);
+        let (always_ids, maybe_ids) = fold(&sets);
+        let (always, always_br) = split_branches(always_ids, &branches);
+        let (maybe, maybe_br) = split_branches(maybe_ids, &branches);
         let (path_always, _) = fold(&path_sets);
         let feature_sets: Vec<IndexSet<String>> =
             sets.iter().map(|s| features_of(s, &feature_map)).collect();
@@ -310,39 +343,51 @@ pub fn build_closure(
         relabel(&mut values, &labels);
         relabel(&mut unreadable, &labels);
 
-        let mut row = Row::new();
-        row.insert("key".into(), Value::String(key.clone()));
-        row.insert("locales".into(), Value::from(loc.list.clone()));
-        row.insert("route".into(), Value::String(route));
-        row.insert("n_refs".into(), Value::from(hit.map(|h| h.refs as i64).unwrap_or(0)));
-        row.insert("components".into(), Value::from(comps.clone()));
-        row.insert("n_paths".into(), Value::from(sets.len() as i64));
+        let mut row: Vec<(String, Value)> = Vec::with_capacity(24);
+        let mut put = |k: &str, v: Value| row.push((k.to_string(), v));
+        put("key", Value::String(key.clone()));
+        put("locales", Value::from(loc.list.clone()));
+        put("route", Value::String(route.clone()));
+        put("n_refs", Value::from(hit.map(|h| h.refs as i64).unwrap_or(0)));
+        put("components", Value::from(comps.clone()));
+        put("n_paths", Value::from(sets.len() as i64));
         // EACH WAY NAMED (#53): its `render_path.id` and what it adds to that row's gates/branches, sorted like every list here.
         debug_assert_eq!(on.len(), sets.len());
         on.sort();
-        row.insert("paths".into(), Value::Array(on.into_iter()
+        put("paths", Value::Array(on.into_iter()
             .map(|(id, own)| serde_json::json!({ "path": id, "own": own })).collect()));
-        row.insert("min_depth".into(), depth.map(Value::from).unwrap_or(Value::Null));
-        row.insert("roots".into(), Value::from(sorted(roots)));
-        row.insert("modules".into(), Value::from(sorted(mods)));
-        row.insert("routes".into(), Value::from(sorted(rts)));
-        row.insert("always_gates".into(), Value::from(always));
-        row.insert("maybe_gates".into(), Value::from(maybe));
-        row.insert("path_always_gates".into(), Value::from(path_always));
-        row.insert("always_branches".into(), Value::from(always_br));
+        put("min_depth", depth.map(Value::from).unwrap_or(Value::Null));
+        put("roots", Value::from(sorted(roots)));
+        put("modules", Value::from(sorted(mods)));
+        put("routes", Value::from(sorted(rts)));
+        put("always_gates", Value::from(always));
+        put("maybe_gates", Value::from(maybe));
+        put("path_always_gates", Value::from(path_always));
+        put("always_branches", Value::from(always_br));
         // THE SIDE OF EACH, spelled out: the id alone says it only as a `!` prefix on a ternary's
         // `else` arm, and a branch's sense is a lookup away in another table.
         let senses: serde_json::Map<String, Value> =
             maybe_br.iter().map(|id| (id.clone(), Value::from(branches.sense(id)))).collect();
-        row.insert("maybe_branches".into(), Value::from(maybe_br));
-        row.insert("branch_senses".into(), Value::Object(senses));
-        row.insert("always_features".into(), Value::from(always_f));
-        row.insert("maybe_features".into(), Value::from(maybe_f));
-        row.insert("always_values".into(), Value::Array(values));
-        row.insert("unreadable_values".into(), Value::Array(unreadable));
-        row.insert("trace".into(), tr.map(Value::String).unwrap_or(Value::Null));
-        row.insert("trace_file".into(), tr_file.map(Value::String).unwrap_or(Value::Null));
-        row.insert("truncated".into(), Value::from(i64::from(cut)));
+        put("maybe_branches", Value::from(maybe_br));
+        put("branch_senses", Value::Object(senses));
+        put("always_features", Value::from(always_f));
+        put("maybe_features", Value::from(maybe_f));
+        put("always_values", Value::Array(values));
+        put("unreadable_values", Value::Array(unreadable));
+        put("trace", tr.clone().map(Value::String).unwrap_or(Value::Null));
+        put("trace_file", tr_file.map(Value::String).unwrap_or(Value::Null));
+        put("truncated", Value::from(i64::from(cut)));
+        (route, tr, row)
+    }).collect();
+    for (route, how, cells) in folded {
+        *counts.entry(route).or_default() += 1;
+        if let Some(how) = how {
+            *traces.entry(how).or_default() += 1;
+        }
+        let mut row = Row::new();
+        for (k, v) in cells {
+            row.insert(k, v);
+        }
         store.emit("key_reach", row);
     }
 

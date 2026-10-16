@@ -23,7 +23,7 @@
 //! cap would hide most of its paths. TWO TREES, NOT ONE NUMBER. Dropping the cap is a deliberate divergence from the first version.
 //! `truncated` stays as a column because a consumer filters on it, and is always 0.
 
-use std::rc::Rc;
+use std::sync::Arc;
 use std::collections::HashMap;
 use super::key_branches::Branches;
 use super::store::{Row, Store};
@@ -61,12 +61,12 @@ fn string_list(row: &Row, field: &str) -> Vec<String> {
 /// One site that renders a component, carrying the gate chain already on it.
 #[derive(Clone, Debug)]
 pub struct Edge {
-    pub id: Rc<str>,
-    pub parent: Rc<str>,
-    pub gates: Vec<Rc<str>>,
+    pub id: Arc<str>,
+    pub parent: Arc<str>,
+    pub gates: Vec<Arc<str>>,
     /// The branches and cases a factory returned the child under (`key_returned`): conditions,
     /// never `gates` rows, so they ride apart.
-    pub branches: Vec<Rc<str>>,
+    pub branches: Vec<Arc<str>>,
 }
 
 /// WHERE AN EDGE IS WRITTEN, in the tree's own terms: a path and a position, never a row id.
@@ -124,22 +124,22 @@ fn edge_sites(store: &Store<'_>) -> impl Fn(&Row) -> Site + use<> {
 /// Interning happens HERE, once, while the DAG is built. The walk itself never looks an id up.
 #[derive(Default)]
 struct Ids {
-    held: std::collections::HashMap<Rc<str>, Rc<str>>,
+    held: std::collections::HashMap<Arc<str>, Arc<str>>,
 }
 
 impl Ids {
-    fn of(&mut self, name: &str) -> Rc<str> {
+    fn of(&mut self, name: &str) -> Arc<str> {
         if let Some(held) = self.held.get(name) {
-            return Rc::clone(held);
+            return Arc::clone(held);
         }
-        let held: Rc<str> = Rc::from(name);
-        self.held.insert(Rc::clone(&held), Rc::clone(&held));
+        let held: Arc<str> = Arc::from(name);
+        self.held.insert(Arc::clone(&held), Arc::clone(&held));
         held
     }
 }
 
 /// The render DAG: child -> the sites that render it.
-pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Rc<str>, Vec<Edge>> {
+pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Arc<str>, Vec<Edge>> {
     let returned = super::key_returned::returned_under(store, branches);
     // A RENDER CREATED IN CODE runs under its creating call's chain, and under what every call of a private method
     // holding it holds (#56, `key_called`).
@@ -172,11 +172,11 @@ pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Rc<str>, V
     ordered.sort_by_key(|r| site(r));
 
     let mut ids = Ids::default();
-    let mut edges: IndexMap<Rc<str>, Vec<Edge>> = IndexMap::new();
+    let mut edges: IndexMap<Arc<str>, Vec<Edge>> = IndexMap::new();
     for r in ordered {
         let Some(parent) = id_of(r, "from_component") else { continue };
         let Some(to) = id_of(r, "to") else { continue };
-        let gates: Vec<Rc<str>> = id_of(r, "node")
+        let gates: Vec<Arc<str>> = id_of(r, "node")
             .and_then(|n| chains.get(&n).cloned())
             .unwrap_or_default()
             .iter()
@@ -184,7 +184,7 @@ pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Rc<str>, V
             .collect();
         let to = ids.of(&to);
         let id = id_of(r, "id").unwrap_or_default();
-        let mut branches: Vec<Rc<str>> = Vec::new();
+        let mut branches: Vec<Arc<str>> = Vec::new();
         for b in returned.get(&id).into_iter().chain(called.get(&id)).flatten() {
             let b = ids.of(b);
             if !branches.contains(&b) {
@@ -199,10 +199,10 @@ pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Rc<str>, V
 /// One simple path from a component up to one nothing renders.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderPath {
-    pub hops: Vec<Rc<str>>,
-    pub edges: Vec<Rc<str>>,
-    pub gates: Vec<Rc<str>>,
-    pub branches: Vec<Rc<str>>,
+    pub hops: Vec<Arc<str>>,
+    pub edges: Vec<Arc<str>>,
+    pub gates: Vec<Arc<str>>,
+    pub branches: Vec<Arc<str>>,
 }
 
 /// THE WALKS ALREADY DONE, shared by every component of one run.
@@ -247,7 +247,7 @@ const MEMO_PATHS: usize = 2_000_000;
 
 #[derive(Default)]
 pub struct Memo {
-    held: HashMap<Rc<str>, Rc<Vec<RenderPath>>>,
+    held: HashMap<Arc<str>, Arc<Vec<RenderPath>>>,
     /// Paths remembered so far, against `MEMO_PATHS`.
     spent: usize,
 }
@@ -273,18 +273,18 @@ impl Memo {
 /// Cycles are cut on the path set — a self-rendering component is ordinary here (several
 /// percent of a large tree), and the cycle guard rather than any depth budget is what terminates the walk.
 pub fn paths_to_memo(
-    edges: &IndexMap<Rc<str>, Vec<Edge>>,
+    edges: &IndexMap<Arc<str>, Vec<Edge>>,
     comp: &str,
     memo: &mut Memo,
 ) -> (Vec<RenderPath>, bool) {
     // The starting component may not be a child of anything, so it is not always a key of the
     // DAG; its handle is taken from there when it is and made once when it is not.
-    let start: Rc<str> = match edges.get_key_value(comp) {
-        Some((held, _)) => Rc::clone(held),
-        None => Rc::from(comp),
+    let start: Arc<str> = match edges.get_key_value(comp) {
+        Some((held, _)) => Arc::clone(held),
+        None => Arc::from(comp),
     };
     let mut seen = IndexSet::new();
-    seen.insert(Rc::clone(&start));
+    seen.insert(Arc::clone(&start));
     let (paths, _) = walk(edges, &start, &mut seen, memo);
     ((*paths).clone(), false)
 }
@@ -294,20 +294,20 @@ pub fn paths_to_memo(
 /// THE SECOND HALF IS WHAT MAKES THE MEMO SOUND. A walk that cut a cycle produced an answer
 /// true only for the path it was on, so it is never cached.
 fn walk(
-    edges: &IndexMap<Rc<str>, Vec<Edge>>,
-    current: &Rc<str>,
-    seen: &mut IndexSet<Rc<str>>,
+    edges: &IndexMap<Arc<str>, Vec<Edge>>,
+    current: &Arc<str>,
+    seen: &mut IndexSet<Arc<str>>,
     memo: &mut Memo,
-) -> (Rc<Vec<RenderPath>>, bool) {
+) -> (Arc<Vec<RenderPath>>, bool) {
     // Only walks that cut no cycle are in here, and those cannot be wrong for this one - see
     // the note on `Memo`.
     if let Some(cached) = memo.held.get(&**current) {
-        return (Rc::clone(cached), false);
+        return (Arc::clone(cached), false);
     }
 
     let root = || {
-        Rc::new(vec![RenderPath {
-            hops: vec![Rc::clone(current)],
+        Arc::new(vec![RenderPath {
+            hops: vec![Arc::clone(current)],
             edges: Vec::new(),
             gates: Vec::new(),
             branches: Vec::new(),
@@ -324,14 +324,14 @@ fn walk(
             pruned = true;
             continue;
         }
-        seen.insert(Rc::clone(&u.parent));
+        seen.insert(Arc::clone(&u.parent));
         let (sub, sub_pruned) = walk(edges, &u.parent, seen, memo);
         pruned = pruned || sub_pruned;
         for p in sub.iter() {
             let mut hops = p.hops.clone();
-            hops.push(Rc::clone(current));
+            hops.push(Arc::clone(current));
             let mut ids = p.edges.clone();
-            ids.push(Rc::clone(&u.id));
+            ids.push(Arc::clone(&u.id));
             let mut gates = p.gates.clone();
             gates.extend(u.gates.iter().cloned());
             let mut branches = p.branches.clone();
@@ -341,7 +341,7 @@ fn walk(
         seen.shift_remove(&u.parent);
     }
     // A component whose every parent was already on this path is a root FOR THIS WALK.
-    let shared = if acc.is_empty() { root() } else { Rc::new(acc) };
+    let shared = if acc.is_empty() { root() } else { Arc::new(acc) };
 
     // A WALK THAT CUT A CYCLE IS NEVER REMEMBERED. Its answer is true only for the path it was
     // found on, and handing it to another walk would quietly shorten that walk's path set.
@@ -349,7 +349,7 @@ fn walk(
     // NOR IS ONE THAT WOULD NOT FIT. Forgetting costs time; not fitting costs the machine.
     if !pruned && memo.spent + shared.len() <= MEMO_PATHS {
         memo.spent += shared.len();
-        memo.held.insert(Rc::clone(current), Rc::clone(&shared));
+        memo.held.insert(Arc::clone(current), Arc::clone(&shared));
     }
     (shared, pruned)
 }
@@ -430,7 +430,7 @@ pub struct Paths {
 /// Emit `render_path` for every component a key reaches.
 pub fn render_paths(
     store: &mut Store<'_>,
-    edges: &IndexMap<Rc<str>, Vec<Edge>>,
+    edges: &IndexMap<Arc<str>, Vec<Edge>>,
     needed: &IndexSet<String>,
 ) -> Paths {
     let mut ordered: Vec<String> = needed.iter().cloned().collect();
@@ -448,7 +448,7 @@ pub fn render_paths(
             row.insert("id".into(), Value::from(rows as i64 + 1));
             row.insert("component".into(), Value::String(comp.clone()));
             row.insert("path_index".into(), Value::from(i as i64));
-            let text = |ids: &[Rc<str>]| -> Value {
+            let text = |ids: &[Arc<str>]| -> Value {
                 Value::from(ids.iter().map(|i| i.to_string()).collect::<Vec<String>>())
             };
             row.insert("root".into(), Value::String(p.hops[0].to_string()));

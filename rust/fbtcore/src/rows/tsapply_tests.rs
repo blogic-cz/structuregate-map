@@ -70,6 +70,66 @@ fn the_source_is_read_from_the_workspace_below_the_root() {
     assert_eq!(held, vec!["a.ts", "b.ts"]);
 }
 
+#[test]
+fn a_partial_run_writes_again_only_the_texts_of_the_files_it_read_again() {
+    // `files` COMES BACK WHOLE on a partial run, and every file's text was deleted and read again from the disk.
+    let db = tmp("texts");
+    let root = std::env::temp_dir().join(format!("fbt-tsapply-texts-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("web")).unwrap();
+    std::fs::write(root.join("web").join("a.ts"), "export const a = 1;\n").unwrap();
+    std::fs::write(root.join("web").join("b.ts"), "export const b = 2;\n").unwrap();
+    let files = json!([
+        {"id": "f:1", "path": "a.ts", "ext": ".ts", "owner_file": "f:1"},
+        {"id": "f:2", "path": "b.ts", "ext": ".ts", "owner_file": "f:2"}
+    ]);
+    let mut full = payload(false, files.clone());
+    full.fe = Some("web".to_string());
+    apply(&db, &root.to_string_lossy(), full).unwrap();
+    // b.ts moves on the disk but is not among the files this run read: its text is the one stored.
+    std::fs::write(root.join("web").join("a.ts"), "export const a = 3;\n").unwrap();
+    std::fs::write(root.join("web").join("b.ts"), "export const b = 4;\n").unwrap();
+    let mut partial = payload(true, files);
+    partial.fe = Some("web".to_string());
+    apply(&db, &root.to_string_lossy(), partial).unwrap();
+    let held: Vec<(String, String)> = {
+        let db = Connection::open(&db).unwrap();
+        let mut stmt = db.prepare("SELECT path, content FROM file_text ORDER BY path").unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
+    };
+    let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(held, vec![("a.ts".to_string(), "export const a = 3;\n".to_string()), ("b.ts".to_string(), "export const b = 2;\n".to_string())]);
+}
+
+#[test]
+fn the_tally_of_rows_counts_the_stylesheets_as_they_were_read_again() {
+    // THE STYLESHEETS COUNT ONLY THEIR OWN TABLES, after a write that counted every table before they moved: the
+    // tally in `_meta` is still every table's final count, as when they counted the whole database.
+    let db = tmp("tally");
+    let root = std::env::temp_dir().join(format!("fbt-tsapply-tally-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("web")).unwrap();
+    std::fs::write(root.join("web").join("s.scss"), ".a { display: none; }\n").unwrap();
+    let files = json!([{"id": "f:1", "path": "a.ts", "ext": ".ts"}, {"id": "f:2", "path": "s.scss", "ext": "scss"}]);
+    let mut full = payload(false, files);
+    full.fe = Some("web".to_string());
+    apply(&db, &root.to_string_lossy(), full).unwrap();
+    let every = || -> (i64, BTreeMap<String, i64>) {
+        let db = Connection::open(&db).unwrap();
+        let counts: BTreeMap<String, i64> = schema::listable_tables(&db).unwrap().into_iter().map(|t| { let n = schema::count_of(&db, &t); (t, n) }).collect();
+        (counts.values().sum(), counts)
+    };
+    // The counts as the write before the stylesheets left them, and then two more rules.
+    let (_, mut written) = every();
+    std::fs::write(root.join("web").join("s.scss"), ".a { display: none; }\n.b { color: red; }\n.c { color: blue; }\n").unwrap();
+    styles(&mut TsReceipt::default(), &mut written, &db, &root.to_string_lossy(), &root.join("web")).unwrap();
+    let _ = std::fs::remove_dir_all(&root);
+    let (total, _) = every();
+    assert_eq!(written.get("style_rules"), Some(&3));
+    let tally: i64 = crate::rows::meta::get(&Connection::open(&db).unwrap(), "rows").unwrap().parse().unwrap();
+    assert_eq!(tally, total, "the tally against a count of every table");
+}
+
 /// LAB HARNESS (not committed): SG_LAB_DB=<map> SG_LAB_OUT=<dir> SG_LAB_WS=<workspace> - the closure and its
 /// partial replace + write over a copy of a stored map.
 #[test]

@@ -50,35 +50,17 @@ import { discoverProjects, findWorkspaceRoot } from './TsProjects.mjs';
 import { loadToolchain, resolveToolchain, versionMismatch } from './TsResolve.mjs';
 import { Diagnostics, Store } from './TsStore.mjs';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { emit, parseArgs, readCarry, readJson, writePayload } from './TsRunIo.mjs';
+import { awaitCarry, emit, parseArgs, readCarry, readJson, revisionOf, writePayload } from './TsRunIo.mjs';
 import { markReachable, runTemplatePass, walkProjects } from './TsWalk.mjs';
-import { forgetParses } from './TsProgram.mjs';
+import { forgetParses, prewarm } from './TsProgram.mjs';
+import { stubSent, uncarriedRead, UNREAD_WHEN_CARRIED } from './TsCarried.mjs';
 
-/**
- * The commit the mapped tree is at, or `{ available: false }`.
- *
- * NO GIT IS A SUPPORTED STATE, not an error: this exe is deployed into trees that are checkouts and into
- * ones that are not, and a map that refused to be written without a repository would be useless in half of
- * them. Every field is read with one call each, and a call that fails simply leaves the record absent.
- */
-function revisionOf(tree) {
-  const git = (...args) => execFileSync('git', ['-C', tree, ...args], {
-    encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
-  }).trim();
-  try {
-    const commit = git('rev-parse', 'HEAD');
-    return {
-      available: true,
-      commit,
-      short: git('rev-parse', '--short=11', 'HEAD'),
-      branch: git('rev-parse', '--abbrev-ref', 'HEAD'),
-      committed_at: git('show', '-s', '--format=%cI', 'HEAD'),
-      dirty: git('status', '--porcelain').length > 0,
-    };
-  } catch {
-    return { available: false };
-  }
+/** A RUN THAT READ A STRUCTURE IT WAS HANDED BACK WITHOUT is asked again with every cell carried - see `TsCarried.mjs`. */
+function uncarried(store, whole = []) {
+  const why = uncarriedRead() ?? stubSent(store, whole);
+  if (why === null) return false;
+  emit('MAP-UNCARRIED', why);
+  return true;
 }
 
 async function main() {
@@ -314,6 +296,8 @@ async function main() {
       full: planned === null,
       changed: planned ? planned.changed : [],
       affected: planned ? planned.affected : [],
+      // WHAT THE CARRY MAY HAND BACK AS A STUB - the structures no pass of a partial run looks inside.
+      uncarried: UNREAD_WHEN_CARRIED,
       hashes: Object.fromEntries(now),
       why,
     }), 'utf8');
@@ -344,6 +328,13 @@ async function main() {
   const store = new Store(partial ? (state.counters ?? {}) : (state.alone ? {} : (state.counters ?? {})), state.floor ?? 0);
   const affected = partial ? new Set(planned.affected) : null;
   let repointLater = null;
+  // THE PROGRAMS BEFORE THE ROWS: a partial run builds them while rust is still writing what it hands back (`prewarm`).
+  const projects = discoverProjects(ts, fe);
+  if (partial && args.carryLate) {
+    prewarm(ts, projects, found.nodeModules);
+    if (!awaitCarry(args.carry)) { emit('MAP-NOCARRY', `${args.carry} was not written`); return 0; }
+  }
+  const diag = new Diagnostics(() => store.currentFile);
   if (partial) {
     const carried = readCarry(args.carry);
     if (!carried || typeof carried.tables !== 'object' || carried.tables === null) {
@@ -401,8 +392,6 @@ async function main() {
         + 'so nothing outside those files has to be re-pointed');
     }
   }
-  const diag = new Diagnostics(() => store.currentFile);
-  const projects = discoverProjects(ts, fe);
   if (!projects.length) {
     emit('MAP-FATAL', `no project was discovered in ${fe} - neither project.json, nor angular.json, `
       + 'nor a root tsconfig naming its own sources');
@@ -423,6 +412,7 @@ async function main() {
   forgetParses();
   // CARRIED-THEN-PRODUCED IS NOT A FULL RUN'S ORDER, and every pass below reads its tables in order (see `sending`).
   if (partial) store.inMintOrder();
+  if (uncarried(store)) return 0;
   if (rereads) {
     const late = cutShort(store, rereads, null, true);
     if (late) { emit('MAP-RETRY', late); return 0; }
@@ -745,6 +735,7 @@ async function main() {
 
   if (partial) {
     const touched = store.verifyUntouched(whole);
+    if (uncarried(store, whole)) return 0;
     // A RUN THAT STOPPED SHORT OF EVERY HOP and broke a row it kept is asked again over every hop.
     const stop = rereads ? cutShort(store, rereads, touched, false) : null;
     if (stop) { emit('MAP-RETRY', stop); return 0; }
@@ -797,6 +788,8 @@ async function main() {
     partial,
     affected: partial ? [...affected].sort() : [],
     whole,
+    // STOPPED SHORT OF EVERY HOP: rust asks every kept row's structures for an id that is gone (`reads::dangling`).
+    cut: Boolean(rereads),
     first: true,
     final: true,
     fe: relativeTo(path.resolve(args.root), fe),
@@ -824,6 +817,8 @@ async function main() {
 }
 
 main().then((code) => process.exit(code), (error) => {
+  // A STUB READ THAT THREW is no failure of the run: it is asked again with every cell carried.
+  if (uncarriedRead() !== null) { emit('MAP-UNCARRIED', uncarriedRead()); process.exit(0); }
   emit('MAP-FATAL', `${error && error.message ? error.message : error}`);
   process.exit(1);
 });

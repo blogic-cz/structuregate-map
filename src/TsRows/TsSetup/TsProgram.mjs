@@ -39,7 +39,12 @@ function remembered(host, name) {
 // because binding reads it); a compiler without that list shares only between identical option sets.
 const PARSED = new Map();
 /** Every shared parse released - once the walk is done, no program asks again. */
-export const forgetParses = () => PARSED.clear();
+export const forgetParses = () => { PARSED.clear(); RESOLVED.clear(); };
+
+// ONE MODULE RESOLUTION CACHE PER CONFIG, as `tsc` keeps one per program: a config built ahead (`prewarm`) and then by
+// the walk resolves its imports once. A cache holds what `resolveModuleName` answers - the host is still asked through
+// `resolveModuleNames` for every import, so every note is made as before - and is asked with that config's options only.
+const RESOLVED = new Map();
 function shareSourceFiles(ts, host, options) {
   const parse = host.getSourceFile.bind(host);
   const affecting = Array.isArray(ts.sourceFileAffectingCompilerOptions)
@@ -58,7 +63,32 @@ function shareSourceFiles(ts, host, options) {
   };
 }
 
-export function createProgram(ts, tsconfigPath, nodeModules, diag, noted) {
+/**
+ * EVERY PROJECT'S PROGRAM BUILT AHEAD OF THE WALK, without a checker - while a partial run waits for the rows it is
+ * handed back (`rows/partial/carry.rs` writes them as node starts). The parses land in the shared set the walk's own
+ * programs take theirs from, in the order the walk would have made them, and no program is kept.
+ *
+ * AND THEY GO BACK AS THEY WERE PARSED: a compiler before 5.3 keeps what a program resolved a file's imports to ON the
+ * parse (`resolvedModules`), and a later program holding a file that declares ambient modules takes that answer without
+ * asking the host - so the walk's programs resolved, and noted, less than a run that built nothing ahead. Forgotten,
+ * the walk resolves every import exactly as it would have. No checker, no note: a config that cannot be read is read
+ * again, and reported, by the walk.
+ */
+export function prewarm(ts, projects, nodeModules) {
+  for (const project of projects) {
+    try {
+      const { program } = createProgram(ts, project.tsconfig, nodeModules, null, new Set(), false);
+      for (const sf of program.getSourceFiles()) {
+        sf.resolvedModules = undefined;
+        sf.resolvedTypeReferenceDirectiveNames = undefined;
+      }
+    } catch {
+      // the walk builds it again, and says why it could not
+    }
+  }
+}
+
+export function createProgram(ts, tsconfigPath, nodeModules, diag, noted, checked = true) {
   const configHost = {
     ...ts.sys,
     onUnRecoverableConfigFileDiagnostic: (d) => {
@@ -83,7 +113,10 @@ export function createProgram(ts, tsconfigPath, nodeModules, diag, noted) {
   // THE COMPILER'S OWN RESOLUTION CACHE, as `tsc` passes it: without one every import of every file is resolved
   // from the disk again. Used only when asked with this program's own options - a redirect through a project
   // reference resolves as before.
-  const cache = ts.createModuleResolutionCache(host.getCurrentDirectory(), host.getCanonicalFileName, options);
+  if (!RESOLVED.has(tsconfigPath)) {
+    RESOLVED.set(tsconfigPath, ts.createModuleResolutionCache(host.getCurrentDirectory(), host.getCanonicalFileName, options));
+  }
+  const cache = RESOLVED.get(tsconfigPath);
   const nmDummy = path.join(nodeModules, '__resolve__.ts');
   // Resolve against the real containing file first; for a bare specifier that fails, retry as if the
   // importer lived next to the node_modules that is available.
@@ -109,7 +142,7 @@ export function createProgram(ts, tsconfigPath, nodeModules, diag, noted) {
   });
 
   const program = ts.createProgram({ rootNames: parsed.fileNames, options, host });
-  return { program, checker: program.getTypeChecker(), options, rootNames: parsed.fileNames };
+  return { program, checker: checked ? program.getTypeChecker() : null, options, rootNames: parsed.fileNames };
 }
 
 /**

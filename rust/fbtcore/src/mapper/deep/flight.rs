@@ -88,14 +88,16 @@ pub(super) fn run(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: 
             let timed = Instant::now();
             let mut own = Collector::new();
             let mut carried = None;
-            let planned = ts::plan(&mut own, deep, &parse, root, db, &work, false, &mut carried);
+            let planned = ts::plan(&mut own, deep, &parse, root, db, &work, false);
             let absent = planned == Planned::Absent;
-            let parsed = (planned == Planned::Full || planned == Planned::Partial).then(|| {
-                let carry = (planned == Planned::Partial).then_some(&work.carry);
-                ts::parse_tree(&mut own, deep, &parse, root, db, &work, carry, false, &|| {
-                    let _ = read.send(());
-                })
-            });
+            let told = || {
+                let _ = read.send(());
+            };
+            let parsed = match planned {
+                Planned::Partial => Some(ts::carried_parse(&mut own, deep, &parse, root, db, &work, false, false, &told, &mut carried)),
+                Planned::Full => Some(ts::parse_tree(&mut own, deep, &parse, root, db, &work, None, false, &told, false)),
+                _ => None,
+            };
             drop(read);
             Landed { into: own, parsed, absent, carried, ms: timed.elapsed().as_millis() as u64 }
         });
@@ -118,17 +120,23 @@ pub(super) fn run(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: 
                 into.notes.push(format!(
                     "the typescript half parses again, in its turn: the halves beside it handed out more than {LANE} id(s) of `{prefix}`"));
                 work.clean();
-                absent = ts::launched(into, deep, db, root, &mut fe, &[false, true]);
+                absent = ts::launched(into, deep, db, root, &mut fe, &[false, true], false);
                 false
             }
             None => ts::store(into, db, root, &work.rows, landed.carried, &mut fe),
         },
         Some(Parsed::Retry) => true,
+        // A CELL IT WAS HANDED BACK WITHOUT, READ: in its turn, with every cell carried.
+        Some(Parsed::Uncarried) => {
+            work.clean();
+            absent = ts::launched(into, deep, db, root, &mut fe, &[false, true], true);
+            false
+        }
         _ => false,
     };
     work.clean();
     if again {
-        absent = ts::launched(into, deep, db, root, &mut fe, &[true]);
+        absent = ts::launched(into, deep, db, root, &mut fe, &[true], false);
     }
     let absence = ts::absence(&into.notes[notes..]);
     ts::settle(db, key, absent, fe, fe_kept, clean && into.errors.len() == errors, absence);
