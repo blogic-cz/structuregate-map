@@ -601,6 +601,8 @@ fn rewrites<'a>(ids: &'a [String], affected: &'a [String], whole: &'a BTreeSet<S
 fn styles(receipt: &mut TsReceipt, written: &mut BTreeMap<String, i64>, db_path: &Path, root: &str, workspace: &Path) -> Result<()> {
     let started = std::time::Instant::now();
     written.extend(crate::cssmap::store(db_path, root, workspace, LANG, &mut receipt.notes)?);
+    // THE TALLY OF EVERY ROW, as the write that counts every table states it - over the stylesheets' new counts.
+    super::meta::put_moved(&Connection::open(db_path)?, "rows", &written.values().filter(|n| **n > 0).sum::<i64>().to_string())?;
     receipt.phases.insert("read the stylesheets".to_string(), started.elapsed().as_millis() as u64);
     Ok(())
 }

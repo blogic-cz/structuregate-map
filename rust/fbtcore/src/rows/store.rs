@@ -339,12 +339,16 @@ impl Texts<'_> {
     }
 }
 
-fn search(db: &Connection, texts: &Texts<'_>) -> Result<i64> {
+fn search(db: &Connection, texts: &Texts<'_>, counts: bool) -> Result<i64> {
     if db
         .execute_batch("CREATE VIRTUAL TABLE IF NOT EXISTS file_text USING fts5(path, content)")
         .is_err()
     {
         return Ok(-1);
+    }
+    // NOTHING TO WRITE AND NOTHING TO COUNT: a count of `file_text` scans every document in it.
+    if !counts && texts.paths().next().is_none() {
+        return Ok(0);
     }
     // A TEXT BEING WRITTEN REPLACES THE ONE STORED. `file_text` is an FTS5 table with no key to
     // conflict on, and the half that replaces its rows WHOLE never reaches the per-file drop that
@@ -505,7 +509,7 @@ pub fn write(path: &Path, req: &WriteRequest<'_>) -> Result<Applied> {
     }
     lap("insert", &mut steps);
 
-    let found = search(&db, req.texts)?;
+    let found = search(&db, req.texts, req.counts)?;
     lap("file text", &mut steps);
 
     let mut written = BTreeMap::new();
