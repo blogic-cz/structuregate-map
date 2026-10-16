@@ -154,6 +154,22 @@ Test-Case 'a deep map keeps its LAST run''s trace beside its database, asked for
     Assert-Equal ([System.IO.File]::ReadAllText($last) -ceq $before) $true 'a query replaced the last run''s trace'
 }
 
+# THE BUILD IS EVERY FILE IT RUNS FROM: under `dotnet` the rust library is a file of its own, `libfbtcore.so` on linux,
+# and a stamp naming only `fbtcore.dll` kept a closure across a rust-only rebuild there - the deep map reads this stamp.
+Test-Case 'the build stamp names the rust library the run loaded, whatever the platform calls it' {
+    $gate = Get-GateInvocation
+    $dir = if ($gate.Lead.Count) { Split-Path -Parent $gate.Lead[0] } else { Split-Path -Parent $gate.File }
+    $native = @('fbtcore.dll', 'libfbtcore.so', 'libfbtcore.dylib') | Where-Object { Test-Path (Join-Path $dir $_) }
+    $tree = Use-Tree @{ 'a.cs' = (New-Code 3) }
+    $trace = Join-Path $tree 'trace.jsonl'
+    Assert-Exit (Invoke-TracedGate $trace @{} @('--root', $tree, '--no-gate-cache')) 0
+    $build = "$(Get-TraceAttribute @(Read-TraceRuns $trace)[0].Resource 'structuregate.build')"
+    Assert-Equal $build.Contains($dir) $true "the build stamp names where it runs from ($build)"
+    foreach ($library in $native) {
+        Assert-Equal $build.Contains((Join-Path $dir $library)) $true "the build stamp names $library ($build)"
+    }
+}
+
 Test-Case 'the deep C# half says per project where its compile time went: references, sources, razor, declarations' {
     $tree = Use-Tree @{
         'lib/Lib.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
