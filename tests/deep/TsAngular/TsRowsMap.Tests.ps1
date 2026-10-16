@@ -24,13 +24,15 @@ Test-Case 'tsrows: the map publishes its own join spec and id scheme' {
 }
 
 # A DECLARED JOIN IS AN INDEXED ONE (#70): the map is opened read-only, so a consumer cannot add the index, and
-# `WHERE calls.target_id = ?` scanned the table. Every join the spec names on a column this map has, and each closure
-# table's lookup column, leads an index.
-Test-Case 'tsrows: every join the spec declares, and key_reach.key, is indexed' {
+# `WHERE calls.target_id = ?` scanned the table. Every join the spec names on a column this map has, each column a
+# reader selects by (#72, #73), and every node table by `(role, parent)` (#71), leads an index.
+Test-Case 'tsrows: every join the spec declares, every lookup column and every node shape is indexed' {
     $tree = New-TsRowsWorkspace
     $made = New-TsRowsDb $tree
     $spec = Get-TsRowsMeta $made.Db 'spec:typescript'
-    $want = @($spec.joins.PSObject.Properties.Name) + 'key_reach.key' | ForEach-Object {
+    $lookups = 'key_reach.key', 'key_reach.route', 'render_path.component', 'gate_values.gate', 'gate_values.enum_name',
+        'gate_features.gate', 'template_nodes.depth', 'string_literals.context', 'translations.locale', 'calls.method'
+    $want = @($spec.joins.PSObject.Properties.Name) + $lookups | ForEach-Object {
         $tc = $_.Split('.', 2); "('$($tc[0])', '$($tc[1])')" }
     # `checked` says the case asked about real columns: a spec whose names matched nothing would pass vacuously.
     $sql = "WITH want(t, c) AS (VALUES $($want -join ', ')), " +
@@ -41,6 +43,16 @@ Test-Case 'tsrows: every join the spec declares, and key_reach.key, is indexed' 
     $r = Invoke-TsRowsQ $made.Db $sql
     Assert-Line $r 'checked enough'
     Assert-NoLine $r 'unindexed='
+    # Most lookups ARE asked: a fixture without their tables would let them pass unseen.
+    $asked = ($lookups | ForEach-Object { $tc = $_.Split('.', 2); "('$($tc[0])', '$($tc[1])')" }) -join ', '
+    $l = Invoke-TsRowsQ $made.Db ("SELECT CASE WHEN count(*) >= 8 THEN 'lookups asked' ELSE 'lookups ' || count(*) END AS r " +
+        "FROM (SELECT column1 AS t, column2 AS c FROM (VALUES $asked)) w WHERE EXISTS (SELECT 1 FROM pragma_table_info(w.t) p WHERE p.name = w.c)")
+    Assert-Line $l 'lookups asked'
+    $nodes = Invoke-TsRowsQ $made.Db ("SELECT 'shapeless=' || child AS r FROM _cells WHERE NOT EXISTS (SELECT 1 FROM " +
+        "pragma_index_list(_cells.child) il, pragma_index_info(il.name) ii WHERE ii.seqno = 0 AND ii.name = 'role') " +
+        "UNION ALL SELECT 'node tables=' || count(*) FROM _cells")
+    Assert-NoLine $nodes 'shapeless='
+    Assert-NoLine $nodes 'node tables=0'
 }
 
 # A PREFIX CAN SERVE SEVERAL TABLES, and a scheme that names one of them silently resolves nothing for the

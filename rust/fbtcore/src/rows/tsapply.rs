@@ -42,9 +42,14 @@ pub const LANG: &str = "typescript";
 /// sees one.
 const CLOSURE_TABLES: &[&str] = &["render_path", "gate_features", "gate_values", "key_reach"];
 
-/// The column each closure table is read BY: a key's reach, a component's paths, a gate's values and features.
-const CLOSURE_KEYS: &[(&str, &str)] =
-    &[("key_reach", "key"), ("render_path", "component"), ("gate_values", "gate"), ("gate_features", "gate")];
+/// THE COLUMNS A READER SELECTS BY that no join names: each closure table by what it is about (a key's reach and
+/// route, a component's paths, a gate's values and features, #72), and the plain filters a consumer narrows a large
+/// table with (#73) - a template's root nodes, one syntactic position, one locale, one declaration, one method.
+const LOOKUP_COLUMNS: &[(&str, &str)] = &[
+    ("key_reach", "key"), ("key_reach", "route"), ("render_path", "component"), ("gate_values", "gate"),
+    ("gate_values", "enum_name"), ("gate_features", "gate"), ("template_nodes", "depth"), ("string_literals", "context"),
+    ("translations", "locale"), ("comments", "context"), ("calls", "method"),
+];
 
 /// WHICH FILES ARE CARRIED AS TEXT. The same set node carries, stated in both places because
 /// neither can see the other's.
@@ -489,10 +494,10 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
     };
     receipt.written = applied.written;
 
-    // EVERY JOIN THE SPEC DECLARES IS INDEXED, and each closure table by what a reader looks it up by - built LAST,
+    // EVERY JOIN THE SPEC DECLARES IS INDEXED, and every column a reader selects by (`LOOKUP_COLUMNS`) - built LAST,
     // once over the finished rows, not kept up insert by insert.
     let indexing = std::time::Instant::now();
-    schema::index_declared(&Connection::open(db_path)?, CLOSURE_KEYS)?;
+    schema::index_declared(&Connection::open(db_path)?, LOOKUP_COLUMNS)?;
     receipt.phases.insert("index the joins".to_string(), indexing.elapsed().as_millis() as u64);
 
     receipt.stored = store::recorded(db_path, LANG).len();

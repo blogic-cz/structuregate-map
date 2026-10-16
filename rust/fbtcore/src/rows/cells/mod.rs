@@ -161,10 +161,11 @@ pub fn create(db: &Connection, table: &str, column: &str) -> Result<String> {
     Ok(child_table)
 }
 
-/// THE `value` INDEX, made AFTER the rows are in - by `store::write` once per write, by `store::insert_rows` per
-/// table. Built during the insert, every node landed at a random place in it, and on a large workspace that was
-/// most of the time the store spent; one sort over the finished table is a fraction of that. `IF NOT EXISTS`, so a
-/// partial run inserts into the index a full run built.
+/// THE `value` AND `(role, parent)` INDEXES, made AFTER the rows are in. `(role, parent)` answers a SHAPE across every
+/// owner - each root `$ref`, each `$template` list (#71): the primary key serves only a lookup inside one owner. Made
+/// by `store::write` once per write, by `store::insert_rows` per table. Built during the insert, every node landed at
+/// a random place in it, and on a large workspace that was most of the time the store spent; one sort over the
+/// finished table is a fraction of that. `IF NOT EXISTS`, so a partial run inserts into the index a full run built.
 pub fn index_values(db: &Connection) -> Result<()> {
     if schema::existing_columns(db, REGISTRY).map(|c| c.is_empty()).unwrap_or(true) {
         return Ok(());
@@ -176,7 +177,10 @@ pub fn index_values(db: &Connection) -> Result<()> {
     };
     for child_table in children {
         let t = schema::escape(&child_table);
-        db.execute_batch(&format!("CREATE INDEX IF NOT EXISTS \"ix_{t}_value\" ON \"{t}\" (value)"))?;
+        db.execute_batch(&format!(
+            "CREATE INDEX IF NOT EXISTS \"ix_{t}_value\" ON \"{t}\" (value); \
+             CREATE INDEX IF NOT EXISTS \"ix_{t}_role\" ON \"{t}\" (role, parent)"
+        ))?;
     }
     Ok(())
 }
