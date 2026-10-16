@@ -516,7 +516,7 @@ pub fn write(path: &Path, req: &WriteRequest<'_>) -> Result<Applied> {
     let wrong = if req.counts { verify(&db, req.shas, req.lang) } else { 0 };
     lap("verify", &mut steps);
 
-    cells::index_values(&db)?;
+    schema::sorted_on_every_core(&db, 262144, || cells::index_values(&db))?;
     lap("index the node values", &mut steps);
     write_meta(&db, req, found, &written, &carried)?;
     tx.commit()?;
