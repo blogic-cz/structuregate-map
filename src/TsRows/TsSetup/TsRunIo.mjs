@@ -7,6 +7,9 @@
 
 import { readFileSync, openSync, writeSync, closeSync, readSync } from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
+import { execFileSync } from 'node:child_process';
+
+import { stub } from './TsCarried.mjs';
 
 export function emit(...fields) {
   const parts = fields.map((f) => String(f).split('|').join('/').split('\r').join(' ')
@@ -63,8 +66,9 @@ export function parseArgs(argv) {
  * hundreds of MB on a real tree - most of V8's hard ceiling of 536 870 888 characters. That is the nearest
  * wall in this half, and `Invalid string length` is not something a heap flag moves.
  *
- * One line is one row - `{"t": <table>, "r": <row>}` - with a final `{"claims": {...}, "rollup": {...}}`. Written by
- * `rows::carry::carry_over`; the shape is private between the two.
+ * One line is one row - `{"t": <table>, "r": <row>}`, and `"o": {<column>: "a" | "o"}` for a structure it was handed
+ * without (`TsCarried.mjs`: a list or an object, as a stub) - with a final `{"claims": {...}, "rollup": {...}}`.
+ * Written by `rows::carry::carry_over`; the shape is private between the two.
  */
 export function readCarry(file) {
   const tables = {};
@@ -85,6 +89,7 @@ export function readCarry(file) {
     if (!line) return;
     const one = JSON.parse(line);
     if (one.claims) { claims = one.claims; rollup = one.rollup ?? {}; return; }
+    if (one.o) for (const [column, kind] of Object.entries(one.o)) one.r[column] = stub(kind, `${one.t}.${column}`);
     (tables[one.t] ??= []).push(one.r);
   };
   try {
@@ -157,5 +162,31 @@ export function readJson(file, fallback) {
     return JSON.parse(readFileSync(file, 'utf8'));
   } catch {
     return fallback;
+  }
+}
+
+/**
+ * The commit the mapped tree is at, or `{ available: false }`.
+ *
+ * NO GIT IS A SUPPORTED STATE, not an error: this exe is deployed into trees that are checkouts and into
+ * ones that are not, and a map that refused to be written without a repository would be useless in half of
+ * them. Every field is read with one call each, and a call that fails simply leaves the record absent.
+ */
+export function revisionOf(tree) {
+  const git = (...args) => execFileSync('git', ['-C', tree, ...args], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim();
+  try {
+    const commit = git('rev-parse', 'HEAD');
+    return {
+      available: true,
+      commit,
+      short: git('rev-parse', '--short=11', 'HEAD'),
+      branch: git('rev-parse', '--abbrev-ref', 'HEAD'),
+      committed_at: git('show', '-s', '--format=%cI', 'HEAD'),
+      dirty: git('status', '--porcelain').length > 0,
+    };
+  } catch {
+    return { available: false };
   }
 }

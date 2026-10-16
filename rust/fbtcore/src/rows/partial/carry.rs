@@ -19,10 +19,14 @@
 //! its structures rebuilt from its node table - only for the rows that go out - and a node table is
 //! never carried as a table of its own: node would load it as one. node still turns a cell that
 //! arrives as TEXT back into a structure (`json_columns`); one that arrives as a structure it keeps.
+//!
+//! EXCEPT WHAT NODE SAYS IT NEVER READS of a carried row (`uncarried.rs`): such a cell goes out as its kind alone, and
+//! a table node rebuilds whole (`rebuilt`) sends no rows at all - node puts none of them back.
 
 use super::half::{tables_with_half, HALF_COLUMN};
 use super::pyjson::PythonSeparators;
 use super::schema;
+use super::uncarried::{Cell, Uncarried};
 use anyhow::{Context, Result};
 use indexmap::{IndexMap, IndexSet};
 use rusqlite::types::Value as Sql;
@@ -108,6 +112,11 @@ fn affected_ids(db: &Connection, lang: &str, affected: &IndexSet<String>) -> Res
 /// One table's rows, minus the ones the run is replacing.
 type Claims = IndexMap<String, String>;
 
+/// A carried row, and the cells it goes out without: `{column: kind}` (`uncarried.rs`).
+type Held = (Map<String, Value>, Map<String, Value>);
+
+/// The rows of `table` this run keeps - none when `send` is false: then only the claims of the ones it replaces.
+#[allow(clippy::too_many_arguments)]
 fn held(
     db: &Connection,
     table: &str,
@@ -115,7 +124,9 @@ fn held(
     lang: &str,
     ids: &IndexSet<String>,
     identity: Option<&Vec<Vec<String>>>,
-) -> Result<(Vec<Map<String, Value>>, Claims)> {
+    send: bool,
+    uncarried: &mut Uncarried,
+) -> Result<(Vec<Held>, Claims)> {
     let by_owner = columns.iter().any(|c| c == "owner_file");
     let sql = format!(
         "SELECT rowid, * FROM \"{}\" WHERE \"{}\" = ?1",
@@ -127,9 +138,10 @@ fn held(
     let names: Vec<String> = stmt.column_names().into_iter().skip(1).map(String::from).collect();
 
     // THE ROW'S STRUCTURES, read from their node tables by the row's owner key: its id, or `#<rowid>`.
-    let mut nodes: Vec<(String, super::cells::Reader)> = Vec::new();
+    let mut nodes: Vec<(String, String, super::cells::Reader)> = Vec::new();
     for (column, child) in super::cells::columns_of(db, table) {
-        nodes.push((column, super::cells::Reader::new(db, &child)?));
+        let reader = super::cells::Reader::new(db, &child)?;
+        nodes.push((column, child, reader));
     }
 
     let mut out = Vec::new();
@@ -164,22 +176,34 @@ fn held(
             _ => false,
         };
         if !replaced {
+            if !send {
+                continue;
+            }
+            let mut stubs = Map::new();
             if !nodes.is_empty() {
                 let owner = match row.get("id") {
                     Some(Value::String(id)) => id.clone(),
                     Some(Value::Number(n)) => n.to_string(),
                     _ => format!("#{at}"),
                 };
-                for (column, reader) in nodes.iter_mut() {
+                for (column, child, reader) in nodes.iter_mut() {
                     if row.contains_key(column.as_str()) {
                         continue;
                     }
-                    if let Some(value) = reader.get(&owner)? {
-                        row.insert(column.clone(), value);
+                    match uncarried.cell(db, table, column, child, &owner, &row)? {
+                        Cell::Stub(kind) => {
+                            stubs.insert(column.clone(), Value::from(kind));
+                        }
+                        Cell::Absent => {}
+                        Cell::Whole => {
+                            if let Some(value) = reader.get(&owner)? {
+                                row.insert(column.clone(), value);
+                            }
+                        }
                     }
                 }
             }
-            out.push(row);
+            out.push((row, stubs));
             continue;
         }
         // THE ID OF A ROW THAT IS NOT COMING BACK, for a table anything outside a file can name. A
@@ -246,11 +270,13 @@ fn identity_of(db: &Connection, lang: &str) -> IndexMap<String, Vec<Vec<String>>
     out
 }
 
+/// `uncarried` is node's word on the cells it never reads of a carried row (`uncarried.rs`); None carries every cell.
 pub fn carry_over(
     db_path: &Path,
     affected: &[String],
     target: &Path,
     lang: &str,
+    uncarried: Option<&Value>,
 ) -> Result<Carried> {
     if !db_path.exists() {
         anyhow::bail!("there is no database to carry rows over from");
@@ -277,6 +303,7 @@ pub fn carry_over(
     let mut carried = Carried::default();
     let mut all_claims: IndexMap<String, Claims> = IndexMap::new();
     let rebuilt = rebuilt_of(&db, lang);
+    let mut uncarried = uncarried.map_or_else(Uncarried::none, |spec| Uncarried::from_plan(Some(spec)));
     let mut rollup = Map::new();
     for table in tables_with_half(&db)? {
         // A NODE TABLE goes out inside the rows it belongs to (`held`), never as a table.
@@ -295,22 +322,29 @@ pub fn carry_over(
         if !columns.iter().any(|c| c == "owner_file") && table != "files" && table != "projects" {
             continue;
         }
-        let (rows, claims) = held(&db, &table, &columns, lang, &ids, identity.get(&table))?;
+        // A TABLE NODE REBUILDS WHOLE is put back by no partial run (`TsMap.mjs`), so its rows stay here; `projects` is
+        // read first, to re-point the files it is handed.
+        let send = table == "projects" || !rebuilt.contains(&table);
+        let (rows, claims) = held(&db, &table, &columns, lang, &ids, identity.get(&table), send, &mut uncarried)?;
         if !claims.is_empty() {
             all_claims.insert(table.clone(), claims);
         }
         if rows.is_empty() {
             continue;
         }
-        for row in &rows {
+        let count = rows.len();
+        for (row, stubs) in rows {
             let mut line = Map::new();
             line.insert("t".to_string(), Value::String(table.clone()));
-            line.insert("r".to_string(), Value::Object(row.clone()));
+            line.insert("r".to_string(), Value::Object(row));
+            if !stubs.is_empty() {
+                line.insert("o".to_string(), Value::Object(stubs));
+            }
             write_json(&mut writer, &Value::Object(line))?;
             writer.write_all(b"\n")?;
         }
         carried.tables += 1;
-        carried.rows += rows.len();
+        carried.rows += count;
     }
 
     let mut claims_of = Map::new();

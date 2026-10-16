@@ -88,7 +88,7 @@ pub(super) fn run(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: 
             let timed = Instant::now();
             let mut own = Collector::new();
             let mut carried = None;
-            let planned = ts::plan(&mut own, deep, &parse, root, db, &work, false, &mut carried);
+            let planned = ts::plan(&mut own, deep, &parse, root, db, &work, false, false, &mut carried);
             let absent = planned == Planned::Absent;
             let parsed = (planned == Planned::Full || planned == Planned::Partial).then(|| {
                 let carry = (planned == Planned::Partial).then_some(&work.carry);
@@ -118,17 +118,23 @@ pub(super) fn run(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: 
                 into.notes.push(format!(
                     "the typescript half parses again, in its turn: the halves beside it handed out more than {LANE} id(s) of `{prefix}`"));
                 work.clean();
-                absent = ts::launched(into, deep, db, root, &mut fe, &[false, true]);
+                absent = ts::launched(into, deep, db, root, &mut fe, &[false, true], false);
                 false
             }
             None => ts::store(into, db, root, &work.rows, landed.carried, &mut fe),
         },
         Some(Parsed::Retry) => true,
+        // A CELL IT WAS HANDED BACK WITHOUT, READ: in its turn, with every cell carried.
+        Some(Parsed::Uncarried) => {
+            work.clean();
+            absent = ts::launched(into, deep, db, root, &mut fe, &[false, true], true);
+            false
+        }
         _ => false,
     };
     work.clean();
     if again {
-        absent = ts::launched(into, deep, db, root, &mut fe, &[true]);
+        absent = ts::launched(into, deep, db, root, &mut fe, &[true], false);
     }
     let absence = ts::absence(&into.notes[notes..]);
     ts::settle(db, key, absent, fe, fe_kept, clean && into.errors.len() == errors, absence);
