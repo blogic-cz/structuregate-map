@@ -419,7 +419,7 @@ async function main() {
   if (partial) store.inMintOrder();
   if (uncarried(store)) return 0;
   if (rereads) {
-    const late = cutShort(store, rereads, null, true);
+    const late = cutShort(rereads, null, true);
     if (late) { emit('MAP-RETRY', late); return 0; }
     emit('MAP-NOTE', `the typescript half read ${affected.size} file(s) again for ${planned.changed.length} `
       + `changed: ${rereads.checked.size} surface(s) looked at, ${rereads.moved.size} moved`);
@@ -747,7 +747,7 @@ async function main() {
     const touched = store.verifyUntouched(whole);
     if (uncarried(store, whole)) return 0;
     // A RUN THAT STOPPED SHORT OF EVERY HOP and broke a row it kept is asked again over every hop.
-    const stop = rereads ? cutShort(store, rereads, touched, false) : null;
+    const stop = rereads ? cutShort(rereads, touched, false) : null;
     if (stop) { emit('MAP-RETRY', stop); return 0; }
     if (touched !== null) {
       const named = touched.map((t) => `${t.table}.${t.columns.join('/')} `
@@ -798,7 +798,7 @@ async function main() {
     partial,
     affected: partial ? [...affected].sort() : [],
     whole,
-    // STOPPED SHORT OF EVERY HOP: rust asks every kept row's structures for an id that is gone (`reads::dangling`).
+    // STOPPED SHORT OF EVERY HOP: rust asks every kept row, and every whole table's, for an id that is gone (`dangling`).
     cut: Boolean(rereads),
     first: true,
     final: true,

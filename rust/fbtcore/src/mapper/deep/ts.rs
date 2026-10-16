@@ -506,7 +506,7 @@ pub(super) fn store(into: &mut Collector, db: &str, root: &str, rows: &Path, car
     let _storing = crate::trace::stage("typescript: store");
     let receipt = match calls::ts_apply(Path::new(db), root, &text(rows)) {
         Ok(receipt) => receipt,
-        Err(error) if error.starts_with(crate::rows::reads::STOPPED_SHORT) => {
+        Err(error) if error.starts_with(crate::rows::dangling::STOPPED_SHORT) => {
             into.notes.push(format!("the typescript half is reading every hop of dependents again: {error}"));
             return true;
         }
