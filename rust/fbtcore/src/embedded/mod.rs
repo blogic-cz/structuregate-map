@@ -58,7 +58,7 @@ pub const TSROWS: Set = set!("tsrows-node":
     "TsRows/TsTpl/TsGateChain.mjs", "TsRows/TsTpl/TsRegistry.mjs", "TsRows/TsDerive/TsDynRender.mjs",
     "TsRows/TsDerive/TsIndexes.mjs", "TsRows/TsDerive/TsInputUsage.mjs", "TsRows/TsDerive/TsModuleScope.mjs",
     "TsRows/TsDerive/TsNgrx.mjs", "TsRows/TsDerive/TsReach.mjs", "TsRows/TsDerive/TsRouteFold.mjs",
-    "TsRows/TsDerive/TsRoutes.mjs", "TsRows/TsDerive/TsRouteTree.mjs", "TsRows/TsDerive/TsSpecAnchors.mjs",
+    "TsRows/TsDerive/TsRouteKeys.mjs", "TsRows/TsDerive/TsRoutes.mjs", "TsRows/TsDerive/TsFederation.mjs", "TsRows/TsDerive/TsRouteTree.mjs", "TsRows/TsDerive/TsSpecAnchors.mjs",
     "TsRows/TsDerive/TsSpecJoins.mjs", "TsRows/TsTpl/TsTplEmit.mjs", "TsRows/TsTpl/TsTplExpr.mjs",
     "TsRows/TsTpl/TsTplExtract.mjs", "TsRows/TsTpl/TsTplKeys.mjs", "TsRows/TsTpl/TsTplMatch.mjs",
     "TsRows/TsTpl/TsTplReads.mjs");

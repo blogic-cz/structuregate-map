@@ -201,5 +201,52 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
     return { ...picked, recovery: true };
   }
 
-  return { valueDecl, declTarget, ownerTarget, evalMemberAccess, evalIdentifier, evalShorthand, lazyTarget };
+  /**
+   * A MODULE FEDERATION REMOTE A LAZY ROUTE LOADS (#76): `loadRemoteModule('demo-orders', './Module')` - or
+   * `loadRemoteModule({ remoteName, exposedModule })` - `.then((m) => m.X)`. The checker types the remote as `any`, so
+   * nothing here resolves it: the remote, the exposed module and the picked name are read off the SYNTAX, and the
+   * remote's federation config joins them to a class later (`TsDerive/TsFederation.mjs`). One such call or none: two
+   * is a branch this cannot pick. A remote named only by its `remoteEntry` URL names no config, and is left out.
+   */
+  function remoteTarget(fn) {
+    const calls = [];
+    const visit = (n) => {
+      if (ts.isCallExpression(n)) {
+        const callee = n.expression;
+        const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : null;
+        if (name === 'loadRemoteModule') calls.push(n);
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(fn);
+    if (calls.length !== 1) return null;
+    const call = calls[0];
+    const text = (e) => (e !== undefined && (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) ? e.text : null);
+    let remote = text(call.arguments[0]);
+    let expose = text(call.arguments[1]);
+    const options = call.arguments[0];
+    if (call.arguments.length === 1 && options !== undefined && ts.isObjectLiteralExpression(options)) {
+      for (const p of options.properties) {
+        if (!ts.isPropertyAssignment(p) || !(ts.isIdentifier(p.name) || ts.isStringLiteral(p.name))) continue;
+        if (p.name.text === 'remoteName') remote = text(p.initializer);
+        if (p.name.text === 'exposedModule') expose = text(p.initializer);
+      }
+    }
+    if (remote === null || expose === null) return null;
+    // `.then((m) => m.X)` ON THE CALL ITSELF: the parameter's own property is the export the route loads.
+    let pick = null;
+    const then = call.parent;
+    const cb = ts.isPropertyAccessExpression(then) && then.name.text === 'then' && ts.isCallExpression(then.parent)
+      ? then.parent.arguments[0] : undefined;
+    if (cb !== undefined && (ts.isArrowFunction(cb) || ts.isFunctionExpression(cb)) && cb.parameters.length === 1
+      && ts.isIdentifier(cb.parameters[0].name)) {
+      let body = cb.body;
+      while (ts.isParenthesizedExpression(body)) body = body.expression;
+      if (ts.isPropertyAccessExpression(body) && ts.isIdentifier(body.expression)
+        && body.expression.text === cb.parameters[0].name.text) pick = body.name.text;
+    }
+    return { remote, expose, pick };
+  }
+
+  return { valueDecl, declTarget, ownerTarget, evalMemberAccess, evalIdentifier, evalShorthand, lazyTarget, remoteTarget };
 }
