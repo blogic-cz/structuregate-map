@@ -365,6 +365,7 @@ async function main() {
     // AN OUT-OF-SCOPE CANDIDATE IS A RENDER WHILE THIS RUN HOLDS IT (#40): back into `renders`, its claims and its rows
     // below, so the scope is decided over every candidate again - `setAsideOutOfScope` moves it out on the way to the store.
     const reclaimable = store.loadClaims(claimsBack(carried.claims), state.identity ?? {});
+    store.loadRollup(carried.rollup);
     let heldProjects = [];
     let loaded = 0;
     let skipped = 0;

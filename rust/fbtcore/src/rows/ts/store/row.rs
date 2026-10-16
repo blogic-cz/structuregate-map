@@ -17,6 +17,9 @@ pub struct Schema {
     nodes: Vec<Option<cells::Source>>,
     /// The column a row's nodes are owned by (`id`); a row without one owns them by its rowid.
     id_at: Option<usize>,
+    /// Per column: whether any pass READ it from any row - what a partial run compares to decide the closure it
+    /// stored is still the answer (`rows/partial/unchanged.rs`). Set on every read, so it is exact, not listed.
+    read: Rc<[std::cell::Cell<bool>]>,
 }
 
 impl Schema {
@@ -28,7 +31,20 @@ impl Schema {
     pub(super) fn with(names: Vec<String>, mut nodes: Vec<Option<cells::Source>>, id_at: Option<usize>) -> Schema {
         let at = names.iter().cloned().zip(0..).collect();
         nodes.resize_with(names.len(), || None);
-        Schema { names, at, nodes, id_at }
+        let read = (0..names.len()).map(|_| std::cell::Cell::new(false)).collect();
+        Schema { names, at, nodes, id_at, read }
+    }
+
+    /// The column names and their read flags, SHARED: the store keeps them after it lets the rows (and the
+    /// connections their node sources hold) go.
+    pub fn reads(&self) -> (Vec<String>, Rc<[std::cell::Cell<bool>]>) {
+        (self.names.clone(), Rc::clone(&self.read))
+    }
+
+    fn mark(&self, index: usize) {
+        if let Some(flag) = self.read.get(index) {
+            flag.set(true);
+        }
     }
 }
 
@@ -189,6 +205,7 @@ impl Row {
         match self {
             Row::Held { schema, cells, rowid } => {
                 let index = *schema.at.get(key)?;
+                schema.mark(index);
                 let at = At { schema, cells, rowid: *rowid, index };
                 match cells.get(index)? { Some(c) => Some(c.value(&at)), None => None }
             }
@@ -202,6 +219,7 @@ impl Row {
     pub fn peek<R>(&self, key: &str, f: impl FnOnce(Option<&Value>) -> R) -> R {
         if let Row::Held { schema, cells, rowid } = self
             && let Some(&index) = schema.at.get(key)
+            && { schema.mark(index); true }
             && let Some(Some(cell)) = cells.get(index)
             && let Some(fresh) = cell.undecoded(&At { schema, cells, rowid: *rowid, index })
         {
@@ -243,6 +261,7 @@ impl Row {
     pub fn into_map(self) -> Map<String, Value> {
         match self {
             Row::Held { schema, cells, rowid } => {
+                (0..schema.names.len()).for_each(|i| schema.mark(i));
                 let mut map = Map::new();
                 // THE OWNER IS READ BEFORE ANY CELL MOVES: a structure nobody decoded is rebuilt from it.
                 let rebuilt: Vec<Option<Value>> = (0..cells.len())

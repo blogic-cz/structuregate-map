@@ -135,26 +135,42 @@ pub fn source_trace(store: &Store<'_>, texts: &IndexMap<String, String>) -> Trac
             continue;
         }
         scanned += 1;
-        // WHOLE BLOCKS FIRST, both pairs, because a binding nine lines inside an open
-        // `<!--` is not live and a line test cannot see that.
-        let body = strip_blocks(&strip_blocks(content, "<!--", "-->"), "/*", "*/");
-        for raw in lines(&body) {
-            let t = trim_start(raw);
-            if t.starts_with("//") || t.starts_with('*') {
-                comment_lines += 1;
-                continue;
-            }
-            let line = strip_line_comment(raw);
-            for name in dotted_names(line) {
-                // THE FIRST FILE WINS, so the id a trace reports is stable across runs.
-                dotted.entry(name).or_insert_with(|| file_id.clone());
-            }
-            for w in words(line) {
-                seen.insert(w);
-            }
+        let file = scan(content);
+        comment_lines += file.comment_lines;
+        for name in file.dotted {
+            // THE FIRST FILE WINS, so the id a trace reports is stable across runs.
+            dotted.entry(name).or_insert_with(|| file_id.clone());
         }
+        seen.extend(file.words);
     }
     Trace { dotted, seen, parsed, scanned, comment_lines, locales: locales.len() }
+}
+
+/// What ONE file's text gives the trace: the dotted names and the words its live lines spell, in order.
+pub struct Scanned {
+    pub dotted: Vec<String>,
+    pub words: Vec<String>,
+    pub comment_lines: usize,
+}
+
+/// One file's text as the trace reads it - and all a partial run needs to say an edit left the trace alone
+/// (`rows/partial/unchanged.rs`): a comment changes the text, not this.
+pub fn scan(content: &str) -> Scanned {
+    let mut out = Scanned { dotted: Vec::new(), words: Vec::new(), comment_lines: 0 };
+    // WHOLE BLOCKS FIRST, both pairs, because a binding nine lines inside an open
+    // `<!--` is not live and a line test cannot see that.
+    let body = strip_blocks(&strip_blocks(content, "<!--", "-->"), "/*", "*/");
+    for raw in lines(&body) {
+        let t = trim_start(raw);
+        if t.starts_with("//") || t.starts_with('*') {
+            out.comment_lines += 1;
+            continue;
+        }
+        let line = strip_line_comment(raw);
+        out.dotted.extend(dotted_names(line));
+        out.words.extend(words(line));
+    }
+    out
 }
 
 #[cfg(test)]

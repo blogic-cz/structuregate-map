@@ -51,18 +51,30 @@ pub fn tables_with_half(db: &Connection) -> Result<Vec<String>> {
 /// longer says that, which is worse than no rows because they look real.
 pub fn drop_half(db: &Connection, half: &str) -> Result<()> {
     for table in tables_with_half(db)? {
-        // The nodes first, through the rows that own them: a node carries no `half` of its own (`cells`).
-        super::cells::delete_children(db, &table, &format!("t.\"{HALF_COLUMN}\" = ?1"), &[&half])?;
-        db.execute(
-            &format!(
-                "DELETE FROM \"{}\" WHERE \"{}\" = ?1",
-                schema::escape(&table),
-                HALF_COLUMN
-            ),
-            [half],
-        )?;
+        delete_half_rows(db, &table, half)?;
     }
     Ok(())
+}
+
+/// Every row of `table` this half wrote, and their nodes, gone; how many rows went.
+///
+/// A TABLE HOLDING NOTHING BUT THIS HALF'S ROWS IS EMPTIED WITHOUT A WHERE: a plain `DELETE FROM` is SQLite's
+/// truncate, which frees the pages instead of visiting every row. Through the rows that own them, a node table's
+/// delete was one owner-by-owner subquery per node, and on a partial run of a large workspace the closure's tables
+/// and node's rollups alone cost most of the replace. A table that also holds another half's rows (`enums`,
+/// `switch_cases` carry C# rows beside these) - or a row with no `half` at all - keeps the scoped path.
+pub fn delete_half_rows(db: &Connection, table: &str, half: &str) -> Result<usize> {
+    let escaped = schema::escape(table);
+    let shared = db
+        .prepare(&format!("SELECT 1 FROM \"{escaped}\" WHERE \"{HALF_COLUMN}\" IS NOT ?1 LIMIT 1"))?
+        .exists([half])?;
+    if shared {
+        // The nodes first, through the rows that own them: a node carries no `half` of its own (`cells`).
+        super::cells::delete_children(db, table, &format!("t.\"{HALF_COLUMN}\" = ?1"), &[&half])?;
+        return Ok(db.execute(&format!("DELETE FROM \"{escaped}\" WHERE \"{HALF_COLUMN}\" = ?1"), [half])?);
+    }
+    super::cells::clear_children(db, table)?;
+    Ok(db.execute(&format!("DELETE FROM \"{escaped}\""), [])?)
 }
 
 /// Is this half the ONLY one with rows in this database?
@@ -166,6 +178,43 @@ mod tests {
         // Its own 3, plus the 2 the other half wrote and nobody deleted.
         assert_eq!(receipt.written.get("bindings"), Some(&5));
         assert_eq!(receipt.written.get("files"), Some(&2));
+    }
+
+    /// `bindings` with a list in every row, so each row owns nodes in `bindings__tags`.
+    fn tagged(lang: &str, half: Option<&str>, rows: usize) -> Batch {
+        let mut b = batch(lang, half, &[&format!("a.{lang}")], rows);
+        let tagged: Vec<_> = (0..rows).map(|i| json!({"id": format!("b:{lang}{i}"), "tags": [format!("t{i}")]})).collect();
+        b.tables.insert("bindings".to_string(), json!(tagged));
+        b
+    }
+
+    fn nodes_of(db: &Path, lang: &str) -> i64 {
+        let db = Connection::open(db).unwrap();
+        db.query_row("SELECT count(*) FROM bindings__tags WHERE owner LIKE ?1", [format!("b:{lang}%")], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn a_table_only_this_half_holds_is_emptied_nodes_and_all() {
+        // THE FAST PATH: no WHERE, so the nodes must go by their table too, or the second run's rows collide with
+        // the first run's nodes on `(owner, n)`.
+        let db = tmp("sole");
+        apply(&db, ".", &tagged("typescript", Some("typescript"), 3)).unwrap();
+        apply(&db, ".", &tagged("typescript", Some("typescript"), 3)).unwrap();
+        assert_eq!(nodes_of(&db, "typescript"), 6, "a list and its item for each of the three rows, once");
+    }
+
+    #[test]
+    fn a_table_another_half_shares_keeps_that_halfs_rows_and_nodes() {
+        // `enums` and `switch_cases` hold C# rows beside these: emptied whole, they would lose them.
+        let db = tmp("shared");
+        apply(&db, ".", &tagged("csharp", None, 2)).unwrap();
+        apply(&db, ".", &tagged("typescript", Some("typescript"), 3)).unwrap();
+        apply(&db, ".", &tagged("typescript", Some("typescript"), 3)).unwrap();
+        assert_eq!(nodes_of(&db, "csharp"), 4, "the C# rows' nodes are not this half's to delete");
+        assert_eq!(nodes_of(&db, "typescript"), 6);
+        let db = Connection::open(&db).unwrap();
+        let kept: i64 = db.query_row("SELECT count(*) FROM bindings WHERE half IS NULL", [], |r| r.get(0)).unwrap();
+        assert_eq!(kept, 2);
     }
 
     #[test]
