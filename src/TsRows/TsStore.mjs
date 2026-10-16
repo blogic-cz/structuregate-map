@@ -539,30 +539,6 @@ export class Store {
     return released;
   }
 
-  /**
-   * WHAT A ROW HANDED BACK NAMES THAT NO ROW IS ANY MORE - an id, however deeply a cell nests it, of a row a
-   * file read again minted afresh. A `$expr_id` inside a member's folded value is such a reference, and no
-   * graph of plain columns sees it. The first few, for the note.
-   */
-  dangling(limit = 5) {
-    const out = [];
-    for (const [name, rows] of Object.entries(this.tables)) {
-      for (const row of rows) {
-        if (!this.hydrated.has(row)) continue;
-        for (const [column, value] of Object.entries(row)) {
-          if (column === 'id' || column === 'owner_file' || column === 'half') continue;
-          const gone = idsIn(value).find((id) => !this.rowById.has(id));
-          if (gone !== undefined) {
-            out.push({ table: name, id: row.id, column, names: gone });
-            if (out.length >= limit) return out;
-            break;
-          }
-        }
-      }
-    }
-    return out;
-  }
-
   note(name, prefix) {
     const hit = this.scheme.get(prefix);
     if (hit) hit.add(name);

@@ -76,7 +76,7 @@ pub fn scope_files(tables: Tables<'_>) -> Vec<String> {
 ///
 /// EVERY EDGE A REPLACED FILE'S ROWS MADE IS DROPPED AND RE-DERIVED, and every other edge is kept: it was
 /// made by rows this run did not touch, so it still says what they point at. A kept row pointing at an id
-/// the run replaced is refused before the write (`reads::dangling`), so a kept edge cannot point at nothing.
+/// the run replaced is refused before the replace (`dangling`), so a kept edge cannot point at nothing.
 pub fn merge(
     previous: &IndexMap<String, Vec<String>>,
     fresh: IndexMap<String, Vec<String>>,

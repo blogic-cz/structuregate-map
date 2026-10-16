@@ -37,6 +37,24 @@ fn text(row: &Row, name: &str) -> Option<String> {
     }
 }
 
+/// Every string in `value` shaped like one of node's ids (`isId` in `TsStore.mjs`: one to four lowercase letters, a
+/// colon, digits) into `into`, under `label` unless already there. A walk over the value's own nesting, no bound.
+fn name_ids(value: &Value, label: &mut dyn FnMut() -> String, into: &mut IndexMap<String, String>) {
+    match value {
+        Value::String(s) => {
+            let shaped = s.find(':').is_some_and(|cut| {
+                (1..=4).contains(&cut) && cut < s.len() - 1 && s[..cut].bytes().all(|b| b.is_ascii_lowercase()) && s[cut + 1..].bytes().all(|b| b.is_ascii_digit())
+            });
+            if shaped && !into.contains_key(s) {
+                into.insert(s.clone(), label());
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|v| name_ids(v, label, into)),
+        Value::Object(map) => map.values().for_each(|v| name_ids(v, label, into)),
+        _ => {}
+    }
+}
+
 #[derive(Default)]
 pub struct Digest {
     /// Tables a rollup rebuilds whole: their rows are derived again, so a reference in them proves nothing.
@@ -49,7 +67,7 @@ pub struct Digest {
     owner: IndexMap<String, String>,
     /// id -> the file that EXTRACTED its row (`owner_file`, else `file`; a `files` row owns itself).
     owner_of: IndexMap<String, String>,
-    /// Every id the payload holds - what a partial run's kept rows may still point at (`reads::dangling`).
+    /// Every id the payload holds - what a partial run's kept rows may still point at (`dangling`).
     pub ids: IndexSet<String>,
     scope_ids: IndexSet<String>,
     templates: Vec<(Option<String>, Option<String>)>,
@@ -59,11 +77,22 @@ pub struct Digest {
     out: IndexMap<String, IndexSet<String>>,
     unread: IndexSet<(String, String)>,
     scope_paths: Option<IndexSet<String>>,
+    /// The tables whose rows `named` is read from - the whole ones, on a run that stopped short; none otherwise.
+    naming: IndexSet<String>,
+    /// Every id a row of those tables holds, however deeply nested -> `table.column` of the first that does
+    /// (`dangling::dangling`): the rows the map will hold in place of the ones the replace deletes.
+    pub named: IndexMap<String, String>,
 }
 
 impl Digest {
     pub fn new(rebuilt: &[String]) -> Digest {
         Digest { rebuilt: rebuilt.to_vec(), ..Default::default() }
+    }
+
+    /// ...and the ids the rows of `tables` name, gathered as the first pass goes (`named`).
+    pub fn naming(mut self, tables: &[String]) -> Digest {
+        self.naming = tables.iter().cloned().collect();
+        self
     }
 
     /// Both passes over rows already held - what a test and a small payload use.
@@ -92,6 +121,13 @@ impl Digest {
         }
         if let Some(Value::String(id)) = row.get("id") {
             self.ids.insert(id.clone());
+        }
+        if self.naming.contains(table) {
+            for (column, value) in row {
+                if column != "id" && column != "owner_file" && column != "half" {
+                    name_ids(value, &mut || format!("{table}.{column}"), &mut self.named);
+                }
+            }
         }
         if let Some(id) = text(row, "id") {
             if let Some(file) = text(row, "file") {

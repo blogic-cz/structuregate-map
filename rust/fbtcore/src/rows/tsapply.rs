@@ -70,7 +70,7 @@ pub struct TsPayload {
     /// files'. node measures it; see its `Store.rollupTables`.
     pub whole: Vec<String>,
     /// Whether this partial run stopped short of every hop - then a kept row's structures are asked too
-    /// (`reads::dangling`, `nested`), as node asked every row it held.
+    /// (`dangling`, `nested`), as node once asked every row it held.
     pub cut: bool,
     pub shas: Map<String, Value>,
     pub counters: Map<String, Value>,
@@ -273,7 +273,9 @@ pub fn apply(db_path: &Path, root: &str, payload: TsPayload) -> Result<TsReceipt
 /// twice and never held - once for what they say about each other (`Digest`), once while they are written, in
 /// batches - so the peak is a batch and the digest, not every row of the workspace.
 pub fn apply_streamed(db_path: &Path, root: &str, head: TsPayload, bytes: &[u8]) -> Result<TsReceipt> {
-    let mut digest = Digest::new(&rebuilt_of(&head));
+    // A RUN THAT STOPPED SHORT checks the rows of every whole table it sends for an id that is gone (`dangling`).
+    let naming: &[String] = if head.partial && head.cut { &head.whole } else { &[] };
+    let mut digest = Digest::new(&rebuilt_of(&head)).naming(naming);
     super::rawcells::each_row(bytes, &mut |table, row| {
         digest.first(table, &row);
         Ok(())
@@ -324,6 +326,12 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
         let db = Connection::open(db_path)
             .with_context(|| format!("the database could not be opened: {}", db_path.display()))?;
         ids = affected_ids(&db, &payload.affected)?;
+        // NOTHING KEPT MAY POINT AT A ROW THIS RUN REPLACES - see `dangling`. Checked before anything is deleted, while
+        // the rows about to go still say which ids they held, so a run that would break a join leaves the map as it was.
+        let check_started = std::time::Instant::now();
+        let plan = super::dangling::Replace { half: LANG, replaced: &payload.affected, whole: &payload.whole, kept: &digest.ids, named: &digest.named };
+        super::dangling::refuse(&db, &plan, payload.cut)?;
+        receipt.phases.insert("check the kept rows".to_string(), check_started.elapsed().as_millis() as u64);
         let compare_started = std::time::Instant::now();
         let before = unchanged::Before::take(&db, LANG, &fingerprint, payload.spec.as_ref(), &rewrites(&ids, &payload.affected, &node_whole))?;
         receipt.phases.insert("compare the closure's reads".to_string(), compare_started.elapsed().as_millis() as u64);
@@ -394,18 +402,6 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
     let gone: BTreeSet<String> = BTreeSet::new();
 
     let applied = if payload.partial {
-        // NOTHING KEPT MAY POINT AT A ROW THIS RUN REPLACES - see `reads::dangling`. Checked before anything is
-        // written, so a run that would break a join leaves the map as it was and says which.
-        let check_started = std::time::Instant::now();
-        {
-            let db = Connection::open(db_path)?;
-            let deps: Map<String, Value> =
-                super::remember::stored_graph(&db).into_iter().map(|(target, dependents)| (target, Value::from(dependents))).collect();
-            if let Some((count, first)) = super::reads::dangling(&db, LANG, &payload.affected, &digest.borrow().ids, &deps, payload.cut)? {
-                bail!("{} would leave {count} reference(s) to rows it replaced, first {first}", super::reads::STOPPED_SHORT);
-            }
-        }
-        receipt.phases.insert("check the kept rows".to_string(), check_started.elapsed().as_millis() as u64);
         // THE ROWS GO IN FIRST, and only then is the closure asked — it is derived from EVERY table,
         // and on a partial run the payload holds a fraction of them. The database is the only place
         // the whole map exists, which is the reason this pass lives on this side at all.

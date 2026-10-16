@@ -56,7 +56,7 @@ file's readers, and the readers - and readers' readers - of every file whose sur
 in program order. A FULL run proves the reads against every row it wrote (`reads::unread`: whatever a row names
 must be its owner's read, a scope file, a rebuilt table or `node_modules`); only `reads:typescript = proven`
 lets a partial run stop short, otherwise every hop is read. A partial run refuses to write when a kept row
-would point at an id it replaced (`reads::dangling`). The graph and the scope set are the tables `ts_deps` (`target`,
+would point at an id it replaced (`rows/partial/dangling.rs`, asked BEFORE the replace deletes a row - asked after, the ids were already gone and it found nothing). The graph and the scope set are the tables `ts_deps` (`target`,
 `dependent`, in the graph's order) and `ts_scope`, rewritten by `rows/partial/remember.rs` - whole on a full run,
 repaired on a partial one - and handed to node as JSON. **A bounded hop count was built and removed - it kept
 stale rows.** An importer also depends on the file declaring each name and every barrel between
@@ -71,8 +71,9 @@ decorator or a const a decorator names moves it, and the run reads everything.
 `rows/partial/uncarried.rs` through the plan): such a cell is its kind alone, a STUB that refuses every look inside;
 a table node rebuilds whole sends no rows at all. A pass that reads a stub, replaces one or would send one back marks
 the run (`MAP-UNCARRIED`), which is asked again with every cell carried - so a list that misses a read costs time,
-never a row. On a run that stopped short, `reads::dangling` asks every kept row's NODE rows for an id that is gone
-(`nested`), as node asked every row it held before its cells were stubbed. THE CARRY IS WRITTEN BESIDE THE PARSE
+never a row. On a run that stopped short, `dangling` asks every kept row - its plain cells and its NODE rows - and every
+row of a whole table the payload sends (`Digest::named`) for an id the replace removes and the payload does not hold
+again (`nested`), which node once asked of every row it held; a string that only looks like an id is no reason to retry. THE CARRY IS WRITTEN BESIDE THE PARSE
 (`carried_parse`, `mapper/deep/ts.rs`): node builds every program ahead without a checker (`prewarm`,
 `TsSetup/TsProgram.mjs` - each parse given back as it was parsed, or a compiler before 5.3 resolves and notes less)
 and waits for the rows only to load them.
