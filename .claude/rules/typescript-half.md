@@ -67,6 +67,17 @@ WAY WHILE ITS SHAPE HOLDS (`src/TsRows/TsSetup/TsShape.mjs`, `files.shape`): eve
 hashed by node on both runs. A comment or a method body keeps it; a selector, an input, a `templateUrl`, a
 decorator or a const a decorator names moves it, and the run reads everything.
 
+**A PARTIAL RUN KEEPS THE CLOSURE WHEN NOTHING IT READ MOVED** (`rust/fbtcore/src/rows/partial/unchanged.rs`). Every
+derivation records what its passes READ - each column asked of a row (`Store::reads`, flagged by `Row::get`) - in
+`_closure_reads`, and what it was derived under (setup, feature API, options, the spec's word on those columns) in
+`_meta` `closure:typescript`. A partial run hashes the rows it removes before they go and the rows it writes in their
+place, per table in rowid order, every read cell with a structure as its nodes, plus what the dead-key trace makes of
+each affected file's text (`file_text` before, the disk after): all equal, and the four tables stay. That needs the
+same ids back: EVERY per-file table with a unique key is claimed (`identityKeys`), not only those another file names,
+with sparse ALTERNATIVES for the rows a first key leaves out (`identityOf`: a template expression has no line), and a
+rollup takes its old ids back in the order it made them (`rollupId`, handed over by `carry` as `rollup`). A table read
+whole (no `half`) is never kept; `forget` runs before any row is written.
+
 **BYTES AND ORDER FOLLOW NODE** - each found only by diffing against node on a real workspace: python's `open()`
 TRANSLATES `\r\n` and node does not (`rust/fbtcore/src/rows/pyjson.rs`, `universal_newlines`); `trimStart` strips
 a BOM and other trims disagree (`JS_SPACE` in `rust/fbtcore/src/rows/ts/jsstr.rs` spells the set out);

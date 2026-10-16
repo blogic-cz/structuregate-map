@@ -63,12 +63,13 @@ export function parseArgs(argv) {
  * hundreds of MB on a real tree - most of V8's hard ceiling of 536 870 888 characters. That is the nearest
  * wall in this half, and `Invalid string length` is not something a heap flag moves.
  *
- * One line is one row - `{"t": <table>, "r": <row>}` - with a final `{"claims": {...}}`. Written by
+ * One line is one row - `{"t": <table>, "r": <row>}` - with a final `{"claims": {...}, "rollup": {...}}`. Written by
  * `rows::carry::carry_over`; the shape is private between the two.
  */
 export function readCarry(file) {
   const tables = {};
   let claims = {};
+  let rollup = {};
   let fd;
   try {
     fd = openSync(file, 'r');
@@ -83,7 +84,7 @@ export function readCarry(file) {
   const take = (line) => {
     if (!line) return;
     const one = JSON.parse(line);
-    if (one.claims) { claims = one.claims; return; }
+    if (one.claims) { claims = one.claims; rollup = one.rollup ?? {}; return; }
     (tables[one.t] ??= []).push(one.r);
   };
   try {
@@ -102,7 +103,7 @@ export function readCarry(file) {
   } finally {
     closeSync(fd);
   }
-  return { tables, claims };
+  return { tables, claims, rollup };
 }
 
 export function writePayload(file, payload) {

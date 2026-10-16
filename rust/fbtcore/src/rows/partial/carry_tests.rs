@@ -49,10 +49,12 @@ fn collected(target: &Path) -> Value {
     let text = std::fs::read_to_string(target).unwrap();
     let mut tables: Map<String, Value> = Map::new();
     let mut claims = Value::Object(Map::new());
+    let mut rollup = Value::Null;
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
         let one: Value = serde_json::from_str(line).unwrap();
         if let Some(found) = one.get("claims") {
             claims = found.clone();
+            rollup = one.get("rollup").cloned().unwrap_or(Value::Null);
             continue;
         }
         let table = one["t"].as_str().unwrap().to_string();
@@ -62,6 +64,7 @@ fn collected(target: &Path) -> Value {
     let mut out = Map::new();
     out.insert("tables".to_string(), Value::Object(tables));
     out.insert("claims".to_string(), claims);
+    out.insert("rollup".to_string(), rollup);
     Value::Object(out)
 }
 
@@ -111,6 +114,43 @@ fn a_declaration_that_is_still_there_keeps_the_id_it_already_had() {
     let claims = payload["claims"]["bindings"].as_object().unwrap();
     assert_eq!(claims.len(), 1, "one row is being replaced, so one id is kept");
     assert_eq!(claims["f:1\u{0}one"], json!("b:1"));
+}
+
+#[test]
+fn a_row_an_earlier_alternative_cannot_name_is_claimed_by_the_next_and_numbered_as_node_numbers_it() {
+    // A template expression has no line: the sparse key every other expression is named by leaves it out, and only
+    // an ALTERNATIVE keeps its id. The number in front is the alternative's, as `identityOf` writes it.
+    let db = tmp("alternatives");
+    seed(&db);
+    with_identity(&db, json!({"bindings": [["name", "note"], ["name"]]}));
+    let (_, payload) = carry(&db, &["a.ts"]);
+    let claims = payload["claims"]["bindings"].as_object().unwrap();
+    assert_eq!(claims["f:1\u{0}1\u{1}one"], json!("b:1"), "{claims:?}");
+}
+
+#[test]
+fn a_rollups_ids_go_back_in_the_order_it_made_them() {
+    // A ROLLUP REBUILT FROM THE SAME ROWS MAKES THE SAME ROWS: handed its old ids in order, it keeps them, and the
+    // closure that reads them does not move for nothing. Every row of a table node rebuilds whole; of a per-file table,
+    // only the rows no file owns - the rest are carried with their own ids.
+    let db = tmp("rollup");
+    let mut b = Batch { all: true, first: true, final_: true, lang: "typescript".to_string(), half: Some("typescript".to_string()), ..Default::default() };
+    b.shas.insert("a.ts".to_string(), json!("sha-a"));
+    b.tables.insert("files".to_string(), json!([{"id": "f:1", "path": "a.ts", "sha": "sha-a"}]));
+    b.tables.insert("routes".to_string(), json!([
+        {"id": "rt:2", "owner_file": "f:1", "path": "b"}, {"id": "rt:1", "owner_file": "f:1", "path": "a"}
+    ]));
+    b.tables.insert("renders".to_string(), json!([
+        {"id": "rd:1", "owner_file": "f:1", "to_class": "c:1"}, {"id": "rd:7", "to_class": "c:2", "call": "cl:9"}
+    ]));
+    apply(&db, ".", &b).unwrap();
+    let conn = Connection::open(&*db).unwrap();
+    crate::rows::meta::put_value(&conn, "spec:typescript", &json!({"rebuilt": ["routes", "projects"]})).unwrap();
+    drop(conn);
+    let (_, payload) = carry(&db, &[]);
+    assert_eq!(payload["rollup"]["routes"], json!(["rt:2", "rt:1"]), "the order they were made in, not their numbers'");
+    assert_eq!(payload["rollup"]["renders"], json!(["rd:7"]), "the per-file render is carried, not handed back");
+    assert!(payload["rollup"].get("files").is_none());
 }
 
 #[test]
