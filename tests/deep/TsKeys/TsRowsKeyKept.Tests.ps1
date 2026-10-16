@@ -57,6 +57,22 @@ Test-Case 'tsrows: a comment keeps the stored closure, and it is the closure a f
     Assert-Equal $kept.Text $full.Text "the kept closure against a full run of the edited tree"
 }
 
+# THE CARRY RUNS BEFORE NODE PARSES, so its span is a stage of the half beside the parse - filed under the store, it read
+# as store time the store never spent. Read off the trace the run keeps beside its database.
+Test-Case 'tsrows: a partial run traces the carry as its own stage of the half, never under the store' {
+    $tree = New-TsRowsWorkspace $script:TsKeptFiles
+    Assert-Exit (New-TsRowsDb $tree).Result 0
+    Add-Content -LiteralPath (Join-Path $tree 'apps/shop/src/kp.component.ts') -Value '// demo: a remark'
+    $again = New-TsRowsDb $tree
+    Assert-Exit $again.Result 0
+    Assert-Line $again.Result 'put back'
+    $spans = @(([System.IO.File]::ReadAllText($again.Db + '.last-run.jsonl') | ConvertFrom-Json).resourceSpans[0].scopeSpans[0].spans)
+    $carry = @($spans | Where-Object { $_.name -eq 'typescript: carry the rows' })
+    Assert-Equal $carry.Count 1 'one carry span'
+    $parent = @($spans | Where-Object { $_.spanId -eq $carry[0].parentSpanId })
+    Assert-Equal $parent[0].name 'deep: typescript' 'the span the carry hangs under'
+}
+
 Test-Case 'tsrows: an edited condition moves the closure, which a partial run derives again' {
     $tree = New-TsRowsWorkspace $script:TsKeptFiles
     Assert-Exit (New-TsRowsDb $tree).Result 0
