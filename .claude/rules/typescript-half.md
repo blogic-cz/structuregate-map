@@ -67,6 +67,13 @@ WAY WHILE ITS SHAPE HOLDS (`src/TsRows/TsSetup/TsShape.mjs`, `files.shape`): eve
 hashed by node on both runs. A comment or a method body keeps it; a selector, an input, a `templateUrl`, a
 decorator or a const a decorator names moves it, and the run reads everything.
 
+**A CARRIED ROW COMES BACK WITHOUT THE STRUCTURES NO PASS READS** (`src/TsRows/TsSetup/TsCarried.mjs`, handed to
+`rows/partial/uncarried.rs` through the plan): such a cell is its kind alone, a STUB that refuses every look inside;
+a table node rebuilds whole sends no rows at all. A pass that reads a stub, replaces one or would send one back marks
+the run (`MAP-UNCARRIED`), which is asked again with every cell carried - so a list that misses a read costs time,
+never a row. On a run that stopped short, `reads::dangling` asks every kept row's NODE rows for an id that is gone
+(`nested`), as node asked every row it held before its cells were stubbed.
+
 **A PARTIAL RUN KEEPS THE CLOSURE WHEN NOTHING IT READ MOVED** (`rust/fbtcore/src/rows/partial/unchanged.rs`). Every
 derivation records what its passes READ - each column asked of a row (`Store::reads`, flagged by `Row::get`) - in
 `_closure_reads`, and what it was derived under (setup, feature API, options, the spec's word on those columns) in

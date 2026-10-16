@@ -69,6 +69,9 @@ pub struct TsPayload {
     /// The tables this run rebuilt ENTIRELY, so their old rows go rather than the affected
     /// files'. node measures it; see its `Store.rollupTables`.
     pub whole: Vec<String>,
+    /// Whether this partial run stopped short of every hop - then a kept row's structures are asked too
+    /// (`reads::dangling`, `nested`), as node asked every row it held.
+    pub cut: bool,
     pub shas: Map<String, Value>,
     pub counters: Map<String, Value>,
     /// Rows HELD, for a fixture. A run never parses them into here: they are streamed past twice (`apply_streamed`),
@@ -394,7 +397,7 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
             let db = Connection::open(db_path)?;
             let deps: Map<String, Value> =
                 super::remember::stored_graph(&db).into_iter().map(|(target, dependents)| (target, Value::from(dependents))).collect();
-            if let Some((count, first)) = super::reads::dangling(&db, LANG, &payload.affected, &digest.borrow().ids, &deps)? {
+            if let Some((count, first)) = super::reads::dangling(&db, LANG, &payload.affected, &digest.borrow().ids, &deps, payload.cut)? {
                 bail!("{} would leave {count} reference(s) to rows it replaced, first {first}", super::reads::STOPPED_SHORT);
             }
         }

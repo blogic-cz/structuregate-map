@@ -38,7 +38,7 @@ fn seed(db: &Path) {
 fn carry(db: &Path, affected: &[&str]) -> (Carried, Value) {
     let target = db.with_extension("carry.json");
     let list: Vec<String> = affected.iter().map(|s| s.to_string()).collect();
-    let out = carry_over(db, &list, &target, "typescript").unwrap();
+    let out = carry_over(db, &list, &target, "typescript", None).unwrap();
     (out, collected(&target))
 }
 
@@ -283,7 +283,7 @@ fn carrying_from_a_database_that_is_not_there_says_so_rather_than_writing_an_emp
     let _ = std::fs::remove_file(&missing);
     let target = std::env::temp_dir().join("fbt-carry-nothing-at-all.json");
     let _ = std::fs::remove_file(&target);
-    let err = carry_over(&missing, &[], &target, "typescript").unwrap_err();
+    let err = carry_over(&missing, &[], &target, "typescript", None).unwrap_err();
     assert!(format!("{err:#}").contains("no database"));
     assert!(!target.exists(), "and it writes nothing");
 }
@@ -324,7 +324,7 @@ fn the_file_is_spelled_the_way_python_spells_it() {
     let db = tmp("spelling");
     seed(&db);
     let target = db.with_extension("carry.json");
-    carry_over(&db, &[], &target, "typescript").unwrap();
+    carry_over(&db, &[], &target, "typescript", None).unwrap();
     let text = std::fs::read_to_string(&target).unwrap();
     let mut lines = text.lines();
     let first = lines.next().unwrap();
@@ -334,4 +334,47 @@ fn the_file_is_spelled_the_way_python_spells_it() {
     assert!(!text.contains("\"id\":\"b:1\""));
     let last = text.lines().next_back().unwrap();
     assert!(last.starts_with("{\"claims\": {"), "the claims come last: {last}");
+}
+
+/// The carry file's lines as they are, `o` and all - `collected` puts the rows back together the way node reads them.
+fn lines(db: &Path, affected: &[&str], uncarried: Value) -> Vec<Value> {
+    let target = db.with_extension("carry.json");
+    let list: Vec<String> = affected.iter().map(|s| s.to_string()).collect();
+    carry_over(db, &list, &target, "typescript", Some(&uncarried)).unwrap();
+    std::fs::read_to_string(&target).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+}
+
+#[test]
+fn a_cell_node_never_reads_goes_out_as_its_kind_alone_and_only_on_the_rows_it_names() {
+    // REBUILDING A STRUCTURE node only holds was most of the carry: such a cell is its kind (`a` a list, `o` an object),
+    // and a `[column, value]` stub leaves the rows whose column holds anything else whole.
+    let db = tmp("stubs");
+    seed(&db);
+    let out = lines(&db, &["a.ts"], json!({"bindings": {"gates": true, "at": ["name", "one"]}}));
+    let two = out.iter().find(|l| l["r"]["id"] == json!("b:2")).unwrap();
+    assert_eq!(two["o"], json!({"gates": "a"}), "{two}");
+    assert!(two["r"].get("gates").is_none(), "a stubbed cell is not rebuilt: {two}");
+    assert_eq!(two["r"]["at"], json!({"line": 4, "open": true}), "b:2 is not named `one`: its cell is carried whole");
+    let named = lines(&db, &["a.ts"], json!({"bindings": {"at": ["name", "two"]}}));
+    let two = named.iter().find(|l| l["r"]["id"] == json!("b:2")).unwrap();
+    assert_eq!(two["o"], json!({"at": "o"}), "{two}");
+    // A ROW WITH NO STRUCTURE THERE goes out with none, stubbed or not.
+    let all = lines(&db, &[], json!({"bindings": {"at": true}}));
+    let one = all.iter().find(|l| l["r"]["id"] == json!("b:1")).unwrap();
+    assert!(one.get("o").is_none(), "b:1 holds no `at`: {one}");
+}
+
+#[test]
+fn a_table_node_rebuilds_whole_sends_no_rows_but_its_ids_and_claims_still_go() {
+    // node puts back no row of a `rebuilt` table (`TsMap.mjs`); `projects` it reads first, to re-point the files.
+    let db = tmp("rebuilt");
+    seed(&db);
+    let conn = Connection::open(&*db).unwrap();
+    crate::rows::meta::put_value(&conn, "spec:typescript", &json!({"rebuilt": ["bindings"], "identity": {"bindings": ["name"]}})).unwrap();
+    drop(conn);
+    let (out, payload) = carry(&db, &["a.ts"]);
+    assert!(payload["tables"].get("bindings").is_none(), "{payload}");
+    assert_eq!(payload["rollup"]["bindings"], json!(["b:1", "b:2"]));
+    assert_eq!(payload["claims"]["bindings"]["f:1\u{0}one"], json!("b:1"));
+    assert_eq!(out.tables, 1, "files alone");
 }

@@ -44,6 +44,7 @@ pub const MAP_POWERSHELL: Set = set!("powershell": "Map/PsMap.ps1");
 pub const TSROWS: Set = set!("tsrows-node":
     "TsRows/TsMap.mjs", "TsRows/TsSetup/TsConfig.mjs", "TsRows/TsImports.mjs", "TsRows/TsInventory.mjs",
     "TsRows/TsLocales.mjs", "TsRows/TsPaths.mjs", "TsRows/TsNodes.mjs", "TsRows/TsSetup/TsProgram.mjs", "TsRows/TsSetup/TsReads.mjs", "TsRows/TsSetup/TsShape.mjs",
+    "TsRows/TsSetup/TsCarried.mjs",
     "TsRows/TsSetup/TsProjects.mjs", "TsRows/TsSetup/TsResolve.mjs", "TsRows/TsSetup/TsRunIo.mjs", "TsRows/TsStore.mjs",
     "TsRows/TsText.mjs", "TsRows/TsPlain/TsLiterals.mjs", "TsRows/TsDecls/TsWalk.mjs",
     "TsRows/TsHtml.mjs",

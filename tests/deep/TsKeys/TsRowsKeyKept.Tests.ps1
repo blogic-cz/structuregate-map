@@ -51,6 +51,8 @@ Test-Case 'tsrows: a comment keeps the stored closure, and it is the closure a f
     Assert-Exit $again.Result 0
     Assert-Line $again.Result 'put back'
     Assert-Line $again.Result 'kept the closure it stored'
+    # NO PASS READ A CELL THE CARRY STUBBED (`src/TsRows/TsSetup/TsCarried.mjs`): the run was not asked again.
+    Assert-NoLine $again.Result 'with every cell carried'
     $kept = Invoke-Gate --map-query $again.Db --width 0 --sql $script:TsKeptSql
     Assert-Line $kept 'kp.a | tier in ["Beta"]'
     $full = Get-TsKeptFull $comment

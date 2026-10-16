@@ -144,12 +144,18 @@ pub const STOPPED_SHORT: &str = "a run that stopped short of every hop";
 /// in a file that was NOT read again, naming one of those ids, would then name a row that is gone. It can only
 /// be a row of a file that pointed into a replaced one, and `deps` (the stored id graph) names exactly those,
 /// so only their rows are looked through, for only the ids that are about to vanish.
+///
+/// `nested`: AN ID INSIDE A STRUCTURE TOO, in a kept row of any file - what node asked of every row it held on a run that
+/// stopped short of every hop (`Store.dangling`), and can no longer ask of a cell the carry stubbed
+/// (`uncarried.rs`). The graph holds plain cells only, so it names no file for these: every node table is asked, through
+/// its index on `value`, for exactly the ids about to vanish.
 pub fn dangling(
     db: &Connection,
     half: &str,
     replaced: &[String],
     kept: &IndexSet<String>,
     deps: &Map<String, Value>,
+    nested: bool,
 ) -> anyhow::Result<Option<(usize, String)>> {
     use super::half::{tables_with_half, HALF_COLUMN};
     use super::schema::escape;
@@ -172,7 +178,7 @@ pub fn dangling(
             }
         }
     }
-    if watchers.is_empty() {
+    if watchers.is_empty() && !nested {
         return Ok(None);
     }
     let replaced_ids = file_ids(&gone_paths)?;
@@ -207,6 +213,39 @@ pub fn dangling(
     }
     let mut found: Option<String> = None;
     let mut count = 0;
+    if nested {
+        let ids: Vec<&String> = vanished.iter().collect();
+        for table in names.iter().filter(|t| owned(t).unwrap_or(false)) {
+            let mut home = db.prepare(&format!("SELECT owner_file FROM \"{}\" WHERE id = ?1", escape(table)))?;
+            let mut home_at = db.prepare(&format!("SELECT owner_file FROM \"{}\" WHERE rowid = ?1", escape(table)))?;
+            for (column, child) in super::cells::columns_of(db, table) {
+                for chunk in ids.chunks(500) {
+                    let sql = format!("SELECT DISTINCT owner, value FROM \"{}\" WHERE value IN ({})", escape(&child), marks(chunk.len()));
+                    let mut stmt = db.prepare(&sql)?;
+                    let params: Vec<&dyn rusqlite::ToSql> = chunk.iter().map(|i| *i as &dyn rusqlite::ToSql).collect();
+                    let hits: Vec<(String, String)> = stmt
+                        .query_map(params.as_slice(), |r| Ok((r.get::<_, rusqlite::types::Value>(0)?, r.get::<_, String>(1)?)))?
+                        .flatten()
+                        .filter_map(|(owner, value)| match owner {
+                            rusqlite::types::Value::Text(t) => Some((t, value)),
+                            _ => None,
+                        })
+                        .collect();
+                    for (owner, value) in hits {
+                        // A ROW OF A REPLACED FILE goes with it; one of any other file is kept, and would name nothing.
+                        let file: Option<String> = match owner.strip_prefix('#').and_then(|at| at.parse::<i64>().ok()) {
+                            Some(at) => home_at.query_row([at], |r| r.get(0)).ok().flatten(),
+                            None => home.query_row([&owner], |r| r.get(0)).ok().flatten(),
+                        };
+                        if file.is_some_and(|f| !replaced_ids.contains(&f)) {
+                            count += 1;
+                            found.get_or_insert_with(|| format!("{table}.{column} -> {value}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
     for table in names.iter().filter(|t| owned(t).unwrap_or(false)) {
         let sql = format!(
             "SELECT * FROM \"{}\" WHERE \"{HALF_COLUMN}\" = ? AND owner_file IN ({})",
@@ -270,12 +309,35 @@ mod tests {
         let deps = json!({"b.ts": ["a.ts"]});
         // b.ts is read again and keeps c:1: nothing a.ts holds is left pointing at nothing.
         let kept = json!({"classes": [{"id": "c:1", "file": "f:2"}]});
-        let found = dangling(&db, "typescript", &["b.ts".to_string()], &super::super::digest::Digest::over(kept.as_object().unwrap(), &[]).ids, deps.as_object().unwrap());
+        let found = dangling(&db, "typescript", &["b.ts".to_string()], &super::super::digest::Digest::over(kept.as_object().unwrap(), &[]).ids, deps.as_object().unwrap(), false);
         assert_eq!(found.unwrap(), None);
         // b.ts comes back with c:1 under a new id: a.ts's call would name a row that is gone.
         let renumbered = json!({"classes": [{"id": "c:9", "file": "f:2"}, {"id": "c:2", "file": "f:2"}]});
-        let found = dangling(&db, "typescript", &["b.ts".to_string()], &super::super::digest::Digest::over(renumbered.as_object().unwrap(), &[]).ids, deps.as_object().unwrap());
+        let found = dangling(&db, "typescript", &["b.ts".to_string()], &super::super::digest::Digest::over(renumbered.as_object().unwrap(), &[]).ids, deps.as_object().unwrap(), false);
         assert_eq!(found.unwrap(), Some((1, "calls -> c:1".to_string())));
+    }
+
+    #[test]
+    fn an_id_a_kept_row_holds_inside_a_structure_is_found_where_the_run_stopped_short_and_nowhere_else() {
+        // c.ts depends on nothing the graph knows of: the id sits inside a member's folded value, which is NODE rows.
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE files (id TEXT, path TEXT, half TEXT);
+             CREATE TABLE classes (id TEXT, file TEXT, owner_file TEXT, half TEXT);
+             INSERT INTO files VALUES ('f:1', 'a.ts', 'typescript'), ('f:2', 'b.ts', 'typescript'), ('f:3', 'c.ts', 'typescript');
+             INSERT INTO classes VALUES ('c:1', 'f:2', 'f:2', 'typescript');",
+        )
+        .unwrap();
+        let members = [json!({"id": "m:1", "file": "f:3", "owner_file": "f:3", "half": "typescript", "value": {"$call": {"args": [{"$expr_id": "c:1"}]}}})];
+        crate::rows::store::insert_rows(&db, "members", &members).unwrap();
+        let deps = json!({"b.ts": ["a.ts"]});
+        let renumbered = json!({"classes": [{"id": "c:9", "file": "f:2"}]});
+        let ids = super::super::digest::Digest::over(renumbered.as_object().unwrap(), &[]).ids;
+        let found = dangling(&db, "typescript", &["b.ts".to_string()], &ids, deps.as_object().unwrap(), true);
+        assert_eq!(found.unwrap(), Some((1, "members.value -> c:1".to_string())));
+        // A run over every hop never asked it of a structure, and still does not.
+        let found = dangling(&db, "typescript", &["b.ts".to_string()], &ids, deps.as_object().unwrap(), false);
+        assert_eq!(found.unwrap(), None);
     }
 
     #[test]

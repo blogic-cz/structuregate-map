@@ -44,22 +44,24 @@ fn deep_stack<T: Send>(work: impl FnOnce() -> Result<T, String> + Send) -> Resul
 
 /// The rows of every file a partial run is NOT re-extracting, written to `target`. AN UNREADABLE PLAN IS
 /// NOT AN EMPTY ONE: read as "nothing is affected" it would carry every row.
-pub fn carry(db: &Path, lang: &str, plan: &str, target: &str) -> Result<String, String> {
+/// `whole`: every cell carried, whatever the plan says node never reads - a run asked again after it read one.
+pub fn carry(db: &Path, lang: &str, plan: &str, target: &str, whole: bool) -> Result<String, String> {
     if target.is_empty() {
         return Err("no file to carry the rows into".to_string());
     }
-    let affected: Vec<String> = if plan.is_empty() {
-        Vec::new()
+    let parsed: serde_json::Value = if plan.is_empty() {
+        serde_json::Value::Null
     } else {
         let text = std::fs::read_to_string(plan).map_err(|e| format!("the plan could not be read - {e}"))?;
-        let parsed: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("the plan could not be read - {e}"))?;
-        parsed
-            .get("affected")
-            .and_then(|a| a.as_array())
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-            .unwrap_or_default()
+        serde_json::from_str(&text).map_err(|e| format!("the plan could not be read - {e}"))?
     };
-    let carried = carry::carry_over(db, &affected, Path::new(target), lang).map_err(|e| format!("{e:#}"))?;
+    let affected: Vec<String> = parsed
+        .get("affected")
+        .and_then(|a| a.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let uncarried = if whole { None } else { parsed.get("uncarried") };
+    let carried = carry::carry_over(db, &affected, Path::new(target), lang, uncarried).map_err(|e| format!("{e:#}"))?;
     serde_json::to_string(&carried).map_err(|e| format!("the receipt could not be serialised: {e}"))
 }
 
