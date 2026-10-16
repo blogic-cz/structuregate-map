@@ -56,6 +56,27 @@ pub fn drop_half(db: &Connection, half: &str) -> Result<()> {
     Ok(())
 }
 
+/// EVERY ROW THIS HALF WROTE, GONE - A TABLE THAT HOLDS NOTHING ELSE DROPPED, its node tables and indexes with it, for a
+/// run about to write every row again: emptied, its indexes stayed and every insert kept them up, so a full run over an
+/// existing map wrote its rows half as slowly again as one into a fresh file, and emptying them was seconds more. The
+/// insert creates the table again as a fresh map's, and the store indexes it after. A table another half's rows share
+/// keeps them (`delete_half_rows`).
+pub fn drop_half_tables(db: &Connection, half: &str) -> Result<()> {
+    for table in tables_with_half(db)? {
+        let escaped = schema::escape(&table);
+        let shared = db
+            .prepare(&format!("SELECT 1 FROM \"{escaped}\" WHERE \"{HALF_COLUMN}\" IS NOT ?1 LIMIT 1"))?
+            .exists([half])?;
+        if shared {
+            delete_half_rows(db, &table, half)?;
+            continue;
+        }
+        super::cells::drop_children(db, &table)?;
+        db.execute_batch(&format!("DROP TABLE \"{escaped}\""))?;
+    }
+    Ok(())
+}
+
 /// Every row of `table` this half wrote, and their nodes, gone; how many rows went.
 ///
 /// A TABLE HOLDING NOTHING BUT THIS HALF'S ROWS IS EMPTIED WITHOUT A WHERE: a plain `DELETE FROM` is SQLite's
@@ -201,6 +222,28 @@ mod tests {
         apply(&db, ".", &tagged("typescript", Some("typescript"), 3)).unwrap();
         apply(&db, ".", &tagged("typescript", Some("typescript"), 3)).unwrap();
         assert_eq!(nodes_of(&db, "typescript"), 6, "a list and its item for each of the three rows, once");
+    }
+
+    #[test]
+    fn a_run_writing_every_row_again_drops_a_table_only_this_half_holds_and_keeps_another_halfs_rows() {
+        let db = tmp("dropped");
+        apply(&db, ".", &tagged("typescript", Some("typescript"), 3)).unwrap();
+        let shared = tmp("dropped-shared");
+        apply(&shared, ".", &tagged("csharp", None, 2)).unwrap();
+        apply(&shared, ".", &tagged("typescript", Some("typescript"), 3)).unwrap();
+        let tables = |db: &Connection| -> Vec<String> {
+            let mut stmt = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'bindings%' ORDER BY name").unwrap();
+            stmt.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect()
+        };
+        let conn = Connection::open(&*db).unwrap();
+        drop_half_tables(&conn, "typescript").unwrap();
+        assert!(tables(&conn).is_empty(), "{:?}", tables(&conn));
+        let conn = Connection::open(&*shared).unwrap();
+        drop_half_tables(&conn, "typescript").unwrap();
+        assert_eq!(tables(&conn), vec!["bindings", "bindings__tags"]);
+        drop(conn);
+        assert_eq!(nodes_of(&shared, "csharp"), 4, "a list and its item for each of the two C# rows");
+        assert_eq!(nodes_of(&shared, "typescript"), 0);
     }
 
     #[test]

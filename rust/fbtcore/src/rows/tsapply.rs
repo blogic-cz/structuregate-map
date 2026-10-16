@@ -19,7 +19,7 @@
 
 use super::deps;
 use super::digest::Digest;
-use super::half::{drop_half, tables_with_half, HALF_COLUMN};
+use super::half::{drop_half_tables, tables_with_half, HALF_COLUMN};
 use super::pyjson;
 use super::schema;
 use super::store::{self, WriteRequest};
@@ -352,7 +352,7 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
         let db = Connection::open(db_path)?;
         db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; BEGIN")?;
         unchanged::forget(&db, LANG)?;
-        drop_half(&db, LANG)?;
+        drop_half_tables(&db, LANG)?;
         db.execute_batch("COMMIT")?;
         receipt.phases.insert("drop the old rows".to_string(), dropping.elapsed().as_millis() as u64);
     }
