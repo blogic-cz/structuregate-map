@@ -141,13 +141,46 @@ export function rollupRefIds(store) {
   const refIn = (ref, fileId) => (ref === null ? null
     : idOf(ref) ?? importedAs.get(`${String(fileId)}#${str(ref.name) ?? str(ref.expr) ?? ''}`) ?? null);
 
+  // EVERY NESTED `$module` AND `$ref` OF AN ELEMENT, with its row id. COPIED ON THE WAY DOWN, never written in place:
+  // a route's `load_children` is the very object a module's `forChild([...])` holds, and an id added to it here
+  // would land on a full run's `routes` row but not on a partial run's, whose rows come back apart. Only the path to
+  // an object that gains an id is copied; `memo` keeps a shared sub-value one value and stops a cycle.
+  const nestedIds = (value, fileId, memo) => {
+    if (value === null || typeof value !== 'object') return value;
+    if (memo.has(value)) return memo.get(value);
+    memo.set(value, value);
+    let out = value;
+    const put = (k, v) => {
+      if (v === out[k]) return;
+      if (out === value) out = Array.isArray(value) ? [...value] : { ...value };
+      out[k] = v;
+    };
+    if (Array.isArray(value)) value.forEach((v, i) => put(i, nestedIds(v, fileId, memo)));
+    else {
+      for (const k of Object.keys(value)) put(k, nestedIds(value[k], fileId, memo));
+      const lazy = asRef(out.$module);
+      const lazyId = lazy === null ? null : idOf(lazy);
+      if (lazyId !== null && lazy.id !== lazyId) put('$module', { ...lazy, id: lazyId });
+      const ref = str(value.$ref) === null ? null : refIn({ name: value.$ref, file: value.file }, fileId);
+      if (ref !== null && out.id !== ref) put('id', ref);
+    }
+    memo.set(value, out);
+    return out;
+  };
+
   // A MODULE'S LISTS CARRY THE ROW ID of each class they name. `reach` and every consumer joining a module to
-  // its declarations otherwise re-derive it from file + name, which an alias defeats.
+  // its declarations otherwise re-derive it from file + name, which an alias defeats. INSIDE an element too (#75):
+  // a lazy `loadChildren` in `RouterModule.forChild([...])` holds its module as `$module` - resolved as
+  // `routes.load_children_module` is - and a provider object names its classes as `$ref`s.
   for (const row of store.table('ng_modules')) {
     for (const key of ['declarations', 'imports', 'exports', 'providers', 'bootstrap']) {
       if (!Array.isArray(row[key])) continue;
-      for (const el of row[key]) {
-        const ref = asRef(el);
+      const memo = new Map();
+      const list = row[key];
+      for (let i = 0; i < list.length; i++) {
+        const out = nestedIds(list[i], row.file, memo);
+        if (out !== list[i]) list[i] = out;
+        const ref = asRef(out);
         const id = refIn(ref, row.file);
         if (id !== null) ref.id = id;
       }

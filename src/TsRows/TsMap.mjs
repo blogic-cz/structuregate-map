@@ -210,9 +210,10 @@ async function main() {
   // 52: an `out_of_scope` candidate is a `renders_out_of_scope` row, no longer a `renders` one (#40).
   // 53: an ORPHAN template's gated nodes carry `gate_chain`/`gate_depth`, as a component's do (divergence #50).
   // 54: `components.unused` no longer counts an `out_of_scope` render candidate as a render (#77).
+  // 55: a nested `$module` (a lazy route in `forChild([...])`) and a nested `$ref` of an `ng_modules` list carry `id` (#75).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 54, build: args.build,
+    config: config.file, data: config.data, rows: 55, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
