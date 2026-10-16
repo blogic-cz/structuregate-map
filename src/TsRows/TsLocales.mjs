@@ -80,6 +80,8 @@ export function rollupTranslationCoverage(store) {
   // EQUALS a key the locale files declare. Nothing is inferred from the shape of a string.
   const referenced = new Set();
   for (const row of store.table('i18n_index')) referenced.add(String(row.key));
+  // A KEY A ROUTE'S PATH IS BUILT FROM (`route_keys`, #74): the router translates it, no call or literal spells it alone.
+  for (const row of store.tables.route_keys ?? []) referenced.add(String(row.key));
   for (const table of ['string_literals', 'template_strings']) {
     for (const row of store.table(table)) {
       const text = typeof row.value === 'string' ? row.value : null;

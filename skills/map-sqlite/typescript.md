@@ -35,7 +35,7 @@ Beside the shared tables it adds the FRAMEWORK tables:
 | declarations | `components` `directives` `pipes` `injectables` `ng_modules` `class_decorators` `members` `locals` `enums` `interfaces` `type_aliases` `type_members` `switch_cases` `template_literals` `template_strings` `projects` |
 | injection and I/O | `di` `io` `input_usage` |
 | templates | `templates` `template_nodes` `bindings` `renders` `renders_out_of_scope` `render_graph` `component_reach` `selector_index` |
-| routing and gates | `routes` `gates` `gate_values` `gate_index` |
+| routing and gates | `routes` `route_keys` `gates` `gate_values` `gate_index` |
 | NgRx | `state_actions` `state_handlers` `state_selectors` `state_effects` |
 | the closure, derived LAST from every other table | `render_path` `key_reach` `gate_features` (+ `gate_values`): where a translation key can be travelled to from a routed root, what gates every way in, which capability each gate requires |
 
@@ -51,6 +51,11 @@ Beside the shared tables it adds the FRAMEWORK tables:
   in lands in `render_path.branches`. `templates`/`template_nodes`/`bindings` are the template side; `gates`/
   `gate_values` what hides a node (`gates.gate_kind = 'hidden'` is `[hidden]`/`[attr.hidden]`, whose `expression` is a row holding the NEGATED condition) (`op` in/not_in/unknown; `listed_json` (child table `gate_values__listed_json`) what a config object lists, even an
   exclusion the map cannot polarise); `state_*` NgRx; `di`/`injectables` injection.
+* **`route_keys`** (`rk:`) is one row per `{{key}}` in a route's own `path` (`'{{routes.order.detail}}/:id'`, as a
+  translating router resolves it): `route` (`routes.id`), `file` (the route's), `ord` (the `/`-separated segment the
+  key sits in, from 0), `key`, and `translation` - a `translations.id` defining the key, NULL when no locale does. Join
+  a route to the code testing the same key by `key` (`i18n_refs.key`), never by parsing the path. A key a route path
+  names counts as `translations.referenced`.
 * **`key_reach.paths`** lists a key's ways, one `{path, own}` per way (`n_paths` entries). `path` joins `render_path.id`, may repeat, and is renumbered every build, so only join within one DB. `own` holds the ids the way holds beyond that row's `gates`/`branches`. Fold a per-way fact the map does not compute over the items of `key_reach__paths` (each item's `path` is a row below it, `role = 'path'`; `own` a child list, `role = 'own'`) joined to `render_path` (AND along `gates ∪ branches ∪ own`, UNION over entries). Never filter `render_path` by `key_reach.components`.
 * **A component field NOTHING reads is no site of the key its initializer holds**: `labelCode = 'k'` in a class whose
   template binds only another field adds no way to `key_reach`. `files.prop_reads` (node rows `files__prop_reads`: one row per property name the file reads - the name its `role`, the count its `value` -
