@@ -21,6 +21,20 @@ function refOf(v) {
   return v;
 }
 
+/** `JSON.stringify` replacer: an object's content without the `id` `rollupRefIds` gives a nested `$ref` or `$module`. */
+function withoutAddedIds(key, value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+  if (key === '$module' && 'id' in value) {
+    const { id, ...rest } = value;
+    return rest;
+  }
+  if ('$ref' in value && 'id' in value) {
+    const { id, ...rest } = value;
+    return rest;
+  }
+  return value;
+}
+
 export function rollupRoutes(store) {
   const foldSpread = makeSpreadFolder(store);
   const emitted = new Set();
@@ -50,7 +64,9 @@ export function rollupRoutes(store) {
       // `export const appRoutes` in one file and calls `forRoot(appRoutes)` in another, and the evaluator
       // RESOLVES that identifier so both walks see the same fully evaluated array. The ARRAY's own content
       // identifies it, with the parent path keeping two identical child arrays under different parents apart.
-      const signature = `${parentPath}|${JSON.stringify(val)}`;
+      // ...AS EXTRACTED: the row ids `rollupRefIds` adds inside a module's lists (a nested `$module`'s and `$ref`'s
+      // `id`, #75) come back on a partial run's kept rows and not on a const read again, so they are left out.
+      const signature = `${parentPath}|${JSON.stringify(val, withoutAddedIds)}`;
       let sig = arraySig;
       if (val.some(looksLikeRoute)) {
         sig = signature;
