@@ -21,11 +21,11 @@ fn chain_tables() -> Value {
 }
 
 /// The ids a path is made of, as the text they stand for.
-fn names(ids: &[Rc<str>]) -> Vec<&str> {
+fn names(ids: &[Arc<str>]) -> Vec<&str> {
     ids.iter().map(|i| &**i).collect()
 }
 
-fn edges_of(tables: Value) -> IndexMap<Rc<str>, Vec<Edge>> {
+fn edges_of(tables: Value) -> IndexMap<Arc<str>, Vec<Edge>> {
     let map = store_of(tables);
     let store = Store::from_payload(map, "typescript");
     load_edges(&store, &super::super::key_branches::Branches::new(&store))
@@ -203,15 +203,15 @@ fn a_root_with_no_reach_row_is_reported_with_empty_lists() {
 /// The memo is only allowed to make the same walk cheaper. Comparing against the plain
 /// recursion is the only way to say that and mean it - a test that asserted a hand-written
 /// expected list would be asserting what I believe, not what the walk did.
-fn naive(edges: &IndexMap<Rc<str>, Vec<Edge>>, comp: &str) -> Vec<RenderPath> {
+fn naive(edges: &IndexMap<Arc<str>, Vec<Edge>>, comp: &str) -> Vec<RenderPath> {
     fn walk(
-        edges: &IndexMap<Rc<str>, Vec<Edge>>,
-        current: &Rc<str>,
-        seen: &mut IndexSet<Rc<str>>,
+        edges: &IndexMap<Arc<str>, Vec<Edge>>,
+        current: &Arc<str>,
+        seen: &mut IndexSet<Arc<str>>,
     ) -> Vec<RenderPath> {
         let root = || {
             vec![RenderPath {
-                hops: vec![Rc::clone(current)],
+                hops: vec![Arc::clone(current)],
                 edges: Vec::new(),
                 gates: Vec::new(),
                 branches: Vec::new(),
@@ -225,12 +225,12 @@ fn naive(edges: &IndexMap<Rc<str>, Vec<Edge>>, comp: &str) -> Vec<RenderPath> {
             if seen.contains(&u.parent) {
                 continue;
             }
-            seen.insert(Rc::clone(&u.parent));
+            seen.insert(Arc::clone(&u.parent));
             for q in walk(edges, &u.parent, seen) {
                 let mut hops = q.hops;
-                hops.push(Rc::clone(current));
+                hops.push(Arc::clone(current));
                 let mut ids = q.edges;
-                ids.push(Rc::clone(&u.id));
+                ids.push(Arc::clone(&u.id));
                 let mut gates = q.gates;
                 gates.extend(u.gates.iter().cloned());
                 acc.push(RenderPath { hops, edges: ids, gates, branches: Vec::new() });
@@ -239,12 +239,12 @@ fn naive(edges: &IndexMap<Rc<str>, Vec<Edge>>, comp: &str) -> Vec<RenderPath> {
         }
         if acc.is_empty() { root() } else { acc }
     }
-    let start: Rc<str> = match edges.get_key_value(comp) {
-        Some((held, _)) => Rc::clone(held),
-        None => Rc::from(comp),
+    let start: Arc<str> = match edges.get_key_value(comp) {
+        Some((held, _)) => Arc::clone(held),
+        None => Arc::from(comp),
     };
     let mut seen = IndexSet::new();
-    seen.insert(Rc::clone(&start));
+    seen.insert(Arc::clone(&start));
     walk(edges, &start, &mut seen)
 }
 
@@ -252,13 +252,13 @@ fn naive(edges: &IndexMap<Rc<str>, Vec<Edge>>, comp: &str) -> Vec<RenderPath> {
 /// diamonds (so one parent is reached by more than one route), a pair of components rendered
 /// by each other (so a cycle is cut), a self-render, and two edges between the SAME pair -
 /// which is what multiplies the real map's paths.
-fn shapes() -> IndexMap<Rc<str>, Vec<Edge>> {
-    let mut edges: IndexMap<Rc<str>, Vec<Edge>> = IndexMap::new();
+fn shapes() -> IndexMap<Arc<str>, Vec<Edge>> {
+    let mut edges: IndexMap<Arc<str>, Vec<Edge>> = IndexMap::new();
     let mut add = |child: &str, parent: &str, id: &str, gate: Option<&str>| {
-        edges.entry(Rc::from(child)).or_default().push(Edge {
-            id: Rc::from(id),
-            parent: Rc::from(parent),
-            gates: gate.map(|g| vec![Rc::from(g)]).unwrap_or_default(),
+        edges.entry(Arc::from(child)).or_default().push(Edge {
+            id: Arc::from(id),
+            parent: Arc::from(parent),
+            gates: gate.map(|g| vec![Arc::from(g)]).unwrap_or_default(),
             branches: Vec::new(),
         });
     };
