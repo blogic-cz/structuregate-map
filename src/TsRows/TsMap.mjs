@@ -34,6 +34,7 @@ import { rollupGateIndex, rollupI18nIndex, rollupRenderGraph, rollupSelectors } 
 import { rollupDynamicRenders } from './TsDynRender.mjs';
 import { rollupRoutes } from './TsRoutes.mjs';
 import { rollupRouteTree } from './TsRouteTree.mjs';
+import { rollupRouteKeys } from './TsRouteKeys.mjs';
 import { rollupInputUsage } from './TsInputUsage.mjs';
 import { ASIDE, claimsBack, rollupModuleScope, setAsideOutOfScope, withAside } from './TsModuleScope.mjs';
 import { rollupStateGraph } from './TsNgrx.mjs';
@@ -211,9 +212,10 @@ async function main() {
   // 53: an ORPHAN template's gated nodes carry `gate_chain`/`gate_depth`, as a component's do (divergence #50).
   // 54: `components.unused` no longer counts an `out_of_scope` render candidate as a render (#77).
   // 55: a nested `$module` (a lazy route in `forChild([...])`) and a nested `$ref` of an `ng_modules` list carry `id` (#75).
+  // 56: `route_keys`, one row per `{{key}}` of a route's path, and such a key counts as `translations.referenced` (#74).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 55, build: args.build,
+    config: config.file, data: config.data, rows: 56, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
@@ -556,6 +558,8 @@ async function main() {
     + `back with the rest (${affectedIds === null ? 'full run' : `${affectedIds.size} file(s) re-read`})`);
 
   const locales = collectLocales(store, directories(config, 'locales', fe), diag);
+  // A ROUTE PATH'S `{{key}}`s, after the locales they resolve to and before `translations.referenced` counts them.
+  emit('MAP-NOTE', `the typescript half found ${rollupRouteKeys(store)} translation key(s) in route paths`);
 
   // A COMPONENT CREATED BY CODE IS A RENDER TOO - before the scope pass, which has a rule for an edge the
   // compiler never matched, and after the refs rollup, whose ids this pass follows.
