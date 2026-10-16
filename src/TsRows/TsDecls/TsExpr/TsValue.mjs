@@ -240,6 +240,9 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       const out = { $fn: node.getText() };
       const lazy = refs.lazyTarget(node);
       if (lazy !== null) out.$module = lazy;
+      // THE TEXT FIRST: a walk of every function's body for one callee name most trees never write.
+      const remote = out.$fn.includes('loadRemoteModule') ? refs.remoteTarget(node) : null;
+      if (remote !== null) out.$remote = remote;
       describeInto(out, node);
       return out;
     }

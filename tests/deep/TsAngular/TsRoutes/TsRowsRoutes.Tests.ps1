@@ -36,4 +36,71 @@ Test-Case 'tsrows: each translation key of a route path is a route_keys row join
     Assert-Line $used 'routes.order.detail=1'
 }
 
+# A HOST WITH A MODULE FEDERATION REMOTE: `orders` is a second project, its federation config exposing the module
+# the host's route loads. The checker types `loadRemoteModule` as `any`; only the config says which class it is.
+function New-TsRemoteWorkspace([string]$RemoteName = 'demo-orders') {
+    New-TsRowsWorkspace @{
+        'angular.json' = '{"projects":{"shop":{"projectType":"application","root":"apps/shop","sourceRoot":"apps/shop/src",' +
+            '"architect":{"build":{"options":{"tsConfig":"apps/shop/tsconfig.app.json"}}}},' +
+            '"orders":{"projectType":"application","root":"apps/orders","sourceRoot":"apps/orders/src",' +
+            '"architect":{"build":{"options":{"tsConfig":"apps/orders/tsconfig.app.json"}}}}}}'
+        'apps/orders/tsconfig.json' = '{"references":[{"path":"./tsconfig.app.json"}]}'
+        'apps/orders/tsconfig.app.json' = '{"compilerOptions":{"strict":true},"include":["src/**/*.ts"]}'
+        'apps/shop/src/app.routes.ts' = "import { NgModule } from '@angular/core';`n" +
+            "import { RouterModule } from '@angular/router';`n" +
+            "import { loadRemoteModule } from '@angular-architects/module-federation';`n" +
+            "@NgModule({ imports: [RouterModule.forRoot([`n" +
+            "  { path: 'orders', loadChildren: () => loadRemoteModule('demo-orders', './Module').then((m) => m.OrdersEntryModule)" +
+            ".catch(() => import('./fallback.module').then((m) => m.FallbackModule)) },`n" +
+            "  { path: 'alpha', loadChildren: () => loadRemoteModule({ type: 'manifest', remoteName: 'demo-orders', exposedModule: './Module' })" +
+            ".then((m) => m.OrdersEntryModule) },`n" +
+            "])] })`nexport class AppModule {}`n"
+        'apps/shop/src/fallback.module.ts' = "import { NgModule } from '@angular/core';`n@NgModule({})`nexport class FallbackModule {}`n"
+        'apps/orders/module-federation.config.js' = (Get-TsRemoteConfig $RemoteName)
+        'apps/orders/src/entry.module.ts' = "import { NgModule } from '@angular/core';`n@NgModule({})`nexport class OrdersEntryModule {}`n"
+    }
+}
+function Get-TsRemoteConfig([string]$Name) {
+    "module.exports = { name: '$Name', exposes: { './Module': 'apps/orders/src/entry.module.ts' } };`n"
+}
+function Get-TsRemoteRoutes([string]$Db) {
+    $r = Invoke-Gate --map-query $Db --width 0 --sql ("SELECT r.path || '|' || coalesce(rc.name, 'NULL') || '|' || " +
+        "coalesce(r.load_children_remote_name, 'NULL') || '|' || coalesce(mc.name, 'NULL') || '|' || " +
+        "coalesce(r.load_children_recovery, 'NULL') AS r FROM routes r LEFT JOIN classes rc ON rc.id = r.load_children_remote " +
+        "LEFT JOIN classes mc ON mc.id = r.load_children_module")
+    Assert-Exit $r 0
+    return $r
+}
+
+# A FEDERATED ROUTE LINKS TO THE REMOTE'S EXPOSED MODULE (#76), not only to its catch fallback: the config whose `name`
+# is the remote, its `exposes['./Module']` the file, the class the `.then` pick names declared there. The fallback stays
+# `load_children_module`, marked a recovery. Both call forms: two strings, and the `{ remoteName, exposedModule }` object.
+Test-Case 'tsrows: a loadRemoteModule route links to the class its remote exposes' {
+    $made = New-TsRowsDb (New-TsRemoteWorkspace)
+    Assert-Exit $made.Result 0
+    $r = Get-TsRemoteRoutes $made.Db
+    Assert-Line $r 'orders|OrdersEntryModule|demo-orders/Module|FallbackModule|1'
+    Assert-Line $r 'alpha|OrdersEntryModule|demo-orders/Module|NULL|NULL'
+}
+
+# THE CONFIG IS READ ON EVERY RUN: a partial run over an edit to it alone re-links the route both ways. Nothing the
+# route's own file read names the config, so a link made while that file was extracted would have kept the old answer.
+Test-Case 'tsrows: a partial run follows an edit to the federation config' {
+    $tree = New-TsRemoteWorkspace
+    Assert-Exit (New-TsRowsDb $tree).Result 0
+    $config = Join-Path $tree 'apps/orders/module-federation.config.js'
+    Set-Content -LiteralPath $config -Value (Get-TsRemoteConfig 'demo-elsewhere')
+    $moved = New-TsRowsDb $tree
+    Assert-Exit $moved.Result 0
+    Assert-Line $moved.Result 'read 1 file(s) again for 1 changed'
+    $r = Get-TsRemoteRoutes $moved.Db
+    Assert-Line $r 'orders|NULL|demo-orders/Module|FallbackModule|1'
+    Assert-NoLine $r 'OrdersEntryModule'
+    Set-Content -LiteralPath $config -Value (Get-TsRemoteConfig 'demo-orders')
+    $back = New-TsRowsDb $tree
+    Assert-Exit $back.Result 0
+    Assert-Line $back.Result 'read 1 file(s) again for 1 changed'
+    Assert-Line (Get-TsRemoteRoutes $back.Db) 'orders|OrdersEntryModule|demo-orders/Module|FallbackModule|1'
+}
+
 }
