@@ -312,7 +312,7 @@ pub fn key_routes(
     //    call runs only under the branches it sits in, and a getter returning
     //    `translate('k')` inside an `if` produces `k` only when that `if` holds. The ref names
     //    its own `calls` row, which names its branch and case.
-    let branches = Branches::new(store);
+    let branches = store.shared("branches", Branches::new);
     let lift = super::key_called::CallLift::new(store);
     let calls = store.table("calls");
     let call_by_id: std::collections::HashMap<String, &Row> =
