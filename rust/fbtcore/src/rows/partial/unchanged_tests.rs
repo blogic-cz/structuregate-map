@@ -55,6 +55,18 @@ fn a_digest_sees_every_read_cell_and_nothing_else() {
     assert_eq!(digest(&db, "u", &both, "typescript", &all).unwrap(), digest(&widened, "u", &both, "typescript", &all).unwrap());
 }
 
+/// A TABLE ANOTHER HALF MADE, with no `half` column, holds no row of this half: it hashes as empty, never an error.
+#[test]
+fn a_table_with_no_half_column_hashes_as_one_with_no_rows() {
+    let db = Connection::open_in_memory().unwrap();
+    db.execute_batch("CREATE TABLE classes (id TEXT, name TEXT); INSERT INTO classes VALUES ('c:1', 'Order')").unwrap();
+    let empty = Connection::open_in_memory().unwrap();
+    let columns: BTreeSet<String> = ["name".to_string()].into();
+    let all = Scope { all: true, owners: &[], paths: &[], kind: None, above: None };
+    let theirs = digest(&db, "classes", &columns, "typescript", &all).expect("a table of another half is no error");
+    assert_eq!(theirs, digest(&empty, "classes", &columns, "typescript", &all).unwrap());
+}
+
 /// A workspace of two files, and the payload that maps it: `parsed` is what the dead-key trace reads off a file.
 fn payload(partial: bool, parsed: bool) -> TsPayload {
     let mut tables = Map::new();
