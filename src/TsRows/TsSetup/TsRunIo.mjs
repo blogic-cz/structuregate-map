@@ -5,7 +5,7 @@
  * staged script lands in one folder.
  */
 
-import { readFileSync, openSync, writeSync, closeSync, readSync } from 'node:fs';
+import { existsSync, readFileSync, openSync, writeSync, closeSync, readSync } from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
 import { execFileSync } from 'node:child_process';
 
@@ -45,6 +45,8 @@ export function parseArgs(argv) {
     else if (flag === '--carry') { args.carry = value; i++; }
     // THE RETRY OF A RUN THAT STOPPED SHORT and found it could not (`MAP-RETRY`): every hop of dependents.
     else if (flag === '--every-hop') { args.everyHop = true; }
+    // THE CARRY IS STILL BEING WRITTEN as this run starts (`awaitCarry`).
+    else if (flag === '--carry-late') { args.carryLate = true; }
   }
   return args;
 }
@@ -59,6 +61,20 @@ export function parseArgs(argv) {
  * THE BYTES ARE THE SAME BYTES. Keys go out in insertion order with no spaces, exactly as
  * `JSON.stringify` emits them; only `tables` is walked row by row, because that is where the size is.
  */
+/**
+ * TRUE ONCE THE CARRY IS THERE, false when it could not be written. Rust writes it beside this run - it is the
+ * last thing the run waits for, and the programs are parsed meanwhile - and names it only when it is whole (a rename),
+ * or leaves `<carry>.failed`.
+ */
+export function awaitCarry(file) {
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    if (existsSync(file)) return true;
+    if (existsSync(`${file}.failed`)) return false;
+    Atomics.wait(pause, 0, 0, 10);
+  }
+}
+
 /**
  * The carried rows, read WITHOUT EVER HOLDING THE FILE AS ONE STRING.
  *

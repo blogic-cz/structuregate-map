@@ -156,13 +156,17 @@ pub(super) fn launched(into: &mut Collector, deep: &Deep, db: &str, root: &str, 
             let mut asks: std::collections::VecDeque<bool> = hops.iter().copied().collect();
             while let Some(every_hop) = asks.pop_front() {
                 let mut carried = None;
-                let planned = plan(into, deep, &parse, root, db, &work, every_hop, whole, &mut carried);
+                let planned = plan(into, deep, &parse, root, db, &work, every_hop);
                 absent = planned == Planned::Absent;
                 if planned != Planned::Full && planned != Planned::Partial {
                     break;
                 }
-                let carry = (planned == Planned::Partial).then_some(&work.carry);
-                let retry = match parse_tree(into, deep, &parse, root, db, &work, carry, every_hop, &|| {}) {
+                let parsed = if planned == Planned::Partial {
+                    carried_parse(into, deep, &parse, root, db, &work, every_hop, whole, &|| {}, &mut carried)
+                } else {
+                    parse_tree(into, deep, &parse, root, db, &work, None, every_hop, &|| {}, false)
+                };
+                let retry = match parsed {
                     Parsed::Rows => store(into, db, root, &work.rows, carried, fe),
                     Parsed::Retry => true,
                     Parsed::Uncarried if !whole => {
@@ -278,13 +282,10 @@ fn shared(deep: &Deep, arguments: &mut Vec<String>) {
     arguments.extend(["--build".into(), deep.build.clone()]);
 }
 
-/// ASK WHAT WOULD HAVE TO BE READ, then fetch the rows that would not be. A PLAN THAT CANNOT BE READ IS A
-/// FULL RUN, never a partial one: a fraction read because the answer was unavailable would be written over
-/// a whole map. How long the carry took goes to `carried`, for the note `store` writes. `whole` carries every cell,
-/// stubbing none (`rows/partial/uncarried.rs`) - and so does `--ts-html`, whose mirror reads every template node.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn plan(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &str, work: &Work, every_hop: bool, whole: bool,
-    carried: &mut Option<u64>) -> Planned {
+/// ASK WHAT WOULD HAVE TO BE READ - the rows that would not be are fetched beside the parse (`carried_parse`). A PLAN
+/// THAT CANNOT BE READ IS A FULL RUN, never a partial one: a fraction read because the answer was unavailable would be
+/// written over a whole map.
+pub(super) fn plan(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &str, work: &Work, every_hop: bool) -> Planned {
     let mut arguments = vec![parse.to_string(), "--root".into(), root.into(), "--rows".into(), text(&work.rows),
         "--state".into(), text(&work.state), "--plan".into(), text(&work.plan), "--db".into(), db.into()];
     if every_hop {
@@ -330,33 +331,55 @@ pub(super) fn plan(into: &mut Collector, deep: &Deep, parse: &str, root: &str, d
         return Planned::Full;
     }
     why(into, &plan["why"], "what moved");
-    // A PARTIAL RUN WITHOUT THE REST OF THE ROWS IS NOT A PARTIAL RUN: it reads everything instead.
-    // ITS OWN STAGE, beside the plan and the parse: it runs before node does, and filed under `store` it read as store time.
-    let carrying = crate::trace::stage("typescript: carry the rows");
-    let carry_started = std::time::Instant::now();
-    let fetched = calls::carry(Path::new(db), LANG, &text(&work.plan), &text(&work.carry), whole || deep.ts_html.is_some());
-    *carried = Some(carry_started.elapsed().as_millis() as u64);
-    drop(carrying);
-    let receipt = match fetched {
-        Ok(receipt) if work.carry.is_file() => receipt,
-        Ok(_) => {
-            into.notes.push("the typescript half is reading everything: the rows it would not have re-extracted could not be fetched ()".into());
-            return Planned::Full;
-        }
+    Planned::Partial
+}
+
+/// A PARTIAL RUN'S CARRY AND PARSE, BESIDE EACH OTHER: node is launched as the carry starts and parses every project
+/// while it is written (`prewarm` in `TsProgram.mjs`), and waits for it only to load it - it is written under another
+/// name and renamed when whole, or `<carry>.failed` is left. Carried one after the other, the carry was a quarter of the
+/// run and node sat idle through it. `read` is told when the carry has read the database - its last read - not when node
+/// starts. A carry that failed is no partial run: it reads everything instead. How long the carry took goes to `carried`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn carried_parse(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &str, work: &Work, every_hop: bool, whole: bool,
+    read: &(dyn Fn() + Sync), carried: &mut Option<u64>) -> Parsed {
+    let part = work.carry.with_extension("part");
+    let failed = work.carry.with_extension("json.failed");
+    let anchor = crate::trace::anchor();
+    let (parsed, fetched, ms) = std::thread::scope(|scope| {
+        let carrying = scope.spawn(|| {
+            let _adopted = crate::trace::adopt(anchor);
+            let _stage = crate::trace::stage("typescript: carry the rows");
+            let started = std::time::Instant::now();
+            let fetched = calls::carry(Path::new(db), LANG, &text(&work.plan), &text(&part), whole || deep.ts_html.is_some())
+                .and_then(|receipt| std::fs::rename(&part, &work.carry).map(|_| receipt).map_err(|e| e.to_string()));
+            if fetched.is_err() {
+                let _ = std::fs::write(&failed, b"");
+            }
+            read();
+            (fetched, started.elapsed().as_millis() as u64)
+        });
+        let parsed = parse_tree(into, deep, parse, root, db, work, Some(&work.carry), every_hop, &|| {}, true);
+        let (fetched, ms) = carrying.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        (parsed, fetched, ms)
+    });
+    *carried = Some(ms);
+    match fetched {
+        Ok(receipt) => match serde_json::from_str::<Value>(&receipt) {
+            Ok(receipt) => into.notes.push(format!(
+                "the typescript half kept {} row(s) it does not have to re-extract, across {} table(s)",
+                receipt["rows"].as_i64().unwrap_or(0),
+                receipt["tables"].as_i64().unwrap_or(0)
+            )),
+            Err(e) => into.notes.push(format!("the typescript half kept rows it does not have to re-extract, and could not say how many ({e})")),
+        },
+        // A PARTIAL RUN WITHOUT THE REST OF THE ROWS IS NOT A PARTIAL RUN: it reads everything instead.
         Err(why) => {
             into.notes.push(format!("the typescript half is reading everything: the rows it would not have re-extracted could not be fetched ({why})"));
-            return Planned::Full;
+            *carried = None;
+            return parse_tree(into, deep, parse, root, db, work, None, every_hop, &|| {}, false);
         }
-    };
-    match serde_json::from_str::<Value>(&receipt) {
-        Ok(receipt) => into.notes.push(format!(
-            "the typescript half kept {} row(s) it does not have to re-extract, across {} table(s)",
-            receipt["rows"].as_i64().unwrap_or(0),
-            receipt["tables"].as_i64().unwrap_or(0)
-        )),
-        Err(e) => into.notes.push(format!("the typescript half kept rows it does not have to re-extract, and could not say how many ({e})")),
     }
-    Planned::Partial
+    parsed
 }
 
 /// WHY THE HALF RUNS, said on every run that does and kept for `_meta.last_refresh`: a pull that moved a hundred-odd `.ts`
@@ -396,14 +419,18 @@ pub(super) enum Parsed {
 }
 
 /// node, with the workspace's own compiler. `read` is told once the last read of the database is behind it, before node starts.
+/// `late`: the carry is still being written as node starts (`carried_parse`).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn parse_tree(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &str, work: &Work, carry: Option<&PathBuf>, every_hop: bool,
-    read: &dyn Fn()) -> Parsed {
+    read: &dyn Fn(), late: bool) -> Parsed {
     // `--db`: WHERE ITS OWN OUTPUT GOES, so a database inside the tree is not read as a file of it.
     let mut arguments = vec![parse.to_string(), "--root".into(), root.into(), "--rows".into(), text(&work.rows),
         "--state".into(), text(&work.state), "--db".into(), db.into()];
     if let Some(carry) = carry {
         arguments.extend(["--carry".into(), text(carry)]);
+        if late {
+            arguments.push("--carry-late".into());
+        }
     }
     if every_hop {
         arguments.push("--every-hop".into());
@@ -439,6 +466,10 @@ pub(super) fn parse_tree(into: &mut Collector, deep: &Deep, parse: &str, root: &
     if let Some(why) = records(&ran.stdout, "MAP-RETRY|").into_iter().next() {
         into.notes.push(format!("the typescript half is reading every hop of dependents again: {why}"));
         return Parsed::Retry;
+    }
+    if let Some(why) = records(&ran.stdout, "MAP-NOCARRY|").into_iter().next() {
+        into.notes.push(format!("the typescript half was handed back no rows: {why}"));
+        return Parsed::Nothing;
     }
     if let Some(cell) = records(&ran.stdout, "MAP-UNCARRIED|").into_iter().next() {
         into.notes.push(format!("the typescript half reads again with every cell carried: a pass read {cell}, which it was handed back without"));

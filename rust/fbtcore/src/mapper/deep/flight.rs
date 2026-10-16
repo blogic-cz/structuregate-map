@@ -88,14 +88,16 @@ pub(super) fn run(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: 
             let timed = Instant::now();
             let mut own = Collector::new();
             let mut carried = None;
-            let planned = ts::plan(&mut own, deep, &parse, root, db, &work, false, false, &mut carried);
+            let planned = ts::plan(&mut own, deep, &parse, root, db, &work, false);
             let absent = planned == Planned::Absent;
-            let parsed = (planned == Planned::Full || planned == Planned::Partial).then(|| {
-                let carry = (planned == Planned::Partial).then_some(&work.carry);
-                ts::parse_tree(&mut own, deep, &parse, root, db, &work, carry, false, &|| {
-                    let _ = read.send(());
-                })
-            });
+            let told = || {
+                let _ = read.send(());
+            };
+            let parsed = match planned {
+                Planned::Partial => Some(ts::carried_parse(&mut own, deep, &parse, root, db, &work, false, false, &told, &mut carried)),
+                Planned::Full => Some(ts::parse_tree(&mut own, deep, &parse, root, db, &work, None, false, &told, false)),
+                _ => None,
+            };
             drop(read);
             Landed { into: own, parsed, absent, carried, ms: timed.elapsed().as_millis() as u64 }
         });

@@ -73,6 +73,10 @@ Test-Case 'tsrows: a partial run traces the carry as its own stage of the half, 
     Assert-Equal $carry.Count 1 'one carry span'
     $parent = @($spans | Where-Object { $_.spanId -eq $carry[0].parentSpanId })
     Assert-Equal $parent[0].name 'deep: typescript' 'the span the carry hangs under'
+    # BESIDE THE PARSE, not before it: node builds its programs while the carry is written (`carried_parse`).
+    $parse = @($spans | Where-Object { $_.name -eq 'typescript: parse (node)' })[0]
+    $overlap = [decimal]$carry[0].startTimeUnixNano -lt [decimal]$parse.endTimeUnixNano -and [decimal]$parse.startTimeUnixNano -lt [decimal]$carry[0].endTimeUnixNano
+    Assert-Equal $overlap $true 'the carry runs while node parses'
 }
 
 Test-Case 'tsrows: an edited condition moves the closure, which a partial run derives again' {
