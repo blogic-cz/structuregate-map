@@ -67,4 +67,33 @@ Test-Case 'tsrows: an export alias still joins a route and a module declaration 
     Assert-Line $beta 'beta=BetaComponent'
 }
 
+# A REF INSIDE AN ELEMENT CARRIES ITS ID TOO (#75). A lazy route written into `RouterModule.forChild([...])` holds its
+# module as `$module` deep in the `imports` element, and a provider object names its class as `$ref`s; only the
+# top-level element got an id, so a walk of module imports by id missed every lazily loaded child.
+Test-Case 'tsrows: a nested lazy module and a nested provider ref in an ng_modules list carry their id' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/demo.module.ts' = "import { NgModule } from '@angular/core';`n" +
+            "import { RouterModule } from '@angular/router';`n" +
+            "import { AlphaService } from './alpha.service';`n" +
+            "@NgModule({ imports: [RouterModule.forChild([{ path: 'orders', loadChildren: () => import('./order.module').then(m => m.OrderModule) }])],`n" +
+            "  providers: [{ provide: AlphaService, useClass: AlphaService }] })`n" +
+            "export class DemoModule {}`n"
+        'apps/shop/src/order.module.ts' = "import { NgModule } from '@angular/core';`n@NgModule({})`nexport class OrderModule {}`n"
+        'apps/shop/src/alpha.service.ts' = "import { Injectable } from '@angular/core';`n@Injectable()`nexport class AlphaService {}`n"
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    # THE SAME CLASS `routes.load_children_module` names - the id is the route's resolution, not a second one.
+    $lazy = Invoke-TsRowsQ $made.Db ('SELECT ''module='' || c.name AS r FROM ng_modules m ' +
+        'JOIN ng_modules__imports z ON z.owner = m.id AND z.role = ''$module'' ' +
+        "JOIN classes c ON c.id = $(Get-TsFieldSql 'ng_modules__imports' 'z' 'id') " +
+        "WHERE m.name = 'DemoModule' AND c.id = (SELECT load_children_module FROM routes WHERE path = 'orders')")
+    Assert-Line $lazy 'module=OrderModule'
+    $provided = Invoke-TsRowsQ $made.Db ('SELECT z.role || ''='' || c.name AS r FROM ng_modules m ' +
+        'JOIN ng_modules__providers z ON z.owner = m.id AND z.role IN (''provide'', ''useClass'') ' +
+        "JOIN classes c ON c.id = $(Get-TsFieldSql 'ng_modules__providers' 'z' 'id') WHERE m.name = 'DemoModule'")
+    Assert-Line $provided 'provide=AlphaService'
+    Assert-Line $provided 'useClass=AlphaService'
+}
+
 }

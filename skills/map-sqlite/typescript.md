@@ -35,7 +35,7 @@ Beside the shared tables it adds the FRAMEWORK tables:
 | declarations | `components` `directives` `pipes` `injectables` `ng_modules` `class_decorators` `members` `locals` `enums` `interfaces` `type_aliases` `type_members` `switch_cases` `template_literals` `template_strings` `projects` |
 | injection and I/O | `di` `io` `input_usage` |
 | templates | `templates` `template_nodes` `bindings` `renders` `renders_out_of_scope` `render_graph` `component_reach` `selector_index` |
-| routing and gates | `routes` `gates` `gate_values` `gate_index` |
+| routing and gates | `routes` `route_keys` `gates` `gate_values` `gate_index` |
 | NgRx | `state_actions` `state_handlers` `state_selectors` `state_effects` |
 | the closure, derived LAST from every other table | `render_path` `key_reach` `gate_features` (+ `gate_values`): where a translation key can be travelled to from a routed root, what gates every way in, which capability each gate requires |
 
@@ -45,11 +45,23 @@ Beside the shared tables it adds the FRAMEWORK tables:
   walk. A selector candidate the host's NgModule or standalone `imports` cannot see is a `renders_out_of_scope`
   row instead (same columns, `scope = 'out_of_scope'`), so every candidate a tag matched is `renders UNION ALL
   renders_out_of_scope` (a table no row was written to does not exist). A host no module declares (`unknown`) keeps an
-  edge to every candidate. A render created in code names the method that returned the class
+  edge to every candidate. `components.unused = 1` when no `renders` edge, route or `bootstrap` reaches the
+  class - a `renders_out_of_scope` candidate is no render. A render created in code names the method that returned the class
   (`returned_by`) and each way it was returned (`return_ways`, `returns` ids); a `case` or `if` every way sits
   in lands in `render_path.branches`. `templates`/`template_nodes`/`bindings` are the template side; `gates`/
   `gate_values` what hides a node (`gates.gate_kind = 'hidden'` is `[hidden]`/`[attr.hidden]`, whose `expression` is a row holding the NEGATED condition) (`op` in/not_in/unknown; `listed_json` (child table `gate_values__listed_json`) what a config object lists, even an
   exclusion the map cannot polarise); `state_*` NgRx; `di`/`injectables` injection.
+* **`route_keys`** (`rk:`) is one row per `{{key}}` in a route's own `path` (`'{{routes.order.detail}}/:id'`, as a
+  translating router resolves it): `route` (`routes.id`), `file` (the route's), `ord` (the `/`-separated segment the
+  key sits in, from 0), `key`, and `translation` - a `translations.id` defining the key, NULL when no locale does. Join
+  a route to the code testing the same key by `key` (`i18n_refs.key`), never by parsing the path. A key a route path
+  names counts as `translations.referenced`.
+* **A Module Federation route** (`loadChildren: () => loadRemoteModule('demo-orders', './Module').then((m) => m.X)`, or
+  `loadRemoteModule({ remoteName, exposedModule })`) carries `routes.load_children_remote_name` (`demo-orders/Module`, the
+  request webpack resolves) and `load_children_remote`, the class `X` declared in the file the remote's own
+  `module-federation.config.{js,ts}` (`name` = the remote) lists under `exposes['./Module']` - read syntactically, never
+  run; NULL when no single config, exposed file or class proves it, or for a remote named only by its `remoteEntry` URL.
+  A `.catch(() => import(..))` fallback stays `load_children_module` with `load_children_recovery = 1`.
 * **`key_reach.paths`** lists a key's ways, one `{path, own}` per way (`n_paths` entries). `path` joins `render_path.id`, may repeat, and is renumbered every build, so only join within one DB. `own` holds the ids the way holds beyond that row's `gates`/`branches`. Fold a per-way fact the map does not compute over the items of `key_reach__paths` (each item's `path` is a row below it, `role = 'path'`; `own` a child list, `role = 'own'`) joined to `render_path` (AND along `gates ∪ branches ∪ own`, UNION over entries). Never filter `render_path` by `key_reach.components`.
 * **A component field NOTHING reads is no site of the key its initializer holds**: `labelCode = 'k'` in a class whose
   template binds only another field adds no way to `key_reach`. `files.prop_reads` (node rows `files__prop_reads`: one row per property name the file reads - the name its `role`, the count its `value` -
@@ -91,7 +103,8 @@ Beside the shared tables it adds the FRAMEWORK tables:
   `token_ref` and `token_id` name the injection token - an `@Inject(TOKEN)` or `inject()`'s argument - where `resolved`
   stays the declared TYPE; a token that is a property of a const object (`Tokens.X`)
   joins that const in `token_id`. An `export { A as B }` alias resolves to `A` (`routes.component_id`, the `id` on each
-  `ng_modules` ref). `in_module` marks an interface or type alias declared inside `declare module`, `declare global` or a
+  `ng_modules` ref). A ref INSIDE an `ng_modules` list element carries its `id` too: a lazy route's `$module` in
+  `RouterModule.forChild([...])` (the class `routes.load_children_module` names) and each `$ref` of a provider object. `in_module` marks an interface or type alias declared inside `declare module`, `declare global` or a
   namespace, and a namespace's class, function, const or enum. `state_selectors.factory` is set on a function that RETURNS `createSelector`. A static attribute that
   matches an input counts in `input_usage` (its `expression` is null) and `io.bound_count`.
 * **`state_effects`** is one row per `createEffect` member: `actions` the `ofType` refs it listens to (as `state_handlers.action_source` spells them), `dispatch` 0 for `{ dispatch: false }`, `emits` the calls its callbacks return, as written.

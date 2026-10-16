@@ -50,8 +50,11 @@ export function rollupComponentReach(store, { wholeApp }) {
   const rendered = new Set();
   for (const r of store.table('renders')) {
     if (r.to_class == null || r.kind !== 'component') continue;
-    rendered.add(r.to_class);
+    // AN OUT-OF-SCOPE CANDIDATE RENDERS NOTHING (#77): a tag matched to a same-selector component its host's scope
+    // cannot see is not where Angular instantiates it, so counting it as rendered left that component `unused = 0`
+    // with no template reaching it. `unknown` still counts - nothing proves which candidate renders.
     if (r.scope === 'out_of_scope') continue;
+    rendered.add(r.to_class);
     if (r.from_class == null || r.from_class === r.to_class) continue;
     const list = edges.get(r.from_class);
     if (list) { if (!list.includes(r.to_class)) list.push(r.to_class); }
