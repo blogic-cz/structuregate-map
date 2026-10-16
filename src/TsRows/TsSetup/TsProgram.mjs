@@ -39,7 +39,12 @@ function remembered(host, name) {
 // because binding reads it); a compiler without that list shares only between identical option sets.
 const PARSED = new Map();
 /** Every shared parse released - once the walk is done, no program asks again. */
-export const forgetParses = () => PARSED.clear();
+export const forgetParses = () => { PARSED.clear(); RESOLVED.clear(); };
+
+// ONE MODULE RESOLUTION CACHE PER CONFIG, as `tsc` keeps one per program: a config built ahead (`prewarm`) and then by
+// the walk resolves its imports once. A cache holds what `resolveModuleName` answers - the host is still asked through
+// `resolveModuleNames` for every import, so every note is made as before - and is asked with that config's options only.
+const RESOLVED = new Map();
 function shareSourceFiles(ts, host, options) {
   const parse = host.getSourceFile.bind(host);
   const affecting = Array.isArray(ts.sourceFileAffectingCompilerOptions)
@@ -108,7 +113,10 @@ export function createProgram(ts, tsconfigPath, nodeModules, diag, noted, checke
   // THE COMPILER'S OWN RESOLUTION CACHE, as `tsc` passes it: without one every import of every file is resolved
   // from the disk again. Used only when asked with this program's own options - a redirect through a project
   // reference resolves as before.
-  const cache = ts.createModuleResolutionCache(host.getCurrentDirectory(), host.getCanonicalFileName, options);
+  if (!RESOLVED.has(tsconfigPath)) {
+    RESOLVED.set(tsconfigPath, ts.createModuleResolutionCache(host.getCurrentDirectory(), host.getCanonicalFileName, options));
+  }
+  const cache = RESOLVED.get(tsconfigPath);
   const nmDummy = path.join(nodeModules, '__resolve__.ts');
   // Resolve against the real containing file first; for a bare specifier that fails, retry as if the
   // importer lived next to the node_modules that is available.
