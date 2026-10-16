@@ -284,6 +284,14 @@ pub fn delete_children(db: &Connection, table: &str, where_sql: &str, params: &[
     Ok(gone)
 }
 
+/// Every node of every row of `table`, gone - for a table whose rows all go: no row is asked which nodes are its.
+pub fn clear_children(db: &Connection, table: &str) -> Result<()> {
+    for (_, child_table) in columns_of(db, table) {
+        db.execute(&format!("DELETE FROM \"{}\"", schema::escape(&child_table)), [])?;
+    }
+    Ok(())
+}
+
 /// Every child table of `table`, dropped with its record - for a table that is itself dropped and made again.
 pub fn drop_children(db: &Connection, table: &str) -> Result<()> {
     for (_, child_table) in columns_of(db, table) {
