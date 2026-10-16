@@ -185,7 +185,18 @@ pub fn store(db_path: &Path, root: &str, workspace: &Path, half: &str, notes: &m
         setup: None,
         extra: &BTreeMap::new(),
         keep_existing: true,
-        counts: true,
+        // ITS OWN TABLES COUNTED, NOT EVERY TABLE: the rows were counted by the write before this one, and only these
+        // moved since - a count of the whole database was most of this pass on a large workspace.
+        counts: false,
     })?;
-    Ok(applied.written)
+    let db = Connection::open(db_path)?;
+    let mut written = applied.written;
+    for table in TABLES.iter().copied().chain(["diagnostics"]) {
+        written.insert(table.to_string(), crate::rows::schema::count_of(&db, table));
+        for (_, child) in crate::rows::cells::columns_of(&db, table) {
+            let count = crate::rows::schema::count_of(&db, &child);
+            written.insert(child, count);
+        }
+    }
+    Ok(written)
 }

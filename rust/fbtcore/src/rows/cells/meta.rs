@@ -92,6 +92,14 @@ pub fn clear(db: &Connection) -> Result<()> {
 /// ONE COMMIT, NOT ONE PER NODE: outside a caller's transaction every insert committed on its own - a sync per row -
 /// and the derived passes' kept key, a few thousand nodes, took most of their time. A savepoint is that one commit,
 /// and nests inside a caller's transaction when there is one.
+/// `put`, unless the key already holds `value`.
+pub fn put_moved(db: &Connection, key: &str, value: &str) -> Result<()> {
+    if get(db, key).as_deref() == Some(value) {
+        return Ok(());
+    }
+    put(db, key, value)
+}
+
 pub fn put(db: &Connection, key: &str, value: &str) -> Result<()> {
     db.execute_batch("SAVEPOINT meta_put")?;
     let done = (|| -> Result<()> {
