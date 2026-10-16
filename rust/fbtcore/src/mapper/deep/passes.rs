@@ -58,11 +58,22 @@ pub(super) fn duplicates(into: &mut Collector, db: &str) {
 }
 
 /// WHICH C# ACTION AN ANGULAR HTTP CALL REACHES - see `rows/http/`.
-pub(super) fn http(into: &mut Collector, db: &str) {
+/// NOT RUN AGAIN OVER THE SAME ROWS: what it read is keyed (`rows/http/inputs.rs`), and what it counted is said again.
+pub(super) fn http(into: &mut Collector, db: &str, build: &str) {
+    use crate::rows::http::inputs;
     let written = rusqlite::Connection::open(db).and_then(|mut conn| {
+        let key = inputs::key(&conn, build);
+        if let Some(counts) = key.as_deref().and_then(|k| inputs::replayed(&conn, k)) {
+            crate::trace::set("structuregate.deep.http_replayed", true);
+            return Ok(counts);
+        }
         let tx = conn.transaction()?;
         let counts = crate::rows::http::write(&tx)?;
         tx.commit()?;
+        if let Some(key) = &key {
+            // A KEY NOT KEPT is a pass run again next time, never a wrong replay.
+            let _ = inputs::remember(&conn, key, &counts);
+        }
         Ok(counts)
     });
     match written {

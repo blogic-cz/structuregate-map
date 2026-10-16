@@ -2,11 +2,13 @@
 //!
 //! `http_endpoints` is every attribute-routed action (`endpoints.rs`), `http_calls` every `@angular/common/http`
 //! call, a wrapper's callers standing for the wrapper's own call (`calls.rs`), and `http_links` which call reaches
-//! which endpoint (`matching.rs`). Rewritten whole each run: it reads nothing but the rows the halves stored.
+//! which endpoint (`matching.rs`). Rewritten whole by each run that does not replay it (`inputs.rs`): it reads nothing
+//! but the rows the halves stored.
 //! A database with no TypeScript still gets its C# endpoints; `http_calls` and `http_links` are then empty.
 
 mod calls;
 mod endpoints;
+pub mod inputs;
 mod matching;
 
 use super::dups::{has_columns, text};

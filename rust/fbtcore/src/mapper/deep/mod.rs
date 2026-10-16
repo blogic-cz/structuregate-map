@@ -374,7 +374,7 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
         let answer = serde_json::from_str(&ask(&json!({ "mode": "sql-links", "notes": into.notes, "db": db }))).unwrap_or_default();
         halves::deep(into, &answer);
     }
-    pass("pass: http links", || http(into, db));
+    pass("pass: http links", || http(into, db, &deep.build));
     pass("pass: mediator dispatch", || dispatch(into, db));
     pass("pass: duplicate types", || duplicates(into, db));
     if let Some(facts) = &facts {

@@ -169,6 +169,62 @@ pub fn dangling(db: &Connection, plan: &Replace<'_>, deps: &Map<String, Value>, 
     Ok(found.map(|f| (count, f)))
 }
 
+/// MAKE ROOM FOR A PARTIAL PAYLOAD: this half's rows for the files being re-extracted, and nothing
+/// else.
+///
+/// TWO KINDS OF TABLE, and node says which is which rather than this side keeping a second copy of
+/// the knowledge. A table node rebuilt WHOLE has its rows for this half removed outright — they are
+/// derived from the tree and a partial tree cannot produce them correctly. Every other table is per
+/// FILE, and only the affected files' rows go.
+///
+/// BY `owner_file`, which is why that column exists: 21 of the 53 tables carry no `file` of their
+/// own, and the parent chain that would stand in for one cannot attribute the module-scope `calls`
+/// at all.
+///
+/// THE OTHER HALVES ARE NEVER TOUCHED — every statement is scoped by `half`.
+pub fn replace_affected(db: &Connection, half: &str, affected: &[String], ids: &[String], whole: &[String]) -> anyhow::Result<usize> {
+    let wholly: IndexSet<&str> = whole.iter().map(String::as_str).collect();
+    let mut removed = 0usize;
+    for table in tables_with_half(db)? {
+        let columns = super::schema::existing_columns(db, &table)?;
+        let escaped = escape(&table);
+        // A STRUCTURE'S NODES GO FIRST, THROUGH THE ROWS THAT OWN THEM: a node carries no scope of its own (`cells`).
+        let count = if wholly.contains(table.as_str()) {
+            super::half::delete_half_rows(db, &table, half)?
+        } else if columns.iter().any(|c| c == "owner_file") && !ids.is_empty() {
+            let marks = vec!["?"; ids.len()].join(",");
+            let sql = format!(
+                "DELETE FROM \"{escaped}\" WHERE \"{HALF_COLUMN}\" = ? AND owner_file IN ({marks})"
+            );
+            let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(ids.len() + 1);
+            params.push(&half);
+            for id in ids {
+                params.push(id);
+            }
+            super::cells::delete_children(db, &table, &format!("t.\"{HALF_COLUMN}\" = ? AND t.owner_file IN ({marks})"), params.as_slice())?;
+            db.execute(&sql, params.as_slice())?
+        } else {
+            continue
+        };
+        removed += count;
+    }
+
+    // THE `files` ROWS OF THE AFFECTED FILES TOO, and last: the lookup above reads them. The write
+    // re-creates each one from the payload.
+    if !affected.is_empty() {
+        let marks = vec!["?"; affected.len()].join(",");
+        let sql = format!("DELETE FROM files WHERE half = ? AND path IN ({marks})");
+        let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(affected.len() + 1);
+        params.push(&half);
+        for path in affected {
+            params.push(path);
+        }
+        super::cells::delete_children(db, "files", &format!("t.half = ? AND t.path IN ({marks})"), params.as_slice())?;
+        db.execute(&sql, params.as_slice())?;
+    }
+    Ok(removed)
+}
+
 fn marks(n: usize) -> String {
     vec!["?"; n].join(",")
 }
