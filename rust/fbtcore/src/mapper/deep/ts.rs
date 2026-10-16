@@ -319,9 +319,12 @@ pub(super) fn plan(into: &mut Collector, deep: &Deep, parse: &str, root: &str, d
     }
     why(into, &plan["why"], "what moved");
     // A PARTIAL RUN WITHOUT THE REST OF THE ROWS IS NOT A PARTIAL RUN: it reads everything instead.
+    // ITS OWN STAGE, beside the plan and the parse: it runs before node does, and filed under `store` it read as store time.
+    let carrying = crate::trace::stage("typescript: carry the rows");
     let carry_started = std::time::Instant::now();
     let fetched = calls::carry(Path::new(db), LANG, &text(&work.plan), &text(&work.carry));
     *carried = Some(carry_started.elapsed().as_millis() as u64);
+    drop(carrying);
     let receipt = match fetched {
         Ok(receipt) if work.carry.is_file() => receipt,
         Ok(_) => {
@@ -472,13 +475,14 @@ pub(super) fn store(into: &mut Collector, db: &str, root: &str, rows: &Path, car
     };
     into.notes.extend(receipt["notes"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(String::from)));
     *fe = receipt["fe"].as_str().map(String::from);
-    // WHERE THE TIME WENT, as one note. The carry was timed here, before node parsed: the store never saw it.
+    for (phase, ms) in receipt["phases"].as_object().into_iter().flatten() {
+        crate::trace::reported(&format!("typescript: {phase}"), ms.as_u64().unwrap_or(0));
+    }
+    // WHERE THE TIME WENT, as one note. The carry was timed before node parsed, as a stage of its own: the store never
+    // saw it, so it joins the note and is not laid back under the store's span.
     if let (Some(ms), Some(phases)) = (carried, receipt["phases"].as_object_mut()) {
         phases.insert("carry the rows".into(), json!(ms));
         phases.sort_keys();
-    }
-    for (phase, ms) in receipt["phases"].as_object().into_iter().flatten() {
-        crate::trace::reported(&format!("typescript: {phase}"), ms.as_u64().unwrap_or(0));
     }
     // WHAT `write the rows` IS MADE OF, as a breakdown: it explains that phase and adds nothing to the store.
     for step in receipt["write_steps"].as_array().into_iter().flatten() {
