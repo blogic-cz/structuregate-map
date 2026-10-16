@@ -23,6 +23,26 @@ Test-Case 'tsrows: the map publishes its own join spec and id scheme' {
     Assert-Line $i 'classes'
 }
 
+# A DECLARED JOIN IS AN INDEXED ONE (#70): the map is opened read-only, so a consumer cannot add the index, and
+# `WHERE calls.target_id = ?` scanned the table. Every join the spec names on a column this map has, and each closure
+# table's lookup column, leads an index.
+Test-Case 'tsrows: every join the spec declares, and key_reach.key, is indexed' {
+    $tree = New-TsRowsWorkspace
+    $made = New-TsRowsDb $tree
+    $spec = Get-TsRowsMeta $made.Db 'spec:typescript'
+    $want = @($spec.joins.PSObject.Properties.Name) + 'key_reach.key' | ForEach-Object {
+        $tc = $_.Split('.', 2); "('$($tc[0])', '$($tc[1])')" }
+    # `checked` says the case asked about real columns: a spec whose names matched nothing would pass vacuously.
+    $sql = "WITH want(t, c) AS (VALUES $($want -join ', ')), " +
+        "have AS (SELECT t, c FROM want WHERE EXISTS (SELECT 1 FROM pragma_table_info(want.t) p WHERE p.name = want.c)) " +
+        "SELECT CASE WHEN count(*) >= 20 THEN 'checked enough' ELSE 'checked ' || count(*) END AS r FROM have " +
+        "UNION ALL SELECT 'unindexed=' || t || '.' || c FROM have WHERE NOT EXISTS (SELECT 1 FROM " +
+        "pragma_index_list(have.t) il, pragma_index_info(il.name) ii WHERE ii.seqno = 0 AND ii.name = have.c)"
+    $r = Invoke-TsRowsQ $made.Db $sql
+    Assert-Line $r 'checked enough'
+    Assert-NoLine $r 'unindexed='
+}
+
 # A PREFIX CAN SERVE SEVERAL TABLES, and a scheme that names one of them silently resolves nothing for the
 # rest: `k` is both a const and an i18n reference. Recorded as a SET where the row is written, never as a
 # list kept somewhere else.

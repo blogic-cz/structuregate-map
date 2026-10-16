@@ -23,7 +23,8 @@ row's own file. The half derives it from the finished rows and publishes it in `
 `rust/fbtcore/src/rows/tsapply.rs`): every id prefix, every join, every anchored table and which columns hold a
 structure (`TsDerive/TsSpecJoins.mjs`, `TsDerive/TsSpecAnchors.mjs`). The anchor is PROVEN per field, never read
 off the join graph: `renders` carries `from_class`, so a graph walk files a render edge under the component's
-`.ts` when the row was read from its `.html`.
+`.ts` when the row was read from its `.html`. Every join it declares is INDEXED (`schema::index_declared`, after the
+closure is written, #70): the map is opened read-only, so a consumer cannot add one.
 
 **IDS ARE HANDLES, NEVER FACTS.** A row's identity is what it says about the source - a call: file + line + callee
 + resolved symbol; a binding: file + line + target + source; a translation: key + file + line. Two maps (or two

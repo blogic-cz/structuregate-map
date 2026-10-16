@@ -77,7 +77,8 @@ Beside the shared tables it adds the FRAMEWORK tables:
 * **A template's tables have no `file`** - a binding hangs off a template node - so join by the ids; every
   row carries `owner_file`. A body's `calls`, `locals`, `assignments`, `returns`, `raises`, `branches`,
   `handlers`, `switch_cases` and the literal tables carry `file` too, as every other half does. `_meta` publishes what SQLite cannot record: the 43 id prefixes, 129 joins and which
-  column anchors a row to its file (`--id` follows them).
+  column anchors a row to its file (`--id` follows them). Every declared join column leads an index, and so do
+  `key_reach.key`, `render_path.component` and `gate_values.gate`/`gate_features.gate`: `WHERE calls.target_id = ?` is a probe.
 * **`imports.names`** is `{name, as, kind}` with `name` the LOCAL binding and `as` the name a rename came
   through. **`imports.external`** is about the SPELLING (a tsconfig alias is external and still in the
   tree; "in the tree" is `JOIN files rf ON rf.id = i.resolved_file WHERE rf.sha IS NOT NULL`).
