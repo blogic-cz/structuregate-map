@@ -197,12 +197,7 @@ fn replace_affected(db: &Connection, affected: &[String], whole: &[String]) -> R
         let escaped = schema::escape(&table);
         // A STRUCTURE'S NODES GO FIRST, THROUGH THE ROWS THAT OWN THEM: a node carries no scope of its own (`cells`).
         let count = if wholly.contains(table.as_str()) {
-            let lang = LANG;
-            super::cells::delete_children(db, &table, &format!("t.\"{HALF_COLUMN}\" = ?1"), &[&lang])?;
-            db.execute(
-                &format!("DELETE FROM \"{escaped}\" WHERE \"{HALF_COLUMN}\" = ?1"),
-                [LANG],
-            )?
+            super::half::delete_half_rows(db, &table, LANG)?
         } else if columns.iter().any(|c| c == "owner_file") && !ids.is_empty() {
             let marks = vec!["?"; ids.len()].join(",");
             let sql = format!(
