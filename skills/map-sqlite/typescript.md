@@ -45,7 +45,8 @@ Beside the shared tables it adds the FRAMEWORK tables:
   walk. A selector candidate the host's NgModule or standalone `imports` cannot see is a `renders_out_of_scope`
   row instead (same columns, `scope = 'out_of_scope'`), so every candidate a tag matched is `renders UNION ALL
   renders_out_of_scope` (a table no row was written to does not exist). A host no module declares (`unknown`) keeps an
-  edge to every candidate. A render created in code names the method that returned the class
+  edge to every candidate. `components.unused = 1` when no `renders` edge, route or `bootstrap` reaches the
+  class - a `renders_out_of_scope` candidate is no render. A render created in code names the method that returned the class
   (`returned_by`) and each way it was returned (`return_ways`, `returns` ids); a `case` or `if` every way sits
   in lands in `render_path.branches`. `templates`/`template_nodes`/`bindings` are the template side; `gates`/
   `gate_values` what hides a node (`gates.gate_kind = 'hidden'` is `[hidden]`/`[attr.hidden]`, whose `expression` is a row holding the NEGATED condition) (`op` in/not_in/unknown; `listed_json` (child table `gate_values__listed_json`) what a config object lists, even an
