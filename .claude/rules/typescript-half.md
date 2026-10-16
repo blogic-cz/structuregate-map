@@ -72,7 +72,10 @@ decorator or a const a decorator names moves it, and the run reads everything.
 a table node rebuilds whole sends no rows at all. A pass that reads a stub, replaces one or would send one back marks
 the run (`MAP-UNCARRIED`), which is asked again with every cell carried - so a list that misses a read costs time,
 never a row. On a run that stopped short, `reads::dangling` asks every kept row's NODE rows for an id that is gone
-(`nested`), as node asked every row it held before its cells were stubbed.
+(`nested`), as node asked every row it held before its cells were stubbed. THE CARRY IS WRITTEN BESIDE THE PARSE
+(`carried_parse`, `mapper/deep/ts.rs`): node builds every program ahead without a checker (`prewarm`,
+`TsSetup/TsProgram.mjs` - each parse given back as it was parsed, or a compiler before 5.3 resolves and notes less)
+and waits for the rows only to load them.
 
 **A PARTIAL RUN KEEPS THE CLOSURE WHEN NOTHING IT READ MOVED** (`rust/fbtcore/src/rows/partial/unchanged.rs`). Every
 derivation records what its passes READ - each column asked of a row (`Store::reads`, flagged by `Row::get`) - in

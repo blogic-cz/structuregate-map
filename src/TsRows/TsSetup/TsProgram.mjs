@@ -58,7 +58,32 @@ function shareSourceFiles(ts, host, options) {
   };
 }
 
-export function createProgram(ts, tsconfigPath, nodeModules, diag, noted) {
+/**
+ * EVERY PROJECT'S PROGRAM BUILT AHEAD OF THE WALK, without a checker - while a partial run waits for the rows it is
+ * handed back (`rows/partial/carry.rs` writes them as node starts). The parses land in the shared set the walk's own
+ * programs take theirs from, in the order the walk would have made them, and no program is kept.
+ *
+ * AND THEY GO BACK AS THEY WERE PARSED: a compiler before 5.3 keeps what a program resolved a file's imports to ON the
+ * parse (`resolvedModules`), and a later program holding a file that declares ambient modules takes that answer without
+ * asking the host - so the walk's programs resolved, and noted, less than a run that built nothing ahead. Forgotten,
+ * the walk resolves every import exactly as it would have. No checker, no note: a config that cannot be read is read
+ * again, and reported, by the walk.
+ */
+export function prewarm(ts, projects, nodeModules) {
+  for (const project of projects) {
+    try {
+      const { program } = createProgram(ts, project.tsconfig, nodeModules, null, new Set(), false);
+      for (const sf of program.getSourceFiles()) {
+        sf.resolvedModules = undefined;
+        sf.resolvedTypeReferenceDirectiveNames = undefined;
+      }
+    } catch {
+      // the walk builds it again, and says why it could not
+    }
+  }
+}
+
+export function createProgram(ts, tsconfigPath, nodeModules, diag, noted, checked = true) {
   const configHost = {
     ...ts.sys,
     onUnRecoverableConfigFileDiagnostic: (d) => {
@@ -109,7 +134,7 @@ export function createProgram(ts, tsconfigPath, nodeModules, diag, noted) {
   });
 
   const program = ts.createProgram({ rootNames: parsed.fileNames, options, host });
-  return { program, checker: program.getTypeChecker(), options, rootNames: parsed.fileNames };
+  return { program, checker: checked ? program.getTypeChecker() : null, options, rootNames: parsed.fileNames };
 }
 
 /**

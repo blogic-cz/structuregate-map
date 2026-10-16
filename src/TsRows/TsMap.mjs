@@ -50,9 +50,9 @@ import { discoverProjects, findWorkspaceRoot } from './TsProjects.mjs';
 import { loadToolchain, resolveToolchain, versionMismatch } from './TsResolve.mjs';
 import { Diagnostics, Store } from './TsStore.mjs';
 import { createHash } from 'node:crypto';
-import { emit, parseArgs, readCarry, readJson, revisionOf, writePayload } from './TsRunIo.mjs';
+import { awaitCarry, emit, parseArgs, readCarry, readJson, revisionOf, writePayload } from './TsRunIo.mjs';
 import { markReachable, runTemplatePass, walkProjects } from './TsWalk.mjs';
-import { forgetParses } from './TsProgram.mjs';
+import { forgetParses, prewarm } from './TsProgram.mjs';
 import { stubSent, uncarriedRead, UNREAD_WHEN_CARRIED } from './TsCarried.mjs';
 
 /** A RUN THAT READ A STRUCTURE IT WAS HANDED BACK WITHOUT is asked again with every cell carried - see `TsCarried.mjs`. */
@@ -328,6 +328,13 @@ async function main() {
   const store = new Store(partial ? (state.counters ?? {}) : (state.alone ? {} : (state.counters ?? {})), state.floor ?? 0);
   const affected = partial ? new Set(planned.affected) : null;
   let repointLater = null;
+  // THE PROGRAMS BEFORE THE ROWS: a partial run builds them while rust is still writing what it hands back (`prewarm`).
+  const projects = discoverProjects(ts, fe);
+  if (partial && args.carryLate) {
+    prewarm(ts, projects, found.nodeModules);
+    if (!awaitCarry(args.carry)) { emit('MAP-NOCARRY', `${args.carry} was not written`); return 0; }
+  }
+  const diag = new Diagnostics(() => store.currentFile);
   if (partial) {
     const carried = readCarry(args.carry);
     if (!carried || typeof carried.tables !== 'object' || carried.tables === null) {
@@ -385,8 +392,6 @@ async function main() {
         + 'so nothing outside those files has to be re-pointed');
     }
   }
-  const diag = new Diagnostics(() => store.currentFile);
-  const projects = discoverProjects(ts, fe);
   if (!projects.length) {
     emit('MAP-FATAL', `no project was discovered in ${fe} - neither project.json, nor angular.json, `
       + 'nor a root tsconfig naming its own sources');
