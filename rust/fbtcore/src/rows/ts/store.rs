@@ -53,6 +53,22 @@ pub struct Store<'a> {
     memo: RefCell<HashMap<&'static str, Rc<dyn std::any::Any>>>,
     /// Derived rows this run produced, by table.
     pub emitted: HashMap<String, Vec<Row>>,
+    /// WHAT THE PASSES READ: every table asked for, and each read's column names and flags (`Schema::reads`).
+    /// Kept past `release`, which lets the rows go - see `reads`.
+    asked: RefCell<Vec<(String, Option<Asked>)>>,
+}
+
+/// One table's columns as read, and whether its rows were scoped by `half` (a table without the column is read
+/// whole, other halves' rows included).
+type Asked = (Vec<String>, Rc<[std::cell::Cell<bool>]>, bool);
+
+/// WHAT THE CLOSURE READ, table by table: the columns any pass asked a row of. A table asked for and holding no
+/// rows is here too, with no columns - that it was empty is part of the answer. `unscoped` names a table read
+/// whole, another half's rows with it.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Reads {
+    pub tables: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    pub unscoped: std::collections::BTreeSet<String>,
 }
 
 impl<'a> Store<'a> {
@@ -74,6 +90,7 @@ impl<'a> Store<'a> {
             order: Vec::new(),
             memo: RefCell::new(HashMap::new()),
             emitted: HashMap::new(),
+            asked: RefCell::new(Vec::new()),
         })
     }
 
@@ -127,6 +144,7 @@ impl<'a> Store<'a> {
             order,
             memo: RefCell::new(HashMap::new()),
             emitted: HashMap::new(),
+            asked: RefCell::new(Vec::new()),
         }
     }
 
@@ -166,15 +184,35 @@ impl<'a> Store<'a> {
         // A table the payload does not carry is one this half wrote no rows to, which is
         // the same answer the database gives for one it does not hold.
         let rows = if self.payload || !self.names.contains(name) {
+            self.asked.borrow_mut().push((name.to_string(), None));
             Vec::new()
         } else {
-            self.read(name).unwrap_or_default()
+            // A TABLE THAT WOULD NOT READ is answered empty, and is UNSCOPED in `reads`: nothing may be concluded
+            // from what the closure saw of it.
+            self.read(name).unwrap_or_else(|_| {
+                self.asked.borrow_mut().push((name.to_string(), Some((Vec::new(), Rc::from(Vec::new()), false))));
+                Vec::new()
+            })
         };
         let shared = Rc::new(rows);
         self.cache
             .borrow_mut()
             .insert(name.to_string(), Rc::clone(&shared));
         shared
+    }
+
+    /// What every pass so far read - see `Reads`.
+    pub fn reads(&self) -> Reads {
+        let mut out = Reads::default();
+        for (name, asked) in self.asked.borrow().iter() {
+            let columns = out.tables.entry(name.clone()).or_default();
+            let Some((names, flags, scoped)) = asked else { continue };
+            columns.extend(names.iter().zip(flags.iter()).filter(|(_, f)| f.get()).map(|(n, _)| n.clone()));
+            if !scoped {
+                out.unscoped.insert(name.clone());
+            }
+        }
+        out
     }
 
     /// Forget every table read so far, and every structure decoded in them. A table asked for again is read
@@ -247,6 +285,8 @@ impl<'a> Store<'a> {
             node_at.push(at);
         }
         let schema = Rc::new(Schema::with(names, sources, id_at));
+        let (names, flags) = schema.reads();
+        self.asked.borrow_mut().push((name.to_string(), Some((names, flags, has_half))));
         let decode: Vec<bool> = keep.iter().map(|c| structured.is_some_and(|cols| cols.contains(c.as_str()))).collect();
         // A BOOLEAN COMES BACK AN INTEGER, and a pass that asks `== true` of it gets false: `is_default` did, and
         // every switch's default case lost its key on every run that read the rows back - all partial ones.

@@ -108,8 +108,7 @@ fn lab() {
         let db = Connection::open(&work).unwrap();
         let mut held = tsstore::Store::from_db(&db, LANG).unwrap();
         let (stats, _) = keyreach::build_closure(&mut held, &[], "", Path::new(&ws), &mut |_| {});
-        eprintln!("closure: {} paths, {} keys", stats.path_rows, stats.keys);
-        let mut out = Map::new();
+        eprintln!("closure: {} paths, {} keys", stats.path_rows, stats.keys);        let mut out = Map::new();
         for (name, rows) in held.emitted {
             out.insert(name, Value::Array(rows.into_iter().map(|r| Value::Object(r.into_map())).collect()));
         }
@@ -128,7 +127,7 @@ fn lab() {
     {
         let db = Connection::open(&work).unwrap();
         let whole: Vec<String> = CLOSURE_TABLES.iter().map(|t| t.to_string()).collect();
-        replace_affected(&db, &[], &whole).unwrap();
+        replace_affected(&db, &[], &[], &whole).unwrap();
     }
     eprintln!("LAB replace {} ms", t.elapsed().as_millis());
     let t = std::time::Instant::now();

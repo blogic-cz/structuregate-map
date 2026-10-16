@@ -34,10 +34,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// The tables this pass owns, deleted and written again by every run of the half.
-const TABLES: &[&str] = &["stylesheets", "style_rules", "class_hides"];
+pub(crate) const TABLES: &[&str] = &["stylesheets", "style_rules", "class_hides"];
 
 /// The kind of the `diagnostics` row a sheet that did not parse gets.
-const UNPARSED: &str = "stylesheet_unparsed";
+pub(crate) const UNPARSED: &str = "stylesheet_unparsed";
 
 /// The rows of every table this pass writes, and what is worth saying about them.
 struct Derived {

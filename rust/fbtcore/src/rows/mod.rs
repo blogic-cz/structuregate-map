@@ -20,6 +20,8 @@ pub mod fts;
 pub mod carry;
 #[path = "partial/deps.rs"]
 pub mod deps;
+#[path = "partial/delta.rs"]
+mod delta;
 #[path = "partial/digest.rs"]
 pub mod digest;
 pub mod dups;
@@ -33,6 +35,8 @@ mod rawcells;
 pub mod reads;
 #[path = "partial/remember.rs"]
 mod remember;
+#[path = "partial/unchanged.rs"]
+mod unchanged;
 pub mod schema;
 pub mod seeds;
 pub mod sqlrun;
