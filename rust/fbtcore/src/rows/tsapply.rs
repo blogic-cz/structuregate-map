@@ -357,7 +357,11 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
         receipt.phases.insert("drop the old rows".to_string(), dropping.elapsed().as_millis() as u64);
     }
 
-    let named = text_paths_of(root, Some(&Value::Array(digest.files.clone())));
+    let mut named = text_paths_of(root, Some(&Value::Array(digest.files.clone())));
+    // A PARTIAL RUN'S TEXTS ARE ITS FILES': `files` comes back whole, and every other text was deleted and written again.
+    if payload.partial && Connection::open(db_path)?.prepare("SELECT 1 FROM file_text LIMIT 1").and_then(|mut s| s.exists([])).unwrap_or(false) {
+        named.retain(|p| payload.affected.contains(p));
+    }
     // THE SECOND WALK, run by the store as it writes: each row past the digest, then into a batch of its table.
     let digest = std::cell::RefCell::new(digest);
     let feed = |sink: &mut dyn FnMut(&str, &[Value]) -> Result<()>| -> Result<()> {
