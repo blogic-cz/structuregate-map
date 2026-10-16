@@ -6,6 +6,7 @@
 //! it writes no call itself, and every call OF it does, with the url its caller handed in.
 
 use super::files_of;
+use super::inputs::read_of;
 use crate::rows::dups::{has_columns, owner_sql, scalar_sql, text, Column};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
@@ -106,7 +107,7 @@ fn is_name(s: &str) -> bool {
 impl World {
     fn load(conn: &Connection, typescript: &HashMap<String, String>) -> rusqlite::Result<World> {
         let mut w = World::default();
-        if has_columns(conn, "members", &["id", "file", "class", "name", "params", "value"]) {
+        if has_columns(conn, "members", read_of("members")) {
             let (mut params, mut value) = (Column::new(conn, "members", "params")?, Column::new(conn, "members", "value")?);
             for (id, file, class, name, owner, held_params, held_value) in read(conn, "members", "id, file, class, name", &["params", "value"], "")? {
                 if !typescript.contains_key(&file) {
@@ -122,7 +123,7 @@ impl World {
                 }
             }
         }
-        if has_columns(conn, "functions", &["id", "file", "params"]) {
+        if has_columns(conn, "functions", read_of("functions")) {
             let mut params = Column::new(conn, "functions", "params")?;
             for (id, file, _, _, owner, held, _) in read(conn, "functions", "id, file, '', ''", &["params"], "")? {
                 if typescript.contains_key(&file) {
@@ -130,7 +131,7 @@ impl World {
                 }
             }
         }
-        if has_columns(conn, "locals", &["file", "member", "name", "line", "value"]) {
+        if has_columns(conn, "locals", read_of("locals")) {
             let mut value = Column::new(conn, "locals", "value")?;
             for (file, member, name, line, owner, held, _) in read(conn, "locals", "file, member, name, line", &["value"], "ORDER BY t.line")? {
                 if typescript.contains_key(&file) && !member.is_empty() {
@@ -139,7 +140,7 @@ impl World {
                 }
             }
         }
-        if has_columns(conn, "consts", &["file", "name", "value"]) {
+        if has_columns(conn, "consts", read_of("consts")) {
             let mut value = Column::new(conn, "consts", "value")?;
             for (file, name, _, _, owner, held, _) in read(conn, "consts", "file, name, '', ''", &["value"], "")? {
                 if typescript.contains_key(&file) {
@@ -257,7 +258,7 @@ impl World {
 }
 
 fn load_calls(conn: &Connection, typescript: &HashMap<String, String>) -> rusqlite::Result<Vec<Call>> {
-    if !has_columns(conn, "calls", &["id", "file", "line", "member", "target", "target_id", "args", "arg_params"]) {
+    if !has_columns(conn, "calls", read_of("calls")) {
         return Ok(vec![]);
     }
     // `target` is an object, `args` and `arg_params` lists: each read back from its nodes.

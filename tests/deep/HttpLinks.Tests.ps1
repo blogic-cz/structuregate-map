@@ -121,6 +121,32 @@ Test-Case 'httplinks: a call through a wrapper and a direct call each reach thei
     Assert-Line $u 'unmatched=1'
 }
 
+# NOT RUN AGAIN OVER THE SAME ROWS (`rows/http/inputs.rs`): a comment moves no row the pass reads, so it is said again from
+# the run before; a url the service builds and a C# route each move one, and it runs again - a replay there kept the old url.
+Test-Case 'httplinks: the pass is said again over the rows it read and runs again when a url or a route moves' {
+    $tree = Get-HttpLinksTree
+    $trace = Join-Path $tree 'map.sqlite.last-run.jsonl'
+    $replayed = { [bool](Select-String -LiteralPath $trace -SimpleMatch 'structuregate.deep.http_replayed' -Quiet) }
+    $rows = "SELECT 'row=' || verb || '|' || url AS r FROM http_calls UNION ALL SELECT 'row=' || verb || '|' || template FROM http_endpoints"
+    $before = Get-HttpLinksRows $tree $rows
+    $service = Join-Path $tree 'web/apps/shop/src/api.service.ts'
+    Add-Content -LiteralPath $service -Value '// demo: one comment'
+    [void](Invoke-HttpLinksMap $tree)
+    Assert-Equal (& $replayed) $true 'replayed after a comment'
+    Assert-Equal (Get-HttpLinksRows $tree $rows).Text $before.Text 'the rows after a comment'
+    Set-Content -LiteralPath $service -Value ((Get-Content -LiteralPath $service -Raw).Replace('orders/list', 'orders/all')) -NoNewline
+    [void](Invoke-HttpLinksMap $tree)
+    Assert-Equal (& $replayed) $false 'replayed after a url moved'
+    $after = Get-HttpLinksRows $tree $rows
+    Assert-Line $after 'orders/all'
+    Assert-NoLine $after 'orders/list'
+    $api = Join-Path $tree 'api/Controllers.cs'
+    Set-Content -LiteralPath $api -Value ((Get-Content -LiteralPath $api -Raw).Replace('[HttpGet(`"[action]`")] public object List()', '[HttpGet(`"all`")] public object List()')) -NoNewline
+    [void](Invoke-HttpLinksMap $tree)
+    Assert-Equal (& $replayed) $false 'replayed after a route moved'
+    Assert-Line (Get-HttpLinksRows $tree $rows) 'row=GET|api/Orders/all'
+}
+
 }
 
 if (Get-Command dotnet -ErrorAction SilentlyContinue) {
