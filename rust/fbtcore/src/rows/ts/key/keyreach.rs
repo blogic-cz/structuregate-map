@@ -185,10 +185,18 @@ pub fn build_closure(
     let gf = gate_features_with(store, checks, enum_name, &conds, note);
     drop(stage);
     let stage = crate::trace::stage("closure: routes");
+    let step = crate::trace::stage("routes: literal gates");
     let lit_gates = literal_gates(store, &gf.ternary_writes);
+    drop(step);
+    let step = crate::trace::stage("routes: field sites");
     let (fields, _) = field_sites(store);
+    drop(step);
+    let step = crate::trace::stage("routes: key routes");
     let routes = key_routes(store, &lit_gates, &fields);
+    drop(step);
+    let step = crate::trace::stage("routes: locales");
     let locales = locale_index(store);
+    drop(step);
 
     // Paths per COMPONENT, computed once for every component any key reaches, then shared by
     // all its keys. Summed over the keyed render sites the paths come to several times as many as
@@ -205,18 +213,29 @@ pub fn build_closure(
     drop(stage);
     let stage = crate::trace::stage("closure: gate_values");
 
+    // EVERY STEP A SPAN: most of this stage was in none of its children.
+    let step = crate::trace::stage("gate_values: write gate_features");
     let gf_rows = write_gate_features(store, &gf.map);
+    drop(step);
+    let step = crate::trace::stage("gate_values: config restrictions");
     let (extra, per_loop) = extra_restrictions(store, &idx0);
+    drop(step);
     // A FLAG THE PARENTS BIND DIFFERENTLY IS ONE CONDITION PER RENDER EDGE (`key_bound`).
+    let step = crate::trace::stage("gate_values: bound flags");
     let bound = bound_conds(store);
+    drop(step);
     let mut conds = conds;
     conds.extend(bound.conds.clone());
     // A CALLEE'S BRANCH CARRIED THROUGH A CALL, its parameters read as the caller's arguments (`key_args`).
+    let step = crate::trace::stage("gate_values: carried arguments");
     let carried = routes.values().flat_map(|h| h.sites.values().flatten().flatten());
     let (arg_found, arg_params) = super::key_args::arg_conds(store, &branches, carried, &idx0);
+    drop(step);
     conds.extend(arg_found);
     let (gv, idx) = gate_values_with(store, &extra, &conds);
+    let step = crate::trace::stage("gate_values: write gate_values");
     let gv_rows = write_gate_values(store, &gv.map, &idx);
+    drop(step);
     // THE FOLDS READ GATES AND BRANCHES ALIKE; only the published tables are gates alone.
     let mut feature_map = gf.map.clone();
     feature_map.extend(gf.conds.iter().map(|(id, f)| (id.clone(), (None, f.clone()))));
