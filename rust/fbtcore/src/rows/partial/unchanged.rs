@@ -153,10 +153,12 @@ fn encode(hasher: &mut blake3::Hasher, value: &Sql) {
 pub fn digest(db: &Connection, table: &str, columns: &BTreeSet<String>, half: &str, scope: &Scope<'_>) -> Result<String> {
     let mut hasher = blake3::Hasher::new();
     let existing = schema::existing_columns(db, table)?;
-    if existing.is_empty() {
+    let has = |c: &str| existing.iter().any(|e| e == c);
+    // NO `half` COLUMN, NO ROW OF THE HALF: another half made the table and this one never wrote to it - asked
+    // for `t.half`, the run failed (a C# `classes` beside an Angular workspace).
+    if !has(HALF_COLUMN) {
         return Ok(hasher.finalize().to_hex().to_string());
     }
-    let has = |c: &str| existing.iter().any(|e| e == c);
     let plain: Vec<&String> = columns.iter().filter(|c| has(c)).collect();
     let nodes: Vec<(String, String)> = cells::columns_of(db, table).into_iter().filter(|(c, _)| columns.contains(c)).collect();
 

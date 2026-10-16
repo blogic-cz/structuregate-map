@@ -421,6 +421,8 @@ async function main() {
   });
   if (repointLater) repointProjects(store, repointLater);
   forgetParses();
+  // CARRIED-THEN-PRODUCED IS NOT A FULL RUN'S ORDER, and every pass below reads its tables in order (see `sending`).
+  if (partial) store.inMintOrder();
   if (rereads) {
     const late = cutShort(store, rereads, null, true);
     if (late) { emit('MAP-RETRY', late); return 0; }
@@ -777,10 +779,11 @@ async function main() {
   // paths come out at an index holding a different path - the same walks, proven identical as a SET
   // over the same components, in a different order.
   //
-  // SORTING THE PAYLOAD BY ID DOES NOT FIX IT, which was worth finding out: the ids of the rows this
-  // run re-derived are all ABOVE every carried one, so they sort to the end while a full run
-  // interleaves them. The order a full run produces is its extraction order, and nothing the partial
-  // run holds records where a re-derived row sat in it.
+  // SORTING BY ID FIXES IT WHERE THE IDS CAME BACK: a full run mints a table's ids in the order it pushes
+  // the rows, and a re-derived row now takes the id it had (`claimed`, `rollupId`), so a WHOLE table sent
+  // carried-then-produced is put back in that order (`store.inMintOrder`, right after the walk, so every rollup reads
+  // what a full run reads) - without it a comment moved `components`, then `selector_index`, and the closure was derived again. A row with a NEW id still sorts to the end, where a
+  // full run would interleave it; nothing the partial run holds records where it would sit.
   //
   // The fix is to stop the enumeration depending on arrival order at all - give `_load_edges` a
   // stable sort over something the TREE decides - and that changes what a full run publishes too, so
@@ -821,3 +824,4 @@ main().then((code) => process.exit(code), (error) => {
   emit('MAP-FATAL', `${error && error.message ? error.message : error}`);
   process.exit(1);
 });
+

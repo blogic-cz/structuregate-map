@@ -567,6 +567,30 @@ export class Store {
   }
 
   /**
+   * EVERY TABLE IN THE ORDER A FULL RUN MINTS IT: by the number of an id of ONE prefix (`ng:9` before `ng:10`). A
+   * partial run holds the carried rows first and the re-extracted after, but those take their old ids back
+   * (`claimed`), so the ids say where each sat. A table whose rows lack an id, or mix prefixes - whose counters never
+   * interleave alike - is left as it is. Sorted in place: `hydrated` holds the rows, not their places.
+   */
+  inMintOrder() {
+    for (const rows of Object.values(this.tables)) {
+      let prefix = null;
+      const keyed = [];
+      for (const row of rows) {
+        const id = typeof row.id === 'string' ? row.id : '';
+        const at = id.indexOf(':');
+        const n = at > 0 ? Number(id.slice(at + 1)) : NaN;
+        if (!Number.isInteger(n) || (prefix !== null && prefix !== id.slice(0, at))) { keyed.length = 0; break; }
+        prefix = id.slice(0, at);
+        keyed.push([n, row]);
+      }
+      if (keyed.length !== rows.length) continue;
+      keyed.sort((a, b) => a[0] - b[0]);
+      for (const [i, [, row]] of keyed.entries()) rows[i] = row;
+    }
+  }
+
+  /**
    * WHICH FILE IS BEING EXTRACTED, so every row minted while it is can say so without being told.
    *
    * 21 of the 53 tables carry no `file` of their own - a binding hangs off a template node, a call off a
