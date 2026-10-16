@@ -108,7 +108,23 @@ pub fn widen(db: &Connection, table: &str, existing: &mut Vec<String>, columns: 
 /// reader looks a row up by (`extra`), indexed - the map is opened read-only, so a consumer cannot add one, and
 /// `WHERE calls.target_id = ?` scanned the table. A name the spec gives with no table or column here is skipped:
 /// the spec also names node tables and columns a run may not have produced.
+/// AN INDEX IS SORTED ON EVERY CORE: SQLite's sorter merges its runs on worker threads (`PRAGMA threads`) - but only
+/// when the page cache leaves it runs to merge. Under the write's own large cache it sorted every index in memory on
+/// one thread; with the default cache and four threads `expressions__ast`'s two indexes took two thirds of the time.
+/// `then` is the cache the caller goes back to (KiB, as `cache_size` takes a negative one); no index differs.
+pub fn sorted_on_every_core<T>(db: &Connection, then: i64, build: impl FnOnce() -> Result<T>) -> Result<T> {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8);
+    db.execute_batch(&format!("PRAGMA cache_size = -2000; PRAGMA threads = {threads};"))?;
+    let built = build();
+    db.execute_batch(&format!("PRAGMA threads = 0; PRAGMA cache_size = -{then};"))?;
+    built
+}
+
 pub fn index_declared(db: &Connection, extra: &[(&str, &str)]) -> Result<usize> {
+    sorted_on_every_core(db, 2000, || declared(db, extra))
+}
+
+fn declared(db: &Connection, extra: &[(&str, &str)]) -> Result<usize> {
     let mut wanted: BTreeSet<(String, String)> = extra.iter().map(|(t, c)| (t.to_string(), c.to_string())).collect();
     for (_, raw) in super::meta::scan(db, Some("spec:%")) {
         let Ok(spec) = serde_json::from_str::<Value>(&raw) else { continue };
