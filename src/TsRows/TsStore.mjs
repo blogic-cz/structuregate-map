@@ -81,6 +81,12 @@ function storedForm(row) {
   return JSON.stringify(out);
 }
 
+// The sparse keys tried after every other candidate - see below.
+const MORE_KEYS = [
+  ['line', 'col', 'kind', 'order'], ['line', 'col', 'kind'], ['binding', 'kind'], ['node', 'kind', 'source'],
+  ['node', 'kind', 'to'], ['class', 'member'], ['node', 'expression', 'value'],
+];
+
 // The candidate keys, most identifying first. A row is claimed by the first of these that is unique
 // inside its own file EVERYWHERE in the map - measured below, never assumed.
 const KEY_CANDIDATES = [
@@ -95,6 +101,11 @@ const KEY_CANDIDATES = [
   // `$expr_id` from other files, and is the reason this key exists. `source` too, because every operand of
   // `a || b || c` starts where the whole does: a large Angular workspace has many rows at one line and column.
   { columns: ['file', 'line', 'col', 'role', 'source'], sparse: true },
+  // AND AFTER IT, SPARSE TOO, for the per-file tables no key above identifies - each a key on its own where it is the
+  // first that holds, and an ALTERNATIVE (`identityOf`) for the rows an earlier sparse key leaves out: a template's
+  // nodes by place and order, a binding by place, a template expression by its binding or its node (no line of its
+  // own), a render by its node and target, an io by its member, a template string by its node and expression.
+  ...MORE_KEYS.map((columns) => ({ columns, sparse: true })),
 ];
 
 /** Every id a cell holds, however deeply it is nested. */
@@ -116,23 +127,54 @@ export function keyOfRow(row, columns) {
   return parts.join('\u0000');
 }
 
-/** The first candidate that identifies every row of this table uniquely inside its own file. */
+/**
+ * A ROW'S IDENTITY UNDER A TABLE'S KEY: one list of columns, or ALTERNATIVES - a list of such lists, a row named by
+ * the first it holds every column of (and which one it was, so two alternatives never name one row alike).
+ */
+export function identityOf(row, key) {
+  if (!Array.isArray(key[0])) return keyOfRow(row, key);
+  for (let i = 0; i < key.length; i++) {
+    const found = keyOfRow(row, key[i]);
+    if (found !== null) return `${i}\u0001${found}`;
+  }
+  return null;
+}
+
+/** Whether `candidate` names every row it holds the columns of uniquely inside its own file - and at least one. */
+function uniqueOver(rows, candidate, sparse) {
+  const seen = new Set();
+  for (const row of rows) {
+    const home = row.owner_file ?? (typeof row.file === 'string' ? row.file : null);
+    const key = keyOfRow(row, candidate);
+    if (sparse && (home === null || key === null)) continue;
+    if (home === null || key === null) return false;
+    const full = `${home}\u0000${key}`;
+    if (seen.has(full)) return false;
+    seen.add(full);
+  }
+  return seen.size > 0;
+}
+
+/**
+ * The first candidate that identifies every row of this table uniquely inside its own file - and, when that one is
+ * SPARSE, the later sparse ones that do the same for the rows it leaves out, as alternatives (`identityOf`).
+ */
 function uniqueKeyFor(rows) {
-  for (const entry of KEY_CANDIDATES) {
+  for (let at = 0; at < KEY_CANDIDATES.length; at++) {
+    const entry = KEY_CANDIDATES[at];
     const candidate = Array.isArray(entry) ? entry : entry.columns;
     const sparse = !Array.isArray(entry) && entry.sparse;
-    const seen = new Set();
-    let usable = true;
-    for (const row of rows) {
-      const home = row.owner_file ?? (typeof row.file === 'string' ? row.file : null);
-      const key = keyOfRow(row, candidate);
-      if (sparse && (home === null || key === null)) continue;
-      if (home === null || key === null) { usable = false; break; }
-      const full = `${home}\u0000${key}`;
-      if (seen.has(full)) { usable = false; break; }
-      seen.add(full);
+    if (!uniqueOver(rows, candidate, sparse)) continue;
+    if (!sparse) return candidate;
+    const alternatives = [candidate];
+    let rest = rows.filter((row) => keyOfRow(row, candidate) === null);
+    for (const later of KEY_CANDIDATES.slice(at + 1)) {
+      if (!rest.length) break;
+      if (Array.isArray(later) || !later.sparse || !uniqueOver(rest, later.columns, true)) continue;
+      alternatives.push(later.columns);
+      rest = rest.filter((row) => keyOfRow(row, later.columns) === null);
     }
-    if (usable && seen.size) return candidate;
+    return alternatives.length > 1 ? alternatives : candidate;
   }
   return null;
 }
@@ -173,6 +215,8 @@ export class Store {
     this.claims = new Map();
     this.claimKeys = {};
     this.reclaimed = 0;
+    // THE IDS A ROLLUP'S ROWS HAD LAST RUN, by table and in the order they were made - see `rollupId`.
+    this.reusable = new Map();
     // The lookups `handedBack` builds, by table and key. Empty on a full run, which is handed nothing.
     this.handed = new Map();
     this.reused = 0;
@@ -330,8 +374,9 @@ export class Store {
    * The way out is not to renumber. A declaration that is still there is the SAME declaration, so it
    * keeps its id - and then nothing outside the file has to be touched at all.
    *
-   * THIS IS MEASURED, NOT LISTED. A table needs stable ids exactly when some row in another file names
-   * one of its rows, which is the same walk `rows/partial/deps.rs` makes over every id-valued cell. The KEY is measured
+   * THIS IS MEASURED, NOT LISTED. A table needs stable ids when some row in another file names one of its
+   * rows, which is the same walk `rows/partial/deps.rs` makes over every id-valued cell - and every other
+   * per-file table wants them too, below. The KEY is measured
    * too: the first candidate that identifies a row uniquely inside its own file, everywhere in the map. A
    * list of either would be a second statement of a fact the rows already carry, and the one that drifted
    * would be the list.
@@ -367,6 +412,11 @@ export class Store {
     crossing.delete('files');
     crossing.delete(undefined);
 
+    // EVERY OTHER PER-FILE TABLE TOO, since nothing outside the file needs its ids: the closure rust derives over
+    // every row reads them (`rows/partial/unchanged.rs`), and a re-extraction that renumbered a file whose rows are
+    // otherwise what they were moved the closure, which is then derived again for nothing.
+    for (const name of Object.keys(this.tables)) crossing.add(name);
+    crossing.delete('files');
     const out = {};
     for (const name of [...crossing].sort()) {
       const key = uniqueKeyFor(this.tables[name] ?? []);
@@ -400,7 +450,7 @@ export class Store {
   claimed(name, cells) {
     const columns = this.claimKeys[name];
     if (!columns || this.currentFile === null) return null;
-    const key = keyOfRow(cells, columns);
+    const key = identityOf(cells, columns);
     if (key === null) return null;
     const at = `${name}\u0000${this.currentFile}\u0000${key}`;
     const held = this.claims.get(at);
@@ -409,6 +459,33 @@ export class Store {
     this.claims.delete(at);
     this.reclaimed += 1;
     return held;
+  }
+
+  /**
+   * THE ID A ROLLUP'S ROW HAD LAST RUN: the next of that table's old ids, in the order the last run made them.
+   *
+   * A rollup is rebuilt WHOLE on every partial run, and minting it fresh numbers renumbered every one of its rows -
+   * a route, a render created in code, a translation - each run, under rows nothing else had changed. The closure
+   * reads them (`component_reach.routes`), so it moved on every run for an edit nothing it reads had seen
+   * (`rust/fbtcore/src/rows/partial/unchanged.rs`). Rebuilt from the same rows, a rollup makes the same rows in the
+   * same order, so they take the same ids back. Nothing outside the rollups names one of these rows - a kept row that
+   * did would have pointed at nothing after a fresh mint - so an order that moved re-points only rows this run makes.
+   */
+  rollupId(name, prefix) {
+    if (this.currentFile !== null) return null;
+    const queue = this.reusable.get(name);
+    while (queue && queue.at < queue.ids.length) {
+      const id = queue.ids[queue.at++];
+      if (id.startsWith(`${prefix}:`) && !this.rowById.has(id)) return id;
+    }
+    return null;
+  }
+
+  /** The rollups' ids a partial run was handed: `{table: [id, ...]}`, each in the order the last run made them. */
+  loadRollup(rollup) {
+    for (const [table, ids] of Object.entries(rollup ?? {})) {
+      if (Array.isArray(ids)) this.reusable.set(table, { ids, at: 0 });
+    }
   }
 
   /** What a partial run was handed: `{table: {file \u0000 key: id}}` and the key columns per table. */
@@ -438,7 +515,7 @@ export class Store {
         if (row.id) {
           this.rowById.delete(row.id);
           this.loadedAs.delete(row.id);
-          const key = columns ? keyOfRow(row, columns) : null;
+          const key = columns ? identityOf(row, columns) : null;
           if (key !== null) this.claims.set(`${name}\u0000${row.owner_file}\u0000${key}`, row.id);
         }
         released += 1;
@@ -515,7 +592,7 @@ export class Store {
   add(name, prefix, cells) {
     (this.currentFile === null ? this.rollupTables : this.perFileTables).add(name);
     this.note(name, prefix);
-    const id = this.claimed(name, cells) ?? this.id(prefix);
+    const id = this.claimed(name, cells) ?? this.rollupId(name, prefix) ?? this.id(prefix);
     const stored = { id, ...cells, half: HALF };
     // A COLUMN OF OUR OWN, never `file`. Stamping `file` where it was empty CHANGED A FACT rather than
     // adding one: the map being reproduced leaves `expressions.file` empty for a TEMPLATE expression, and

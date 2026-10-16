@@ -75,6 +75,15 @@ fn identity_key(row: &Map<String, Value>, columns: &[String]) -> Option<String> 
     Some(parts.join("\u{0}"))
 }
 
+/// A row's identity under its table's key: one key, or the first ALTERNATIVE it holds every column of, numbered as
+/// node numbers it (`identityOf`) - a claim made here is looked up there.
+fn identity_of_row(row: &Map<String, Value>, keys: &[Vec<String>]) -> Option<String> {
+    match keys {
+        [one] => identity_key(row, one),
+        many => many.iter().enumerate().find_map(|(i, key)| identity_key(row, key).map(|k| format!("{i}\u{1}{k}"))),
+    }
+}
+
 /// The file ids this run is about to replace, so their rows are not sent twice.
 fn affected_ids(db: &Connection, lang: &str, affected: &IndexSet<String>) -> Result<IndexSet<String>> {
     let mut ids = IndexSet::new();
@@ -105,7 +114,7 @@ fn held(
     columns: &[String],
     lang: &str,
     ids: &IndexSet<String>,
-    identity: Option<&Vec<String>>,
+    identity: Option<&Vec<Vec<String>>>,
 ) -> Result<(Vec<Map<String, Value>>, Claims)> {
     let by_owner = columns.iter().any(|c| c == "owner_file");
     let sql = format!(
@@ -178,7 +187,7 @@ fn held(
         // is what stops every reference to it from another file having to be resolved again onto a new
         // one — which a partial run may not store.
         if let (Some(columns_for), Some(Value::String(id))) = (identity, row.get("id"))
-            && let Some(key) = identity_key(&row, columns_for)
+            && let Some(key) = identity_of_row(&row, columns_for)
             && let Some(Value::String(owner)) = row.get("owner_file")
         {
             claims.insert(format!("{owner}\u{0}{key}"), id.clone());
@@ -187,19 +196,51 @@ fn held(
     Ok((out, claims))
 }
 
-/// `{table: [column, ...]}` — which ids must survive a re-extraction, as the last full run measured it.
-fn identity_of(db: &Connection, lang: &str) -> IndexMap<String, Vec<String>> {
+/// The tables node rebuilds whole, as the last run's spec names them.
+fn rebuilt_of(db: &Connection, lang: &str) -> IndexSet<String> {
+    let Some(text) = crate::rows::meta::get(db, &format!("spec:{lang}")) else { return IndexSet::new() };
+    let Ok(spec) = serde_json::from_str::<Value>(&text) else { return IndexSet::new() };
+    spec.get("rebuilt").and_then(Value::as_array).into_iter().flatten().filter_map(|t| t.as_str().map(String::from)).collect()
+}
+
+/// THE IDS A ROLLUP MADE, in the order it made them (rowid): every row of a table node rebuilds whole, and the rows
+/// of a per-file table that belong to no file. Node hands them back to the rows the rollup makes again (`rollupId` in
+/// `TsStore.mjs`), so a rollup rebuilt from the same rows keeps its ids. `projects` is re-pointed by node itself.
+fn rollup_ids(db: &Connection, table: &str, columns: &[String], lang: &str, rebuilt: &IndexSet<String>) -> Result<Option<Vec<String>>> {
+    if table == "projects" || !columns.iter().any(|c| c == "id") {
+        return Ok(None);
+    }
+    let scope = if rebuilt.contains(table) {
+        ""
+    } else if columns.iter().any(|c| c == "owner_file") {
+        " AND owner_file IS NULL"
+    } else {
+        return Ok(None);
+    };
+    let sql = format!("SELECT id FROM \"{}\" WHERE \"{HALF_COLUMN}\" = ?1 AND id IS NOT NULL{scope} ORDER BY rowid", schema::escape(table));
+    let mut stmt = db.prepare(&sql)?;
+    let ids: Vec<String> = stmt.query_map([lang], |r| r.get::<_, String>(0))?.flatten().collect();
+    Ok((!ids.is_empty()).then_some(ids))
+}
+
+/// `{table: [column, ...]}` — which ids must survive a re-extraction, as the last full run measured it - or
+/// `{table: [[column, ...], ...]}`, ALTERNATIVES: a row is named by the first it holds every column of (node's
+/// `identityOf`).
+fn identity_of(db: &Connection, lang: &str) -> IndexMap<String, Vec<Vec<String>>> {
     let mut out = IndexMap::new();
     let Some(text) = crate::rows::meta::get(db, &format!("spec:{lang}")) else { return out };
     let Ok(spec) = serde_json::from_str::<Value>(&text) else { return out };
     let Some(Value::Object(identity)) = spec.get("identity") else { return out };
+    let names = |list: &Vec<Value>| -> Vec<String> { list.iter().filter_map(|c| c.as_str().map(String::from)).collect() };
     for (table, columns) in identity {
-        if let Value::Array(list) = columns {
-            let names: Vec<String> =
-                list.iter().filter_map(|c| c.as_str().map(String::from)).collect();
-            if !names.is_empty() {
-                out.insert(table.clone(), names);
-            }
+        let Value::Array(list) = columns else { continue };
+        let keys: Vec<Vec<String>> = if list.iter().all(Value::is_array) {
+            list.iter().filter_map(Value::as_array).map(names).collect()
+        } else {
+            vec![names(list)]
+        };
+        if !keys.is_empty() && keys.iter().all(|k| !k.is_empty()) {
+            out.insert(table.clone(), keys);
         }
     }
     out
@@ -231,16 +272,21 @@ pub fn carry_over(
     // which no heap setting moves. A line is a row, so nothing here is ever held whole.
     //
     // The shape is private between this and `TsMap.mjs`: `{"t": <table>, "r": <row>}` for every row,
-    // then one `{"claims": {...}}` at the end. Order does not matter - the reader collects both.
+    // then one `{"claims": {...}, "rollup": {...}}` at the end. Order does not matter - the reader collects both.
 
     let mut carried = Carried::default();
     let mut all_claims: IndexMap<String, Claims> = IndexMap::new();
+    let rebuilt = rebuilt_of(&db, lang);
+    let mut rollup = Map::new();
     for table in tables_with_half(&db)? {
         // A NODE TABLE goes out inside the rows it belongs to (`held`), never as a table.
         if super::cells::parent_of(&db, &table).is_some() {
             continue;
         }
         let columns = schema::existing_columns(&db, &table)?;
+        if let Some(ids) = rollup_ids(&db, &table, &columns, lang, &rebuilt)? {
+            rollup.insert(table.clone(), Value::Array(ids.into_iter().map(Value::String).collect()));
+        }
         // A TABLE WITH NO `owner_file` is a derived one - node rebuilds those whole and would
         // throw these away, so they are never sent. `files` is the exception: a file row IS a
         // file, and node needs every one of them because `imports.resolved_file` names files
@@ -277,6 +323,7 @@ pub fn carry_over(
     }
     let mut last = Map::new();
     last.insert("claims".to_string(), Value::Object(claims_of));
+    last.insert("rollup".to_string(), Value::Object(rollup));
     write_json(&mut writer, &Value::Object(last))?;
     writer.write_all(b"\n")?;
     writer.flush()?;

@@ -23,6 +23,7 @@ use super::half::{drop_half, tables_with_half, HALF_COLUMN};
 use super::pyjson;
 use super::schema;
 use super::store::{self, WriteRequest};
+use super::unchanged;
 use super::ts::keyreach;
 use super::ts::store as tsstore;
 use anyhow::{bail, Context, Result};
@@ -160,6 +161,19 @@ fn sorted(value: &Value) -> Value {
     }
 }
 
+/// The `files` ids of the affected paths - what their rows' `owner_file` holds.
+fn affected_ids(db: &Connection, affected: &[String]) -> Result<Vec<String>> {
+    if affected.is_empty() {
+        return Ok(Vec::new());
+    }
+    let marks = vec!["?"; affected.len()].join(",");
+    let mut stmt = db.prepare(&format!("SELECT id FROM files WHERE half = ? AND path IN ({marks})"))?;
+    let lang = LANG;
+    let mut params: Vec<&dyn rusqlite::ToSql> = vec![&lang];
+    params.extend(affected.iter().map(|p| p as &dyn rusqlite::ToSql));
+    Ok(stmt.query_map(params.as_slice(), |r| r.get::<_, String>(0))?.flatten().collect())
+}
+
 /// MAKE ROOM FOR A PARTIAL PAYLOAD: this half's rows for the files being re-extracted, and nothing
 /// else.
 ///
@@ -173,23 +187,7 @@ fn sorted(value: &Value) -> Value {
 /// at all.
 ///
 /// THE OTHER HALVES ARE NEVER TOUCHED — every statement is scoped by `half`.
-fn replace_affected(db: &Connection, affected: &[String], whole: &[String]) -> Result<usize> {
-    let mut ids: Vec<String> = Vec::new();
-    if !affected.is_empty() {
-        let marks = vec!["?"; affected.len()].join(",");
-        let sql = format!("SELECT id FROM files WHERE half = ? AND path IN ({marks})");
-        let mut stmt = db.prepare(&sql)?;
-        let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(affected.len() + 1);
-        let lang = LANG;
-        params.push(&lang);
-        for path in affected {
-            params.push(path);
-        }
-        for id in stmt.query_map(params.as_slice(), |r| r.get::<_, String>(0))?.flatten() {
-            ids.push(id);
-        }
-    }
-
+fn replace_affected(db: &Connection, affected: &[String], ids: &[String], whole: &[String]) -> Result<usize> {
     let wholly: IndexSet<&str> = whole.iter().map(String::as_str).collect();
     let mut removed = 0usize;
     for table in tables_with_half(db)? {
@@ -206,7 +204,7 @@ fn replace_affected(db: &Connection, affected: &[String], whole: &[String]) -> R
             let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(ids.len() + 1);
             let lang = LANG;
             params.push(&lang);
-            for id in &ids {
+            for id in ids {
                 params.push(id);
             }
             super::cells::delete_children(db, &table, &format!("t.\"{HALF_COLUMN}\" = ? AND t.owner_file IN ({marks})"), params.as_slice())?;
@@ -290,30 +288,6 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
     // writing here, a half that rebuilt on its own row count would take the other two halves' rows
     // with it.
     let full = !store::usable(db_path) && !payload.partial;
-    if payload.partial {
-        let db = Connection::open(db_path)
-            .with_context(|| format!("the database could not be opened: {}", db_path.display()))?;
-        // THE CLOSURE'S OWN TABLES ARE WHOLE TOO, and node cannot say so: it does not produce them.
-        let mut whole = payload.whole.clone();
-        whole.extend(CLOSURE_TABLES.iter().map(|t| t.to_string()));
-        let replace_started = std::time::Instant::now();
-        receipt.replaced = replace_affected(&db, &payload.affected, &whole)?;
-        receipt.phases.insert("replace the affected rows".to_string(), replace_started.elapsed().as_millis() as u64);
-        receipt.notes.push(format!(
-            "the typescript half is replacing {} file(s), not all {}",
-            payload.affected.len(),
-            payload.shas.len()
-        ));
-    } else if !full && db_path.exists() {
-        // ONE TRANSACTION, UNJOURNALLED as the store writes: a statement per table, each its own journalled commit,
-        // over a database of gigabytes - and in no phase, so its time was the store's own `(untraced)`.
-        let dropping = std::time::Instant::now();
-        let db = Connection::open(db_path)?;
-        db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; BEGIN")?;
-        drop_half(&db, LANG)?;
-        db.execute_batch("COMMIT")?;
-        receipt.phases.insert("drop the old rows".to_string(), dropping.elapsed().as_millis() as u64);
-    }
 
     // THE MANIFEST, stored beside the rows it describes. SQLite records none of it, so the half
     // that derived it publishes it — under one key of its own, because the other halves have their
@@ -328,6 +302,47 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
             other => pyjson::dumps(&sorted(other)),
         };
         extra.insert(format!("{key}:{LANG}"), text);
+    }
+    let fingerprint = closure_fingerprint(&payload, &extra, &workspace);
+    // WHAT A PARTIAL RUN REMOVES AND WRITES, for the comparison that may keep the closure (`unchanged`).
+    let mut ids: Vec<String> = Vec::new();
+    let node_whole: BTreeSet<String> = payload.whole.iter().cloned().collect();
+    let mut kept: Option<(unchanged::Before, BTreeMap<String, i64>)> = None;
+    if payload.partial {
+        let db = Connection::open(db_path)
+            .with_context(|| format!("the database could not be opened: {}", db_path.display()))?;
+        ids = affected_ids(&db, &payload.affected)?;
+        let compare_started = std::time::Instant::now();
+        let before = unchanged::Before::take(&db, LANG, &fingerprint, payload.spec.as_ref(), &rewrites(&ids, &payload.affected, &node_whole))?;
+        receipt.phases.insert("compare the closure's reads".to_string(), compare_started.elapsed().as_millis() as u64);
+        // ONE TRANSACTION, UNJOURNALLED as the store writes: each delete was a commit of its own, synced.
+        db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; BEGIN")?;
+        // THE RECORD GOES BEFORE ANY ROW DOES: a run that stops between here and its closure vouches for nothing.
+        unchanged::forget(&db, LANG)?;
+        // THE CLOSURE'S OWN TABLES ARE NOT REPLACED HERE: they stay until the closure is known to have moved.
+        let replace_started = std::time::Instant::now();
+        receipt.replaced = replace_affected(&db, &payload.affected, &ids, &payload.whole)?;
+        receipt.phases.insert("replace the affected rows".to_string(), replace_started.elapsed().as_millis() as u64);
+        kept = before.map(|b| {
+            let marks = b.marks(&db);
+            (b, marks)
+        });
+        db.execute_batch("COMMIT")?;
+        receipt.notes.push(format!(
+            "the typescript half is replacing {} file(s), not all {}",
+            payload.affected.len(),
+            payload.shas.len()
+        ));
+    } else if !full && db_path.exists() {
+        // ONE TRANSACTION, UNJOURNALLED as the store writes: a statement per table, each its own journalled commit,
+        // over a database of gigabytes - and in no phase, so its time was the store's own `(untraced)`.
+        let dropping = std::time::Instant::now();
+        let db = Connection::open(db_path)?;
+        db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; BEGIN")?;
+        unchanged::forget(&db, LANG)?;
+        drop_half(&db, LANG)?;
+        db.execute_batch("COMMIT")?;
+        receipt.phases.insert("drop the old rows".to_string(), dropping.elapsed().as_millis() as u64);
     }
 
     let named = text_paths_of(root, Some(&Value::Array(digest.files.clone())));
@@ -407,45 +422,28 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
         // closure reads a class gate on the false side only then. Derived after it, every class gate read as a plain condition.
         let mut first = first;
         styles(&mut receipt, &mut first.written, db_path, root, &workspace)?;
-        let closure_started = std::time::Instant::now();
-        let emitted = {
-            let db = Connection::open(db_path)?;
-            let mut held = tsstore::Store::from_db(&db, LANG)?;
-            let (stats, _) = keyreach::build_closure(
-                &mut held,
-                &payload.declared.checks,
-                &payload.declared.enum_name,
-                &workspace,
-                &mut |note| receipt.notes.push(format!("the typescript half {note}")),
-            );
-            record(&mut receipt, &stats);
-            let mut out = Map::new();
-            for (name, rows) in held.emitted {
-                out.insert(name, Value::Array(rows.into_iter().map(|r| Value::Object(r.into_map())).collect()));
-            }
-            out
+        // THE CLOSURE STAYS WHEN NOTHING IT READ MOVED (`unchanged`): the comparison is of what the run removed with
+        // what it wrote in its place, cell for cell of what the last derivation read.
+        let compare_started = std::time::Instant::now();
+        let moved = match &kept {
+            Some((before, marks)) => before.moved(&Connection::open(db_path)?, LANG, marks, &rewrites(&ids, &payload.affected, &node_whole), &workspace)?,
+            None => Some("no closure was recorded under this setup".to_string()),
         };
-        receipt.phases.insert("derive the closure".to_string(), closure_started.elapsed().as_millis() as u64);
-        // THE COUNTS ARE THE FIRST WRITE'S. The second puts the closure's own four tables in, and
-        // reporting its tally would say this run wrote four tables and nothing else.
-        let closure_written = std::time::Instant::now();
-        store::write(db_path, &WriteRequest {
-            tables: &emitted,
-            stream: None,
-            texts: &store::Texts::Held(&BTreeMap::new()),
-            root,
-            shas: &Map::new(),
-            gone: &gone,
-            full: false,
-            counters: &Map::new(),
-            lang: LANG,
-            half: Some(LANG),
-            setup: None,
-            extra: &BTreeMap::new(),
-            keep_existing: true,
-            counts: true,
-        })?;
-        receipt.phases.insert("write the closure".to_string(), closure_written.elapsed().as_millis() as u64);
+        *receipt.phases.entry("compare the closure's reads".to_string()).or_default() += compare_started.elapsed().as_millis() as u64;
+        match moved {
+            None => {
+                receipt.notes.push("the typescript half kept the closure it stored: nothing it reads moved".to_string());
+                if let Some((before, _)) = &kept {
+                    before.vouch(&Connection::open(db_path)?, LANG)?;
+                }
+            }
+            Some(why) => {
+                receipt.notes.push(format!("the typescript half derives its closure again: {why}"));
+                // THE COUNTS ARE THE FIRST WRITE'S, but for the closure's own four tables, which only the second knows.
+                let written = closure(&mut receipt, db_path, root, &workspace, &payload, &fingerprint)?;
+                first.written.extend(written.into_iter().filter(|(t, _)| CLOSURE_TABLES.contains(&t.as_str())));
+            }
+        }
         first
     } else {
         // THE ROWS GO IN FIRST HERE TOO, and the closure reads them back - what a partial run does. Holding the
@@ -480,49 +478,9 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
         // THE STYLESHEETS BEFORE THE CLOSURE: `class_hides` says which class gates hide their element, and the
         // closure reads a class gate on the false side only then. Derived after it, every class gate read as a plain condition.
         styles(&mut receipt, &mut applied.written, db_path, root, &workspace)?;
-        let closure_started = std::time::Instant::now();
-        let emitted = {
-            let db = Connection::open(db_path)?;
-            let mut held = tsstore::Store::from_db(&db, LANG)?;
-            let (stats, _) = keyreach::build_closure(
-                &mut held,
-                &payload.declared.checks,
-                &payload.declared.enum_name,
-                &workspace,
-                &mut |note| receipt.notes.push(format!("the typescript half {note}")),
-            );
-            record(&mut receipt, &stats);
-            let mut out = Map::new();
-            for (name, rows) in held.emitted {
-                out.insert(name, Value::Array(rows.into_iter().map(|r| Value::Object(r.into_map())).collect()));
-            }
-            out
-        };
-        receipt
-            .phases
-            .insert("derive the closure".to_string(), closure_started.elapsed().as_millis() as u64);
-        // TIMED HERE TOO: the partial branch always said what writing the closure cost, and a full run's was part of
-        // the minute and more of `deep: typescript` no span named.
-        let closure_written = std::time::Instant::now();
-        let closure = store::write(db_path, &WriteRequest {
-            tables: &emitted,
-            stream: None,
-            texts: &store::Texts::Held(&BTreeMap::new()),
-            root,
-            shas: &Map::new(),
-            gone: &gone,
-            full: false,
-            counters: &Map::new(),
-            lang: LANG,
-            half: Some(LANG),
-            setup: None,
-            extra: &BTreeMap::new(),
-            keep_existing: true,
-            counts: true,
-        })?;
-        receipt.phases.insert("write the closure".to_string(), closure_written.elapsed().as_millis() as u64);
+        let written = closure(&mut receipt, db_path, root, &workspace, &payload, &fingerprint)?;
         // A FULL RUN'S TALLY HAS ALWAYS NAMED THE CLOSURE'S FOUR TABLES beside the rest.
-        applied.written.extend(closure.written);
+        applied.written.extend(written);
         applied
     };
     receipt.written = applied.written;
@@ -531,6 +489,79 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
     Ok(receipt)
 }
 
+
+/// THE CLOSURE, DERIVED AND STORED, and what it read recorded beside it (`unchanged`) - the one way both runs make it.
+/// Its old rows go first: a partial run keeps them until it knows they moved.
+fn closure(receipt: &mut TsReceipt, db_path: &Path, root: &str, workspace: &Path, payload: &TsPayload, fingerprint: &str) -> Result<BTreeMap<String, i64>> {
+    let declared = &payload.declared;
+    {
+        let db = Connection::open(db_path)?;
+        db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; BEGIN")?;
+        for table in CLOSURE_TABLES {
+            if !schema::existing_columns(&db, table)?.is_empty() {
+                super::half::delete_half_rows(&db, table, LANG)?;
+            }
+        }
+        db.execute_batch("COMMIT")?;
+    }
+    let closure_started = std::time::Instant::now();
+    let (emitted, reads) = {
+        let db = Connection::open(db_path)?;
+        let mut held = tsstore::Store::from_db(&db, LANG)?;
+        let (stats, _) = keyreach::build_closure(&mut held, &declared.checks, &declared.enum_name, workspace, &mut |note| {
+            receipt.notes.push(format!("the typescript half {note}"))
+        });
+        record(receipt, &stats);
+        let reads = held.reads();
+        let mut out = Map::new();
+        for (name, rows) in held.emitted {
+            out.insert(name, Value::Array(rows.into_iter().map(|r| Value::Object(r.into_map())).collect()));
+        }
+        (out, reads)
+    };
+    receipt.phases.insert("derive the closure".to_string(), closure_started.elapsed().as_millis() as u64);
+    // TIMED HERE TOO: the partial branch always said what writing the closure cost, and a full run's was part of
+    // the minute and more of `deep: typescript` no span named.
+    let closure_written = std::time::Instant::now();
+    let written = store::write(db_path, &WriteRequest {
+        tables: &emitted,
+        stream: None,
+        texts: &store::Texts::Held(&BTreeMap::new()),
+        root,
+        shas: &Map::new(),
+        gone: &BTreeSet::new(),
+        full: false,
+        counters: &Map::new(),
+        lang: LANG,
+        half: Some(LANG),
+        setup: None,
+        extra: &BTreeMap::new(),
+        keep_existing: true,
+        counts: true,
+    })?
+    .written;
+    unchanged::record(&Connection::open(db_path)?, LANG, &reads, fingerprint, payload.spec.as_ref())?;
+    receipt.phases.insert("write the closure".to_string(), closure_written.elapsed().as_millis() as u64);
+    Ok(written)
+}
+
+/// What the closure is derived under besides the rows - see `unchanged::fingerprint`.
+fn closure_fingerprint(payload: &TsPayload, extra: &BTreeMap<String, String>, workspace: &Path) -> String {
+    let parts: Vec<String> = vec![
+        payload.setup.clone().unwrap_or_default(),
+        payload.declared.enum_name.clone(),
+        payload.declared.checks.join("\u{1}"),
+        extra.get(&format!("options:{LANG}")).cloned().unwrap_or_default(),
+        workspace.to_string_lossy().into_owned(),
+        env!("CARGO_PKG_VERSION").to_string(),
+    ];
+    unchanged::fingerprint(&parts.iter().map(String::as_str).collect::<Vec<_>>())
+}
+
+/// Which part of a partial run removes and writes which rows - see `unchanged::Rewrites`.
+fn rewrites<'a>(ids: &'a [String], affected: &'a [String], whole: &'a BTreeSet<String>) -> unchanged::Rewrites<'a> {
+    unchanged::Rewrites { ids, paths: affected, whole, derived: crate::cssmap::TABLES, derived_kind: crate::cssmap::UNPARSED }
+}
 
 /// THE STYLESHEETS, AS RULES (`cssmap`) - derived after every other row is in, because `class_hides`
 /// joins node's gates to them; whole on every run, so a partial one needs nothing of its own.

@@ -33,6 +33,8 @@ mod rawcells;
 pub mod reads;
 #[path = "partial/remember.rs"]
 mod remember;
+#[path = "partial/unchanged.rs"]
+mod unchanged;
 pub mod schema;
 pub mod seeds;
 pub mod sqlrun;
