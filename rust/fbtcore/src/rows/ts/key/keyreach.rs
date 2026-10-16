@@ -145,10 +145,19 @@ pub fn extra_restrictions(
     store: &Store<'_>,
     idx: &EnumIndex,
 ) -> (IndexMap<String, Vec<Value>>, IndexMap<String, Vec<Value>>) {
+    let step = crate::trace::stage("restrictions: member enums");
     let mem = member_enums(store, idx);
+    drop(step);
+    let step = crate::trace::stage("restrictions: configs");
     let (cfg, per_loop, _) = gate_config::config_restrictions_all(store, &mem, idx);
+    drop(step);
+    let step = crate::trace::stage("restrictions: switches");
     let (sw, _) = gate_switch::switch_restrictions(store, &mem, idx);
+    drop(step);
+    let step = crate::trace::stage("restrictions: directives");
     let (dir, _) = gate_directives::directive_restrictions(store, &mem, idx);
+    drop(step);
+    let _step = crate::trace::stage("restrictions: guards");
     let guards = super::gate_guards::guard_restrictions(store, &mem, idx);
     let mut extra = cfg;
     for (gate, rows) in sw.into_iter().chain(dir).chain(guards) {
@@ -171,7 +180,9 @@ pub fn build_closure(
 ) -> (Closure, Derived) {
     let stage = crate::trace::stage("closure: branches");
     let step = crate::trace::stage("branches: index");
-    let branches = Branches::new(store);
+    // BUILT ONCE FOR EVERY PASS THAT ASKS (`Store::shared`): six passes made their own, each over every row.
+    let shared_branches = store.shared("branches", Branches::new);
+    let branches: &Branches = &shared_branches;
     let idx0 = enum_index(store);
     drop(step);
     let step = crate::trace::stage("branches: edges");

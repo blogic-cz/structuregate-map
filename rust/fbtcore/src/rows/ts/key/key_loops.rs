@@ -195,7 +195,7 @@ impl Loops {
         let returns = store.table("returns");
         let by_member = returns_by_member(&returns);
         let params = super::key_fields::callables(store).0;
-        let branches = Branches::new(store);
+        let branches = store.shared("branches", Branches::new);
         let members = store.table("members");
         let calls = store.table("calls");
         let functions = store.table("functions");
