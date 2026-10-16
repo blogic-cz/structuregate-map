@@ -56,6 +56,12 @@ Beside the shared tables it adds the FRAMEWORK tables:
   key sits in, from 0), `key`, and `translation` - a `translations.id` defining the key, NULL when no locale does. Join
   a route to the code testing the same key by `key` (`i18n_refs.key`), never by parsing the path. A key a route path
   names counts as `translations.referenced`.
+* **A Module Federation route** (`loadChildren: () => loadRemoteModule('demo-orders', './Module').then((m) => m.X)`, or
+  `loadRemoteModule({ remoteName, exposedModule })`) carries `routes.load_children_remote_name` (`demo-orders/Module`, the
+  request webpack resolves) and `load_children_remote`, the class `X` declared in the file the remote's own
+  `module-federation.config.{js,ts}` (`name` = the remote) lists under `exposes['./Module']` - read syntactically, never
+  run; NULL when no single config, exposed file or class proves it, or for a remote named only by its `remoteEntry` URL.
+  A `.catch(() => import(..))` fallback stays `load_children_module` with `load_children_recovery = 1`.
 * **`key_reach.paths`** lists a key's ways, one `{path, own}` per way (`n_paths` entries). `path` joins `render_path.id`, may repeat, and is renumbered every build, so only join within one DB. `own` holds the ids the way holds beyond that row's `gates`/`branches`. Fold a per-way fact the map does not compute over the items of `key_reach__paths` (each item's `path` is a row below it, `role = 'path'`; `own` a child list, `role = 'own'`) joined to `render_path` (AND along `gates ∪ branches ∪ own`, UNION over entries). Never filter `render_path` by `key_reach.components`.
 * **A component field NOTHING reads is no site of the key its initializer holds**: `labelCode = 'k'` in a class whose
   template binds only another field adds no way to `key_reach`. `files.prop_reads` (node rows `files__prop_reads`: one row per property name the file reads - the name its `role`, the count its `value` -

@@ -35,6 +35,7 @@ import { rollupDynamicRenders } from './TsDynRender.mjs';
 import { rollupRoutes } from './TsRoutes.mjs';
 import { rollupRouteTree } from './TsRouteTree.mjs';
 import { rollupRouteKeys } from './TsRouteKeys.mjs';
+import { rollupRemoteRoutes } from './TsFederation.mjs';
 import { rollupInputUsage } from './TsInputUsage.mjs';
 import { ASIDE, claimsBack, rollupModuleScope, setAsideOutOfScope, withAside } from './TsModuleScope.mjs';
 import { rollupStateGraph } from './TsNgrx.mjs';
@@ -213,16 +214,16 @@ async function main() {
   // 54: `components.unused` no longer counts an `out_of_scope` render candidate as a render (#77).
   // 55: a nested `$module` (a lazy route in `forChild([...])`) and a nested `$ref` of an `ng_modules` list carry `id` (#75).
   // 56: `route_keys`, one row per `{{key}}` of a route's path, and such a key counts as `translations.referenced` (#74).
+  // 57: a `$fn` calling `loadRemoteModule` carries `$remote`, and its route `load_children_remote(_name)` (#76).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 56, build: args.build,
+    config: config.file, data: config.data, rows: 57, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
   const skipFiles = new Set(args.db
     ? ['', '-wal', '-shm', '-journal', '.last-run.jsonl'].map((suffix) => canonicalPath(args.db + suffix))
     : []);
-
   // ONLY THE FILES THAT CARRY A HASH. A few of a workspace's `files` rows are program files the
   // compiler reached OUTSIDE the tree - a `.d.ts` in the borrowed node_modules - and the walk that
   // produces hashes does not go there, so they are recorded with none. Counting them made the comparison
@@ -531,6 +532,9 @@ async function main() {
   // AFTER the inventory, because an import that resolved into a file only the walk knows about could not be
   // joined before that file had a row.
   rollupRefIds(store);
+  // A FEDERATED REMOTE A ROUTE LOADS, through the tree's own `module-federation.config` - once every class has its id.
+  const remotes = rollupRemoteRoutes(ts, store, fe);
+  if (remotes.remotes) emit('MAP-NOTE', `the typescript half resolved ${remotes.resolved} of ${remotes.remotes} remote route(s)`);
   // ...and then which PARAMETER each argument fills, which needs the call targets the pass above resolved.
   rollupCallParams(store);
 
