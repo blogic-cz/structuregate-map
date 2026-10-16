@@ -7,7 +7,7 @@
 use anyhow::Result;
 use rusqlite::{types::ToSqlOutput, types::Value as SqlValue, Connection};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 /// The columns that join to `files.id`, indexed wherever they appear.
 ///
@@ -102,6 +102,34 @@ pub fn widen(db: &Connection, table: &str, existing: &mut Vec<String>, columns: 
         }
     }
     Ok(())
+}
+
+/// EVERY COLUMN A HALF'S SPEC DECLARES A JOIN (`spec:<half>` -> `joins`, keyed `table.column`), plus the columns a
+/// reader looks a row up by (`extra`), indexed - the map is opened read-only, so a consumer cannot add one, and
+/// `WHERE calls.target_id = ?` scanned the table. A name the spec gives with no table or column here is skipped:
+/// the spec also names node tables and columns a run may not have produced.
+pub fn index_declared(db: &Connection, extra: &[(&str, &str)]) -> Result<usize> {
+    let mut wanted: BTreeSet<(String, String)> = extra.iter().map(|(t, c)| (t.to_string(), c.to_string())).collect();
+    for (_, raw) in super::meta::scan(db, Some("spec:%")) {
+        let Ok(spec) = serde_json::from_str::<Value>(&raw) else { continue };
+        for key in spec.get("joins").and_then(Value::as_object).into_iter().flat_map(|j| j.keys()) {
+            if let Some((table, column)) = key.split_once('.') {
+                wanted.insert((table.to_string(), column.to_string()));
+            }
+        }
+    }
+    let mut made = 0;
+    let mut columns: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (table, column) in wanted {
+        if !columns.contains_key(&table) {
+            columns.insert(table.clone(), existing_columns(db, &table)?);
+        }
+        if columns[&table].contains(&column) {
+            index(db, &table, &column)?;
+            made += 1;
+        }
+    }
+    Ok(made)
 }
 
 fn index(db: &Connection, table: &str, column: &str) -> Result<()> {
