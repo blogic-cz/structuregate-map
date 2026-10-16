@@ -163,16 +163,26 @@ pub fn create(db: &Connection, table: &str, column: &str) -> Result<String> {
 
 /// THE `value` AND `(role, parent)` INDEXES, made AFTER the rows are in. `(role, parent)` answers a SHAPE across every
 /// owner - each root `$ref`, each `$template` list (#71): the primary key serves only a lookup inside one owner. Made
-/// by `store::write` once per write, by `store::insert_rows` per table. Built during the insert, every node landed at
+/// by `store::write` once per write (a full TypeScript run once, after its closure), by `store::insert_rows` per table. Built during the insert, every node landed at
 /// a random place in it, and on a large workspace that was most of the time the store spent; one sort over the
 /// finished table is a fraction of that. `IF NOT EXISTS`, so a partial run inserts into the index a full run built.
 pub fn index_values(db: &Connection) -> Result<()> {
+    index_children(db, None)
+}
+
+/// ...of `table`'s node tables alone - what a pass writing a table of its own makes (`store::insert_rows`): every node
+/// table of the database is not its to index, and indexing them hid whether the store had.
+pub fn index_values_of(db: &Connection, table: &str) -> Result<()> {
+    index_children(db, Some(table))
+}
+
+fn index_children(db: &Connection, table: Option<&str>) -> Result<()> {
     if schema::existing_columns(db, REGISTRY).map(|c| c.is_empty()).unwrap_or(true) {
         return Ok(());
     }
     let children: Vec<String> = {
-        let mut stmt = db.prepare(&format!("SELECT child FROM {REGISTRY}"))?;
-        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut stmt = db.prepare(&format!("SELECT child FROM {REGISTRY} WHERE ?1 IS NULL OR tbl = ?1"))?;
+        let rows = stmt.query_map([table], |r| r.get::<_, String>(0))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
     for child_table in children {
