@@ -103,4 +103,42 @@ Test-Case 'tsrows: a partial run follows an edit to the federation config' {
     Assert-Line (Get-TsRemoteRoutes $back.Db) 'orders|OrdersEntryModule|demo-orders/Module|FallbackModule|1'
 }
 
+# A LAZY MODULE'S ROUTES STAY UNDER THEIR PARENT ON A PARTIAL RUN. The routes are joined across the lazy boundary by
+# the CONTENT of the array a module's `forChild` holds and the const it names; since #75 a kept module row carries the
+# ids added inside it (`component`'s `$ref`), the const read again does not, and the two stopped matching - every lazy
+# root lost its `parent_route` on every partial run.
+Test-Case 'tsrows: a partial run keeps a lazy module''s routes under the route that loads it' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/app.routes.ts' = "import { NgModule } from '@angular/core';`n" +
+            "import { RouterModule } from '@angular/router';`n" +
+            "@NgModule({ imports: [RouterModule.forRoot([`n" +
+            "  { path: 'orders', loadChildren: () => import('./order.module').then((m) => m.OrderModule) },`n" +
+            "])] })`nexport class AppRoutingModule {}`n"
+        'apps/shop/src/order-detail.component.ts' = "import { Component } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-order-detail', template: '<p>order</p>' })`nexport class OrderDetailComponent {}`n"
+        'apps/shop/src/order.routes.ts' = "import { OrderDetailComponent } from './order-detail.component';`n" +
+            "export const orderRoutes = [{ path: 'detail', component: OrderDetailComponent }];`n"
+        'apps/shop/src/order.module.ts' = "import { NgModule } from '@angular/core';`n" +
+            "import { RouterModule } from '@angular/router';`n" +
+            "import { OrderDetailComponent } from './order-detail.component';`n" +
+            "import { orderRoutes } from './order.routes';`n" +
+            "@NgModule({ declarations: [OrderDetailComponent], imports: [RouterModule.forChild(orderRoutes)] })`n" +
+            "export class OrderModule {}`n"
+        'apps/shop/src/note.ts' = "export const note = 1;`n"
+    }
+    $sql = "SELECT c.path || '<' || coalesce(p.path, 'none') AS r FROM routes c LEFT JOIN routes p ON p.id = c.parent_route " +
+        "WHERE c.path = 'detail'"
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    Assert-Line (Invoke-TsRowsQ $made.Db $sql) 'detail<orders'
+    # AN EDIT THAT READS NEITHER the module nor its routes again: both rows come back as they were stored.
+    Add-Content -LiteralPath (Join-Path $tree 'apps/shop/src/note.ts') -Value '// demo: a remark'
+    $again = New-TsRowsDb $tree
+    Assert-Exit $again.Result 0
+    Assert-Line $again.Result 'put back'
+    $kept = Invoke-TsRowsQ $again.Db $sql
+    Assert-Line $kept 'detail<orders'
+    Assert-NoLine $kept 'detail<none'
+}
+
 }
