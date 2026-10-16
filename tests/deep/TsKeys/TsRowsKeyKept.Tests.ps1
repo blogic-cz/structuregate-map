@@ -98,4 +98,23 @@ Test-Case 'tsrows: a closure derived again rewrites the rows that moved and keep
     if ($moved -le $top) { throw "kp.a moved and its row is not a new one: $($is[0]), the old rows ran to $top" }
 }
 
+# A TEMPLATE TWO COMPONENTS SHARE is walked once for each, both copies of its nodes and bindings under the one `.html`:
+# no key without the template row told the copies apart, so neither table was claimed, a comment renumbered both, and
+# the closure was derived again on every partial run of a large workspace.
+Test-Case 'tsrows: a comment beside a template two components share keeps the stored closure' {
+    $files = $script:TsKeptFiles.Clone()
+    $files['apps/shop/src/twin.component.html'] = "<p [title]=""label"">{{ label }}</p>`n<i>{{ label }}</i>`n"
+    $files['apps/shop/src/twin.component.ts'] = "import { Component } from '@angular/core';`n" +
+        "@Component({ selector: 'app-left', templateUrl: './twin.component.html', standalone: true })`n" +
+        "export class LeftComponent {`n  label = 'l';`n}`n" +
+        "@Component({ selector: 'app-right', templateUrl: './twin.component.html', standalone: true })`n" +
+        "export class RightComponent {`n  label = 'r';`n}`n"
+    $tree = New-TsRowsWorkspace $files
+    Assert-Exit (New-TsRowsDb $tree).Result 0
+    Add-Content -LiteralPath (Join-Path $tree 'apps/shop/src/twin.component.ts') -Value '// demo: a remark'
+    $again = New-TsRowsDb $tree
+    Assert-Exit $again.Result 0
+    Assert-Line $again.Result 'kept the closure it stored'
+}
+
 }

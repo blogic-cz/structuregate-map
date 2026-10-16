@@ -85,6 +85,10 @@ function storedForm(row) {
 const MORE_KEYS = [
   ['line', 'col', 'kind', 'order'], ['line', 'col', 'kind'], ['binding', 'kind'], ['node', 'kind', 'source'],
   ['node', 'kind', 'to'], ['class', 'member'], ['node', 'expression', 'value'],
+  // A TEMPLATE TWO COMPONENTS SHARE is walked once for each, both copies under the one `.html`: a node or a binding
+  // is then told apart by its template row (itself claimed). Measured on a small tree, the keys above held; on a large
+  // workspace one shared template left both tables without a key, and every partial run renumbered them.
+  ['template', 'line', 'col', 'kind', 'order'], ['template', 'line', 'col', 'kind', 'name'],
 ];
 
 // The candidate keys, most identifying first. A row is claimed by the first of these that is unique
