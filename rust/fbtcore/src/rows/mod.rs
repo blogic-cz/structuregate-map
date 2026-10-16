@@ -20,6 +20,8 @@ pub mod fts;
 pub mod carry;
 #[path = "partial/deps.rs"]
 pub mod deps;
+#[path = "partial/delta.rs"]
+mod delta;
 #[path = "partial/digest.rs"]
 pub mod digest;
 pub mod dups;

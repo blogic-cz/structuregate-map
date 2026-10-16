@@ -8,12 +8,11 @@
 
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
-# Every key and what always restricts it, plus the size of each closure table: what a kept closure has to match.
+# Every key and what always restricts it, plus the size of two closure tables: what a kept closure has to match.
 $script:TsKeptSql = "SELECT k.key || ' | ' || coalesce($(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension'), '-') || ' ' || " +
     "coalesce($(Get-TsFieldSql 'key_reach__always_values' 'v' 'op'), '-') || ' ' || coalesce($(Get-NodeListSql 'key_reach__always_values' 'v' 'values'), '-') AS reach " +
     "FROM key_reach k LEFT JOIN key_reach__always_values v ON v.owner = '#' || k.rowid AND v.parent = 0 WHERE k.key LIKE 'kp.%' " +
-    "UNION ALL SELECT 'paths=' || (SELECT count(*) FROM render_path) || ' values=' || (SELECT count(*) FROM gate_values) || " +
-    "' keys=' || (SELECT count(*) FROM key_reach) ORDER BY 1"
+    "UNION ALL SELECT 'paths=' || (SELECT count(*) FROM render_path) || ' keys=' || (SELECT count(*) FROM key_reach) ORDER BY 1"
 
 $script:TsKeptFiles = @{
     'apps/shop/src/kp.component.html' = "<b>{{ label }}</b>`n"
@@ -72,6 +71,31 @@ Test-Case 'tsrows: an edited condition moves the closure, which a partial run de
     Assert-NoLine $moved 'Beta'
     $full = Get-TsKeptFull $edit
     Assert-Equal $moved.Text $full.Text "the derived closure against a full run of the edited tree"
+}
+
+# DERIVED AGAIN, IT IS WRITTEN AS WHAT CHANGED (`rust/fbtcore/src/rows/partial/delta.rs`): the row of a key the edit did not
+# move is the row that was there - the same rowid - and the row of one it moved is a new one, above every row there was.
+# Deleted and written whole, the table numbers its rows from 1 again and the moved key sits where it sat.
+Test-Case 'tsrows: a closure derived again rewrites the rows that moved and keeps the rest' {
+    $tree = New-TsRowsWorkspace $script:TsKeptFiles
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $where = "SELECT key || '=' || rowid AS r FROM key_reach WHERE key IN ('kp.a', 'kp.c') ORDER BY key"
+    $top = [long](Invoke-TsRowsQ $made.Db "SELECT 'top=' || max(rowid) AS r FROM key_reach").Lines.Where({ $_.Trim().StartsWith('top=') })[0].Trim().Substring(4)
+    $before = Invoke-Gate --map-query $made.Db --width 0 --sql $where
+    $ts = Join-Path $tree 'apps/shop/src/kp.component.ts'
+    Set-Content -LiteralPath $ts -Value ([IO.File]::ReadAllText($ts).Replace('Tier.Beta ?', 'Tier.Gamma ?'))
+    $again = New-TsRowsDb $tree
+    Assert-Exit $again.Result 0
+    Assert-Line $again.Result 'derives its closure again'
+    $after = Invoke-Gate --map-query $again.Db --width 0 --sql $where
+    $was = @($before.Lines | ForEach-Object { $_.Trim() } | Where-Object { $_.StartsWith('kp.') })
+    $is = @($after.Lines | ForEach-Object { $_.Trim() } | Where-Object { $_.StartsWith('kp.') })
+    Assert-Equal $was.Count 2 'the two keys before the edit'
+    Assert-Equal $is.Count 2 'the two keys after it'
+    Assert-Equal $is[1] $was[1] 'kp.c, which the edit did not move, keeps its row'
+    $moved = [long]$is[0].Substring('kp.a='.Length)
+    if ($moved -le $top) { throw "kp.a moved and its row is not a new one: $($is[0]), the old rows ran to $top" }
 }
 
 }

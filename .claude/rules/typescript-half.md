@@ -76,7 +76,9 @@ each affected file's text (`file_text` before, the disk after): all equal, and t
 same ids back: EVERY per-file table with a unique key is claimed (`identityKeys`), not only those another file names,
 with sparse ALTERNATIVES for the rows a first key leaves out (`identityOf`: a template expression has no line), and a
 rollup takes its old ids back in the order it made them (`rollupId`, handed over by `carry` as `rollup`). A table read
-whole (no `half`) is never kept; `forget` runs before any row is written.
+whole (no `half`) is never kept; `forget` runs before any row is written. A closure that MOVED is written as what
+changed (`rows/partial/delta.rs`): a stored row is matched to an emitted one by its content as the store holds it (its
+cells, then each structure's node rows), and only the rows left over on either side are deleted or inserted.
 
 **BYTES AND ORDER FOLLOW NODE** - each found only by diffing against node on a real workspace: python's `open()`
 TRANSLATES `\r\n` and node does not (`rust/fbtcore/src/rows/pyjson.rs`, `universal_newlines`); `trimStart` strips
