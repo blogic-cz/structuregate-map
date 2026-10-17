@@ -82,6 +82,13 @@ fn from_disk(walk: &mut Walk, root: &Path, dir: &Path) {
             return;
         }
     };
+    // A LINKED GIT WORKTREE BELOW THE ROOT IS ANOTHER CHECKOUT, not this tree's source: `git worktree add` put one under
+    // `.claude/worktrees/`, its half-done files were measured as this repo's, and the build failed on a branch it was not
+    // building. Told by its `.git` FILE naming a `worktrees` folder - read only where the listing already holds one; a
+    // submodule's names `modules`, and a submodule is still walked.
+    if dir != root && entries.iter().any(|e| e.file_name() == ".git" && linked_worktree(&e.path())) {
+        return;
+    }
     for entry in entries {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -102,6 +109,15 @@ fn from_disk(walk: &mut Walk, root: &Path, dir: &Path) {
             walk.found.push((path.to_string_lossy().into_owned(), rel));
         }
     }
+}
+
+/// `gitdir: <repo>/.git/worktrees/<name>` - the `.git` file `git worktree add` writes. A folder, a submodule's
+/// `.../modules/...` or an unreadable file is not one.
+fn linked_worktree(git: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(git) else { return false };
+    let Some(target) = text.trim().strip_prefix("gitdir:") else { return false };
+    let parts: Vec<String> = Path::new(target.trim()).components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    parts.len() >= 2 && parts[parts.len() - 2] == "worktrees"
 }
 
 /// THE GIT LIST, scoped to the root: `<scope>/**` and `<scope>/*`, or `*` when the root is the repo.

@@ -84,6 +84,24 @@ Test-Case 'walk: a build tree is not authored code' {
     Assert-Exit $result 0
 }
 
+# A LINKED GIT WORKTREE BELOW THE ROOT IS ANOTHER CHECKOUT: `git worktree add` under `.claude/worktrees/` put a branch's
+# half-done files into this repo's own gate, which failed a build of main over a file main did not have. Its `.git` is a
+# FILE naming `<repo>/.git/worktrees/<name>`; a submodule's names `.git/modules/<name>` and is still measured.
+Test-Case 'walk: a linked worktree below the root is not walked, a submodule still is' {
+    $tree = Use-Tree @{
+        'a.cs' = "class A { }`n"
+        'wt/demo/.git' = "gitdir: /demo/repo/.git/worktrees/demo`n"
+        'wt/demo/big.cs' = (New-Code 20)
+    }
+    Assert-Exit (Invoke-Gate --root $tree --max-lines 5) 0
+    $sub = Use-Tree @{
+        'a.cs' = "class A { }`n"
+        'lib/alpha/.git' = "gitdir: ../../.git/modules/alpha`n"
+        'lib/alpha/big.cs' = (New-Code 20)
+    }
+    Assert-Exit (Invoke-Gate --root $sub --max-lines 5) 1
+}
+
 Test-Case 'walk: --skip replaces the list, so a custom tree name can be excluded' {
     $tree = Use-Tree @{ 'vendor/big.cs' = (New-Code 20); 'a.cs' = "class A { }`n" }
     Assert-Exit (Invoke-Gate --root $tree --max-lines 5) 1
