@@ -68,6 +68,40 @@ Test-Case 'sqlstatements: a statement is a tree of clauses, and its fingerprint 
     Assert-SqlStmtRow $made.Db "SELECT 'v=' || count(DISTINCT fingerprint) FROM sql_statements" '2' 'one more operator is another statement'
 }
 
+Test-Case 'sqlstatements: a statement''s shape - its clauses, what it joins, its functions and CTEs' {
+    $nl = $script:SqlStmtNl
+    $made = New-SqlStmtDb @{
+        'Demo/Demo.sqlproj' = Get-SqlStmtProject
+        'Demo/q.sql' = "WITH Totals AS (SELECT o.CustomerId, SUM(o.Amount) AS s FROM dbo.Orders o GROUP BY o.CustomerId)$nl" +
+            "SELECT TOP 10 c.Name, t.s, ROW_NUMBER() OVER (ORDER BY t.s DESC) AS rn$nl" +
+            "FROM Totals t LEFT JOIN dbo.Customers c ON c.Id = t.CustomerId${nl}WHERE t.s > 100${nl}ORDER BY t.s DESC;$nl"
+    }
+    Assert-SqlStmtRow $made.Db "SELECT 'v=' || group_concat(kind, ',') FROM (SELECT DISTINCT kind FROM sql_clauses ORDER BY kind)" 'cte,groupby,leftjoin,orderby,top,where,window' 'every clause, an OVER as a window'
+    Assert-SqlStmtRow $made.Db "SELECT 'v=' || type || '|' || schema || '.' || name || '|' || alias || '|' || on_line FROM sql_joins" 'left|dbo.Customers|c|3' 'the side a join brings in'
+    Assert-SqlStmtRow $made.Db "SELECT 'v=' || group_concat(name || ':' || windowed, ',') FROM (SELECT name, windowed FROM sql_functions ORDER BY name)" 'row_number:1,sum:0' 'the functions, one over a window'
+    Assert-SqlStmtRow $made.Db "SELECT 'v=' || name || '|' || line FROM sql_ctes" 'Totals|1' 'the CTE'
+}
+
+Test-Case 'sqlstatements: every column a statement names, its table through the alias, and the clause it is in' {
+    $nl = $script:SqlStmtNl
+    $made = New-SqlStmtDb @{
+        'Demo/Demo.sqlproj' = Get-SqlStmtProject
+        'Demo/q.sql' = "SELECT o.Amount, c.Name FROM dbo.Orders o LEFT JOIN dbo.Customers c ON c.Id = o.CustomerId WHERE o.Status = 1;$nl" +
+            "UPDATE dbo.Orders SET Status = 2 WHERE Id = 5;${nl}INSERT INTO dbo.Orders (Id, Amount) VALUES (1, 10);$nl" +
+            "SELECT a.Id FROM dbo.Orders a JOIN dbo.Customers b ON b.Id = a.CustomerId WHERE X = 1;$nl" +
+            "MERGE dbo.Orders AS T USING (SELECT Id FROM dbo.Archive) AS S ON T.Id = S.Id WHEN MATCHED THEN UPDATE SET Status = 1;$nl" +
+            "UPDATE o SET Status = 3 FROM dbo.Orders o JOIN dbo.Customers c ON c.Id = o.CustomerId WHERE c.Name = 'x';$nl"
+    }
+    $named = "SELECT 'v=' || group_concat(x, ',') FROM (SELECT line || ':' || schema || '.' || name || '.' || column || ':' || role || ':' || source_kind x" +
+        " FROM sql_column_refs ORDER BY line, name, column, role)"
+    # An unqualified column of a two-table join (`X`) belongs to no table and stays a row; a SET's column is the target's.
+    Assert-SqlStmtRow $made.Db $named ('1:dbo.Customers.Id:join:table,1:dbo.Customers.Name:select:table,1:dbo.Orders.Amount:select:table,' +
+        '1:dbo.Orders.CustomerId:join:table,1:dbo.Orders.Status:where:table,2:dbo.Orders.Id:where:table,2:dbo.Orders.Status:set:table,' +
+        '3:dbo.Orders.Amount:insert:table,3:dbo.Orders.Id:insert:table,4:..X:where:,4:dbo.Customers.Id:join:table,4:dbo.Orders.CustomerId:join:table,' +
+        '4:dbo.Orders.Id:select:table,5:..Id:merge_on:derived,5:dbo.Archive.Id:select:table,5:dbo.Orders.Id:merge_on:table,5:dbo.Orders.Status:set:table,' +
+        '6:dbo.Customers.Id:join:table,6:dbo.Customers.Name:where:table,6:dbo.Orders.CustomerId:join:table,6:dbo.Orders.Status:set:table') 'every column and its table'
+}
+
 # THE STATEMENTS OF A RE-READ FILE ARE REPLACED, and those of the files that did not move kept as they were: a partial
 # run holds the same rows as a fresh map of the same tree, compared by what each row SAYS - an id is a handle.
 function Get-SqlStmtContent([string]$Db) {
@@ -79,7 +113,11 @@ function Get-SqlStmtContent([string]$Db) {
         "SELECT 'v=N|' || coalesce($($statement -f 'n.statement'), 'gone') || '|' || n.n || '|' || coalesce(n.parent, '') || '|' || n.ord || '|' || n.kind || '|' ||" +
             " n.value || '|' || n.line FROM sql_nodes n",
         "SELECT 'v=R|' || f.path || '|' || r.line || '|' || r.action || '|' || r.name || '|' || r.column || '|' ||" +
-            " coalesce($($statement -f 'r.statement'), '') FROM sql_refs r JOIN files f ON f.id = r.file")
+            " coalesce($($statement -f 'r.statement'), '') FROM sql_refs r JOIN files f ON f.id = r.file",
+        "SELECT 'v=C|' || coalesce($($statement -f 'c.statement'), 'gone') || '|' || c.line || '|' || c.role || '|' || c.schema || '|' ||" +
+            " c.name || '|' || c.source_kind || '|' || c.alias || '|' || c.column FROM sql_column_refs c",
+        "SELECT 'v=V|' || $($statement -f 'v.statement') || '|' || v.kind || '|' || v.line FROM sql_clauses v",
+        "SELECT 'v=J|' || $($statement -f 'v.statement') || '|' || v.type || '|' || v.schema || '|' || v.name || '|' || v.alias FROM sql_joins v")
     return @($queries | ForEach-Object { Get-SqlStmtRows $Db $_ } | Sort-Object)
 }
 
@@ -111,7 +149,7 @@ Test-Case 'sqlstatements: a run that re-read one file holds what a fresh map of 
     $kept = Get-SqlStmtContent $partial.Db
     $fresh = Get-SqlStmtContent (New-SqlStmtDb (Get-SqlStmtChain $after)).Db
     $diff = @(Compare-Object $kept $fresh)
-    if ($diff.Count -gt 0 -or $kept.Count -lt 40) {
+    if ($diff.Count -gt 0 -or $kept.Count -lt 40 -or @($kept | Where-Object { $_.StartsWith('C|') }).Count -lt 10) {
         throw "the partial run and the fresh map differ ($($kept.Count) vs $($fresh.Count) rows):`n$(($diff | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }) -join "`n")"
     }
 }

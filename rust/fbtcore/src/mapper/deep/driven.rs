@@ -38,7 +38,8 @@ pub(super) const CS_ROWS_VERSION: &str = "28";
 // 8: a CTE name is the statement's own - never a `sql_refs` row, and never hiding a table in a later statement.
 // 9: `sql_statements` (a row per statement, `fingerprint` filled by `rows/sqlshape/`), its tree `sql_nodes`, and
 // `sql_refs.statement`.
-const SQL_ROWS_VERSION: &str = "9";
+// 10: `sql_column_refs` and the shape views, derived from `sql_nodes` for the statements a run writes.
+const SQL_ROWS_VERSION: &str = "10";
 /// Rows held before a batch is sent - both ends pay for it, so it decides whether a large solution fits.
 const ROWS_PER_BATCH: i64 = 100_000;
 
