@@ -22,8 +22,6 @@ pub mod carry;
 pub mod deps;
 #[path = "partial/dangling.rs"]
 pub mod dangling;
-#[path = "partial/delta.rs"]
-mod delta;
 #[path = "partial/digest.rs"]
 pub mod digest;
 pub mod dups;
@@ -39,7 +37,14 @@ pub mod reads;
 mod remember;
 #[path = "partial/uncarried.rs"]
 mod uncarried;
-#[path = "partial/unchanged.rs"]
+// WHAT RUST DERIVES FROM THE TYPESCRIPT HALF'S STORED ROWS - the closure and the stylesheet tables, written whole or as
+// what changed, kept when nothing they read moved - in a folder by `#[path]` too. Nothing in it shapes a stored node
+// row, so `build.rs` leaves it out of what node's rows are keyed by: a release that changes only it reads no tree again.
+#[path = "derive/delta.rs"]
+mod delta;
+#[path = "derive/tsderive.rs"]
+pub mod tsderive;
+#[path = "derive/unchanged.rs"]
 mod unchanged;
 pub mod schema;
 pub mod seeds;

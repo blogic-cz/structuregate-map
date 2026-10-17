@@ -123,7 +123,7 @@ pub(super) fn run(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: 
                 absent = ts::launched(into, deep, db, root, &mut fe, &[false, true], false);
                 false
             }
-            None => ts::store(into, db, root, &work.rows, landed.carried, &mut fe),
+            None => ts::store(into, db, root, &work.rows, landed.carried, &mut fe, &deep.build),
         },
         Some(Parsed::Retry) => true,
         // A CELL IT WAS HANDED BACK WITHOUT, READ: in its turn, with every cell carried.
@@ -137,6 +137,10 @@ pub(super) fn run(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: 
     work.clean();
     if again {
         absent = ts::launched(into, deep, db, root, &mut fe, &[true], false);
+    }
+    // A FLIGHT THAT STORED NOTHING (the plan found the tree unchanged) still owes this build's derivation.
+    if !absent && clean && into.errors.len() == errors && super::derived::derive_again(into, deep, db, root) == super::derived::Again::Unable {
+        absent = ts::launched(into, deep, db, root, &mut fe, &[false, true], false);
     }
     let absence = ts::absence(&into.notes[notes..]);
     ts::settle(db, key, absent, fe, fe_kept, clean && into.errors.len() == errors, absence);

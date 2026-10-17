@@ -2,6 +2,9 @@
 //! `tsapply::tests`, so `super::*` is the store of this half.
 use super::*;
 use serde_json::json;
+use super::super::ts::keyreach;
+use super::super::ts::store as tsstore;
+use super::tsderive::styles;
 
 fn tmp(name: &str) -> crate::rows::TempDb {
     crate::rows::TempDb::new("tsapply", name)

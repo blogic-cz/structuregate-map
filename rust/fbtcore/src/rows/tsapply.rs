@@ -11,11 +11,13 @@
 //! file's rows behind, joined to nothing. Every row carries `half` instead, and every run deletes
 //! exactly those. A PARTIAL run is the exception, and it is `owner_file` that makes it possible.
 //!
-//! THE RENDER CLOSURE RUNS HERE, not in node. It is derived from EVERY other table, so it needs
+//! THE RENDER CLOSURE RUNS ON THIS SIDE, not in node. It is derived from EVERY other table, so it needs
 //! every row — which node only has while it still holds the whole store. Handing them back for a
 //! partial run would cost about as much JSON as a `JSON.parse` can hold at all, so the
-//! pass lives on the side that can read the database instead. On a full run the rows are already
-//! in the payload and are served straight out of it; nothing is read back.
+//! pass lives on the side that can read the database instead, after the rows are written: what it and the
+//! stylesheets derive is `tsderive.rs`, which can derive it again from the stored rows alone.
+//!
+//! THIS FILE SHAPES THE STORED ROWS, and is listed in `build.rs`: a change here reads every consumer's tree again.
 
 use super::deps;
 use super::digest::Digest;
@@ -23,9 +25,8 @@ use super::half::drop_half_tables;
 use super::pyjson;
 use super::schema;
 use super::store::{self, WriteRequest};
+use super::tsderive::{self, CLOSURE_TABLES};
 use super::unchanged;
-use super::ts::keyreach;
-use super::ts::store as tsstore;
 use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -37,14 +38,10 @@ use std::path::{Path, PathBuf};
 /// every question this one asks about "what is already here".
 pub const LANG: &str = "typescript";
 
-/// THE FOUR TABLES THE CLOSURE DERIVES, stated here because this side writes them and node never
-/// sees one.
-const CLOSURE_TABLES: &[&str] = &["render_path", "gate_features", "gate_values", "key_reach"];
-
 /// THE COLUMNS A READER SELECTS BY that no join names: each closure table by what it is about (a key's reach and
 /// route, a component's paths, a gate's values and features, #72), and the plain filters a consumer narrows a large
 /// table with (#73) - a template's root nodes, one syntactic position, one locale, one declaration, one method.
-const LOOKUP_COLUMNS: &[(&str, &str)] = &[
+pub(super) const LOOKUP_COLUMNS: &[(&str, &str)] = &[
     ("key_reach", "key"), ("key_reach", "route"), ("render_path", "component"), ("gate_values", "gate"),
     ("gate_values", "enum_name"), ("gate_features", "gate"), ("template_nodes", "depth"), ("string_literals", "context"),
     ("translations", "locale"), ("comments", "context"), ("calls", "method"),
@@ -191,7 +188,7 @@ fn affected_ids(db: &Connection, affected: &[String]) -> Result<Vec<String>> {
 /// below it, and every source read off `root/src/app/...` missed: `file_text` held no `.ts` or `.html`
 /// at all, and the dead-key trace scanned an empty workspace. A read that misses is skipped by design,
 /// so nothing said so.
-fn workspace_of(root: &str, fe: Option<&str>) -> PathBuf {
+pub(super) fn workspace_of(root: &str, fe: Option<&str>) -> PathBuf {
     match fe {
         Some(fe) if !fe.is_empty() && fe != "." => Path::new(root).join(fe.replace('/', std::path::MAIN_SEPARATOR_STR)),
         _ => PathBuf::from(root),
@@ -207,13 +204,14 @@ fn workspace_of(root: &str, fe: Option<&str>) -> PathBuf {
 pub fn apply(db_path: &Path, root: &str, payload: TsPayload) -> Result<TsReceipt> {
     let rebuilt = rebuilt_of(&payload);
     let digest = Digest::over(&payload.tables, &rebuilt);
-    apply_with(db_path, root, payload, digest, None)
+    apply_with(db_path, root, "", payload, digest, None)
 }
 
 /// A payload STREAMED: `head` is the payload without its rows, `bytes` the whole file (mapped). The rows are walked
 /// twice and never held - once for what they say about each other (`Digest`), once while they are written, in
 /// batches - so the peak is a batch and the digest, not every row of the workspace.
-pub fn apply_streamed(db_path: &Path, root: &str, head: TsPayload, bytes: &[u8]) -> Result<TsReceipt> {
+/// `build`: the running build, recorded as the one that derived the closure (`tsderive`).
+pub fn apply_streamed(db_path: &Path, root: &str, build: &str, head: TsPayload, bytes: &[u8]) -> Result<TsReceipt> {
     // A RUN THAT STOPPED SHORT checks the rows of every whole table it sends for an id that is gone (`dangling`).
     let naming: &[String] = if head.partial && head.cut { &head.whole } else { &[] };
     let mut digest = Digest::new(&rebuilt_of(&head)).naming(naming);
@@ -221,7 +219,7 @@ pub fn apply_streamed(db_path: &Path, root: &str, head: TsPayload, bytes: &[u8])
         digest.first(table, &row);
         Ok(())
     })?;
-    apply_with(db_path, root, head, digest, Some(bytes))
+    apply_with(db_path, root, build, head, digest, Some(bytes))
 }
 
 /// The tables a rollup rebuilds whole, as the payload's spec names them.
@@ -232,7 +230,7 @@ fn rebuilt_of(payload: &TsPayload) -> Vec<String> {
 /// How many rows of one table go into the store at a time when they are streamed.
 const BATCH: usize = 5_000;
 
-fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest, bytes: Option<&[u8]>) -> Result<TsReceipt> {
+fn apply_with(db_path: &Path, root: &str, build: &str, mut payload: TsPayload, digest: Digest, bytes: Option<&[u8]>) -> Result<TsReceipt> {
     if !payload.all && !payload.partial {
         bail!("a payload must say whether it is the whole half or a named set of files");
     }
@@ -258,7 +256,8 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
         };
         extra.insert(format!("{key}:{LANG}"), text);
     }
-    let fingerprint = closure_fingerprint(&payload, &extra, &workspace);
+    let base = tsderive::base(payload.setup.as_deref(), &payload.declared, extra.get(&format!("options:{LANG}")).map(String::as_str), &workspace);
+    let fingerprint = tsderive::fingerprint(&base, build);
     // WHAT A PARTIAL RUN REMOVES AND WRITES, for the comparison that may keep the closure (`unchanged`).
     let mut ids: Vec<String> = Vec::new();
     let node_whole: BTreeSet<String> = payload.whole.iter().cloned().collect();
@@ -282,6 +281,7 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
         db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; BEGIN")?;
         // THE RECORD GOES BEFORE ANY ROW DOES: a run that stops between here and its closure vouches for nothing.
         unchanged::forget(&db, LANG)?;
+        tsderive::forget(&db)?;
         super::http::inputs::forget(&db)?;
         // THE CLOSURE'S OWN TABLES ARE NOT REPLACED HERE: they stay until the closure is known to have moved.
         let replace_started = std::time::Instant::now();
@@ -305,6 +305,7 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
         let db = Connection::open(db_path)?;
         db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; BEGIN")?;
         unchanged::forget(&db, LANG)?;
+        tsderive::forget(&db)?;
         super::http::inputs::forget(&db)?;
         drop_half_tables(&db, LANG)?;
         db.execute_batch("COMMIT")?;
@@ -381,7 +382,7 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
         // THE STYLESHEETS BEFORE THE CLOSURE: `class_hides` says which class gates hide their element, and the
         // closure reads a class gate on the false side only then. Derived after it, every class gate read as a plain condition.
         let mut first = first;
-        styles(&mut receipt, &mut first.written, db_path, root, &workspace)?;
+        tsderive::styles(&mut receipt, &mut first.written, db_path, root, &workspace)?;
         // THE CLOSURE STAYS WHEN NOTHING IT READ MOVED (`unchanged`): the comparison is of what the run removed with
         // what it wrote in its place, cell for cell of what the last derivation read.
         let compare_started = std::time::Instant::now();
@@ -400,7 +401,7 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
             Some(why) => {
                 receipt.notes.push(format!("the typescript half derives its closure again: {why}"));
                 // THE COUNTS ARE THE FIRST WRITE'S, but for the closure's own four tables, which only the second knows.
-                let written = closure(&mut receipt, db_path, root, &workspace, &payload, &fingerprint, true)?;
+                let written = tsderive::closure(&mut receipt, db_path, root, &workspace, &payload.declared, payload.spec.as_ref(), &fingerprint, true)?;
                 first.written.extend(written.into_iter().filter(|(t, _)| CLOSURE_TABLES.contains(&t.as_str())));
             }
         }
@@ -438,8 +439,8 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
 
         // THE STYLESHEETS BEFORE THE CLOSURE: `class_hides` says which class gates hide their element, and the
         // closure reads a class gate on the false side only then. Derived after it, every class gate read as a plain condition.
-        styles(&mut receipt, &mut applied.written, db_path, root, &workspace)?;
-        let written = closure(&mut receipt, db_path, root, &workspace, &payload, &fingerprint, false)?;
+        tsderive::styles(&mut receipt, &mut applied.written, db_path, root, &workspace)?;
+        let written = tsderive::closure(&mut receipt, db_path, root, &workspace, &payload.declared, payload.spec.as_ref(), &fingerprint, false)?;
         // A FULL RUN'S TALLY HAS ALWAYS NAMED THE CLOSURE'S FOUR TABLES beside the rest.
         applied.written.extend(written);
         applied
@@ -449,123 +450,20 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
     // EVERY JOIN THE SPEC DECLARES IS INDEXED, and every column a reader selects by (`LOOKUP_COLUMNS`) - built LAST,
     // once over the finished rows, not kept up insert by insert.
     let indexing = std::time::Instant::now();
-    schema::index_declared(&Connection::open(db_path)?, LOOKUP_COLUMNS)?;
+    let db = Connection::open(db_path)?;
+    schema::index_declared(&db, LOOKUP_COLUMNS)?;
     receipt.phases.insert("index the joins".to_string(), indexing.elapsed().as_millis() as u64);
+    // WHO DERIVED WHAT IS NOW STORED, and what deriving it again needs that no row holds (`tsderive::rederive`).
+    tsderive::remember(&db, build, &base, &payload.declared, receipt.fe.as_deref())?;
 
     receipt.stored = store::recorded(db_path, LANG).len();
     Ok(receipt)
 }
 
 
-/// THE CLOSURE, DERIVED AND STORED, and what it read recorded beside it (`unchanged`) - the one way both runs make it.
-/// A full run empties its tables first; a partial run (`delta`) keeps them and writes only the rows that moved.
-fn closure(receipt: &mut TsReceipt, db_path: &Path, root: &str, workspace: &Path, payload: &TsPayload, fingerprint: &str, delta: bool) -> Result<BTreeMap<String, i64>> {
-    let declared = &payload.declared;
-    if !delta {
-        let db = Connection::open(db_path)?;
-        db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; BEGIN")?;
-        for table in CLOSURE_TABLES {
-            if !schema::existing_columns(&db, table)?.is_empty() {
-                super::half::delete_half_rows(&db, table, LANG)?;
-            }
-        }
-        db.execute_batch("COMMIT")?;
-    }
-    let closure_started = std::time::Instant::now();
-    let (emitted, reads) = {
-        let db = Connection::open(db_path)?;
-        let mut held = tsstore::Store::from_db(&db, LANG)?;
-        let (stats, _) = keyreach::build_closure(&mut held, &declared.checks, &declared.enum_name, workspace, &mut |note| {
-            receipt.notes.push(format!("the typescript half {note}"))
-        });
-        record(receipt, &stats);
-        let reads = held.reads();
-        let mut out = Map::new();
-        for (name, rows) in held.emitted {
-            out.insert(name, Value::Array(rows.into_iter().map(|r| Value::Object(r.into_map())).collect()));
-        }
-        (out, reads)
-    };
-    receipt.phases.insert("derive the closure".to_string(), closure_started.elapsed().as_millis() as u64);
-    // TIMED HERE TOO: the partial branch always said what writing the closure cost, and a full run's was part of
-    // the minute and more of `deep: typescript` no span named.
-    let closure_written = std::time::Instant::now();
-    let emitted = if delta { changed_rows(receipt, db_path, emitted)? } else { emitted };
-    let written = store::write(db_path, &WriteRequest {
-        tables: &emitted,
-        stream: None,
-        texts: &store::Texts::Held(&BTreeMap::new()),
-        root,
-        shas: &Map::new(),
-        gone: &BTreeSet::new(),
-        full: false,
-        counters: &Map::new(),
-        lang: LANG,
-        half: Some(LANG),
-        setup: None,
-        extra: &BTreeMap::new(),
-        keep_existing: true,
-        counts: true,
-    })?
-    .written;
-    unchanged::record(&Connection::open(db_path)?, LANG, &reads, fingerprint, payload.spec.as_ref())?;
-    receipt.phases.insert("write the closure".to_string(), closure_written.elapsed().as_millis() as u64);
-    Ok(written)
-}
-
-/// A PARTIAL RUN'S CLOSURE, AS WHAT CHANGED (`delta`): only the emitted rows nothing stored matched come back to be written.
-fn changed_rows(receipt: &mut TsReceipt, db_path: &Path, emitted: Map<String, Value>) -> Result<Map<String, Value>> {
-    let (fresh, total) = super::delta::reconcile_tables(&Connection::open(db_path)?, CLOSURE_TABLES, emitted, LANG)?;
-    receipt.notes.push(format!(
-        "the typescript half rewrote {} closure row(s) and deleted {}, keeping {} that did not move",
-        total.inserted, total.deleted, total.kept
-    ));
-    Ok(fresh)
-}
-
-/// What the closure is derived under besides the rows - see `unchanged::fingerprint`.
-fn closure_fingerprint(payload: &TsPayload, extra: &BTreeMap<String, String>, workspace: &Path) -> String {
-    let parts: Vec<String> = vec![
-        payload.setup.clone().unwrap_or_default(),
-        payload.declared.enum_name.clone(),
-        payload.declared.checks.join("\u{1}"),
-        extra.get(&format!("options:{LANG}")).cloned().unwrap_or_default(),
-        workspace.to_string_lossy().into_owned(),
-        env!("CARGO_PKG_VERSION").to_string(),
-    ];
-    unchanged::fingerprint(&parts.iter().map(String::as_str).collect::<Vec<_>>())
-}
-
 /// Which part of a partial run removes and writes which rows - see `unchanged::Rewrites`.
 fn rewrites<'a>(ids: &'a [String], affected: &'a [String], whole: &'a BTreeSet<String>) -> unchanged::Rewrites<'a> {
     unchanged::Rewrites { ids, paths: affected, whole, derived: crate::cssmap::TABLES, derived_kind: crate::cssmap::UNPARSED }
-}
-
-/// THE STYLESHEETS, AS RULES (`cssmap`) - derived after every other row is in, because `class_hides`
-/// joins node's gates to them; whole on every run, so a partial one needs nothing of its own.
-fn styles(receipt: &mut TsReceipt, written: &mut BTreeMap<String, i64>, db_path: &Path, root: &str, workspace: &Path) -> Result<()> {
-    let started = std::time::Instant::now();
-    written.extend(crate::cssmap::store(db_path, root, workspace, LANG, &mut receipt.notes)?);
-    // THE TALLY OF EVERY ROW, as the write that counts every table states it - over the stylesheets' new counts.
-    super::meta::put_moved(&Connection::open(db_path)?, "rows", &written.values().filter(|n| **n > 0).sum::<i64>().to_string())?;
-    receipt.phases.insert("read the stylesheets".to_string(), started.elapsed().as_millis() as u64);
-    Ok(())
-}
-
-fn record(receipt: &mut TsReceipt, stats: &keyreach::Closure) {
-    receipt.path_rows = stats.path_rows;
-    receipt.components = stats.components;
-    receipt.keys = stats.keys;
-    receipt.gate_features = stats.gate_feature_rows;
-    receipt.gate_values = stats.gate_value_rows;
-    receipt.notes.push(format!(
-        "the typescript half walked {} render path(s) into {} component(s) and placed {} translation key(s)",
-        stats.path_rows, stats.components, stats.keys
-    ));
-    receipt.notes.push(format!(
-        "the typescript half resolved {} gate feature(s) and {} gate value restriction(s)",
-        stats.gate_feature_rows, stats.gate_value_rows
-    ));
 }
 
 #[cfg(test)]

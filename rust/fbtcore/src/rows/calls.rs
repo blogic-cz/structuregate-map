@@ -73,11 +73,19 @@ pub fn ts_state(db: &Path, lang: &str) -> Result<String, String> {
 /// One TypeScript payload stored, parsed from a MAPPING of the file node wrote. Reading it whole held hundreds of MB, and
 /// streaming it through a reader cost seconds of per-byte overhead; mapped pages are the file's own, so the OS
 /// can drop them. The parse is timed here, the only side that knows when it began.
-pub fn ts_apply(db: &Path, root: &str, payload: &str) -> Result<String, String> {
-    deep_stack(|| ts_apply_on(db, root, payload))
+/// `build`: the running build, recorded as the one that derived what rust derives from the rows (`tsderive`).
+pub fn ts_apply(db: &Path, root: &str, payload: &str, build: &str) -> Result<String, String> {
+    deep_stack(|| ts_apply_on(db, root, payload, build))
 }
 
-fn ts_apply_on(db: &Path, root: &str, payload: &str) -> Result<String, String> {
+/// EVERYTHING RUST DERIVES FROM THE STORED TYPESCRIPT ROWS, derived again by `build` - no payload, no node
+/// (`tsderive::rederive`). Err when the database records no derivation to repeat.
+pub fn ts_rederive(db: &Path, root: &str, build: &str) -> Result<String, String> {
+    let receipt = deep_stack(|| super::tsderive::rederive(db, root, build).map_err(|e| format!("{e:#}")))?;
+    serde_json::to_string(&receipt).map_err(|e| format!("the receipt could not be serialised: {e}"))
+}
+
+fn ts_apply_on(db: &Path, root: &str, payload: &str, build: &str) -> Result<String, String> {
     let file = std::fs::File::open(payload).map_err(|e| format!("the payload {payload} could not be opened - {e}"))?;
     let started = std::time::Instant::now();
     // SAFETY: node has exited and nothing writes the payload while it is mapped; the mapping is dropped here.
@@ -92,7 +100,7 @@ fn ts_apply_on(db: &Path, root: &str, payload: &str) -> Result<String, String> {
         parsed.map_err(|e| format!("the rows could not be read - {e}"))?
     };
     let parse_ms = started.elapsed().as_millis() as u64;
-    let mut receipt = tsapply::apply_streamed(db, root, head, &mapped).map_err(|e| format!("{e:#}"))?;
+    let mut receipt = tsapply::apply_streamed(db, root, build, head, &mapped).map_err(|e| format!("{e:#}"))?;
     drop(mapped);
     receipt.phases.insert("parse the payload".to_string(), parse_ms);
     serde_json::to_string(&receipt).map_err(|e| format!("the receipt could not be serialised: {e}"))
