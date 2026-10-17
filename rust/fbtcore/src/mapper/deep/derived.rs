@@ -10,13 +10,56 @@
 //! again, so a skipped pass prints exactly what the run that did the work printed.
 //!
 //! Kept only after a run whose derived passes added no error, so a failure is said again every run.
+//!
+//! WHAT RUST DERIVES INSIDE THE TYPESCRIPT HALF is keyed the same way (`derive_again`): when node's rows stand and
+//! another build derived from them, this one derives again from the stored rows, without node.
 
 use super::super::protocol::Collector;
+use super::Deep;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
 
 const KEPT: &str = "derived";
+
+/// What became of the derivation the database holds.
+#[derive(PartialEq)]
+pub(super) enum Again {
+    /// This build derived it.
+    Same,
+    /// Another build had: this one derived it again from the stored rows.
+    Derived,
+    /// It could not be derived again - no record of it, or the derivation failed - and its setup is forgotten, so node
+    /// reads every file when it is launched.
+    Unable,
+}
+
+/// NODE'S ROWS STAND AND THE BUILD MOVED - a release that changed only what rust derives: the closure, the stylesheet
+/// tables and the rest are derived again from the stored rows by this build (`tsderive::rederive`), as a full run of it
+/// would derive them, in the time the closure takes rather than a read of the whole tree.
+pub(super) fn derive_again(into: &mut Collector, deep: &Deep, db: &str, root: &str) -> Again {
+    let path = Path::new(db);
+    if !path.is_file() || crate::rows::tsderive::derived_by(path).as_deref() == Some(deep.build.as_str()) {
+        return Again::Same;
+    }
+    let deriving = crate::trace::stage("typescript: derive again");
+    let derived = crate::rows::calls::ts_rederive(path, root, &deep.build);
+    drop(deriving);
+    match derived {
+        Ok(receipt) => {
+            let mut fe = None;
+            report(into, &receipt, None, &mut fe);
+            Again::Derived
+        }
+        Err(why) => {
+            into.notes.push(format!("the typescript half reads every file: what rust derives from its stored rows could not be derived again - {why}"));
+            if let Err(e) = crate::rows::tsderive::unrecorded(path) {
+                into.errors.push(format!("HALF      {}: the stored rows' setup could not be forgotten — {e}", super::ts::LANGUAGE));
+            }
+            Again::Unable
+        }
+    }
+}
 
 /// What the derived passes read: one hash, and its PARTS - the run, each language's files, each counter and setup -
 /// kept beside it so a run that has to do the work again can say which part moved (a large tree re-ran them, most of
@@ -139,4 +182,46 @@ fn recorded(db: &str) -> Option<Value> {
 
 fn strings(value: &Value) -> Vec<String> {
     value.as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect()
+}
+
+/// WHAT A STORE OR A REDERIVE SAID, in the run's own account: its notes, its phases as spans, its tables' counts.
+pub(super) fn report(into: &mut Collector, receipt: &str, carried: Option<u64>, fe: &mut Option<String>) {
+    let mut receipt: Value = match serde_json::from_str(receipt) {
+        Ok(receipt) => receipt,
+        Err(e) => {
+            into.errors.push(format!("HALF      {}: the receipt could not be read — {e}", super::ts::LANGUAGE));
+            return;
+        }
+    };
+    into.notes.extend(receipt["notes"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(String::from)));
+    *fe = receipt["fe"].as_str().map(String::from);
+    for (phase, ms) in receipt["phases"].as_object().into_iter().flatten() {
+        crate::trace::reported(&format!("typescript: {phase}"), ms.as_u64().unwrap_or(0));
+    }
+    // WHERE THE TIME WENT, as one note. The carry was timed before node parsed, as a stage of its own: the store never
+    // saw it, so it joins the note and is not laid back under the store's span.
+    if let (Some(ms), Some(phases)) = (carried, receipt["phases"].as_object_mut()) {
+        phases.insert("carry the rows".into(), json!(ms));
+        phases.sort_keys();
+    }
+    // WHAT `write the rows` IS MADE OF, as a breakdown: it explains that phase and adds nothing to the store.
+    for step in receipt["write_steps"].as_array().into_iter().flatten() {
+        if let (Some(name), Some(ms)) = (step[0].as_str(), step[1].as_u64()) {
+            crate::trace::breakdown_with(&format!("write the rows: {name}"), ms, Vec::new());
+        }
+    }
+    let spent: Vec<String> = receipt["phases"].as_object().into_iter().flatten()
+        .filter_map(|(phase, ms)| ms.as_i64().filter(|ms| *ms >= 1000).map(|ms| format!("{phase} {} s", seconds(ms))))
+        .collect();
+    if !spent.is_empty() {
+        into.notes.push(format!("the typescript half spent: {}", spent.join(", ")));
+    }
+    for (table, rows) in receipt["written"].as_object().into_iter().flatten() {
+        into.database.insert(table.clone(), rows.as_i64().unwrap_or(0));
+    }
+}
+
+/// Milliseconds as whole seconds, rounded half AWAY from zero as .NET's `F0` does.
+fn seconds(ms: i64) -> i64 {
+    (ms + 500) / 1000
 }

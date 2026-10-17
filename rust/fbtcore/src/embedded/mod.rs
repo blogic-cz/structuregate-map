@@ -12,6 +12,8 @@
 
 use std::path::Path;
 
+pub mod node_rows;
+
 /// One set: the folder tag and its files as `(source path under src/, bytes)` - the entry script FIRST.
 pub struct Set {
     pub tag: &'static str,

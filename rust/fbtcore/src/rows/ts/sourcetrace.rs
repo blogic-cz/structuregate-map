@@ -154,7 +154,7 @@ pub struct Scanned {
 }
 
 /// One file's text as the trace reads it - and all a partial run needs to say an edit left the trace alone
-/// (`rows/partial/unchanged.rs`): a comment changes the text, not this.
+/// (`rows/derive/unchanged.rs`): a comment changes the text, not this.
 pub fn scan(content: &str) -> Scanned {
     let mut out = Scanned { dotted: Vec::new(), words: Vec::new(), comment_lines: 0 };
     // WHOLE BLOCKS FIRST, both pairs, because a binding nine lines inside an open
