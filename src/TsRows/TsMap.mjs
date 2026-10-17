@@ -826,10 +826,9 @@ async function main() {
             // rows arrive already made - and publishing what it CAN see would shrink the list to the
             // rollups alone and make the next partial run drop `renders`.
             rebuilt: partial ? [...rebuilt].sort() : store.rebuiltTables(),
-            // WHICH IDS A RE-EXTRACTION MUST NOT CHANGE, and what identifies the row holding one. A
-            // partial run republishes what it was given, for the same reason it republishes `rebuilt`:
-            // it cannot measure this over a map it only partly walked.
-            identity: partial ? (state.identity ?? {}) : store.identityKeys() },
+            // WHICH IDS A RE-EXTRACTION MUST NOT CHANGE, and what identifies the row holding one - measured by a
+            // partial run too, which holds every row of every per-file table and makes every rollup's again.
+            identity: store.identityKeys() },
     provenance,
   };
   writePayload(args.rows, payload);

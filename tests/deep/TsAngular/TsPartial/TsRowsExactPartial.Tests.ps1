@@ -205,4 +205,14 @@ Test-Case 'tsrows: a partial run writes every row a fresh full map of the edited
     Assert-TsExactRows $partial (Get-TsExactRows $run.FullDb) 'every row after editing alpha.component.ts'
 }
 
+Test-Case 'tsrows: a partial run publishes the spec a fresh full map of the edited tree publishes' {
+    $run = Invoke-TsExactRun 'apps/shop/src/alpha.component.ts'
+    $partial = Get-TsRowsMeta $run.PartialDb 'spec:typescript'
+    $full = Get-TsRowsMeta $run.FullDb 'spec:typescript'
+    # A join to `files` and an anchored table: what a spec derived from the rows the run MADE alone had none of.
+    if (-not $partial.joins.'classes.file') { throw 'the partial run''s spec declares no join classes.file' }
+    if (-not $partial.anchors.'classes') { throw 'the partial run''s spec anchors no classes' }
+    Assert-Equal ($partial | ConvertTo-Json -Depth 100 -Compress) ($full | ConvertTo-Json -Depth 100 -Compress) 'spec:typescript'
+}
+
 }
