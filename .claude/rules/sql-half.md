@@ -25,7 +25,25 @@ build (`build`, `predeploy`, `postdeploy`, `script`).
 
 SQLCMD is not T-SQL: `:r`/`:setvar` lines are blanked and `$(Var)` becomes an identifier of the SAME LENGTH
 (`SqlVisitor.Prepared`), so lines and offsets still point into the file; the `:r` targets become
-`include` refs. `inserted`/`deleted`, `#temp`, `@table` and CTE names are never touches.
+`include` refs. `inserted`/`deleted`, `#temp`, `@table` and CTE names are never touches - a CTE's names are known to
+its WHOLE statement before any of it is visited (`SqlVisitor.Scoped`: ScriptDom visits a SELECT's query before its
+WITH) and forgotten after it.
+
+## `sql_statements` and `sql_nodes` - per file, the fingerprint filled in rust
+
+`SqlStatements.cs` lists every fragment in visit order and rebuilds the nesting from TOKEN RANGES with an explicit
+stack (ScriptDom's visitor has no exit hook): a `TSqlStatement` is a row and the root of its own tree, a statement
+inside it a row with `parent`. `SqlTree.cs` maps ~70 fragment types onto the dialect-free node kinds the skill lists;
+an unmapped fragment is transparent, and a node no type is (`on`, `target`, `using`, `partition`, `alias`, `schema`,
+`distinct`) is made from where a fragment sits or from a property. Nodes are numbered in SOURCE preorder (siblings by
+first token): visit order is not source order. A `sql_refs` row's `statement` is the innermost statement holding its
+token. `sql_nodes` rows carry NO id - its key is `(statement, n)` - through `CsTables.Plain`.
+
+The fingerprint is RUST'S (`rust/fbtcore/src/rows/sqlshape/`), run by `mapper/deep/mod.rs` right after the half
+stores: the half writes `fingerprint = ''`, and the pass fills only those - the statements written this run - so a
+partial run is exact by construction (the store drops a re-read file's rows by `file` first). It also replaces the
+store's useless `parent` index on `sql_nodes` with `(statement, parent)`. One implementation over the dialect-free
+kinds, so every dialect's statements hash alike.
 
 ## `sql_links` - derived after both halves, rewritten whole each run
 

@@ -44,6 +44,7 @@ mod unchanged;
 pub mod schema;
 pub mod seeds;
 pub mod sqlrun;
+pub mod sqlshape;
 pub mod store;
 pub mod ts;
 

@@ -112,11 +112,27 @@ internal static class SqlDeep
                 ("columns", k.Columns), ("ref_schema", k.RefName.Length > 0 ? Schema(k.RefSchema) : ""),
                 ("ref_name", k.RefName), ("ref_columns", k.RefColumns), ("database", database));
         }
+        // EVERY STATEMENT, its tree, and which statement each touch is in - see SqlStatements.cs. `fingerprint` is
+        // rust's (`rows/sqlshape/`): it fills the rows this run wrote, which an empty one marks.
+        var statements = SqlStatements.Read(fragment, text);
+        var sids = new List<string>();
+        foreach (var s in statements.Statements)
+        {
+            sids.Add(rows.Add("sql_statements", "ss", ("file", file), ("object", Id(visitor.ObjectOf(s.First, s.Last))),
+                ("parent", s.Parent >= 0 ? sids[s.Parent] : ""), ("batch", s.Batch), ("ordinal", s.Ordinal), ("line", s.Line),
+                ("end_line", s.EndLine), ("col", s.Col), ("kind", s.Kind), ("source", s.Leaf ? s.Source : ""), ("fingerprint", "")));
+        }
+        foreach (var n in statements.Nodes)
+        {
+            rows.Plain("sql_nodes", ("file", file), ("statement", sids[n.Statement]), ("n", n.N),
+                ("parent", n.Parent < 0 ? CsTables.Null : n.Parent), ("ord", n.Ord), ("kind", n.Kind), ("value", n.Value), ("line", n.Line));
+        }
         foreach (var t in visitor.Touches)
         {
+            var held = statements.Of(t.Token);
             rows.Add("sql_refs", "sr", ("file", file), ("object", Id(t.Object)), ("line", t.Line), ("lang", Lang),
                 ("action", t.Action), ("schema", Schema(t.Schema)), ("name", t.Name), ("column", t.Column),
-                ("database", database), ("call", ""));
+                ("database", database), ("call", ""), ("statement", held >= 0 ? sids[held] : ""));
         }
         foreach (var d in visitor.Dynamics)
         {
@@ -137,7 +153,7 @@ internal static class SqlDeep
         {
             rows.Add("sql_refs", "sr", ("file", file), ("object", ""), ("line", line), ("lang", Lang),
                 ("action", "include"), ("schema", ""), ("name", path.Replace('\\', '/')), ("column", ""),
-                ("database", database), ("call", ""));
+                ("database", database), ("call", ""), ("statement", ""));
         }
     }
 
