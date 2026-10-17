@@ -143,6 +143,20 @@ export function rollupI18nCalls(store, methods, only = null, dictMethods = new S
   }
 
   const takesKey = keyTakingDecls(store, new Set([...methods, ...dictMethods]), known);
+  // A REF IS ITS FILE'S ROW, MINTED WITH THAT FILE OPEN: a partial run derives the refs of the files it reads again
+  // alone (`only`) and is handed every other file's back - which only a PER-FILE table is (`Store.rebuiltTables`).
+  // Minted with no file open, a tree whose templates hold no key made `i18n_refs` a rollup's table: no partial run
+  // was handed it, and the refs of every file but the ones read again were deleted. Open, a ref read again also
+  // takes its old id back (`claimed`, by `call` and its key).
+  const outside = store.currentFile;
+  const addRef = (cells) => {
+    store.enterFile(cells.file ?? outside);
+    try {
+      store.add('i18n_refs', 'k', cells);
+    } finally {
+      store.enterFile(outside);
+    }
+  };
   let refs = 0;
   let dictRefs = 0;
   let dictDynamic = 0;
@@ -168,7 +182,7 @@ export function rollupI18nCalls(store, methods, only = null, dictMethods = new S
       const prefixes = args.length ? staticArgStrings(args[0]) : [];
       if (!prefixes.length) { dictDynamic += 1; continue; }
       for (const prefix of prefixes) {
-        store.add('i18n_refs', 'k', {
+        addRef({
           prefix, kind: 'dictionary_call', source: 'ts',
           file: fileOf.get(call.member) ?? null,
           call: call.id, member: call.member, method: name, line: call.line,
@@ -183,7 +197,7 @@ export function rollupI18nCalls(store, methods, only = null, dictMethods = new S
     const keys = (Array.isArray(call.args) ? call.args : []).flatMap(staticArgStrings);
     if (!keys.length) { dynamic += 1; continue; }
     for (const key of keys) {
-      store.add('i18n_refs', 'k', {
+      addRef({
         key, kind: 'service_call', source: 'ts',
         file: fileOf.get(call.member) ?? null,
         call: call.id, member: call.member, method: name, line: call.line,

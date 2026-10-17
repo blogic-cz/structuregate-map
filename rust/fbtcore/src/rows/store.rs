@@ -229,9 +229,12 @@ pub fn insert_rows(db: &Connection, table: &str, rows: &[Value]) -> Result<()> {
 fn insert(db: &Connection, table: &str, rows: &[Value], stamp: &[(String, Value)]) -> Result<()> {
     // A LIST OR AN OBJECT IS NOT A COLUMN of this table: its nodes go to `<table>__<column>` (`cells`).
     let (structured, scalar) = cells::structured_columns(rows);
+    // NOR IS A COLUMN THAT ALREADY WENT TO A CHILD TABLE, when these rows hold it null: a partial run's few rows of
+    // `classes` with no `extends` added a NULL `extends` column a full run - whose other rows hold one - never has.
+    let nodes: Vec<String> = cells::columns_of(db, table).into_iter().map(|(c, _)| c).collect();
     let mut columns: Vec<String> = schema::columns_of(rows)
         .into_iter()
-        .filter(|c| !structured.contains(c) || scalar.contains(c))
+        .filter(|c| (!structured.contains(c) && !nodes.contains(c)) || scalar.contains(c))
         .collect();
     if columns.is_empty() {
         return Ok(());

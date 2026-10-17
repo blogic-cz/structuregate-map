@@ -88,7 +88,12 @@ place, per table in rowid order, every read cell with a structure as its nodes, 
 each affected file's text (`file_text` before, the disk after): all equal, and the four tables stay. That needs the
 same ids back: EVERY per-file table with a unique key is claimed (`identityKeys`), not only those another file names,
 with sparse ALTERNATIVES for the rows a first key leaves out (`identityOf`: a template expression has no line), and a
-rollup takes its old ids back in the order it made them (`rollupId`, handed over by `carry` as `rollup`). A table read
+rollup takes its old ids back in the order it made them (`rollupId`, handed over by `carry` as `rollup`), a project by its
+name (`Store.named`). What a file read again made lands after every carried row, so the store is put back in mint order
+after the walk and again after the refs rollup (`inMintOrder`), before a rollup numbers rows by another table's order.
+**ONE DIFFERENCE FROM A FULL RUN STAYS**: a row ADDED to a file read again (a comment appended) takes the next free id,
+where a full run numbers it in walk order and every later row of its table one higher - renumbering them would rewrite
+every kept row after it. Everything else, `_meta` `spec:typescript` included, is the full run's. A table read
 whole (no `half`) is never kept; `forget` runs before any row is written. A closure that MOVED is written as what
 changed (`rows/derive/delta.rs`): a stored row is matched to an emitted one by its content as the store holds it (its
 cells, then each structure's node rows), and only the rows left over on either side are deleted or inserted.
