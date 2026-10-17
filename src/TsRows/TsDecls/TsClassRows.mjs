@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 
 import { canonicalPath, relativeTo, slash } from './TsPaths.mjs';
 import { locationOf } from './TsNodes.mjs';
+import { makeLibPipes } from './TsLibPipes.mjs';
 
 /** The package a decorator must come FROM to be an Angular one. ONE identity resolved through the type
  *  checker, instead of a list of the five names - which says nothing about origin and would count a
@@ -44,6 +45,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
    * than dropped: "declared here" and "declared here and nowhere else" are different claims.
    */
   const declFileOf = (node) => declFileOfSymbol(symbolAt(node));
+  const libPipesOf = makeLibPipes({ ts, checker, symbolAt, feRoot, propName });
   const declFileOfSymbol = (sym) => {
     const decls = sym?.declarations ?? [];
     if (!decls.length || !sym) return null;
@@ -335,6 +337,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
       io = angular.registerIo({ classId, className, fid, members: summaries });
       angularRows = angular.registerAngular({
         classId, fid, filePath: node.getSourceFile().fileName, className, decorators,
+        externalPipes: libPipesOf(node, decorators),
       });
     }
     return { classId, decorators, members, name: className, io, angularRows, injectsTemplateRef };

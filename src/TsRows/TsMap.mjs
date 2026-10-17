@@ -37,7 +37,8 @@ import { rollupRouteTree } from './TsRouteTree.mjs';
 import { rollupRouteKeys } from './TsRouteKeys.mjs';
 import { rollupRemoteRoutes } from './TsFederation.mjs';
 import { rollupInputUsage } from './TsInputUsage.mjs';
-import { ASIDE, claimsBack, rollupModuleScope, setAsideOutOfScope, withAside } from './TsModuleScope.mjs';
+import { ASIDE, claimsBack, makeScopes, rollupModuleScope, setAsideOutOfScope, withAside } from './TsModuleScope.mjs';
+import { rollupPipeRefs } from './TsPipeRefs.mjs';
 import { rollupStateGraph } from './TsNgrx.mjs';
 import { columnKinds, deriveJoins } from './TsSpecJoins.mjs';
 import { writeHtmlMirror } from './TsHtml.mjs';
@@ -216,9 +217,11 @@ async function main() {
   // 56: `route_keys`, one row per `{{key}}` of a route's path, and such a key counts as `translations.referenced` (#74).
   // 57: a `$fn` calling `loadRemoteModule` carries `$remote`, and its route `load_children_remote(_name)` (#76).
   // 58: `classes.extends` and each of its `type_args` carry the declaration's `line` and the `id` of its `classes` row (#87).
+  // 59: `pipe_refs` on a template expression and string - each pipe usage resolved by its component's scope - and
+  // `external_pipes` on `components`/`ng_modules`, a library entry's pipes read off its typings (#86).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 58, build: args.build,
+    config: config.file, data: config.data, rows: 59, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
@@ -566,9 +569,14 @@ async function main() {
     + `${dynamic.sites} site(s), ${dynamic.unresolved} with no statically nameable component`);
 
   // WHICH OF SEVERAL SAME-SELECTOR CANDIDATES ANGULAR WOULD USE - before anything that reads `renders.scope`.
-  const scopes = rollupModuleScope(store, diag);
+  const scoping = makeScopes(store, diag);
+  const scopes = rollupModuleScope(store, diag, scoping);
   emit('MAP-NOTE', `the typescript half scoped renders: `
     + Object.entries(scopes).map(([k, v]) => `${k}=${v}`).join(', '));
+  // WHICH PIPE EACH TEMPLATE USAGE RUNS, by the same scopes (#86) - their notes are made once, above.
+  scoping.quiet();
+  const piped = rollupPipeRefs(store, diag, scoping);
+  emit('MAP-NOTE', `the typescript half resolved ${piped.resolved} of ${piped.usages} template pipe usage(s) by scope`);
 
   // WHICH ENTRY POINTS REACH A COMPONENT, and which inputs a template really binds - both read
   // `renders.scope`, so both run after it. `wholeApp` is true here: this half always maps the whole
