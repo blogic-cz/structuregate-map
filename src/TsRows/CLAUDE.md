@@ -22,7 +22,10 @@ the rust that STORES them is in the setup by itself (`--build` is the digest of 
 **THE MAP STATES WHAT SQLITE CANNOT RECORD** - no foreign keys, no arrays, no note of which column reaches a
 row's own file. The half derives it from the finished rows and publishes it in `_meta` (`spec:typescript`,
 `rust/fbtcore/src/rows/tsapply.rs`): every id prefix, every join, every anchored table and which columns hold a
-structure (`TsDerive/TsSpecJoins.mjs`, `TsDerive/TsSpecAnchors.mjs`). The anchor is PROVEN per field, never read
+structure (`TsDerive/TsSpecJoins.mjs`, `TsDerive/TsSpecAnchors.mjs`) - and which key claims a row's id (`identity`). A
+PARTIAL run derives it from every row it holds, carried ones included (`Store.load` notes their prefixes), so it
+publishes what a full run of the same tree would; only `rebuilt` is republished, since only a full run sees where a
+table's rows are minted. The anchor is PROVEN per field, never read
 off the join graph: `renders` carries `from_class`, so a graph walk files a render edge under the component's
 `.ts` when the row was read from its `.html`. Every join it declares is INDEXED (`schema::index_declared`, after the
 closure is written, #70): the map is opened read-only, so a consumer cannot add one.
