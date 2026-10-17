@@ -39,7 +39,8 @@ pub(super) const CS_ROWS_VERSION: &str = "28";
 // 9: `sql_statements` (a row per statement, `fingerprint` filled by `rows/sqlshape/`), its tree `sql_nodes`, and
 // `sql_refs.statement`.
 // 10: `sql_column_refs` and the shape views, derived from `sql_nodes` for the statements a run writes.
-const SQL_ROWS_VERSION: &str = "10";
+// 11: `files.dialect`, and a file the config's `dialects` names `postgres` parsed by sqlparser-rs (`sqlpg/`).
+const SQL_ROWS_VERSION: &str = "11";
 /// Rows held before a batch is sent - both ends pay for it, so it decides whether a large solution fits.
 const ROWS_PER_BATCH: i64 = 100_000;
 
@@ -378,7 +379,13 @@ fn unrestored(into: &mut Collector, db: &str, root: &str, projects: &[String]) {
 }
 
 /// The SQL half: one batch, since a `.sql` file carries far fewer rows than a C# one.
-pub fn sql(into: &mut Collector, db: &str, root: &str, files: &[(String, String)], stamp: &str, hashes: &Hashes, forced: bool, ask: &mut Ask) {
+/// `config` is the SQL config (`sqlconfig.rs`): its stamp and each file's dialect are folded into the file's sha.
+pub fn sql(into: &mut Collector, db: &str, root: &str, files: &[(String, String)], config: &Value, hashes: &Hashes, forced: bool, ask: &mut Ask) {
+    let stamp = config["stamp"].as_str().unwrap_or("none");
+    let dialects: BTreeMap<String, String> = files.iter()
+        .map(|(rel, _)| (rel.clone(), super::sqlconfig::dialect_of(config, rel)))
+        .filter(|(_, dialect)| dialect != "tsql")
+        .collect();
     let inputs = super::inputs::Inputs::open(db, hashes);
     let plan = answer(ask(&json!({ "mode": "sql-plan", "files": files })));
     let entries: Vec<&Value> = plan["files"].as_array().into_iter().flatten().collect();
@@ -391,7 +398,8 @@ pub fn sql(into: &mut Collector, db: &str, root: &str, files: &[(String, String)
                 Some(project) => inputs.content(project),
             };
             let (Ok(own), Ok(project)) = (inputs.content(abs), project) else { return None };
-            Some((rel.clone(), abs.clone(), folded(&format!("{own}|{project}|{stamp}|{SQL_ROWS_VERSION}"))))
+            let dialect = dialects.get(rel).map_or("tsql", String::as_str);
+            Some((rel.clone(), abs.clone(), folded(&format!("{own}|{project}|{stamp}|{SQL_ROWS_VERSION}|{dialect}"))))
         })
         .collect();
     let mut shas = BTreeMap::new();
@@ -413,7 +421,7 @@ pub fn sql(into: &mut Collector, db: &str, root: &str, files: &[(String, String)
     }
     let send = |into: &mut Collector, ask: &mut Ask, stale: Vec<&String>, reset: bool| -> Option<bool> {
         let question = json!({ "mode": "sql-batch", "rels": stale, "paths": paths, "shas": shas,
-            "counters": state.counters, "all": stale.len() == shas.len(), "reset": reset });
+            "counters": state.counters, "all": stale.len() == shas.len(), "reset": reset, "dialects": dialects });
         let header = answer(ask(&question));
         into.errors.extend(strings(&header["errors"]));
         pinned(&header, ask, |payload| store(into, db, root, payload, "sql")).map(|receipt| receipt.retry)

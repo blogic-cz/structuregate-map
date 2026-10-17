@@ -55,12 +55,12 @@ pub fn run_on(conn: &mut Connection) -> anyhow::Result<usize> {
     crate::rows::schema::create(conn, "sql_column_refs", &COLUMN_REFS.map(String::from))?;
     views::write(conn)?;
     let text = |r: &rusqlite::Row, i: usize| -> rusqlite::Result<String> { Ok(r.get::<_, Option<String>>(i)?.unwrap_or_default()) };
-    let fresh: Vec<[String; 4]> = {
+    let fresh: Vec<[String; 5]> = {
         let mut stmt = conn.prepare(
-            "SELECT s.id, s.file, s.object, f.database FROM sql_statements s LEFT JOIN files f ON f.id = s.file \
+            "SELECT s.id, s.file, s.object, f.database, f.dialect FROM sql_statements s LEFT JOIN files f ON f.id = s.file \
              WHERE s.fingerprint = '' ORDER BY s.rowid",
         )?;
-        stmt.query_map([], |r| Ok([text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?]))?.collect::<rusqlite::Result<_>>()?
+        stmt.query_map([], |r| Ok([text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, text(r, 4)?]))?.collect::<rusqlite::Result<_>>()?
     };
     if fresh.is_empty() {
         return Ok(0);
@@ -74,7 +74,9 @@ pub fn run_on(conn: &mut Connection) -> anyhow::Result<usize> {
             COLUMN_REFS.map(|c| format!("\"{c}\"")).join(", "),
             vec!["?"; COLUMN_REFS.len()].join(", ")
         ))?;
-        for [id, file, object, database] in &fresh {
+        for [id, file, object, database, dialect] in &fresh {
+            // AN UNQUALIFIED TABLE IS IN THE DIALECT'S DEFAULT SCHEMA: `public` for PostgreSQL, `dbo` for SQL Server.
+            let schema = if dialect == "postgres" { "public" } else { "dbo" };
             let nodes: Vec<Node> = read
                 .query_map([id], |r| {
                     Ok(Node {
@@ -86,7 +88,7 @@ pub fn run_on(conn: &mut Connection) -> anyhow::Result<usize> {
                     })
                 })?
                 .collect::<rusqlite::Result<_>>()?;
-            for c in columns::of(&nodes, "dbo") {
+            for c in columns::of(&nodes, schema) {
                 named.execute(rusqlite::params![file, object, id, c.line, c.role, c.schema, c.name, c.source_kind, c.alias, c.column, database])?;
             }
             stamp.execute((id, fingerprint(&nodes)))?;

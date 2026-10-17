@@ -89,7 +89,8 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         functions, ctes, nodes and diagnostics - with no tree, no database file and
                         no host. `-` reads stdin. Exits 1 when the text does not parse. Takes no
                         --map, --map-sqlite or --map-query.
-  --dialect <name>      the SQL --sql-parse reads: tsql (the default).
+  --dialect <name>      the SQL --sql-parse reads: tsql (the default) or postgres. A tree's files
+                        are told apart by the SQL config's `dialects`.
   --facts-config <file> `structuregate.facts.json`: documents outside the tree (a Google Doc, a
                         Markdown file), the table under a heading of each that lists facts, and
                         the code each list is checked against - a seeded table's column, an enum,

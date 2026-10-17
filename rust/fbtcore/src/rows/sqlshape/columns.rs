@@ -197,6 +197,10 @@ fn role_of(tree: &Tree, i: usize) -> String {
         if kind == "over" || kind == "partition" {
             return "window".into();
         }
+        // OUTPUT / RETURNING lists items too: they are what the statement hands back, not what it selects.
+        if kind == "output" {
+            return "output".into();
+        }
         if kind == "query" || tree.parent[a].is_none() {
             if role.is_none() && tree.parent[a].is_none() {
                 role = Some(match kind {

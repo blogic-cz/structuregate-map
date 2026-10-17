@@ -4,8 +4,8 @@
 
 use rusqlite::{Connection, OptionalExtension};
 
-/// The schema an unqualified table name is in, as SQL Server resolves it.
-const DEFAULT_SCHEMA: &str = "'dbo'";
+/// The schema an unqualified table name is in, from the dialect its file was parsed as.
+const DEFAULT_SCHEMA: &str = "(SELECT CASE WHEN fd.dialect = 'postgres' THEN 'public' ELSE 'dbo' END FROM files fd WHERE fd.id = t.file)";
 
 fn views() -> [(&'static str, String); 4] {
     [
@@ -16,7 +16,7 @@ fn views() -> [(&'static str, String); 4] {
                  WHEN 'outer apply' THEN 'outerapply' ELSE n.value || 'join' END \
              WHEN 'union' THEN 'union' || n.value WHEN 'over' THEN 'window' ELSE n.kind END AS kind, n.line \
            FROM sql_nodes n \
-           WHERE n.kind IN ('cte', 'where', 'groupby', 'having', 'orderby', 'join', 'top', 'offset', 'distinct', 'union', \
+           WHERE n.kind IN ('cte', 'where', 'groupby', 'having', 'orderby', 'join', 'top', 'limit', 'offset', 'distinct', 'union', \
                  'except', 'intersect', 'subquery', 'values', 'output', 'over') \
              AND NOT (n.kind = 'orderby' AND EXISTS (SELECT 1 FROM sql_nodes p WHERE p.statement = n.statement AND p.n = n.parent AND p.kind = 'over'))".to_string()),
         // WHAT A JOIN BRINGS IN: its second side. A CTE or a #temp is in no schema; `joined` says a table from a subquery.

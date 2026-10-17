@@ -1,5 +1,6 @@
 //! fbtcore — the C ABI StructureGate links against. Its doors are few: the whole command (`cli::fbt_main`),
-//! the SQL the links ask of the map (`rows::sqlrun`), and freeing what either returned (`abi`).
+//! the SQL the links ask of the map (`rows::sqlrun`), a PostgreSQL file's rows (`sqlpg::fbt_sql_parse`), and
+//! freeing what any of them returned (`abi`).
 //!
 //! Built as a STATIC library and linked into the NativeAOT exe, so a consumer still
 //! receives two files. Nothing here allocates across the boundary without saying who
@@ -37,6 +38,7 @@ mod rows;
 mod rsmap;
 mod session;
 mod sources;
+mod sqlpg;
 mod trace;
 mod view;
 

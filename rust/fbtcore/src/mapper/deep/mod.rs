@@ -343,7 +343,7 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
     if !files.sql.is_empty() || Path::new(db).is_file() {
         let stage = crate::trace::stage("deep: sql");
         stage.set("structuregate.files", files.sql.len() as i64);
-        driven::sql(into, db, root, &files.sql, config["stamp"].as_str().unwrap_or("none"), &hashes, deep.reread.iter().any(|h| h == "sql"), ask);
+        driven::sql(into, db, root, &files.sql, &config, &hashes, deep.reread.iter().any(|h| h == "sql"), ask);
         // WHAT EACH STATEMENT WRITTEN THIS RUN IS, from its tree - before any pass reads the rows.
         let shapes = crate::trace::stage("deep: sql statement shapes");
         let shaped = if Path::new(db).is_file() { crate::rows::sqlshape::run(db).err() } else { None };
