@@ -97,6 +97,14 @@ pub fn dangling(db: &Connection, plan: &Replace<'_>, deps: &Map<String, Value>, 
     if vanished.is_empty() {
         return Ok(None);
     }
+    // THE IDS THAT GO, as a table every probe below joins: the probes stay in SQLite, never a row per cell into this side.
+    db.execute_batch("DROP TABLE IF EXISTS temp.sg_vanished; CREATE TEMP TABLE sg_vanished (id TEXT PRIMARY KEY)")?;
+    {
+        let mut put = db.prepare("INSERT INTO temp.sg_vanished (id) VALUES (?1)")?;
+        for id in &vanished {
+            put.execute([id])?;
+        }
+    }
     let mut found: Option<String> = None;
     let mut count = 0;
     let mut hit = |label: String| {
@@ -109,32 +117,28 @@ pub fn dangling(db: &Connection, plan: &Replace<'_>, deps: &Map<String, Value>, 
                 hit(format!("{label} -> {id}"));
             }
         }
-        let ids: Vec<&String> = vanished.iter().collect();
         for (table, has_id) in &holders {
             let mut home = db.prepare(&format!("SELECT owner_file FROM \"{}\" WHERE {} = ?1", escape(table), if *has_id { "id" } else { "rowid" }))?;
             let mut home_at = db.prepare(&format!("SELECT owner_file FROM \"{}\" WHERE rowid = ?1", escape(table)))?;
             for (column, child) in super::cells::columns_of(db, table) {
-                for chunk in ids.chunks(500) {
-                    let sql = format!("SELECT DISTINCT owner, value FROM \"{}\" WHERE value IN ({})", escape(&child), marks(chunk.len()));
-                    let mut stmt = db.prepare(&sql)?;
-                    let params: Vec<&dyn ToSql> = chunk.iter().map(|i| *i as &dyn ToSql).collect();
-                    let hits: Vec<(String, String)> = stmt
-                        .query_map(params.as_slice(), |r| Ok((r.get::<_, Sql>(0)?, r.get::<_, String>(1)?)))?
-                        .flatten()
-                        .filter_map(|(owner, value)| match owner {
-                            Sql::Text(t) => Some((t, value)),
-                            _ => None,
-                        })
-                        .collect();
-                    for (owner, value) in hits {
-                        // A ROW OF A REPLACED FILE goes with it; one of any other file is kept, and would name nothing.
-                        let file: Option<String> = match owner.strip_prefix('#').and_then(|at| at.parse::<i64>().ok()) {
-                            Some(at) => home_at.query_row([at], |r| r.get(0)).ok().flatten(),
-                            None => home.query_row([&owner], |r| r.get(0)).ok().flatten(),
-                        };
-                        if file.is_some_and(|f| !replaced_ids.contains(&f)) {
-                            hit(format!("{table}.{column} -> {value}"));
-                        }
+                let sql = format!("SELECT DISTINCT owner, value FROM \"{}\" WHERE value IN temp.sg_vanished", escape(&child));
+                let mut stmt = db.prepare(&sql)?;
+                let hits: Vec<(String, String)> = stmt
+                    .query_map([], |r| Ok((r.get::<_, Sql>(0)?, r.get::<_, String>(1)?)))?
+                    .flatten()
+                    .filter_map(|(owner, value)| match owner {
+                        Sql::Text(t) => Some((t, value)),
+                        _ => None,
+                    })
+                    .collect();
+                for (owner, value) in hits {
+                    // A ROW OF A REPLACED FILE goes with it; one of any other file is kept, and would name nothing.
+                    let file: Option<String> = match owner.strip_prefix('#').and_then(|at| at.parse::<i64>().ok()) {
+                        Some(at) => home_at.query_row([at], |r| r.get(0)).ok().flatten(),
+                        None => home.query_row([&owner], |r| r.get(0)).ok().flatten(),
+                    };
+                    if file.is_some_and(|f| !replaced_ids.contains(&f)) {
+                        hit(format!("{table}.{column} -> {value}"));
                     }
                 }
             }
@@ -149,14 +153,20 @@ pub fn dangling(db: &Connection, plan: &Replace<'_>, deps: &Map<String, Value>, 
     };
     if nested || !watcher_ids.is_empty() {
         for table in scanned {
-            let sql = format!("SELECT * FROM \"{}\" WHERE \"{HALF_COLUMN}\" = ? AND {scope}", escape(table));
+            let columns: Vec<String> =
+                super::schema::existing_columns(db, table)?.into_iter().filter(|c| !["id", "owner_file", HALF_COLUMN].contains(&c.as_str())).collect();
+            if columns.is_empty() {
+                continue;
+            }
+            let quoted: Vec<String> = columns.iter().map(|c| format!("\"{}\"", escape(c))).collect();
+            let named: Vec<String> = quoted.iter().map(|c| format!("{c} IN temp.sg_vanished")).collect();
+            let sql = format!("SELECT {} FROM \"{}\" WHERE \"{HALF_COLUMN}\" = ? AND {scope} AND ({})", quoted.join(", "), escape(table), named.join(" OR "));
             let mut stmt = db.prepare(&sql)?;
-            let width = stmt.column_count();
             let mut params: Vec<&dyn ToSql> = vec![&half];
             params.extend(scoped.iter().map(|i| i as &dyn ToSql));
             let mut rows = stmt.query(params.as_slice())?;
             while let Some(row) = rows.next()? {
-                for i in 0..width {
+                for i in 0..columns.len() {
                     if let Ok(Some(text)) = row.get::<_, Option<String>>(i)
                         && vanished.contains(&text)
                     {
@@ -166,6 +176,7 @@ pub fn dangling(db: &Connection, plan: &Replace<'_>, deps: &Map<String, Value>, 
             }
         }
     }
+    db.execute_batch("DROP TABLE IF EXISTS temp.sg_vanished")?;
     Ok(found.map(|f| (count, f)))
 }
 
