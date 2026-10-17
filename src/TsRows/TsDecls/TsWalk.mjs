@@ -147,7 +147,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
         ...(refs && refs.size ? { write_refs: Object.fromEntries(refs) } : {}),
       });
     }, readRefs.resolveRead, readRefs.resolveName, log, readRefs.resolveLocal);
-    const { evalNode, propName } = makeEvaluator(ts, checker, symbolAt, describe);
+    const { evalNode, evalCell, propName } = makeEvaluator(ts, checker, symbolAt, describe);
     const typeRows = makeTypeRows({
       ts, checker, store, modifiersOf, typeRefAt, evalNode, propName, fileId,
     });
@@ -159,11 +159,11 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     const collectBody = (node, ownerId, classId) => bodies.collect(node, ownerId, classId);
     const angular = makeAngularRows({ store, feRoot: fe, diag });
     const classRows = makeClassRows({
-      ts, checker, store, feRoot: fe, modifiersOf, typeRefAt, symbolAt, evalNode, propName,
+      ts, checker, store, feRoot: fe, modifiersOf, typeRefAt, symbolAt, evalNode, evalCell, propName,
       jsdocOf: (node) => jsdocOf(ts, node), collectBody, angular,
     });
     const declRows = makeDeclRows({
-      ts, store, modifiersOf, localExports, evalNode, collectBody,
+      ts, store, modifiersOf, localExports, evalCell, collectBody,
       paramsOf: classRows.paramsOf, typeText: classRows.typeText,
       jsdocOf: (node) => jsdocOf(ts, node), resolveRead: readRefs.resolveRead, resolveMember: readRefs.resolveMember,
     });
@@ -179,7 +179,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
       ...nodeLocation(node),
     });
     bodies.collect = makeBodyRows({
-      ts, store, evalNode, describe, declFileOf: classRows.declFileOf, declareInline, propName,
+      ts, store, evalNode, evalCell, describe, declFileOf: classRows.declFileOf, declareInline, propName,
     }).collectBody;
     for (const sf of files) {
       const abs = canonicalPath(sf.fileName);

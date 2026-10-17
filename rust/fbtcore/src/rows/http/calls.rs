@@ -8,6 +8,8 @@
 use super::files_of;
 use super::inputs::read_of;
 use crate::rows::dups::{has_columns, owner_sql, scalar_sql, text, Column};
+// A whole cell spelled `null` is read as the null it stood for before #85 wrote it as `{$literal: 'null'}`.
+use crate::rows::ts::store::null_literal;
 use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
 use serde_json::Value;
@@ -116,7 +118,7 @@ impl World {
                 w.params.insert(id.clone(), names(params.value(&owner, &held_params)?));
                 if !class.is_empty() {
                     w.class_of.insert(id.clone(), class.clone());
-                    let value = value.value(&owner, &held_value)?;
+                    let value = null_literal(value.value(&owner, &held_value)?);
                     if !is_empty(&value) {
                         w.members.insert((class, name), value);
                     }
@@ -135,7 +137,7 @@ impl World {
             let mut value = Column::new(conn, "locals", "value")?;
             for (file, member, name, line, owner, held, _) in read(conn, "locals", "file, member, name, line", &["value"], "ORDER BY t.line")? {
                 if typescript.contains_key(&file) && !member.is_empty() {
-                    let value = blank(value.value(&owner, &held)?);
+                    let value = blank(null_literal(value.value(&owner, &held)?));
                     w.locals.entry(member).or_default().push((name, line.parse().unwrap_or(0), value));
                 }
             }
@@ -144,7 +146,7 @@ impl World {
             let mut value = Column::new(conn, "consts", "value")?;
             for (file, name, _, _, owner, held, _) in read(conn, "consts", "file, name, '', ''", &["value"], "")? {
                 if typescript.contains_key(&file) {
-                    let value = blank(value.value(&owner, &held)?);
+                    let value = blank(null_literal(value.value(&owner, &held)?));
                     w.consts.insert((file, name), value);
                 }
             }

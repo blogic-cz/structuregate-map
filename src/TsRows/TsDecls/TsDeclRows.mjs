@@ -5,7 +5,7 @@
  */
 import { locationOf } from './TsNodes.mjs';
 
-export function makeDeclRows({ ts, store, modifiersOf, localExports, evalNode, paramsOf, typeText,
+export function makeDeclRows({ ts, store, modifiersOf, localExports, evalCell, paramsOf, typeText,
   jsdocOf, collectBody, resolveRead, resolveMember }) {
   /**
    * One row per declared name - `const a = 1, b = 2` is two consts, not one statement.
@@ -24,7 +24,7 @@ export function makeDeclRows({ ts, store, modifiersOf, localExports, evalNode, p
         name,
         exported: exported || named.has(name),
         type: d.type ? d.type.getText() : null,
-        value: d.initializer ? evalNode(d.initializer) : undefined,
+        value: d.initializer ? evalCell(d.initializer) : undefined,
         ...locationOf(d),
       });
       // A FUNCTION-VALUED CONST IS A FUNCTION. `export const initItems = (...) => {...}` is how many helpers
