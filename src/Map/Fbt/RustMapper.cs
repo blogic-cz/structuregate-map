@@ -124,6 +124,8 @@ internal static class RustMapper
                         Pin(json, payload);
                     }));
                 }
+                case "sql-parse":
+                    return Text(SqlDeep.Parse(input.GetProperty("text").GetString() ?? "", input.GetProperty("name").GetString() ?? "-"));
                 case "release":
                     // The store has read the batch: the buffer may move, and be collected, again.
                     if (Pinned.Remove(input.GetProperty("handle").GetInt64(), out var pinned)) pinned.Free();

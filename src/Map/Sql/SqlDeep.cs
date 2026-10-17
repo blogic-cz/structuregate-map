@@ -68,12 +68,25 @@ internal static class SqlDeep
     public static void Read(CsTables rows, string rel, string abs, string text, string sha, SqlConfig config)
     {
         var project = Owner(abs);
-        var database = project is null ? "" : config.DatabaseOf(project);
-        var kind = project is null ? "script" : KindOf(project, abs);
+        Rows(rows, rel, text, sha, project is null ? "" : Path.GetFileNameWithoutExtension(project),
+            project is null ? "" : config.DatabaseOf(project), project is null ? "script" : KindOf(project, abs));
+    }
+
+    /// <summary>`--sql-parse`: ONE TEXT's rows, as a file of no project has them, in the payload's own shape -
+    /// rust stores them into a database in memory and derives the rest there (`rust/fbtcore/src/cli/sqlparse.rs`).</summary>
+    public static string Parse(string text, string name)
+    {
+        var rows = new CsTables([]);
+        Rows(rows, name, text, "", "", "", "script");
+        var (buffer, length) = rows.ToUtf8(true, true, true, false, new SortedDictionary<string, string>(StringComparer.Ordinal), [], Lang);
+        return System.Text.Encoding.UTF8.GetString(buffer, 0, length);
+    }
+
+    private static void Rows(CsTables rows, string rel, string text, string sha, string project, string database, string kind)
+    {
         var file = rows.Add("files", "f",
             ("path", rel), ("lang", Lang), ("sha", sha), ("lines", text.Count(c => c == '\n') + 1),
-            ("project", project is null ? "" : Path.GetFileNameWithoutExtension(project)),
-            ("database", database), ("kind", kind), ("errors", 0));
+            ("project", project), ("database", database), ("kind", kind), ("errors", 0));
 
         var included = new List<(string Path, int Line)>();
         var prepared = SqlVisitor.Prepared(text, included);
