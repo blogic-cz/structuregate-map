@@ -45,6 +45,14 @@ partial run is exact by construction (the store drops a re-read file's rows by `
 store's useless `parent` index on `sql_nodes` with `(statement, parent)`. One implementation over the dialect-free
 kinds, so every dialect's statements hash alike.
 
+The same pass writes `sql_column_refs` for those statements (`sqlshape/columns.rs`: scopes are `query` nodes and the
+root, a `target` wrapper marks the written table, an UPDATE's alias target is its FROM table, nothing ambiguous is
+attributed) - a table of its own, NOT a widened `sql_refs`, because every `sql_refs` row becomes a `sql_ref` link
+(`SqlLinksEf.cs`). It has a `file` column, so the store's per-file drop covers it; the tally recounts it. The shape
+VIEWS (`sqlshape/views.rs`: `sql_clauses`, `sql_joins`, `sql_functions`, `sql_ctes`) are rewritten only when their
+text moved. **A test compares a partial run with a fresh map of the edited tree, row by row, ids replaced by what
+they name** (`tests/deep/sql/SqlStatements.Tests.ps1`) - a new per-statement table goes into its content queries.
+
 ## `sql_links` - derived after both halves, rewritten whole each run
 
 `SqlLinks.cs`, through `fbt_sql_run` (SQL over the map, `rust/fbtcore/src/rows/sqlrun.rs`). The C# side needs no

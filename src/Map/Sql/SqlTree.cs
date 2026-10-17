@@ -204,9 +204,11 @@ internal sealed class SqlTree
     };
 
     /// <summary>The nodes a fragment's PROPERTIES make: a table's schema, database and alias, a select item's alias
-    /// and star, a query's DISTINCT.</summary>
-    public void Synthesized(TSqlFragment f, int node)
+    /// and star, a query's DISTINCT. A MERGE keeps its target's alias on itself (`MERGE dbo.Orders AS T`).</summary>
+    public void Synthesized(TSqlFragment parent, TSqlFragment f, int node)
     {
+        if (parent is MergeSpecification { TableAlias: { } merged } merge && ReferenceEquals(merge.Target, f))
+            Add(node, "alias", merged.Value, merged.StartLine, merged.FirstTokenIndex);
         if (f is NamedTableReference { SchemaObject: { } name })
         {
             if (name.DatabaseIdentifier is { } database) Add(node, "database", database.Value, database.StartLine, database.FirstTokenIndex);

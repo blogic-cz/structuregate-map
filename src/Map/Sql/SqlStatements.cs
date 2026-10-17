@@ -73,7 +73,7 @@ internal sealed class SqlStatements
                 if (SqlTree.Map(held.Fragment, f) is { } mapped)
                 {
                     node = into.Add(node, mapped.Kind, mapped.Value, f.StartLine, f.FirstTokenIndex);
-                    into.Synthesized(f, node);
+                    into.Synthesized(held.Fragment, f, node);
                 }
                 open.Add(new Open(f, held.Statement, node));
             }
