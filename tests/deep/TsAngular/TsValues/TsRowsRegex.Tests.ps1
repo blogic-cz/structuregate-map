@@ -4,7 +4,7 @@
     `TsRows.Helpers.ps1`.
 #>
 
-. (Join-Path $PSScriptRoot '../TsRows.Helpers.ps1')
+. (Join-Path $PSScriptRoot '../../TsRows.Helpers.ps1')
 
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 

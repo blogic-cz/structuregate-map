@@ -6,7 +6,7 @@
     Read through node rows (`<table>__value`), never JSON text. Its helpers are `TsRows.Helpers.ps1`.
 #>
 
-. (Join-Path $PSScriptRoot '..\TsRows.Helpers.ps1')
+. (Join-Path $PSScriptRoot '../../TsRows.Helpers.ps1')
 
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
