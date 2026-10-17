@@ -91,6 +91,15 @@ Beside the shared tables it adds the FRAMEWORK tables:
   `handlers`, `switch_cases` and the literal tables carry `file` too, as every other half does. `_meta` publishes what SQLite cannot record: the 43 id prefixes, 129 joins and which
   column anchors a row to its file (`--id` follows them). Every declared join column leads an index, and so do
   `key_reach.key`, `render_path.component` and `gate_values.gate`/`gate_features.gate`: `WHERE calls.target_id = ?` is a probe.
+* **A `value` cell is the EVALUATED expression** (`returns`, `assignments`, `locals`, `members`, `consts`, `raises`, and
+  each of `calls.args`): a literal is its value (`'x'`, `1`, `true`), an expression the map cannot evaluate is
+  `{$expr, $kind, $reads, ..}`. A KEYWORD literal is `{$literal, $kind}`: `undefined` anywhere (`$kind` `UndefinedKeyword`,
+  `VoidExpression` for `void 0`; a local or parameter NAMED `undefined` is a name), and `null` as a whole cell
+  (`NullKeyword`) - inside a list or an object `null` is its own `null` node. A NULL cell is a statement with no value
+  (`return;`). A name is never a literal: `$kind = 'Identifier'`, `$expr` the name, plus `$local` (`{file, line, col}` of
+  its `locals` row) when a destructuring binds it; a name whose value the map can follow is that value (`return s` over
+  `let s = null` holds the `null` literal, `source` says `s`). `return null` rows:
+  `JOIN returns__value v ON v.owner = r.id AND v.parent = 0 AND v.role = '$literal' AND v.value = 'null'`.
 * **`imports.names`** is `{name, as, kind}` with `name` the LOCAL binding and `as` the name a rename came
   through. **`imports.external`** is about the SPELLING (a tsconfig alias is external and still in the
   tree; "in the tree" is `JOIN files rf ON rf.id = i.resolved_file WHERE rf.sha IS NOT NULL`).
