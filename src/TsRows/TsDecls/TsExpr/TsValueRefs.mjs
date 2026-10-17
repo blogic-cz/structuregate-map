@@ -7,6 +7,13 @@
  */
 import { canonicalPath } from './TsPaths.mjs';
 
+/**
+ * `undefined` AS A VALUE: `{$literal: 'undefined', $kind}` - JSON has no `undefined`, and the `$expr` an unresolved name
+ * carries made it the same shape as a variable nobody could follow (#85). `$kind` is what the source spelled it with:
+ * `UndefinedKeyword` for the name, `VoidExpression` for `void 0`. No `$expr`: there is nothing left to evaluate.
+ */
+export const undefinedLiteral = (kind) => ({ $literal: 'undefined', $kind: kind });
+
 export function makeValueRefs({ ts, checker, symbolAt, api }) {
   /**
    * The declaration that actually CARRIES the value, not whichever the checker lists first.
@@ -108,10 +115,33 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
     return api.unresolved(node);
   }
 
+  /**
+   * The `locals` row a name bound by a DESTRUCTURING declaration sits in (`const { a } = f()`): `{file, line, col}`, the
+   * row's own place, as an expression tree's `local` names a plain one - the value of `a` is that row's `value` read at
+   * its `bindings`. A pattern a module, a loop or a catch declares has no `locals` row, and names none.
+   */
+  function bindingLocal(decl) {
+    let at = decl;
+    while (at && (ts.isBindingElement(at) || ts.isObjectBindingPattern(at) || ts.isArrayBindingPattern(at))) at = at.parent;
+    if (!at || !ts.isVariableDeclaration(at) || at.initializer === undefined) return null;
+    const statement = at.parent?.parent;
+    if (!statement || !ts.isVariableStatement(statement) || ts.isSourceFile(statement.parent)) return null;
+    const sf = at.getSourceFile();
+    const pos = sf.getLineAndCharacterOfPosition(at.name.getStart());
+    return { file: canonicalPath(sf.fileName), line: pos.line + 1, col: pos.character + 1 };
+  }
+
   /** An identifier reference -> the literal it was initialized with, when that is knowable. */
   function evalIdentifier(node) {
+    // THE GLOBAL `undefined` IS A LITERAL, not a name (#85): the checker's symbol for it has no declaration. A local or a
+    // parameter that shadows it has one, and is followed like any other name.
+    if (node.text === 'undefined' && !(symbolAt(node)?.declarations?.length)) return undefinedLiteral('UndefinedKeyword');
     const decl = valueDecl(node);
     if (!decl) return api.unresolved(node);
+    if (ts.isBindingElement(decl)) {
+      const local = bindingLocal(decl);
+      return local ? { ...api.unresolved(node), $local: local } : api.unresolved(node);
+    }
     if (ts.isVariableDeclaration(decl) && decl.initializer) {
       return api.follow(decl, decl.initializer, node.getText());
     }

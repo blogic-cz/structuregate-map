@@ -28,7 +28,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 mod row;
-pub use row::{Cell, Row, Schema};
+pub use row::{null_literal, Cell, Row, Schema};
 #[cfg(test)]
 use row::shared;
 

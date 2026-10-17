@@ -105,7 +105,21 @@ impl At<'_> {
             Some(Cell::Value(Value::Number(n))) if n.is_i64() => n.to_string(),
             _ => format!("#{}", self.rowid),
         };
-        source.get(&owner).unwrap_or(Value::Null)
+        source.get(&owner).map(null_literal).unwrap_or(Value::Null)
+    }
+}
+
+/// A WHOLE CELL THAT IS THE `null` LITERAL is read as the JSON null it stands for. The half writes it
+/// `{$literal: 'null', $kind: 'NullKeyword'}` (#85, `TsDecls/TsExpr/TsValue.mjs::cell`), because a NULL cell is no value at
+/// all and `return null` read as `return;`; every pass here was written against the null, and asks the same of it. Only
+/// the ROOT: inside a list or an object the literal is the `null` node it always was. `undefined` has no JSON value and
+/// stays its `{$literal: 'undefined', ..}` object.
+pub fn null_literal(value: Value) -> Value {
+    match &value {
+        Value::Object(o) if o.len() == 2
+            && o.get("$literal").and_then(Value::as_str) == Some("null")
+            && o.get("$kind").and_then(Value::as_str) == Some("NullKeyword") => Value::Null,
+        _ => value,
     }
 }
 

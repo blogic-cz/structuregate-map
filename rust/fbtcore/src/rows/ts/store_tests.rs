@@ -296,3 +296,31 @@ fn a_released_store_reads_its_rows_again_and_they_are_the_same_rows() {
     assert_eq!(again.iter().map(Row::to_map).collect::<Vec<_>>(), first);
     });
 }
+
+#[test]
+fn a_whole_cell_spelled_null_reads_as_null_and_undefined_stays_its_literal() {
+    // #85: `return null` is written `{$literal: 'null', $kind: 'NullKeyword'}` - a NULL cell is `return;` - and every pass
+    // asks the null of it. Only the ROOT: an object of those two members anywhere below is the object it is.
+    let path = std::env::temp_dir().join(format!("fbt-store-literal-{}.sqlite", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch(
+        "CREATE TABLE returns (id TEXT, value, half TEXT);
+         INSERT INTO returns VALUES ('rv:1', NULL, 'typescript'), ('rv:2', NULL, 'typescript'), ('rv:3', NULL, 'typescript');",
+    )
+    .unwrap();
+    let mut value = cells::Writer::new(&db, "returns", "value").unwrap();
+    value.tree("rv:1", &json!({"$literal": "null", "$kind": "NullKeyword"})).unwrap();
+    value.tree("rv:2", &json!({"$literal": "undefined", "$kind": "UndefinedKeyword"})).unwrap();
+    value.tree("rv:3", &json!([{"$literal": "null", "$kind": "NullKeyword"}])).unwrap();
+    drop(value);
+    {
+        let store = Store::from_db(&db, "typescript").unwrap();
+        let rows = store.table("returns");
+        assert_eq!(rows[0].get("value"), Some(&Value::Null));
+        assert_eq!(rows[1]["value"], json!({"$literal": "undefined", "$kind": "UndefinedKeyword"}));
+        assert_eq!(rows[2]["value"], json!([{"$literal": "null", "$kind": "NullKeyword"}]), "only a whole cell");
+    }
+    drop(db);
+    let _ = std::fs::remove_file(path);
+}
