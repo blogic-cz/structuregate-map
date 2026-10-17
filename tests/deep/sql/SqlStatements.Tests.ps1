@@ -107,17 +107,17 @@ Test-Case 'sqlstatements: every column a statement names, its table through the 
 function Get-SqlStmtContent([string]$Db) {
     $statement = "(SELECT f2.path || '#' || s2.batch || '.' || s2.ordinal FROM sql_statements s2 JOIN files f2 ON f2.id = s2.file WHERE s2.id = {0})"
     $queries = @(
-        "SELECT 'v=S|' || f.path || '|' || s.batch || '|' || s.ordinal || '|' || coalesce($($statement -f 's.parent'), '') || '|' || s.line || '|' ||" +
-            " s.end_line || '|' || s.kind || '|' || s.source || '|' || s.fingerprint FROM sql_statements s JOIN files f ON f.id = s.file",
+        ("SELECT 'v=S|' || f.path || '|' || s.batch || '|' || s.ordinal || '|' || coalesce($($statement -f 's.parent'), '') || '|' || s.line || '|' ||" +
+            " s.end_line || '|' || s.kind || '|' || s.source || '|' || s.fingerprint FROM sql_statements s JOIN files f ON f.id = s.file"),
         # A NODE LEFT BEHIND names a statement that is gone: NULL would drop the whole line, so it reads `gone`.
-        "SELECT 'v=N|' || coalesce($($statement -f 'n.statement'), 'gone') || '|' || n.n || '|' || coalesce(n.parent, '') || '|' || n.ord || '|' || n.kind || '|' ||" +
-            " n.value || '|' || n.line FROM sql_nodes n",
-        "SELECT 'v=R|' || f.path || '|' || r.line || '|' || r.action || '|' || r.name || '|' || r.column || '|' ||" +
-            " coalesce($($statement -f 'r.statement'), '') FROM sql_refs r JOIN files f ON f.id = r.file",
-        "SELECT 'v=C|' || coalesce($($statement -f 'c.statement'), 'gone') || '|' || c.line || '|' || c.role || '|' || c.schema || '|' ||" +
-            " c.name || '|' || c.source_kind || '|' || c.alias || '|' || c.column FROM sql_column_refs c",
-        "SELECT 'v=V|' || $($statement -f 'v.statement') || '|' || v.kind || '|' || v.line FROM sql_clauses v",
-        "SELECT 'v=J|' || $($statement -f 'v.statement') || '|' || v.type || '|' || v.schema || '|' || v.name || '|' || v.alias FROM sql_joins v")
+        ("SELECT 'v=N|' || coalesce($($statement -f 'n.statement'), 'gone') || '|' || n.n || '|' || coalesce(n.parent, '') || '|' || n.ord || '|' || n.kind || '|' ||" +
+            " n.value || '|' || n.line FROM sql_nodes n"),
+        ("SELECT 'v=R|' || f.path || '|' || r.line || '|' || r.action || '|' || r.name || '|' || r.column || '|' ||" +
+            " coalesce($($statement -f 'r.statement'), '') FROM sql_refs r JOIN files f ON f.id = r.file"),
+        ("SELECT 'v=C|' || coalesce($($statement -f 'c.statement'), 'gone') || '|' || c.line || '|' || c.role || '|' || c.schema || '|' ||" +
+            " c.name || '|' || c.source_kind || '|' || c.alias || '|' || c.column FROM sql_column_refs c"),
+        ("SELECT 'v=V|' || $($statement -f 'v.statement') || '|' || v.kind || '|' || v.line FROM sql_clauses v"),
+        ("SELECT 'v=J|' || $($statement -f 'v.statement') || '|' || v.type || '|' || v.schema || '|' || v.name || '|' || v.alias FROM sql_joins v"))
     return @($queries | ForEach-Object { Get-SqlStmtRows $Db $_ } | Sort-Object)
 }
 
