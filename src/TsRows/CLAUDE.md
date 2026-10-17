@@ -51,6 +51,22 @@ runs) are compared by that, every carried field equal, never by `c:412`.
   re-export's `from` resolves to. An importer DEPENDS on its declaring file and every barrel in `via`
   (`rust/fbtcore/src/rows/partial/deps.rs`), so a partial run re-reads it when either moves.
 
+## What a name resolves to - by the declaration, never by the name written
+
+- **A template pipe usage names the pipe Angular runs** (rows 59, #86, `TsTpl/TsPipeRefs.mjs`): `expressions.pipes` and
+  `template_strings.pipes` stay the names; `pipe_refs` beside them is one `{name, ...}` per name, resolved by the SCOPE of
+  the template's component - its NgModule's declarations and what each import exports, transitively, or a standalone
+  component's own `imports` (`TsModuleScope.mjs::makeScopes`, the render rollup's machinery) - `id` the `pipes` row,
+  `external: true` + `class` for a library pipe, `ambiguous: true` for two of one name (Angular warns, NG0313, and takes the
+  last registered - an order no row holds). A library entry's pipes are read off its typings at extraction
+  (`ɵpipe`/`ɵmod`, `TsDecls/TsLibPipes.mjs`) into `external_pipes` on `components`/`ng_modules` (`from`: `imports` or
+  `exports`). An unsettled name is a `diagnostics` row (`pipe_unresolved_in_scope` with `reason`, `pipe_ambiguous_in_scope`).
+  Resolved over the WHOLE store on every run, carried rows too - a template expression's `pipes` is carried for it
+  (`TsSetup/TsCarried.mjs`).
+- **A base class carries its row** (rows 58, #87): `classes.extends` and each of its `type_args` (every level) hold `line`,
+  where the declaration the checker reached is (`TsClassRows.mjs::heritageRef`, alias and barrel followed), and `id`, the
+  `classes` row at that file and line (`TsRefs.mjs::rollupRefIds`); a library class, or a place two rows share, has none.
+
 ## Expression trees the gate readers need (`TsDecls/TsBody.mjs`)
 
 `value` keeps only the last link of a call chain, so the rust readers need the TREE: `returns.expression`,
