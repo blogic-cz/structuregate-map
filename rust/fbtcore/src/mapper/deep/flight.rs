@@ -123,7 +123,15 @@ pub(super) fn run(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: 
                 absent = ts::launched(into, deep, db, root, &mut fe, &[false, true], false);
                 false
             }
-            None => ts::store(into, db, root, &work.rows, landed.carried, &mut fe, &deep.build),
+            None => match ts::store(into, db, root, &work.rows, landed.carried, &mut fe, &deep.build) {
+                Stored::Done => false,
+                Stored::Again => true,
+                Stored::Everything => {
+                    work.clean();
+                    absent = everything(into, deep, db, root, &mut fe);
+                    false
+                }
+            },
         },
         Some(Parsed::Retry) => true,
         // A CELL IT WAS HANDED BACK WITHOUT, READ: in its turn, with every cell carried.
@@ -226,4 +234,31 @@ mod tests {
         assert_eq!(crossed(&recording("past", &[("f", 31 + LANE)]).path(), &recorded), Some("f".to_string()));
         assert_eq!(crossed(&recording("new", &[("f", 31), ("q", LANE + 1)]).path(), &recorded), Some("q".to_string()));
     }
+}
+
+/// What became of a payload: stored (or failed, said), or nothing stored because a kept row would have pointed at nothing -
+/// asked again over every hop when the run stopped short, read whole (`everything`) when it already read every hop.
+pub(super) enum Stored {
+    Done,
+    Again,
+    Everything,
+}
+
+/// EVERY FILE READ, NOTHING CARRIED: what a partial run that read every hop and would still have left a kept row naming
+/// nothing (`rows::dangling::EVERY_HOP`) does instead - asked again it would answer the same, and a full run cannot leave
+/// one. Never absent: the plan that led here found a workspace.
+pub(super) fn everything(into: &mut Collector, deep: &Deep, db: &str, root: &str, fe: &mut Option<String>) -> bool {
+    let Some(parse) = ts::staged(into, deep) else { return false };
+    let Some(state) = ts::state(into, deep, db) else { return false };
+    let work = ts::Work::new();
+    match std::fs::write(&work.state, &state) {
+        Err(e) => into.errors.push(format!("HALF      {}: the payload could not be written ({e})", ts::LANGUAGE)),
+        Ok(()) => {
+            if let Parsed::Rows = ts::parse_tree(into, deep, &parse, root, db, &work, None, true, &|| {}, false) {
+                ts::store(into, db, root, &work.rows, None, fe, &deep.build);
+            }
+        }
+    }
+    work.clean();
+    false
 }

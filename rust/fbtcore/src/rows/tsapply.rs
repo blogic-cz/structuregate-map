@@ -234,6 +234,14 @@ fn apply_with(db_path: &Path, root: &str, build: &str, mut payload: TsPayload, d
     if !payload.all && !payload.partial {
         bail!("a payload must say whether it is the whole half or a named set of files");
     }
+    // A TEST'S DOOR, NOTHING ELSE: a table named here is deleted WHOLE by a partial run while node sends only the rows it
+    // made - a table wrongly rebuilt, the shape of the v2.6.0 defect - so a black-box case proves what `dangling` does
+    // with the ids that vanish under kept rows. No defect of that shape is left to reproduce it by.
+    if payload.partial
+        && let Ok(names) = std::env::var("STRUCTUREGATE_TEST_WHOLE")
+    {
+        payload.whole.extend(names.split(',').filter(|n| !n.is_empty()).map(String::from));
+    }
     let mut receipt = TsReceipt { partial: payload.partial, fe: payload.fe.take(), ..Default::default() };
     let workspace = workspace_of(root, receipt.fe.as_deref());
 
@@ -270,7 +278,8 @@ fn apply_with(db_path: &Path, root: &str, build: &str, mut payload: TsPayload, d
         // NOTHING KEPT MAY POINT AT A ROW THIS RUN REPLACES - see `dangling`. Checked before anything is deleted, while
         // the rows about to go still say which ids they held, so a run that would break a join leaves the map as it was.
         let check_started = std::time::Instant::now();
-        let plan = super::dangling::Replace { half: LANG, replaced: &payload.affected, whole: &payload.whole, kept: &digest.ids, named: &digest.named };
+        let joins: Vec<String> = payload.spec.as_ref().and_then(|s| s.get("joins")).and_then(Value::as_object).map(|j| j.keys().cloned().collect()).unwrap_or_default();
+        let plan = super::dangling::Replace { half: LANG, replaced: &payload.affected, whole: &payload.whole, kept: &digest.ids, named: &digest.named, joins: &joins };
         super::dangling::refuse(&db, &plan, payload.cut)?;
         receipt.phases.insert("check the kept rows".to_string(), check_started.elapsed().as_millis() as u64);
         let compare_started = std::time::Instant::now();

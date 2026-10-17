@@ -73,9 +73,13 @@ a table node rebuilds whole sends no rows at all - never an INTERNED one (`files
 measured by where its rows were minted, a workspace with no `templateUrl` made `files` a rollup's table, no partial run
 was handed it, and every file id moved under the kept rows naming them. A pass that reads a stub, replaces one or would send one back marks
 the run (`MAP-UNCARRIED`), which is asked again with every cell carried - so a list that misses a read costs time,
-never a row. On a run that stopped short, `dangling` asks every kept row - its plain cells and its NODE rows - and every
-row of a whole table the payload sends (`Digest::named`) for an id the replace removes and the payload does not hold
-again (`nested`), which node once asked of every row it held; a string that only looks like an id is no reason to retry. THE CARRY IS WRITTEN BESIDE THE PARSE
+never a row. EVERY partial run has `dangling` ask, for an id the replace removes and the payload does not hold again: every
+row of a whole table the payload sends (`Digest::named`), every kept row's NODE rows and its cells in a column a spec
+declares a join (both by index), and every cell of the files the stored graph lists as readers; a run that stopped short
+(`nested`) also every plain cell of every kept row, which node once asked of every row it held. A string that only looks
+like an id is no reason to retry. A hit on a run that stopped short asks again over every hop; on one that read every hop
+it would ask the same again, so the half READS EVERYTHING instead and says which reference it found (`EVERY_HOP`,
+`_meta.last_refresh` `dangling`): asked of the watchers alone, an id a whole table lost (`files`, v2.6.0) was stored dangling. THE CARRY IS WRITTEN BESIDE THE PARSE
 (`carried_parse`, `mapper/deep/ts.rs`): node builds every program ahead without a checker (`prewarm`,
 `TsSetup/TsProgram.mjs` - each parse given back as it was parsed, or a compiler before 5.3 resolves and notes less)
 and then loads the rows as rust writes them (`readCarry`, `--carry-part`: the file read while it grows, whole once renamed).
