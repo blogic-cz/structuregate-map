@@ -69,7 +69,9 @@ decorator or a const a decorator names moves it, and the run reads everything.
 
 **A CARRIED ROW COMES BACK WITHOUT THE STRUCTURES NO PASS READS** (`src/TsRows/TsSetup/TsCarried.mjs`, handed to
 `rows/partial/uncarried.rs` through the plan): such a cell is its kind alone, a STUB that refuses every look inside;
-a table node rebuilds whole sends no rows at all. A pass that reads a stub, replaces one or would send one back marks
+a table node rebuilds whole sends no rows at all - never an INTERNED one (`files`, `TsStore.mjs::rebuiltTables`):
+measured by where its rows were minted, a workspace with no `templateUrl` made `files` a rollup's table, no partial run
+was handed it, and every file id moved under the kept rows naming them. A pass that reads a stub, replaces one or would send one back marks
 the run (`MAP-UNCARRIED`), which is asked again with every cell carried - so a list that misses a read costs time,
 never a row. On a run that stopped short, `dangling` asks every kept row - its plain cells and its NODE rows - and every
 row of a whole table the payload sends (`Digest::named`) for an id the replace removes and the payload does not hold

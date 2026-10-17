@@ -226,6 +226,9 @@ export class Store {
     // scratch every run, and a table BOTH write is per-file rows with a rollup's own added on top.
     // Handing the first kind back doubles it; not handing the second kind back loses it.
     this.perFileTables = new Set();
+    // ...AND WHICH TABLES ARE INTERNED - one row per key, handed back by that key (`load`) - which is never a
+    // rollup's, wherever its rows were first interned: see `rebuiltTables`.
+    this.internedTables = new Set();
     // THE IDS A RE-EXTRACTED FILE'S ROWS ALREADY HAVE, by table and key - see `identityKeys` for what
     // is in here and why. Empty on a full run, which mints every id as it always did.
     this.claims = new Map();
@@ -387,9 +390,15 @@ export class Store {
    * made, so it cannot see which tables its own walks would have filled - `renders` looks like a
    * rollup's table to it, and dropping those rows would empty the render tree. So the FULL
    * run measures it and publishes it, exactly as it publishes which columns hold a structure.
+   *
+   * AN INTERNED TABLE IS NEVER ONE, even when no row of it was interned while a file was open. `files` is
+   * interned by the inventory, outside every walk, and by a walk only for a `templateUrl`'s `.html` - so in a
+   * workspace with no such template it read as a rollup's table: a partial run was handed no `files` row, minted
+   * every file a new id, and a kept row naming a file (`exports.resolved_file`, `classes.file`) named one that
+   * was gone - the run refused, or kept rows no join reached.
    */
   rebuiltTables() {
-    return [...this.rollupTables].filter((name) => !this.perFileTables.has(name)).sort();
+    return [...this.rollupTables].filter((name) => !this.perFileTables.has(name) && !this.internedTables.has(name)).sort();
   }
 
     /**
@@ -666,6 +675,7 @@ export class Store {
   /** One row per KEY. The builder runs only the first time; everything after is `patch`. */
   intern(name, prefix, key, build) {
     (this.currentFile === null ? this.rollupTables : this.perFileTables).add(name);
+    this.internedTables.add(name);
     const k = `${name} ${key}`;
     const hit = this.byKey.get(k);
     if (hit) return hit;
