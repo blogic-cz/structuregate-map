@@ -315,7 +315,6 @@ pub fn apply(db: &Path, root: &str, batch: &Batch) -> Result<Receipt> {
         extra: &extra,
         keep_existing: false,
         counts: batch.final_,
-        index_nodes: true,
     };
     let applied = store::write(db, &request)?;
 

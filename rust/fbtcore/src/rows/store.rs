@@ -223,7 +223,7 @@ fn drop_files(db: &Connection, rels: &BTreeSet<String>, lang: &str) -> Result<()
 /// child table (`cells`). For a pass that writes a table of its own - it must never spell a structure as text.
 pub fn insert_rows(db: &Connection, table: &str, rows: &[Value]) -> Result<()> {
     insert(db, table, rows, &[])?;
-    cells::index_values_of(db, table)
+    cells::index_values(db)
 }
 
 fn insert(db: &Connection, table: &str, rows: &[Value], stamp: &[(String, Value)]) -> Result<()> {
@@ -427,10 +427,6 @@ pub struct WriteRequest<'a> {
     /// of the whole table, and a hundred batches into a database of millions of rows
     /// means counting the same rows a hundred times.
     pub counts: bool,
-    /// THE NODE TABLES' `value` AND `(role, parent)` INDEXES, built after the rows (`cells::index_values`). False when
-    /// more rows follow before anything reads through them - a full TypeScript run writes its closure next, and builds
-    /// them once after it (`tsapply`): inserted into indexed tables, the closure's nodes cost most of their write.
-    pub index_nodes: bool,
 }
 
 pub fn write(path: &Path, req: &WriteRequest<'_>) -> Result<Applied> {
@@ -527,9 +523,7 @@ pub fn write(path: &Path, req: &WriteRequest<'_>) -> Result<Applied> {
     let wrong = if req.counts { verify(&db, req.shas, req.lang) } else { 0 };
     lap("verify", &mut steps);
 
-    if req.index_nodes {
-        schema::sorted_on_every_core(&db, 262144, || cells::index_values(&db))?;
-    }
+    schema::sorted_on_every_core(&db, 262144, || cells::index_values(&db))?;
     lap("index the node values", &mut steps);
     write_meta(&db, req, found, &written, &carried)?;
     tx.commit()?;

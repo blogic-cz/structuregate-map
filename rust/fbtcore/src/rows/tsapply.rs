@@ -367,7 +367,6 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
             extra: &extra,
             keep_existing: true,
             counts: true,
-            index_nodes: true,
         })?;
         receipt.phases.insert("write the rows".to_string(), write_started.elapsed().as_millis() as u64);
         receipt.write_steps = first.steps.iter().map(|(n, ms)| (n.to_string(), *ms)).collect();
@@ -382,7 +381,7 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
         // THE STYLESHEETS BEFORE THE CLOSURE: `class_hides` says which class gates hide their element, and the
         // closure reads a class gate on the false side only then. Derived after it, every class gate read as a plain condition.
         let mut first = first;
-        styles(&mut receipt, &mut first.written, db_path, root, &workspace, true)?;
+        styles(&mut receipt, &mut first.written, db_path, root, &workspace)?;
         // THE CLOSURE STAYS WHEN NOTHING IT READ MOVED (`unchanged`): the comparison is of what the run removed with
         // what it wrote in its place, cell for cell of what the last derivation read.
         let compare_started = std::time::Instant::now();
@@ -426,7 +425,6 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
             extra: &extra,
             keep_existing: false,
             counts: true,
-            index_nodes: false,
         })?;
         receipt
             .phases
@@ -440,17 +438,10 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
 
         // THE STYLESHEETS BEFORE THE CLOSURE: `class_hides` says which class gates hide their element, and the
         // closure reads a class gate on the false side only then. Derived after it, every class gate read as a plain condition.
-        styles(&mut receipt, &mut applied.written, db_path, root, &workspace, false)?;
+        styles(&mut receipt, &mut applied.written, db_path, root, &workspace)?;
         let written = closure(&mut receipt, db_path, root, &workspace, &payload, &fingerprint, false)?;
         // A FULL RUN'S TALLY HAS ALWAYS NAMED THE CLOSURE'S FOUR TABLES beside the rest.
         applied.written.extend(written);
-        // THE NODE TABLES INDEXED ONCE, over every row of them - the closure's too (`WriteRequest::index_nodes`).
-        let indexing = std::time::Instant::now();
-        let db = Connection::open(db_path)?;
-        db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; BEGIN")?;
-        schema::sorted_on_every_core(&db, 2000, || super::cells::index_values(&db))?;
-        db.execute_batch("COMMIT")?;
-        receipt.phases.insert("index the node values".to_string(), indexing.elapsed().as_millis() as u64);
         applied
     };
     receipt.written = applied.written;
@@ -515,7 +506,6 @@ fn closure(receipt: &mut TsReceipt, db_path: &Path, root: &str, workspace: &Path
         extra: &BTreeMap::new(),
         keep_existing: true,
         counts: true,
-        index_nodes: delta,
     })?
     .written;
     unchanged::record(&Connection::open(db_path)?, LANG, &reads, fingerprint, payload.spec.as_ref())?;
@@ -553,9 +543,9 @@ fn rewrites<'a>(ids: &'a [String], affected: &'a [String], whole: &'a BTreeSet<S
 
 /// THE STYLESHEETS, AS RULES (`cssmap`) - derived after every other row is in, because `class_hides`
 /// joins node's gates to them; whole on every run, so a partial one needs nothing of its own.
-fn styles(receipt: &mut TsReceipt, written: &mut BTreeMap<String, i64>, db_path: &Path, root: &str, workspace: &Path, index: bool) -> Result<()> {
+fn styles(receipt: &mut TsReceipt, written: &mut BTreeMap<String, i64>, db_path: &Path, root: &str, workspace: &Path) -> Result<()> {
     let started = std::time::Instant::now();
-    written.extend(crate::cssmap::store(db_path, root, workspace, LANG, &mut receipt.notes, index)?);
+    written.extend(crate::cssmap::store(db_path, root, workspace, LANG, &mut receipt.notes)?);
     // THE TALLY OF EVERY ROW, as the write that counts every table states it - over the stylesheets' new counts.
     super::meta::put_moved(&Connection::open(db_path)?, "rows", &written.values().filter(|n| **n > 0).sum::<i64>().to_string())?;
     receipt.phases.insert("read the stylesheets".to_string(), started.elapsed().as_millis() as u64);
