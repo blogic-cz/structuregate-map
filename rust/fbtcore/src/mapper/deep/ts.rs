@@ -334,15 +334,18 @@ pub(super) fn plan(into: &mut Collector, deep: &Deep, parse: &str, root: &str, d
     Planned::Partial
 }
 
+/// Where the carry is written until it is whole (`readCarry` in `TsRunIo.mjs` reads it there as it grows).
+fn part_of(carry: &Path) -> PathBuf { carry.with_extension("part") }
+
 /// A PARTIAL RUN'S CARRY AND PARSE, BESIDE EACH OTHER: node is launched as the carry starts and parses every project
-/// while it is written (`prewarm` in `TsProgram.mjs`), and waits for it only to load it - it is written under another
-/// name and renamed when whole, or `<carry>.failed` is left. Carried one after the other, the carry was a quarter of the
+/// while it is written (`prewarm` in `TsProgram.mjs`), then loads its rows as they are written (`--carry-part`) - it is
+/// written under another name and renamed when whole, or `<carry>.failed` is left. Carried one after the other, the carry was a quarter of the
 /// run and node sat idle through it. `read` is told when the carry has read the database - its last read - not when node
 /// starts. A carry that failed is no partial run: it reads everything instead. How long the carry took goes to `carried`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn carried_parse(into: &mut Collector, deep: &Deep, parse: &str, root: &str, db: &str, work: &Work, every_hop: bool, whole: bool,
     read: &(dyn Fn() + Sync), carried: &mut Option<u64>) -> Parsed {
-    let part = work.carry.with_extension("part");
+    let part = part_of(&work.carry);
     let failed = work.carry.with_extension("json.failed");
     let anchor = crate::trace::anchor();
     let (parsed, fetched, ms) = std::thread::scope(|scope| {
@@ -428,9 +431,8 @@ pub(super) fn parse_tree(into: &mut Collector, deep: &Deep, parse: &str, root: &
         "--state".into(), text(&work.state), "--db".into(), db.into()];
     if let Some(carry) = carry {
         arguments.extend(["--carry".into(), text(carry)]);
-        if late {
-            arguments.push("--carry-late".into());
-        }
+        // STILL BEING WRITTEN, under this name: node reads the rows as they arrive.
+        arguments.extend(late.then(|| ["--carry-part".to_string(), text(&part_of(carry))]).into_iter().flatten());
     }
     if every_hop {
         arguments.push("--every-hop".into());
@@ -506,7 +508,7 @@ pub(super) fn store(into: &mut Collector, db: &str, root: &str, rows: &Path, car
     let _storing = crate::trace::stage("typescript: store");
     let receipt = match calls::ts_apply(Path::new(db), root, &text(rows)) {
         Ok(receipt) => receipt,
-        Err(error) if error.starts_with(crate::rows::reads::STOPPED_SHORT) => {
+        Err(error) if error.starts_with(crate::rows::dangling::STOPPED_SHORT) => {
             into.notes.push(format!("the typescript half is reading every hop of dependents again: {error}"));
             return true;
         }

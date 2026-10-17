@@ -19,7 +19,7 @@
 
 use super::deps;
 use super::digest::Digest;
-use super::half::{drop_half_tables, tables_with_half, HALF_COLUMN};
+use super::half::drop_half_tables;
 use super::pyjson;
 use super::schema;
 use super::store::{self, WriteRequest};
@@ -27,7 +27,6 @@ use super::unchanged;
 use super::ts::keyreach;
 use super::ts::store as tsstore;
 use anyhow::{bail, Context, Result};
-use indexmap::IndexSet;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -70,7 +69,7 @@ pub struct TsPayload {
     /// files'. node measures it; see its `Store.rollupTables`.
     pub whole: Vec<String>,
     /// Whether this partial run stopped short of every hop - then a kept row's structures are asked too
-    /// (`reads::dangling`, `nested`), as node asked every row it held.
+    /// (`dangling`, `nested`), as node once asked every row it held.
     pub cut: bool,
     pub shas: Map<String, Value>,
     pub counters: Map<String, Value>,
@@ -186,64 +185,6 @@ fn affected_ids(db: &Connection, affected: &[String]) -> Result<Vec<String>> {
     Ok(stmt.query_map(params.as_slice(), |r| r.get::<_, String>(0))?.flatten().collect())
 }
 
-/// MAKE ROOM FOR A PARTIAL PAYLOAD: this half's rows for the files being re-extracted, and nothing
-/// else.
-///
-/// TWO KINDS OF TABLE, and node says which is which rather than this side keeping a second copy of
-/// the knowledge. A table node rebuilt WHOLE has its rows for this half removed outright — they are
-/// derived from the tree and a partial tree cannot produce them correctly. Every other table is per
-/// FILE, and only the affected files' rows go.
-///
-/// BY `owner_file`, which is why that column exists: 21 of the 53 tables carry no `file` of their
-/// own, and the parent chain that would stand in for one cannot attribute the module-scope `calls`
-/// at all.
-///
-/// THE OTHER HALVES ARE NEVER TOUCHED — every statement is scoped by `half`.
-fn replace_affected(db: &Connection, affected: &[String], ids: &[String], whole: &[String]) -> Result<usize> {
-    let wholly: IndexSet<&str> = whole.iter().map(String::as_str).collect();
-    let mut removed = 0usize;
-    for table in tables_with_half(db)? {
-        let columns = schema::existing_columns(db, &table)?;
-        let escaped = schema::escape(&table);
-        // A STRUCTURE'S NODES GO FIRST, THROUGH THE ROWS THAT OWN THEM: a node carries no scope of its own (`cells`).
-        let count = if wholly.contains(table.as_str()) {
-            super::half::delete_half_rows(db, &table, LANG)?
-        } else if columns.iter().any(|c| c == "owner_file") && !ids.is_empty() {
-            let marks = vec!["?"; ids.len()].join(",");
-            let sql = format!(
-                "DELETE FROM \"{escaped}\" WHERE \"{HALF_COLUMN}\" = ? AND owner_file IN ({marks})"
-            );
-            let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(ids.len() + 1);
-            let lang = LANG;
-            params.push(&lang);
-            for id in ids {
-                params.push(id);
-            }
-            super::cells::delete_children(db, &table, &format!("t.\"{HALF_COLUMN}\" = ? AND t.owner_file IN ({marks})"), params.as_slice())?;
-            db.execute(&sql, params.as_slice())?
-        } else {
-            continue
-        };
-        removed += count;
-    }
-
-    // THE `files` ROWS OF THE AFFECTED FILES TOO, and last: the lookup above reads them. The write
-    // re-creates each one from the payload.
-    if !affected.is_empty() {
-        let marks = vec!["?"; affected.len()].join(",");
-        let sql = format!("DELETE FROM files WHERE half = ? AND path IN ({marks})");
-        let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(affected.len() + 1);
-        let lang = LANG;
-        params.push(&lang);
-        for path in affected {
-            params.push(path);
-        }
-        super::cells::delete_children(db, "files", &format!("t.half = ? AND t.path IN ({marks})"), params.as_slice())?;
-        db.execute(&sql, params.as_slice())?;
-    }
-    Ok(removed)
-}
-
 /// THE FOLDER A `files.path` OF THIS HALF IS RELATIVE TO: the workspace node mapped (`fe`), not the root.
 ///
 /// The two are one folder only when the workspace sits AT the root. On a consumer it is often a folder
@@ -273,7 +214,9 @@ pub fn apply(db_path: &Path, root: &str, payload: TsPayload) -> Result<TsReceipt
 /// twice and never held - once for what they say about each other (`Digest`), once while they are written, in
 /// batches - so the peak is a batch and the digest, not every row of the workspace.
 pub fn apply_streamed(db_path: &Path, root: &str, head: TsPayload, bytes: &[u8]) -> Result<TsReceipt> {
-    let mut digest = Digest::new(&rebuilt_of(&head));
+    // A RUN THAT STOPPED SHORT checks the rows of every whole table it sends for an id that is gone (`dangling`).
+    let naming: &[String] = if head.partial && head.cut { &head.whole } else { &[] };
+    let mut digest = Digest::new(&rebuilt_of(&head)).naming(naming);
     super::rawcells::each_row(bytes, &mut |table, row| {
         digest.first(table, &row);
         Ok(())
@@ -320,21 +263,31 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
     let mut ids: Vec<String> = Vec::new();
     let node_whole: BTreeSet<String> = payload.whole.iter().cloned().collect();
     let mut kept: Option<(unchanged::Before, BTreeMap<String, i64>)> = None;
+    let mut http_before: Option<super::http::inputs::Before> = None;
     if payload.partial {
         let db = Connection::open(db_path)
             .with_context(|| format!("the database could not be opened: {}", db_path.display()))?;
         ids = affected_ids(&db, &payload.affected)?;
+        // NOTHING KEPT MAY POINT AT A ROW THIS RUN REPLACES - see `dangling`. Checked before anything is deleted, while
+        // the rows about to go still say which ids they held, so a run that would break a join leaves the map as it was.
+        let check_started = std::time::Instant::now();
+        let plan = super::dangling::Replace { half: LANG, replaced: &payload.affected, whole: &payload.whole, kept: &digest.ids, named: &digest.named };
+        super::dangling::refuse(&db, &plan, payload.cut)?;
+        receipt.phases.insert("check the kept rows".to_string(), check_started.elapsed().as_millis() as u64);
         let compare_started = std::time::Instant::now();
         let before = unchanged::Before::take(&db, LANG, &fingerprint, payload.spec.as_ref(), &rewrites(&ids, &payload.affected, &node_whole))?;
+        http_before = Some(super::http::inputs::Before::take(&db, LANG, &rewrites(&ids, &payload.affected, &node_whole))?);
         receipt.phases.insert("compare the closure's reads".to_string(), compare_started.elapsed().as_millis() as u64);
         // ONE TRANSACTION, UNJOURNALLED as the store writes: each delete was a commit of its own, synced.
         db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; BEGIN")?;
         // THE RECORD GOES BEFORE ANY ROW DOES: a run that stops between here and its closure vouches for nothing.
         unchanged::forget(&db, LANG)?;
+        super::http::inputs::forget(&db)?;
         // THE CLOSURE'S OWN TABLES ARE NOT REPLACED HERE: they stay until the closure is known to have moved.
         let replace_started = std::time::Instant::now();
-        receipt.replaced = replace_affected(&db, &payload.affected, &ids, &payload.whole)?;
+        receipt.replaced = super::dangling::replace_affected(&db, LANG, &payload.affected, &ids, &payload.whole)?;
         receipt.phases.insert("replace the affected rows".to_string(), replace_started.elapsed().as_millis() as u64);
+        http_before.iter_mut().for_each(|h| h.mark(&db));
         kept = before.map(|b| {
             let marks = b.marks(&db);
             (b, marks)
@@ -352,6 +305,7 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
         let db = Connection::open(db_path)?;
         db.execute_batch("PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; BEGIN")?;
         unchanged::forget(&db, LANG)?;
+        super::http::inputs::forget(&db)?;
         drop_half_tables(&db, LANG)?;
         db.execute_batch("COMMIT")?;
         receipt.phases.insert("drop the old rows".to_string(), dropping.elapsed().as_millis() as u64);
@@ -394,18 +348,6 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
     let gone: BTreeSet<String> = BTreeSet::new();
 
     let applied = if payload.partial {
-        // NOTHING KEPT MAY POINT AT A ROW THIS RUN REPLACES - see `reads::dangling`. Checked before anything is
-        // written, so a run that would break a join leaves the map as it was and says which.
-        let check_started = std::time::Instant::now();
-        {
-            let db = Connection::open(db_path)?;
-            let deps: Map<String, Value> =
-                super::remember::stored_graph(&db).into_iter().map(|(target, dependents)| (target, Value::from(dependents))).collect();
-            if let Some((count, first)) = super::reads::dangling(&db, LANG, &payload.affected, &digest.borrow().ids, &deps, payload.cut)? {
-                bail!("{} would leave {count} reference(s) to rows it replaced, first {first}", super::reads::STOPPED_SHORT);
-            }
-        }
-        receipt.phases.insert("check the kept rows".to_string(), check_started.elapsed().as_millis() as u64);
         // THE ROWS GO IN FIRST, and only then is the closure asked — it is derived from EVERY table,
         // and on a partial run the payload holds a fraction of them. The database is the only place
         // the whole map exists, which is the reason this pass lives on this side at all.
@@ -433,6 +375,8 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
         // put the exe at several GB on a large consumer, much of it rows already written.
         super::remember::remember_graph(&mut receipt, db_path, &digest.borrow(), Some(payload.affected.as_slice()));
         payload.tables = Map::new();
+        // THE HTTP PASS'S INPUTS: their token stays when the rows it reads came back as they went (`http::inputs`).
+        if let Some(h) = &http_before { h.settle(&Connection::open(db_path)?, LANG, &rewrites(&ids, &payload.affected, &node_whole))?; }
 
         // THE STYLESHEETS BEFORE THE CLOSURE: `class_hides` says which class gates hide their element, and the
         // closure reads a class gate on the false side only then. Derived after it, every class gate read as a plain condition.
@@ -487,6 +431,7 @@ fn apply_with(db_path: &Path, root: &str, mut payload: TsPayload, digest: Digest
             .insert("write the rows".to_string(), write_started.elapsed().as_millis() as u64);
         receipt.write_steps = applied.steps.iter().map(|(n, ms)| (n.to_string(), *ms)).collect();
         super::remember::remember_graph(&mut receipt, db_path, &digest.borrow(), None);
+        super::http::inputs::fresh(&Connection::open(db_path)?)?;
         let freeing = std::time::Instant::now();
         payload.tables = Map::new();
         receipt.phases.insert("free the payload".to_string(), freeing.elapsed().as_millis() as u64);
