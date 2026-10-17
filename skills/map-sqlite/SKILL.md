@@ -13,7 +13,8 @@ and SQL) it is 70 tables and millions of rows - every join column indexed, plus
 **The origin of this skill is `skills\map-sqlite` in the `structuregate-map` repository**; the copy here is a
 junction to it. Each half's own tables and columns are a page beside this one - read the one for the
 language you are asking about: [python.md](python.md), [csharp-sql.md](csharp-sql.md) (C#, T-SQL and the
-links between them), [typescript.md](typescript.md) (plain TypeScript and Angular). When a
+links between them; a SQL statement's tree, fingerprint, columns and shape in
+[sql-statements.md](sql-statements.md)), [typescript.md](typescript.md) (plain TypeScript and Angular). When a
 `<consumer>.md` beside this skill names the tree, read it first — a tree may keep its database elsewhere.
 
 **This is a cache of the tree, not a second source.** `buildmap.json` beside it is the resolved GRAPH — what

@@ -38,6 +38,12 @@ internal static class FbtCore
         [MarshalAs(UnmanagedType.LPUTF8Str)] string script,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string query);
 
+    [DllImport(Library, ExactSpelling = true)]
+    private static extern IntPtr fbt_sql_parse([MarshalAs(UnmanagedType.LPUTF8Str)] string text);
+
+    /// <summary>A PostgreSQL file's rows, parsed in rust - see `rust/fbtcore/src/sqlpg/`. JSON.</summary>
+    internal static string? SqlParse(string text) => Owned(fbt_sql_parse(text));
+
     /// <summary>The whole command, calling back into the parsers only .NET has - see Program.cs.</summary>
     internal static string? Run(string inputJson, IntPtr csFile, IntPtr csMap, IntPtr deep, IntPtr free)
         => Owned(fbt_main(inputJson, csFile, csMap, deep, free));

@@ -9,7 +9,7 @@ namespace StructureGate;
 /// runs, with the action (`select`, `insert`, `update`, `delete`, `merge`, `truncate`, `exec`).
 ///
 /// A NAME THAT IS NO OBJECT IS NOT A TOUCH: a `#temp` table, a `@table` variable and a CTE name are local to
-/// the script, and a row naming them would read as a table nobody declared.
+/// the script (a CTE's to its one statement), and a row naming them would read as a table nobody declared.
 /// </summary>
 internal sealed class SqlVisitor : TSqlFragmentVisitor
 {
@@ -18,7 +18,8 @@ internal sealed class SqlVisitor : TSqlFragmentVisitor
         bool Key, string Default, string Computed, int Line);
     public sealed record Key(int Object, string Kind, string Name, string Schema, string Table, List<string> Columns,
         string RefSchema, string RefName, List<string> RefColumns, int Line);
-    public sealed record Touch(int Object, string Action, string Schema, string Name, string Column, int Line);
+    /// <summary>`Token`: where in the script's tokens it is, so the statement holding it can be found.</summary>
+    public sealed record Touch(int Object, string Action, string Schema, string Name, string Column, int Line, int Token);
     /// <summary>A `CREATE TRIGGER` inside a string - dynamic SQL. `Open` when the name runs on past the literal
     /// (`'CREATE TRIGGER Demo_' + @Name`): `Name` is then only the prefix every trigger it builds has.</summary>
     public sealed record Dynamic(string Kind, string Name, bool Open, int Line, string Source);
@@ -41,15 +42,31 @@ internal sealed class SqlVisitor : TSqlFragmentVisitor
         fragment is null || fragment.StartOffset < 0 || fragment.StartOffset + fragment.FragmentLength > text.Length
             ? "" : text.Substring(fragment.StartOffset, fragment.FragmentLength);
 
-    private static int EndLine(TSqlFragment fragment) =>
+    internal static int EndLine(TSqlFragment fragment) =>
         fragment.LastTokenIndex >= 0 && fragment.ScriptTokenStream is { } tokens && fragment.LastTokenIndex < tokens.Count
             ? tokens[fragment.LastTokenIndex].Line : fragment.StartLine;
+
+    /// <summary>Each object's token range, beside `Objects`: which object a statement belongs to.</summary>
+    private readonly List<(int First, int Last)> spans = [];
 
     private int Declare(string kind, SchemaObjectName? name, TSqlFragment node, string parent = "")
     {
         Objects.Add(new Object(kind, name?.SchemaIdentifier?.Value ?? "", name?.BaseIdentifier?.Value ?? "", parent,
             node.StartLine, EndLine(node), Text(node)));
+        spans.Add((node.FirstTokenIndex, node.LastTokenIndex));
         return Objects.Count - 1;
+    }
+
+    /// <summary>The innermost object whose tokens hold these, or -1 - a statement of a procedure's body is the procedure's.</summary>
+    public int ObjectOf(int first, int last)
+    {
+        var best = -1;
+        for (var o = 0; o < spans.Count; o++)
+        {
+            if (first < 0 || spans[o].First > first || last > spans[o].Last) continue;
+            if (best < 0 || spans[o].First >= spans[best].First) best = o;
+        }
+        return best;
     }
 
     /// <summary>Visit a body with the object it belongs to as the owner of every touch in it.</summary>
@@ -179,10 +196,28 @@ internal sealed class SqlVisitor : TSqlFragmentVisitor
 
     public override void ExplicitVisit(CreateTypeUddtStatement node) => Declare("type", node.Name, node);
 
-    public override void ExplicitVisit(CommonTableExpression node)
+    public override void ExplicitVisit(SelectStatement node) => Scoped(node, () => base.ExplicitVisit(node));
+
+    public override void ExplicitVisit(InsertStatement node) => Scoped(node, () => base.ExplicitVisit(node));
+
+    public override void ExplicitVisit(UpdateStatement node) => Scoped(node, () => base.ExplicitVisit(node));
+
+    public override void ExplicitVisit(DeleteStatement node) => Scoped(node, () => base.ExplicitVisit(node));
+
+    public override void ExplicitVisit(MergeStatement node) => Scoped(node, () => base.ExplicitVisit(node));
+
+    /// <summary>
+    /// A CTE NAME IS THE STATEMENT'S OWN, and known for the WHOLE statement before any of it is visited: ScriptDom
+    /// visits a SELECT's query before its WITH clause, so a name added as its CTE was reached came too late for the
+    /// outer FROM - and a name never forgotten hid a real table of the same name in every later statement of the file.
+    /// </summary>
+    private void Scoped(StatementWithCtesAndXmlNamespaces node, Action visit)
     {
-        ctes.Add(node.ExpressionName.Value);
-        base.ExplicitVisit(node);
+        var outer = new HashSet<string>(ctes, ctes.Comparer);
+        foreach (var cte in node.WithCtesAndXmlNamespaces?.CommonTableExpressions ?? []) ctes.Add(cte.ExpressionName.Value);
+        visit();
+        ctes.Clear();
+        ctes.UnionWith(outer);
     }
 
     public override void ExplicitVisit(InsertSpecification node)
@@ -245,19 +280,19 @@ internal sealed class SqlVisitor : TSqlFragmentVisitor
 
     public override void ExplicitVisit(TruncateTableStatement node)
     {
-        Record("truncate", node.TableName, "", node.StartLine);
+        Record("truncate", node.TableName, "", node);
         base.ExplicitVisit(node);
     }
 
     public override void ExplicitVisit(ExecutableProcedureReference node)
     {
-        if (node.ProcedureReference?.ProcedureReference?.Name is { } name) Record("exec", name, "", node.StartLine);
+        if (node.ProcedureReference?.ProcedureReference?.Name is { } name) Record("exec", name, "", node);
         base.ExplicitVisit(node);
     }
 
     public override void ExplicitVisit(NamedTableReference node)
     {
-        if (!targets.Contains(node)) Record("select", node.SchemaObject, "", node.StartLine);
+        if (!targets.Contains(node)) Record("select", node.SchemaObject, "", node);
         base.ExplicitVisit(node);
     }
 
@@ -265,16 +300,16 @@ internal sealed class SqlVisitor : TSqlFragmentVisitor
     {
         if (target is not NamedTableReference named) return;
         targets.Add(named);
-        Record(action, named.SchemaObject, "", named.StartLine);
+        Record(action, named.SchemaObject, "", named);
     }
 
     private void Written(TableReference? target, string action, ColumnReferenceExpression? column)
     {
         if (target is NamedTableReference named && Last(column) is { Length: > 0 } name)
-            Record(action, named.SchemaObject, name, column!.StartLine);
+            Record(action, named.SchemaObject, name, column!);
     }
 
-    private void Record(string action, SchemaObjectName? name, string column, int line)
+    private void Record(string action, SchemaObjectName? name, string column, TSqlFragment at)
     {
         var base_ = name?.BaseIdentifier?.Value ?? "";
         var schema = name?.SchemaIdentifier?.Value ?? "";
@@ -282,7 +317,7 @@ internal sealed class SqlVisitor : TSqlFragmentVisitor
         if (schema.Length == 0 && ctes.Contains(base_)) return;
         // A TRIGGER'S `inserted` AND `deleted` are the rows of the statement that fired it, not tables.
         if (schema.Length == 0 && base_.ToLowerInvariant() is "inserted" or "deleted") return;
-        Touches.Add(new Touch(owner, action, schema, base_, column, line));
+        Touches.Add(new Touch(owner, action, schema, base_, column, at.StartLine, at.FirstTokenIndex));
     }
 
     /// <summary>

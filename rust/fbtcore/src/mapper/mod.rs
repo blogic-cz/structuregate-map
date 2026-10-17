@@ -490,7 +490,7 @@ fn cs_file(cs: CsMap, free: Free, abs: &str, rel: &str) -> Value {
 }
 
 /// A deep half's answer, as the caller wrote it: JSON, or a JSON line followed by a batch's payload.
-fn callback(deep: Deep, free: Free, input: &str) -> String {
+pub(crate) fn callback(deep: Deep, free: Free, input: &str) -> String {
     let Ok(input) = CString::new(input) else { return r#"{"errors": ["HALF      deep: the question held a NUL"]}"#.into() };
     let reply = deep(input.as_ptr());
     if reply.is_null() {

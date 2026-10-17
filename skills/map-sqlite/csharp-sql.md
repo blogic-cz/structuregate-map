@@ -81,21 +81,33 @@ a generated file is listed and never walked (nearly all of a real tree's rows we
 
 ## SQL (`files.lang = 'sql'`)
 
-Every `.sql` under a `.sqlproj`, parsed with Microsoft's own T-SQL parser (ScriptDom):
+Every `.sql` under a `.sqlproj`, parsed with Microsoft's own T-SQL parser (ScriptDom) - or, where the SQL config's
+`dialects` names a file `postgres`, with sqlparser-rs's PostgreSQL grammar into the SAME tables (`files.dialect`
+says which; an unqualified name is in `public`, not `dbo`; dollar-quoting, `LIMIT/OFFSET`, `RETURNING`, `::`, `ILIKE`,
+`DISTINCT ON` parse; a statement that does not is ONE `diagnostics` row, `name = 'syntax'`, and the statements around it
+still map; psql's `\i`/`\set` lines are skipped). A PostgreSQL file has no `sql_keys`, `sql_steps` or `sql_dynamic`
+rows, and a function's body is its text, not statements:
 
 | table | one row per |
 |---|---|
 | `sql_objects` | table, view, procedure, function, trigger, type, sequence, index - `database`, `schema`, `name`, `source` |
 | `sql_columns` | column - `type`, `nullable`, `identity`, `key`, `default_expr`, `computed` |
 | `sql_keys` | primary, unique, foreign (`ref_schema`, `ref_name`, `ref_columns`), check, default, index |
-| `sql_refs` | what a statement touches - `action` (`select`, `insert`, `update`, `delete`, `merge`, `truncate`, `exec`, `include`), the column where it names one |
+| `sql_refs` | what a statement touches - `action` (`select`, `insert`, `update`, `delete`, `merge`, `truncate`, `exec`, `include`), the column where it names one, `statement` the `sql_statements.id` it is in (`''` for an `include`) |
+| `sql_statements` | statement, one that touches nothing (`SET NOCOUNT ON`, `DECLARE`) included - `batch` (the `GO`-separated index), `ordinal` (its place in the batch, nested statements counted), `line`, `end_line`, `col`, `kind` (`select`, `insert`, `update`, `delete`, `merge`, `set`, `declare`, `block`, `if`, `create table`, `create or alter procedure`, ...), `parent` (the enclosing statement: a block, an `IF`, a `CREATE PROCEDURE`), `object` (the `sql_objects.id` whose body it is), `source` (a LEAF statement's text; a compound one keeps only its lines), `fingerprint` |
+| `sql_nodes` | node of a statement's normalized tree - `statement`, `n` (preorder, the root 0, by where it starts), `parent` (the parent's `n`, NULL for the root), `ord`, `kind`, `value`, `line` |
+| `sql_column_refs` | column a statement names - `statement`, `object`, `line`, `role` (the clause: `select`, `where`, `join`, `groupby`, `having`, `orderby`, `set`, `insert`, `values`, `output`, `merge_on`, `using`, `window`, `top`), `schema` + `name` (the table the alias or name stands for), `source_kind` (`table`, `cte`, `derived`, `temp`, `variable`, `pseudo` for `inserted`/`deleted`), `alias` (as written), `column` (`*` for `o.*`), `database`. An unqualified column of a query with several sources is NOT attributed: `name` is `''`, never guessed |
 | `sql_steps` | what a script does, in order: `values`, `set`, `temp`, `drop`, `flow` - the input of `sql_seeds` |
 | `sql_dynamic` | a `CREATE TRIGGER` inside a string - `name` (its literal prefix when `open` = 1: `'... T_' + @t`) |
-| `files` | `database`, `project`, `kind`: `build`, `predeploy`, `postdeploy`, `script` |
+| `files` | `database`, `project`, `kind`: `build`, `predeploy`, `postdeploy`, `script`; `dialect`: `tsql` or `postgres` |
 
 SQLCMD is handled before parsing: `:r`/`:setvar` lines are blanked and `$(Var)` becomes an identifier of
 the same length, so lines still point into the file; each `:r` becomes an `include` ref. `inserted`,
 `deleted`, `#temp`, `@table` and CTE names are never touches.
+
+**What each statement is** - its tree (`sql_nodes`), its fingerprint, the columns it names (`sql_column_refs`),
+its shape as views (`sql_clauses`, `sql_joins`, `sql_functions`, `sql_ctes`) and `--sql-parse` for one text with
+no tree: [sql-statements.md](sql-statements.md).
 
 Two tables are DERIVED after both halves and rewritten whole each run:
 
@@ -138,6 +150,8 @@ cannot - which database a context or a connection reaches is decided at run time
   "sqlText": ["Demo.Data.Sql.Run*"], "unattributedContexts": ["App.Data.MainContext"], "default": "Main" }
 ```
 
+`"dialects": [{ "glob": "pg/**", "dialect": "postgres" }]` says which SQL a file is: a glob over its map path (`**`,
+`*`, `?`, case ignored), the first that matches deciding; every other file is `tsql`.
 `contexts`: a mapping class with that context in `typeof(...)`, or an entity with a `DbSet` in it, resolves
 there. `connections`: a method spelling that connection name runs its SQL there. `sqlText`: more methods whose
 SQL argument is parsed (`*` the only wildcard). `unattributedContexts`: where a mapping class naming no context

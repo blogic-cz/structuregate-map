@@ -35,6 +35,17 @@ internal sealed class CsTables
         return id;
     }
 
+    /// <summary>A row WITHOUT an id: a node of a table keyed by its owner and its number (`sql_nodes`), where an id per
+    /// node would only be stored.</summary>
+    public void Plain(string table, params (string Key, object Value)[] cells)
+    {
+        if (!tables.TryGetValue(table, out var list)) tables[table] = list = [];
+        list.Add(cells);
+    }
+
+    /// <summary>A cell that is SQL NULL - a root node's parent. A plain null is written as "".</summary>
+    public static readonly object Null = new();
+
     /// <summary>Records how many compile errors the file has.</summary>
     public void Count(string file, int errors) => Stamp(file, "errors", errors);
 
@@ -158,6 +169,9 @@ internal sealed class CsTables
         if (key is not null) json.WritePropertyName(key);
         switch (value)
         {
+            case not null when ReferenceEquals(value, Null):
+                json.WriteNullValue();
+                break;
             case ValueTuple<string, object?>[] node:
                 json.WriteStartObject();
                 open.Push((node.GetEnumerator(), false));

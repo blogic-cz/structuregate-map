@@ -244,3 +244,18 @@ Test-Case 'sqlmap: a primary key trailing a column with its own column list keys
     Assert-SqlMapRow $db "SELECT 'v=' || name || '|' || nullable || '|' || key FROM sql_columns WHERE name = 'ItemID'" 'ItemID|0|1' 'the named column is the key'
     Assert-SqlMapRow $db "SELECT 'v=' || name || '|' || nullable || '|' || key FROM sql_columns WHERE name = 'Note'" 'Note|1|0' 'the column it trails is untouched'
 }
+
+# A CTE NAME IS ITS STATEMENT'S OWN: ScriptDom visits a SELECT's query before its WITH clause, so the outer FROM once read
+# the CTE as a table; and a name kept for the rest of the file hid the real table of that name in a later statement.
+Test-Case 'sqlmap: a CTE name is no table - known to its whole statement, and only to it' {
+    $nl = $script:SqlMapNl
+    $made = New-SqlMapDb @{
+        'Demo/Demo.sqlproj' = '<Project Sdk="Microsoft.Build.Sql"></Project>'
+        'Demo/q.sql' = "WITH x AS (SELECT Id FROM dbo.Orders) INSERT INTO dbo.Archive (Id) SELECT Id FROM x;$nl" +
+            "WITH a AS (SELECT Id FROM dbo.Orders), b AS (SELECT Id FROM a) SELECT Id FROM b;$nl" +
+            "WITH Accounts AS (SELECT Id FROM dbo.Orders) SELECT Id FROM Accounts;$nl" + "SELECT Name FROM Accounts;$nl"
+        'structuregate.sql.json' = '{ "databases": [ { "name": "Demo", "project": "Demo/Demo.sqlproj" } ] }'
+    }
+    $read = "SELECT 'v=' || group_concat(line || ':' || name, ',') FROM (SELECT line, name FROM sql_refs WHERE action = 'select' ORDER BY line, name)"
+    Assert-SqlMapRow $made.Db $read '1:Orders,2:Orders,3:Orders,4:Accounts' 'every table a statement reads, and no CTE'
+}
