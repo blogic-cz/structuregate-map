@@ -217,6 +217,24 @@ export function rollupRefIds(store) {
     const up = fid === undefined ? undefined : classAt.get(`${fid}#${str(ext.name) ?? ''}`);
     if (up !== undefined) parentOf.set(c.id, up);
   }
+  // A BASE CLASS AND EACH TYPE ARGUMENT OF IT CARRY THE `classes` ROW THE CHECKER RESOLVED THEM TO (#87): the declaration's
+  // own place - its file and its name's line, which `TsClassRows.mjs::heritageRef` read off the symbol, an alias and a
+  // barrel followed - never the name as written. A place two class rows share names neither; a library class has no row.
+  const classAtLine = new Map();
+  const sharedLine = new Set();
+  for (const c of store.table('classes')) {
+    const key = `${String(c.file)}#${String(c.line)}`;
+    if (classAtLine.has(key)) sharedLine.add(key);
+    else classAtLine.set(key, c.id);
+  }
+  const baseIds = (ref) => {
+    if (ref === null) return;
+    const fid = ref.external === true || str(ref.file) === null ? undefined : idByPath.get(ref.file);
+    const key = `${String(fid)}#${String(ref.line)}`;
+    if (fid !== undefined && typeof ref.line === 'number' && !sharedLine.has(key) && classAtLine.has(key)) ref.id = classAtLine.get(key);
+    for (const arg of Array.isArray(ref.type_args) ? ref.type_args : []) baseIds(asRef(arg));
+  };
+  for (const c of store.table('classes')) baseIds(asRef(c.extends));
   const ownMember = (cls, name) => {
     for (let at = cls, i = 0; at !== undefined && i < 32; at = parentOf.get(at), i++) {
       const id = memberOf.get(`${String(at)}#${name}`);

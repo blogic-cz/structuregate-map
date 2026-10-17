@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 
 import { canonicalPath, relativeTo, slash } from './TsPaths.mjs';
 import { locationOf } from './TsNodes.mjs';
+import { makeLibPipes } from './TsLibPipes.mjs';
 
 /** The package a decorator must come FROM to be an Angular one. ONE identity resolved through the type
  *  checker, instead of a list of the five names - which says nothing about origin and would count a
@@ -44,6 +45,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
    * than dropped: "declared here" and "declared here and nowhere else" are different claims.
    */
   const declFileOf = (node) => declFileOfSymbol(symbolAt(node));
+  const libPipesOf = makeLibPipes({ ts, checker, symbolAt, feRoot, propName });
   const declFileOfSymbol = (sym) => {
     const decls = sym?.declarations ?? [];
     if (!decls.length || !sym) return null;
@@ -154,14 +156,38 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     }));
   }
 
+  /**
+   * WHERE THE CLASS A NAME RESOLVES TO IS DECLARED - its name's line, the line its `classes` row carries - so the refs
+   * rollup joins it by the DECLARATION the checker reached (`TsRefs.mjs::rollupRefIds`, #87), never by the name as
+   * written: an alias or a barrel is followed by `symbolAt`, and two classes of one name in one file stay two.
+   */
+  const classLineOf = (sym, file) => {
+    const decl = (sym?.declarations ?? []).find((d) => ts.isClassDeclaration(d) || ts.isClassExpression(d));
+    if (!decl || relativeTo(feRoot, canonicalPath(decl.getSourceFile().fileName)) !== file) return {};
+    return { line: locationOf(decl).line };
+  };
+  /** A heritage clause's base, or one of its type arguments: what the checker resolves it to, and each type argument
+   *  of its own the same way, every level of them (`extends Base<Page<Order>>`). */
+  const heritageRef = (nameNode, typeArgs, text) => {
+    const sym = nameNode ? symbolAt(nameNode) : undefined;
+    const declared = nameNode ? declFileOfSymbol(sym) : null;
+    const args = [...(typeArgs ?? [])].map((a) => (ts.isTypeReferenceNode(a)
+      ? heritageRef(ts.isQualifiedName(a.typeName) ? a.typeName.right : a.typeName, a.typeArguments, a.getText())
+      : { text: a.getText() }));
+    return {
+      text, ...(declared ?? {}), ...(declared ? classLineOf(sym, declared.file) : {}),
+      ...(args.length ? { type_args: args } : {}),
+    };
+  };
+
   function heritageOf(node) {
     let extendsInfo = null;
     const implementsInfo = [];
     for (const h of node.heritageClauses ?? []) {
       for (const t of h.types) {
-        const info = { text: t.expression.getText(), ...(declFileOf(t.expression) ?? {}) };
-        if (h.token === ts.SyntaxKind.ExtendsKeyword) extendsInfo = info;
-        else implementsInfo.push(info);
+        if (h.token === ts.SyntaxKind.ExtendsKeyword) {
+          extendsInfo = heritageRef(t.expression, t.typeArguments, t.expression.getText());
+        } else implementsInfo.push({ text: t.expression.getText(), ...(declFileOf(t.expression) ?? {}) });
       }
     }
     return { extendsInfo, implementsInfo };
@@ -311,6 +337,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
       io = angular.registerIo({ classId, className, fid, members: summaries });
       angularRows = angular.registerAngular({
         classId, fid, filePath: node.getSourceFile().fileName, className, decorators,
+        externalPipes: libPipesOf(node, decorators),
       });
     }
     return { classId, decorators, members, name: className, io, angularRows, injectsTemplateRef };

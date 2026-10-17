@@ -12,7 +12,13 @@ import { slash } from './TsPaths.mjs';
 
 const refsOf = (row, field) => row[field] ?? [];
 
-export function rollupModuleScope(store, diag) {
+/**
+ * THE SCOPE MACHINERY, built once and asked by both rollups that need it: which candidates a render's host can see
+ * (`rollupModuleScope`) and which pipe a template's usage resolves to (`TsTpl/TsPipeRefs.mjs`, #86). `quiet()` stops its notes
+ * once the render rollup has made them: the pipe rollup asks again of the same modules, and a note is no new fact.
+ */
+export function makeScopes(store, diag) {
+  let note = (kind, detail) => diag.note(kind, detail);
   const classById = new Map(store.table('classes').map((c) => [c.id, c]));
   const modules = store.table('ng_modules');
   const fileIdByAbs = new Map(store.table('files').map((f) => [f.abs, f.id]));
@@ -94,7 +100,7 @@ export function rollupModuleScope(store, diag) {
       }
     }
     if (ownerFile != null && npmNamesByFile.get(ownerFile)?.has(name)) {
-      diag.note('module_ref_from_dependency', { name, file: ownerFile });
+      note('module_ref_from_dependency', { name, file: ownerFile });
       return [];
     }
     return byName.get(name) ?? [];
@@ -136,10 +142,17 @@ export function rollupModuleScope(store, diag) {
     return null;
   };
 
-  const emptyScope = () => ({ ids: new Set(), names: new Set() });
+  // `ext`: the LIBRARY pipes in scope, read off their typings at extraction (`external_pipes`, `TsDecls/TsLibPipes.mjs`).
+  const emptyScope = () => ({ ids: new Set(), names: new Set(), ext: new Map() });
   const merge = (into, from) => {
     for (const i of from.ids) into.ids.add(i);
     for (const n of from.names) into.names.add(n);
+    for (const [k, v] of from.ext) into.ext.set(k, v);
+  };
+  const addExternal = (into, row, from) => {
+    for (const p of Array.isArray(row?.external_pipes) ? row.external_pipes : []) {
+      if (p?.from === from) into.ext.set(`${String(p.file)}#${String(p.line)}#${String(p.name)}`, p);
+    }
   };
   const addRef = (into, ref) => {
     const cid = classIdForRef(ref);
@@ -160,6 +173,7 @@ export function rollupModuleScope(store, diag) {
       }
       addRef(out, e);
     }
+    addExternal(out, m, 'exports');
     return out;
   };
 
@@ -184,11 +198,39 @@ export function rollupModuleScope(store, diag) {
     if (cached) return cached;
     const declared = emptyScope();
     for (const d of refsOf(m, 'declarations')) addRef(declared, d);
-    const scope = { declared, imported: importsOf(refsOf(m, 'imports'), m.file) };
+    const imported = importsOf(refsOf(m, 'imports'), m.file);
+    addExternal(imported, m, 'imports');
+    const scope = { declared, imported };
     scopeCache.set(m.id, scope);
     return scope;
   };
 
+  const fileAbsById = new Map(store.table('files').map((f) => [f.id, String(f.abs)]));
+  // A STANDALONE component has no NgModule at all: its scope is its own `imports` array. Without this, every
+  // render from a standalone component was `unknown` however the module lookup was keyed.
+  const standaloneByClass = new Map();
+  for (const c of store.table('components')) if (c.standalone === true) standaloneByClass.set(c.class, c);
+  /** A standalone component's scope: its own `imports`, and the library pipes they make visible. */
+  const standaloneScope = (c) => {
+    const scope = importsOf(refsOf(c, 'imports'), c.file);
+    addExternal(scope, c, 'imports');
+    return scope;
+  };
+  /** The NgModule declaring a class - keyed by its FILE, then by its name. */
+  const moduleOfClass = (classId) => {
+    const fromClass = classById.get(classId);
+    const fromFile = fromClass ? fileAbsById.get(fromClass.file) : undefined;
+    return (fromFile ? declaringModuleByFile.get(fromFile) : undefined)
+      ?? (typeof fromClass?.name === 'string' ? declaringModule.get(fromClass.name) : undefined);
+  };
+  return {
+    scopeOf, standaloneScope, moduleOfClass, standaloneByClass,
+    quiet: () => { note = () => {}; },
+  };
+}
+
+export function rollupModuleScope(store, diag, scopes = makeScopes(store, diag)) {
+  const { scopeOf, standaloneScope, moduleOfClass, standaloneByClass } = scopes;
   /**
    * Is this render's TARGET in that scope - BY IDENTITY first, by name only if nothing resolved.
    *
@@ -200,12 +242,6 @@ export function rollupModuleScope(store, diag) {
     if (scope.ids.has(r.to_class)) return 'id';
     return scope.names.has(String(r.to_name)) ? 'name' : null;
   };
-
-  const fileAbsById = new Map(store.table('files').map((f) => [f.id, String(f.abs)]));
-  // A STANDALONE component has no NgModule at all: its scope is its own `imports` array. Without this, every
-  // render from a standalone component was `unknown` however the module lookup was keyed.
-  const standaloneByClass = new Map();
-  for (const c of store.table('components')) if (c.standalone === true) standaloneByClass.set(c.class, c);
 
   const counts = { declared: 0, imported: 0, out_of_scope: 0, unknown: 0 };
   for (const r of store.table('renders')) {
@@ -224,7 +260,7 @@ export function rollupModuleScope(store, diag) {
     const standalone = standaloneByClass.get(r.from_class);
     if (standalone) {
       // Its own `imports` array IS the scope - the rule the compiler applies to a standalone component.
-      const hit = reach(importsOf(refsOf(standalone, 'imports'), standalone.file), r);
+      const hit = reach(standaloneScope(standalone), r);
       const scopeName = hit === null ? 'out_of_scope' : 'imported';
       r.standalone = true;
       r.scope = scopeName;
@@ -232,10 +268,7 @@ export function rollupModuleScope(store, diag) {
       counts[scopeName] = (counts[scopeName] ?? 0) + 1;
       continue;
     }
-    const fromClass = classById.get(r.from_class);
-    const fromFile = fromClass ? fileAbsById.get(fromClass.file) : undefined;
-    const mod = (fromFile ? declaringModuleByFile.get(fromFile) : undefined)
-      ?? (typeof fromClass?.name === 'string' ? declaringModule.get(fromClass.name) : undefined);
+    const mod = moduleOfClass(r.from_class);
     const scope = scopeOf(mod);
     if (!scope || !mod) {
       r.scope = 'unknown';
