@@ -8,7 +8,8 @@ fn ids_of(rows: Value) -> IndexSet<String> {
 fn ask(db: &Connection, replaced: &[&str], whole: &[&str], kept: &IndexSet<String>, named: &IndexMap<String, String>, deps: Value, nested: bool) -> Option<(usize, String)> {
     let replaced: Vec<String> = replaced.iter().map(|s| s.to_string()).collect();
     let whole: Vec<String> = whole.iter().map(|s| s.to_string()).collect();
-    let plan = Replace { half: "typescript", replaced: &replaced, whole: &whole, kept, named };
+    let joins = vec!["calls.target".to_string()];
+    let plan = Replace { half: "typescript", replaced: &replaced, whole: &whole, kept, named, joins: &joins };
     dangling(db, &plan, deps.as_object().unwrap(), nested).unwrap()
 }
 
@@ -35,7 +36,7 @@ fn a_kept_row_naming_an_id_the_run_replaces_away_is_found_and_one_kept_is_not() 
     assert_eq!(ask(&db, &["b.ts"], &[], &kept, &none, json!({"b.ts": ["a.ts"]}), false), None);
     // b.ts comes back with c:1 under a new id: a.ts's call would name a row that is gone.
     let renumbered = ids_of(json!({"classes": [{"id": "c:9", "file": "f:2"}, {"id": "c:2", "file": "f:2"}]}));
-    assert_eq!(ask(&db, &["b.ts"], &[], &renumbered, &none, json!({"b.ts": ["a.ts"]}), false), Some((1, "calls -> c:1".to_string())));
+    assert_eq!(ask(&db, &["b.ts"], &[], &renumbered, &none, json!({"b.ts": ["a.ts"]}), false), Some((1, "calls.target -> c:1".to_string())));
 }
 
 #[test]
@@ -50,8 +51,20 @@ fn an_id_a_kept_row_holds_inside_a_structure_is_found_where_the_run_stopped_shor
     // a.ts's plain call and c.ts's nested value both name it.
     assert_eq!(found.map(|(n, _)| n), Some(2));
     assert_eq!(ask(&db, &["b.ts"], &[], &ids, &none, json!({}), true).unwrap().1, "members.value -> c:1");
-    // A run over every hop never asked it of a structure, and still does not.
-    assert_eq!(ask(&db, &["b.ts"], &[], &ids, &none, json!({}), false), None);
+    // A run over every hop asks it too: no file the graph lists names c:1, and its node rows still do.
+    assert_eq!(ask(&db, &["b.ts"], &[], &ids, &none, json!({}), false).unwrap().1, "members.value -> c:1");
+}
+
+#[test]
+fn a_run_over_every_hop_finds_an_id_a_whole_table_loses_in_a_join_of_a_file_no_graph_lists() {
+    // `classes` is wrongly rebuilt whole and comes back renumbered (as `files` once did): a.ts, which the graph says
+    // depends on nothing replaced, names c:1 in `calls.target` - a join the spec declares.
+    let db = base();
+    let renumbered = ids_of(json!({"classes": [{"id": "c:7"}, {"id": "c:8"}]}));
+    let none = IndexMap::new();
+    assert_eq!(ask(&db, &["c.ts"], &["classes"], &renumbered, &none, json!({}), false), Some((1, "calls.target -> c:1".to_string())));
+    let kept = ids_of(json!({"classes": [{"id": "c:1"}, {"id": "c:2"}]}));
+    assert_eq!(ask(&db, &["c.ts"], &["classes"], &kept, &none, json!({}), false), None);
 }
 
 #[test]
@@ -67,7 +80,7 @@ fn an_id_of_a_whole_table_the_payload_does_not_hold_again_is_found_in_a_kept_row
     .unwrap();
     let kept = ids_of(json!({"routes": [{"id": "r:5"}, {"id": "r:2"}]}));
     let none = IndexMap::new();
-    assert_eq!(ask(&db, &["a.ts"], &["routes"], &kept, &none, json!({}), true), Some((1, "calls -> r:1".to_string())));
+    assert_eq!(ask(&db, &["a.ts"], &["routes"], &kept, &none, json!({}), true), Some((1, "calls.target -> r:1".to_string())));
     let named: IndexMap<String, String> = [("r:1".to_string(), "component_reach.routes".to_string())].into_iter().collect();
     db.execute("DELETE FROM calls WHERE id = 'x:2'", []).unwrap();
     assert_eq!(ask(&db, &["a.ts"], &["routes"], &kept, &named, json!({}), true), Some((1, "component_reach.routes -> r:1".to_string())));
@@ -87,7 +100,7 @@ fn a_kept_row_of_a_table_with_no_id_is_asked_too_and_a_string_that_only_looks_li
     let none = IndexMap::new();
     let renumbered = ids_of(json!({"classes": [{"id": "c:9", "file": "f:2"}, {"id": "c:2", "file": "f:2"}]}));
     db.execute("DELETE FROM calls", []).unwrap();
-    assert_eq!(ask(&db, &["b.ts"], &[], &renumbered, &none, json!({}), true), Some((1, "diagnostics -> c:1".to_string())));
+    assert_eq!(ask(&db, &["b.ts"], &[], &renumbered, &none, json!({}), true), Some((1, "diagnostics.target -> c:1".to_string())));
     // `zz:77` names no row that ever was: nothing vanished, nothing to read again for.
     let kept = ids_of(json!({"classes": [{"id": "c:1", "file": "f:2"}, {"id": "c:2", "file": "f:2"}]}));
     assert_eq!(ask(&db, &["b.ts"], &[], &kept, &none, json!({}), true), None);

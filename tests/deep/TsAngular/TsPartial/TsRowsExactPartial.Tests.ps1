@@ -215,4 +215,13 @@ Test-Case 'tsrows: a partial run publishes the spec a fresh full map of the edit
     Assert-Equal ($partial | ConvertTo-Json -Depth 100 -Compress) ($full | ConvertTo-Json -Depth 100 -Compress) 'spec:typescript'
 }
 
+Test-Case 'tsrows: a partial run over every hop that would leave a kept row naming a row it replaced reads everything' {
+    # `classes` deleted WHOLE while node sends the rows it made - a table wrongly rebuilt, as `files` once was - through a
+    # door only a test opens (`STRUCTUREGATE_TEST_WHOLE`, `tsapply.rs`). `main.ts` is read again and nothing imports it,
+    # so no file the stored graph lists names a class: only a probe of every kept row's joins and structures finds them.
+    $run = Invoke-TsExactRun 'apps/shop/src/main.ts' @{ STRUCTUREGATE_TEST_WHOLE = 'classes' }
+    Assert-Line $run.Partial 'reads everything instead'
+    Assert-TsExactRows (Get-TsExactRows $run.PartialDb) (Get-TsExactRows $run.FullDb) 'every row after the run read everything'
+}
+
 }

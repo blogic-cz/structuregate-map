@@ -148,6 +148,11 @@ fn declared(db: &Connection, extra: &[(&str, &str)]) -> Result<usize> {
     Ok(made)
 }
 
+/// One column's index, made when it is not there yet - what a reader that probes the column by value needs.
+pub fn index_column(db: &Connection, table: &str, column: &str) -> Result<()> {
+    index(db, table, column)
+}
+
 fn index(db: &Connection, table: &str, column: &str) -> Result<()> {
     db.execute_batch(&format!(
         "CREATE INDEX IF NOT EXISTS \"ix_{t}_{c}\" ON \"{t}\" (\"{c}\")",
