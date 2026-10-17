@@ -88,7 +88,9 @@ Every `.sql` under a `.sqlproj`, parsed with Microsoft's own T-SQL parser (Scrip
 | `sql_objects` | table, view, procedure, function, trigger, type, sequence, index - `database`, `schema`, `name`, `source` |
 | `sql_columns` | column - `type`, `nullable`, `identity`, `key`, `default_expr`, `computed` |
 | `sql_keys` | primary, unique, foreign (`ref_schema`, `ref_name`, `ref_columns`), check, default, index |
-| `sql_refs` | what a statement touches - `action` (`select`, `insert`, `update`, `delete`, `merge`, `truncate`, `exec`, `include`), the column where it names one |
+| `sql_refs` | what a statement touches - `action` (`select`, `insert`, `update`, `delete`, `merge`, `truncate`, `exec`, `include`), the column where it names one, `statement` the `sql_statements.id` it is in (`''` for an `include`) |
+| `sql_statements` | statement, one that touches nothing (`SET NOCOUNT ON`, `DECLARE`) included - `batch` (the `GO`-separated index), `ordinal` (its place in the batch, nested statements counted), `line`, `end_line`, `col`, `kind` (`select`, `insert`, `update`, `delete`, `merge`, `set`, `declare`, `block`, `if`, `create table`, `create or alter procedure`, ...), `parent` (the enclosing statement: a block, an `IF`, a `CREATE PROCEDURE`), `object` (the `sql_objects.id` whose body it is), `source` (a LEAF statement's text; a compound one keeps only its lines), `fingerprint` |
+| `sql_nodes` | node of a statement's normalized tree - `statement`, `n` (preorder, the root 0, by where it starts), `parent` (the parent's `n`, NULL for the root), `ord`, `kind`, `value`, `line` |
 | `sql_steps` | what a script does, in order: `values`, `set`, `temp`, `drop`, `flow` - the input of `sql_seeds` |
 | `sql_dynamic` | a `CREATE TRIGGER` inside a string - `name` (its literal prefix when `open` = 1: `'... T_' + @t`) |
 | `files` | `database`, `project`, `kind`: `build`, `predeploy`, `postdeploy`, `script` |
@@ -96,6 +98,25 @@ Every `.sql` under a `.sqlproj`, parsed with Microsoft's own T-SQL parser (Scrip
 SQLCMD is handled before parsing: `:r`/`:setvar` lines are blanked and `$(Var)` becomes an identifier of
 the same length, so lines still point into the file; each `:r` becomes an `include` ref. `inserted`,
 `deleted`, `#temp`, `@table` and CTE names are never touches.
+
+**A statement's tree (`sql_nodes`) is in kinds no dialect owns**, so one query reads every SQL the half parses: the
+root is the statement's `kind`; below it `query` (a SELECT's body), `union`/`except`/`intersect` (`value` `all`),
+`item` (a select-list entry), `from`, `table` (`value` the name, children `schema`, `database`, `alias`),
+`subquery`, `join` (`value` `inner`, `left`, `right`, `full`, `cross`, `cross apply`, `outer apply`; children: the two
+sides in order, then `on`), `where`, `groupby`, `having`, `orderby` + `sort` (`asc`/`desc`), `top`, `offset`,
+`distinct`, `cte` (`value` its name), `column` (`o.Amount`, `*`), `func` (lowercased: `sum`, `row_number`, `cast`),
+`over` + `partition`, `literal`, `null`, `param` (`@id`), `op` (`=`, `<>`, `and`, `or`, `not`, `+`, `like`, `is null`,
+`between`), `in` (`value` `not` for NOT IN), `exists`, `case`/`when`, `values`/`row`, `set` (one assignment),
+`target`/`using`/`into`, `output`, `action` (a MERGE's `matched`/`not matched`), `var`, `proc`, `name`, `columndef`,
+`type`. Anything else is transparent: its children hang off the nearest node above. `fingerprint` is the same for two
+statements that differ only in literals or in how many literals an IN list holds; one more operator, column or
+table is another fingerprint.
+
+```sql
+-- the same query, written in several places
+SELECT s.fingerprint, count(*) n, min(f.path || ':' || s.line) first FROM sql_statements s JOIN files f ON f.id = s.file
+WHERE s.kind = 'select' GROUP BY s.fingerprint HAVING n > 1 ORDER BY n DESC;
+```
 
 Two tables are DERIVED after both halves and rewritten whole each run:
 
