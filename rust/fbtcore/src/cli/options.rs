@@ -11,6 +11,8 @@ pub const USAGE: &str = include_str!("usage.txt");
 const POWERSHELL: [&str; 3] = [".ps1", ".psm1", ".psd1"];
 const TYPESCRIPT: [&str; 4] = [".ts", ".tsx", ".mts", ".cts"];
 
+use crate::mapper::deep::sqlconfig::DIALECTS;
+
 /// Every flag, parsed. The field names are the ones the gate and the map read their input by.
 #[derive(Default)]
 pub struct Options {
@@ -36,6 +38,9 @@ pub struct Options {
     pub ts_node_modules: Vec<String>,
     pub ts_config: Option<String>,
     pub sql_config: Option<String>,
+    /// `--sql-parse <file|->`: one SQL text parsed and printed as JSON, nothing else; `--dialect` says which SQL it is.
+    pub sql_parse: Option<String>,
+    pub dialect: Option<String>,
     /// `--facts-config`: `structuregate.facts.json`, the documents whose facts the deep map checks the code against.
     pub facts_config: Option<String>,
     /// `--facts-pull`: save each document of the facts config as its snapshot, and do nothing else.
@@ -167,6 +172,11 @@ pub fn parse(args: &[String]) -> Result<Parsed, String> {
             "--ts-node-modules" => o.ts_node_modules.push(full(&next()?)),
             "--ts-config" => o.ts_config = Some(full(&next()?)),
             "--sql-config" => o.sql_config = Some(full(&next()?)),
+            "--sql-parse" => {
+                let source = next()?;
+                o.sql_parse = Some(if source == "-" { source } else { full(&source) });
+            }
+            "--dialect" => o.dialect = Some(next()?.to_lowercase()),
             "--facts-config" => o.facts_config = Some(full(&next()?)),
             "--facts-pull" => o.facts_pull = true,
             "--ts-html" => o.ts_html = Some(full(&next()?)),
@@ -286,6 +296,16 @@ pub fn parse(args: &[String]) -> Result<Parsed, String> {
     }
     if (o.map_view_out.is_some() || o.map_view_graph.is_some()) && o.map_view.is_none() {
         return Err("--map-view-out and --map-view-graph belong to --map-view <db>".into());
+    }
+    // A TREE'S DIALECTS ARE ITS SQL CONFIG'S: on the command line one names the dialect of the one text parsed.
+    if o.dialect.is_some() && o.sql_parse.is_none() {
+        return Err("--dialect belongs to --sql-parse: a tree's SQL dialects are its SQL config's".into());
+    }
+    if let Some(other) = o.dialect.as_deref().filter(|d| !DIALECTS.contains(d)) {
+        return Err(format!("--dialect takes {}, not `{other}`", DIALECTS.join(" or ")));
+    }
+    if o.sql_parse.is_some() && (o.map || o.map_sqlite.is_some() || o.map_query.is_some()) {
+        return Err("--sql-parse parses one text and maps no tree: it takes no --map, --map-sqlite or --map-query".into());
     }
     if o.update_map_baseline && o.map_baseline.is_none() {
         return Err("--update-map-baseline needs --map-baseline <file>".into());

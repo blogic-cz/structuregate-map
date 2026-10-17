@@ -69,7 +69,28 @@ pub fn read(given: Option<&str>, base_dir: &str) -> Value {
     config["sql_text"] = json!(sql_text);
     config["default"] = json!(root["default"].as_str().unwrap_or(""));
     config["unattributed_contexts"] = json!(strings(&root["unattributedContexts"]));
+    // WHICH SQL A FILE IS: `[{glob, dialect}]`, a glob over the map path (`**`, `*`, `?`), the first that matches deciding.
+    let dialects: Vec<Value> = root["dialects"].as_array().into_iter().flatten()
+        .filter_map(|d| Some(json!({ "glob": d["glob"].as_str()?, "dialect": d["dialect"].as_str()?.to_lowercase() })))
+        .collect();
+    if let Some(wrong) = dialects.iter().filter_map(|d| d["dialect"].as_str()).find(|d| !DIALECTS.contains(d)) {
+        config["problem"] = json!(format!("{path}: a dialect is {}, not `{wrong}`", DIALECTS.join(" or ")));
+    }
+    config["dialects"] = Value::Array(dialects);
     config
+}
+
+/// The SQL the half parses: ScriptDom's T-SQL, and PostgreSQL through `sqlpg/`.
+pub const DIALECTS: [&str; 2] = ["tsql", "postgres"];
+
+/// The dialect of one file of the tree: the first `dialects` glob its map path matches, else T-SQL.
+pub fn dialect_of(config: &Value, rel: &str) -> String {
+    config["dialects"].as_array().into_iter().flatten()
+        .find(|d| d["glob"].as_str().is_some_and(|glob| crate::sources::glob::excluded(&[glob.to_string()], rel)))
+        .and_then(|d| d["dialect"].as_str())
+        .filter(|d| DIALECTS.contains(d))
+        .unwrap_or("tsql")
+        .to_string()
 }
 
 fn strings(value: &Value) -> Vec<String> {

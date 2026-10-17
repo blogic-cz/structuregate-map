@@ -52,12 +52,18 @@ internal static class SqlDeep
         }
         var rows = new CsTables(counters);
         var read = new List<(string Rel, string Abs)>();
+        // WHICH SQL A FILE IS - the config's `dialects`, decided by rust; a file it does not name is T-SQL.
+        var dialects = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (input.TryGetProperty("dialects", out var named) && named.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var file in named.EnumerateObject()) dialects[file.Name] = file.Value.GetString()!;
+        }
         foreach (var rel in input.GetProperty("rels").EnumerateArray().Select(r => r.GetString()!))
         {
             string text;
             try { text = File.ReadAllText(paths[rel]); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
-            Read(rows, rel, paths[rel], text, shas[rel], config);
+            Read(rows, rel, paths[rel], text, shas[rel], config, dialects.GetValueOrDefault(rel, TSql));
             read.Add((rel, paths[rel]));
         }
         return ([], rows.ToUtf8(input.GetProperty("all").GetBoolean(), first: true, final: true,
@@ -65,15 +71,35 @@ internal static class SqlDeep
     }
 
     /// <summary>One file's rows: its `files` row, what it declares, and what it touches.</summary>
-    public static void Read(CsTables rows, string rel, string abs, string text, string sha, SqlConfig config)
+    public static void Read(CsTables rows, string rel, string abs, string text, string sha, SqlConfig config, string dialect = TSql)
     {
         var project = Owner(abs);
-        var database = project is null ? "" : config.DatabaseOf(project);
-        var kind = project is null ? "script" : KindOf(project, abs);
+        Rows(rows, rel, text, sha, project is null ? "" : Path.GetFileNameWithoutExtension(project),
+            project is null ? "" : config.DatabaseOf(project), project is null ? "script" : KindOf(project, abs), dialect);
+    }
+
+    /// <summary>`--sql-parse`: ONE TEXT's rows, as a file of no project has them, in the payload's own shape -
+    /// rust stores them into a database in memory and derives the rest there (`rust/fbtcore/src/cli/sqlparse.rs`).</summary>
+    public static string Parse(string text, string name, string dialect)
+    {
+        var rows = new CsTables([]);
+        Rows(rows, name, text, "", "", "", "script", dialect);
+        var (buffer, length) = rows.ToUtf8(true, true, true, false, new SortedDictionary<string, string>(StringComparer.Ordinal), [], Lang);
+        return System.Text.Encoding.UTF8.GetString(buffer, 0, length);
+    }
+
+    public const string TSql = "tsql";
+
+    private static void Rows(CsTables rows, string rel, string text, string sha, string project, string database, string kind, string dialect)
+    {
         var file = rows.Add("files", "f",
             ("path", rel), ("lang", Lang), ("sha", sha), ("lines", text.Count(c => c == '\n') + 1),
-            ("project", project is null ? "" : Path.GetFileNameWithoutExtension(project)),
-            ("database", database), ("kind", kind), ("errors", 0));
+            ("project", project), ("database", database), ("kind", kind), ("errors", 0), ("dialect", dialect));
+        if (dialect == SqlPostgres.Dialect)
+        {
+            SqlPostgres.Write(rows, file, text, database);
+            return;
+        }
 
         var included = new List<(string Path, int Line)>();
         var prepared = SqlVisitor.Prepared(text, included);
@@ -112,11 +138,27 @@ internal static class SqlDeep
                 ("columns", k.Columns), ("ref_schema", k.RefName.Length > 0 ? Schema(k.RefSchema) : ""),
                 ("ref_name", k.RefName), ("ref_columns", k.RefColumns), ("database", database));
         }
+        // EVERY STATEMENT, its tree, and which statement each touch is in - see SqlStatements.cs. `fingerprint` is
+        // rust's (`rows/sqlshape/`): it fills the rows this run wrote, which an empty one marks.
+        var statements = SqlStatements.Read(fragment, text);
+        var sids = new List<string>();
+        foreach (var s in statements.Statements)
+        {
+            sids.Add(rows.Add("sql_statements", "ss", ("file", file), ("object", Id(visitor.ObjectOf(s.First, s.Last))),
+                ("parent", s.Parent >= 0 ? sids[s.Parent] : ""), ("batch", s.Batch), ("ordinal", s.Ordinal), ("line", s.Line),
+                ("end_line", s.EndLine), ("col", s.Col), ("kind", s.Kind), ("source", s.Leaf ? s.Source : ""), ("fingerprint", "")));
+        }
+        foreach (var n in statements.Nodes)
+        {
+            rows.Plain("sql_nodes", ("file", file), ("statement", sids[n.Statement]), ("n", n.N),
+                ("parent", n.Parent < 0 ? CsTables.Null : n.Parent), ("ord", n.Ord), ("kind", n.Kind), ("value", n.Value), ("line", n.Line));
+        }
         foreach (var t in visitor.Touches)
         {
+            var held = statements.Of(t.Token);
             rows.Add("sql_refs", "sr", ("file", file), ("object", Id(t.Object)), ("line", t.Line), ("lang", Lang),
                 ("action", t.Action), ("schema", Schema(t.Schema)), ("name", t.Name), ("column", t.Column),
-                ("database", database), ("call", ""));
+                ("database", database), ("call", ""), ("statement", held >= 0 ? sids[held] : ""));
         }
         foreach (var d in visitor.Dynamics)
         {
@@ -137,7 +179,7 @@ internal static class SqlDeep
         {
             rows.Add("sql_refs", "sr", ("file", file), ("object", ""), ("line", line), ("lang", Lang),
                 ("action", "include"), ("schema", ""), ("name", path.Replace('\\', '/')), ("column", ""),
-                ("database", database), ("call", ""));
+                ("database", database), ("call", ""), ("statement", ""));
         }
     }
 

@@ -84,6 +84,13 @@ structuregate — structure rules, enforced where they cannot be skipped.
   --sql-config <file>   `structuregate.sql.json` for the deep SQL map: which .sqlproj is which
                         database, and which DbContext, connection name and method reaches it.
                         Found beside the exe when not given; absent links only unique names.
+  --sql-parse <file|->  PARSE ONE SQL TEXT and print what the deep SQL map would hold for it, as
+                        JSON on stdout - statements, objects, refs, column_refs, clauses, joins,
+                        functions, ctes, nodes and diagnostics - with no tree, no database file and
+                        no host. `-` reads stdin. Exits 1 when the text does not parse. Takes no
+                        --map, --map-sqlite or --map-query.
+  --dialect <name>      the SQL --sql-parse reads: tsql (the default) or postgres. A tree's files
+                        are told apart by the SQL config's `dialects`.
   --facts-config <file> `structuregate.facts.json`: documents outside the tree (a Google Doc, a
                         Markdown file), the table under a heading of each that lists facts, and
                         the code each list is checked against - a seeded table's column, an enum,
@@ -185,7 +192,8 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         branch, assignment, decorator and expression as a row, with its source text
                         beside the facts read off it (what it reads, what it calls, what strings it
                         holds), every join column indexed, and the source itself FTS5-indexed in
-                        `file_text`. EVERY HALF INTO ONE DATABASE - python, C# and TypeScript: each
+                        `file_text`. EVERY HALF INTO ONE DATABASE - python, C#, TypeScript, rust and
+                        SQL (every .sql of --ext, parsed in this process): each
                         `files` row says which half wrote it and no half touches another's rows. The C# rows are
                         BOUND where a compilation can be built from what restore and build left on
                         disk - a call carries the symbol and the overload it resolved to, an
@@ -194,7 +202,8 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         is loaded; `files.semantic` says which files were bound. It is a CACHE of
                         the tree: a file whose sha has not moved is not re-read, a file that has
                         gone leaves, and `_meta` records the root and file count it was built from.
-                        Needs --py-host: the database is written by python's own `sqlite3`.
+                        The database is written in this process; --py-host is asked only for the
+                        python half.
   --map-baseline <file> RATCHET WHAT THE MAP CANNOT RESOLVE. Two lists, both of which may only
                         SHRINK, and the same three rules as --baseline: a new entry fails, a
                         recorded one may not grow, and one that is GONE must be removed.

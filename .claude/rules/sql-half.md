@@ -2,6 +2,9 @@
 paths:
   - "src/Map/Sql/**"
   - "rust/fbtcore/src/rows/sqlrun.rs"
+  - "rust/fbtcore/src/rows/sqlshape/**"
+  - "rust/fbtcore/src/cli/sqlparse.rs"
+  - "rust/fbtcore/src/sqlpg/**"
   - "rust/fbtcore/src/rows/seeds/**"
   - "rust/fbtcore/src/rows/dups.rs"
   - "rust/fbtcore/src/mapper/deep/sqlconfig.rs"
@@ -15,7 +18,8 @@ What a consumer queries (every table and column, the worked queries) is `skills/
 it in step. This file is how the half is built and the rules that keep it honest.
 
 `src/Map/Sql/` parses every `.sql` (`--ext .sql`) IN PROCESS with Microsoft's own T-SQL parser
-(`Microsoft.SqlServer.TransactSql.ScriptDom`, +5.3 MB of exe, no trim warning). Rows are stored through the
+(`Microsoft.SqlServer.TransactSql.ScriptDom`, +5.3 MB of exe, no trim warning), or with sqlparser-rs where the config
+says PostgreSQL (below). Rows are stored through the
 same store as C#, scoped by `lang = 'sql'`: `sql_objects`, `sql_columns`, `sql_keys`, `sql_refs`, `sql_steps`,
 `sql_dynamic`, parse errors in `diagnostics`. A file belongs to its nearest `.sqlproj`, which names its database
 (`SqlConfig.DatabaseOf`, the config read by `rust/fbtcore/src/mapper/deep/sqlconfig.rs`) and what it is to the
@@ -25,7 +29,51 @@ build (`build`, `predeploy`, `postdeploy`, `script`).
 
 SQLCMD is not T-SQL: `:r`/`:setvar` lines are blanked and `$(Var)` becomes an identifier of the SAME LENGTH
 (`SqlVisitor.Prepared`), so lines and offsets still point into the file; the `:r` targets become
-`include` refs. `inserted`/`deleted`, `#temp`, `@table` and CTE names are never touches.
+`include` refs. `inserted`/`deleted`, `#temp`, `@table` and CTE names are never touches - a CTE's names are known to
+its WHOLE statement before any of it is visited (`SqlVisitor.Scoped`: ScriptDom visits a SELECT's query before its
+WITH) and forgotten after it.
+
+## PostgreSQL - `rust/fbtcore/src/sqlpg/`, one producer still
+
+A file the config's `dialects` (`sqlconfig.rs::dialect_of`, a glob over the map path) names `postgres` is told to C# in
+the `sql-batch` question (`dialects`), its dialect folded into its sha. C# writes its `files` row (`dialect`) and calls
+`fbt_sql_parse` (`FbtCore.SqlParse`), then writes the rows rust answers through the SAME `CsTables` and counters
+(`SqlPostgres.cs`) - two producers of `lang = 'sql'` would each delete the other's rows. sqlparser-rs (+2.6 MB of exe,
+pure rust, `default-features = false`: its `recursive-protection` is `stacker`/`psm`, C and assembly) stops at its first
+error, so the TOKENS are split at each top-level `;` and every statement parsed on its own with its tokens' own lines;
+its recursion limit is lifted and it runs on a 512 MB-stack thread. The AST is mapped onto the same node kinds by hand
+with an explicit stack (`tree.rs`, `exprs.rs`); refs, objects and columns are read off that tree and the tokens
+(`rows.rs`). A view's query is a statement inside the CREATE VIEW, as ScriptDom has it. The fingerprint, column refs
+and views are the shared pass's - a query written in both dialects has one fingerprint (`tests/deep/sql/SqlPostgres.Tests.ps1`).
+
+## `sql_statements` and `sql_nodes` - per file, the fingerprint filled in rust
+
+`SqlStatements.cs` lists every fragment in visit order and rebuilds the nesting from TOKEN RANGES with an explicit
+stack (ScriptDom's visitor has no exit hook): a `TSqlStatement` is a row and the root of its own tree, a statement
+inside it a row with `parent`. `SqlTree.cs` maps ~70 fragment types onto the dialect-free node kinds the skill lists;
+an unmapped fragment is transparent, and a node no type is (`on`, `target`, `using`, `partition`, `alias`, `schema`,
+`distinct`) is made from where a fragment sits or from a property. Nodes are numbered in SOURCE preorder (siblings by
+first token): visit order is not source order. A `sql_refs` row's `statement` is the innermost statement holding its
+token. `sql_nodes` rows carry NO id - its key is `(statement, n)` - through `CsTables.Plain`.
+
+The fingerprint is RUST'S (`rust/fbtcore/src/rows/sqlshape/`), run by `mapper/deep/mod.rs` right after the half
+stores: the half writes `fingerprint = ''`, and the pass fills only those - the statements written this run - so a
+partial run is exact by construction (the store drops a re-read file's rows by `file` first). It also replaces the
+store's useless `parent` index on `sql_nodes` with `(statement, parent)`. One implementation over the dialect-free
+kinds, so every dialect's statements hash alike.
+
+The same pass writes `sql_column_refs` for those statements (`sqlshape/columns.rs`: scopes are `query` nodes and the
+root, a `target` wrapper marks the written table, an UPDATE's alias target is its FROM table, nothing ambiguous is
+attributed) - a table of its own, NOT a widened `sql_refs`, because every `sql_refs` row becomes a `sql_ref` link
+(`SqlLinksEf.cs`). It has a `file` column, so the store's per-file drop covers it; the tally recounts it. The shape
+VIEWS (`sqlshape/views.rs`: `sql_clauses`, `sql_joins`, `sql_functions`, `sql_ctes`) are rewritten only when their
+text moved. **A test compares a partial run with a fresh map of the edited tree, row by row, ids replaced by what
+they name** (`tests/deep/sql/SqlStatements.Tests.ps1`) - a new per-statement table goes into its content queries.
+
+`--sql-parse` (`rust/fbtcore/src/cli/sqlparse.rs`) asks C# the callback mode `sql-parse` (`SqlDeep.Parse`: the same
+`Rows` a file of no project gets, as the payload's JSON), inserts the tables into an IN-MEMORY SQLite through
+`store::insert_rows`, runs `sqlshape::run_on` and reads the tables and views back - never a second derivation in rust
+memory, which would be a second implementation to disagree with the map.
 
 ## `sql_links` - derived after both halves, rewritten whole each run
 
