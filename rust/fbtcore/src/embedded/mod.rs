@@ -52,7 +52,7 @@ pub const TSROWS: Set = set!("tsrows-node":
     "TsRows/TsDecls/TsClassRows.mjs",
     "TsRows/TsDecls/TsDeclRows.mjs", "TsRows/TsDecls/TsExpr/TsExprDescribe.mjs", "TsRows/TsDecls/TsExpr/TsExprNorm.mjs",
     "TsRows/TsDecls/TsExpr/TsExprSummary.mjs", "TsRows/TsDecls/TsExpr/TsReadRefs.mjs", "TsRows/TsDecls/TsI18nCalls.mjs",
-    "TsRows/TsDecls/TsModifiers.mjs", "TsRows/TsDecls/TsPropReads.mjs", "TsRows/TsDecls/TsRefs.mjs", "TsRows/TsDecls/TsTypeRef.mjs",
+    "TsRows/TsDecls/TsModifiers.mjs", "TsRows/TsDecls/TsPropReads.mjs", "TsRows/TsDecls/TsLibPipes.mjs", "TsRows/TsDecls/TsRefs.mjs", "TsRows/TsDecls/TsTypeRef.mjs",
     "TsRows/TsDecls/TsTypeRows.mjs", "TsRows/TsDecls/TsExpr/TsValue.mjs", "TsRows/TsDecls/TsExpr/TsValueRefs.mjs",
     "TsRows/TsDecls/TsExpr/TsWriteRefs.mjs",
     "TsRows/TsTpl/TsGateChain.mjs", "TsRows/TsTpl/TsRegistry.mjs", "TsRows/TsDerive/TsDynRender.mjs",
@@ -61,7 +61,7 @@ pub const TSROWS: Set = set!("tsrows-node":
     "TsRows/TsDerive/TsRouteKeys.mjs", "TsRows/TsDerive/TsRoutes.mjs", "TsRows/TsDerive/TsFederation.mjs", "TsRows/TsDerive/TsRouteTree.mjs", "TsRows/TsDerive/TsSpecAnchors.mjs",
     "TsRows/TsDerive/TsSpecJoins.mjs", "TsRows/TsTpl/TsTplEmit.mjs", "TsRows/TsTpl/TsTplExpr.mjs",
     "TsRows/TsTpl/TsTplExtract.mjs", "TsRows/TsTpl/TsTplKeys.mjs", "TsRows/TsTpl/TsTplMatch.mjs",
-    "TsRows/TsTpl/TsTplReads.mjs");
+    "TsRows/TsTpl/TsTplReads.mjs", "TsRows/TsTpl/TsPipeRefs.mjs");
 
 /// The plain TypeScript half. `TsGate.Map.mjs` is the file map's: sharing it keeps its fingerprints the ones
 /// buildmap.json groups by.

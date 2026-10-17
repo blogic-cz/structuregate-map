@@ -99,6 +99,13 @@ Beside the shared tables it adds the FRAMEWORK tables:
   A bare `import('./x')` or `require('./x')` is an `imports` row too, with `dynamic` = `import`/`require` and no names.
   **`imports.in_tree`** is whether the import lands in the tree (not `node_modules`, not outside the root) - what
   `external = 0` was often read as.
+* **A template pipe usage names the pipe it runs**: `expressions.pipes`/`template_strings.pipes` are the names, and
+  `pipe_refs` (node rows `<table>__pipe_refs`, one item per name, in order) resolves each by the component's SCOPE (its
+  NgModule's declarations and its imports' exports, or a standalone component's `imports`) - never by the name alone: `id`
+  joins `pipes.id`; `external` (with `class`) is a library pipe (`date` through `CommonModule`); `ambiguous` is two in scope
+  (Angular warns and takes the last registered, so none is picked); none of them, no pipe of that name in scope - a
+  `diagnostics` row `pipe_unresolved_in_scope` (`reason`) or `pipe_ambiguous_in_scope`. A translate pipe's `i18n_refs` row
+  reaches it through `i18n_refs.expression`.
 * **`classes.extends`** is `{text, name, file, external, line, id, type_args}`: `text` as written, `name`/`file`/`line` the
   declaration the checker reached (alias and barrel followed), `id` its `classes` row (none for a library class), and
   `type_args` each type argument the same way (`extends Base<Order>`: Order's `id`), nested arguments under their own.
