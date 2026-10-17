@@ -7,11 +7,20 @@
 //! rows still there. Asked AFTER the replace, as it once was, they were already gone: the check found nothing, ever,
 //! and a refusal would have left the map with the affected rows deleted and nothing written in their place.
 //!
-//! WHO IS ASKED. Every run: the rows of the files the stored id graph (`deps`) says point into a replaced one. A run
-//! that STOPPED SHORT of every hop (`nested`) asks what node once asked of every row it held (`Store.dangling`, gone):
-//! every kept row's plain cells and its structures' node rows, and every row of a whole table the payload sends -
-//! carried or made, it is the row the map will hold (`Digest::named`). Only ids that existed and are about to vanish
-//! count, so a string that merely looks like an id is never a reason to read every hop again.
+//! WHO IS ASKED, ON EVERY RUN: every row of a whole table the payload sends - carried or made, it is the row the map will
+//! hold (`Digest::named`) - every kept row's structures (node rows, by their indexed `value`), every kept row's cell in a
+//! column a spec declares a JOIN (indexed: `schema::index_declared`), and every cell of the rows of the files the stored
+//! id graph (`deps`) says point into a replaced one. Asked only of the watchers' files, as it once was on a run that
+//! read every hop, an id vanishing from a whole table - `files`, when a workspace with no `templateUrl` made it a
+//! rollup's - was named by the kept rows of every other file and stored dangling. A run that STOPPED SHORT of every hop
+//! (`nested`) also reads every plain cell of every kept row, as node once asked of every row it held (`Store.dangling`,
+//! gone). Only ids that existed and are about to vanish count, so a string that merely looks like an id is never a
+//! reason to read again.
+//!
+//! WHAT A HIT DOES: a run that stopped short is asked again over every hop (`STOPPED_SHORT`). A run that already read
+//! every hop would be asked the same question again, so it is refused with `EVERY_HOP` and the caller reads EVERYTHING
+//! instead (`mapper/deep/ts.rs`), saying which reference it found: a full run cannot leave one, and a hook that failed
+//! would leave the map stale until someone ran it by hand.
 
 use super::half::{tables_with_half, HALF_COLUMN};
 use super::schema::escape;
@@ -22,6 +31,9 @@ use serde_json::{Map, Value};
 
 /// How a refusal by `dangling` begins, so the caller asks again over every hop rather than reporting an error.
 pub const STOPPED_SHORT: &str = "a run that stopped short of every hop";
+
+/// How a refusal of a run that read every hop begins, so the caller reads everything instead.
+pub const EVERY_HOP: &str = "a run that read every hop";
 
 /// What a partial run is about to replace, and what it writes in its place.
 pub struct Replace<'a> {
@@ -34,14 +46,19 @@ pub struct Replace<'a> {
     pub kept: &'a IndexSet<String>,
     /// id -> `table.column` of the first payload row of a whole table that names it (`Digest::named`).
     pub named: &'a IndexMap<String, String>,
+    /// `table.column` of every join the payload's spec declares - beside the stored spec's (`probed`).
+    pub joins: &'a [String],
 }
 
-/// An error beginning `STOPPED_SHORT` when the replace would leave a kept row naming nothing - the caller then asks again
-/// over every hop - over the id graph the last run stored.
+/// An error beginning `STOPPED_SHORT` (asked again over every hop) or `EVERY_HOP` (read everything instead) when the
+/// replace would leave a kept row naming nothing, over the id graph the last run stored.
 pub fn refuse(db: &Connection, plan: &Replace<'_>, nested: bool) -> anyhow::Result<()> {
     let deps: Map<String, Value> = super::remember::stored_graph(db).into_iter().map(|(target, dependents)| (target, Value::from(dependents))).collect();
     match dangling(db, plan, &deps, nested)? {
-        Some((count, first)) => anyhow::bail!("{STOPPED_SHORT} would leave {count} reference(s) to rows it replaced, first {first}"),
+        Some((count, first)) => {
+            let run = if nested { STOPPED_SHORT } else { EVERY_HOP };
+            anyhow::bail!("{run} would leave {count} reference(s) to rows it replaced, first {first}")
+        }
         None => Ok(()),
     }
 }
@@ -57,9 +74,6 @@ pub fn dangling(db: &Connection, plan: &Replace<'_>, deps: &Map<String, Value>, 
                 watchers.insert(d.to_string());
             }
         }
-    }
-    if watchers.is_empty() && !nested {
-        return Ok(None);
     }
     let replaced_ids = file_ids(db, half, gone_paths.iter().copied())?;
     let watcher_ids = file_ids(db, half, watchers.iter().map(String::as_str))?;
@@ -105,18 +119,17 @@ pub fn dangling(db: &Connection, plan: &Replace<'_>, deps: &Map<String, Value>, 
             put.execute([id])?;
         }
     }
-    let mut found: Option<String> = None;
-    let mut count = 0;
+    // ONE REFERENCE PER `table.column -> id`, however many probes reach it.
+    let mut found: IndexSet<String> = IndexSet::new();
     let mut hit = |label: String| {
-        count += 1;
-        found.get_or_insert(label);
+        found.insert(label);
     };
-    if nested {
-        for (id, label) in plan.named {
-            if vanished.contains(id) {
-                hit(format!("{label} -> {id}"));
-            }
+    for (id, label) in plan.named {
+        if vanished.contains(id) {
+            hit(format!("{label} -> {id}"));
         }
+    }
+    {
         for (table, has_id) in &holders {
             let mut home = db.prepare(&format!("SELECT owner_file FROM \"{}\" WHERE {} = ?1", escape(table), if *has_id { "id" } else { "rowid" }))?;
             let mut home_at = db.prepare(&format!("SELECT owner_file FROM \"{}\" WHERE rowid = ?1", escape(table)))?;
@@ -140,6 +153,23 @@ pub fn dangling(db: &Connection, plan: &Replace<'_>, deps: &Map<String, Value>, 
                     if file.is_some_and(|f| !replaced_ids.contains(&f)) {
                         hit(format!("{table}.{column} -> {value}"));
                     }
+                }
+            }
+        }
+    }
+    // A JOIN'S CELL OF EVERY KEPT ROW, by the column's index: a run over every hop scans nothing whole.
+    if !nested {
+        let joins = probed(db, plan.joins);
+        let scope = format!("(owner_file IS NULL OR owner_file NOT IN ({}))", marks(replaced_ids.len()));
+        for (table, _) in &holders {
+            for column in joins.get(table.as_str()).into_iter().flatten() {
+                let sql = format!("SELECT \"{c}\" FROM \"{t}\" WHERE \"{c}\" IN temp.sg_vanished AND \"{HALF_COLUMN}\" = ? AND {scope}",
+                    c = escape(column), t = escape(table));
+                let mut stmt = db.prepare(&sql)?;
+                let mut params: Vec<&dyn ToSql> = vec![&half];
+                params.extend(replaced_ids.iter().map(|i| i as &dyn ToSql));
+                for value in stmt.query_map(params.as_slice(), |r| r.get::<_, String>(0))?.flatten() {
+                    hit(format!("{table}.{column} -> {value}"));
                 }
             }
         }
@@ -170,14 +200,14 @@ pub fn dangling(db: &Connection, plan: &Replace<'_>, deps: &Map<String, Value>, 
                     if let Ok(Some(text)) = row.get::<_, Option<String>>(i)
                         && vanished.contains(&text)
                     {
-                        hit(format!("{table} -> {text}"));
+                        hit(format!("{table}.{} -> {text}", columns[i]));
                     }
                 }
             }
         }
     }
     db.execute_batch("DROP TABLE IF EXISTS temp.sg_vanished")?;
-    Ok(found.map(|f| (count, f)))
+    Ok(found.first().map(|f| (found.len(), f.clone())))
 }
 
 /// MAKE ROOM FOR A PARTIAL PAYLOAD: this half's rows for the files being re-extracted, and nothing
@@ -234,6 +264,25 @@ pub fn replace_affected(db: &Connection, half: &str, affected: &[String], ids: &
         db.execute(&sql, params.as_slice())?;
     }
     Ok(removed)
+}
+
+/// Every `table -> [column]` a join is declared on - by the spec the last run stored and by this payload's - that the
+/// table has, each indexed: the stored ones already are (`schema::index_declared`), a new one is made here.
+fn probed(db: &Connection, payload: &[String]) -> IndexMap<String, Vec<String>> {
+    let mut keys: IndexSet<String> = payload.iter().cloned().collect();
+    for (_, raw) in super::meta::scan(db, Some("spec:%")) {
+        let Ok(spec) = serde_json::from_str::<Value>(&raw) else { continue };
+        keys.extend(spec.get("joins").and_then(Value::as_object).into_iter().flat_map(|j| j.keys().cloned()));
+    }
+    let mut out: IndexMap<String, Vec<String>> = IndexMap::new();
+    for key in keys {
+        let Some((table, column)) = key.split_once('.') else { continue };
+        let has = super::schema::existing_columns(db, table).is_ok_and(|c| c.iter().any(|c| c == column));
+        if has && super::schema::index_column(db, table, column).is_ok() {
+            out.entry(table.to_string()).or_default().push(column.to_string());
+        }
+    }
+    out
 }
 
 fn marks(n: usize) -> String {
