@@ -35,7 +35,8 @@ use std::path::Path;
 // 28: an index initializer's entry (`["EU"] = 3`) is named by its KEY (`EU`), not by `["EU"]` spelled as text.
 pub(super) const CS_ROWS_VERSION: &str = "28";
 /// The same for the SQL extractor. 7: `sql_dynamic`, an object created by dynamic SQL.
-const SQL_ROWS_VERSION: &str = "7";
+// 8: a CTE name is the statement's own - never a `sql_refs` row, and never hiding a table in a later statement.
+const SQL_ROWS_VERSION: &str = "8";
 /// Rows held before a batch is sent - both ends pay for it, so it decides whether a large solution fits.
 const ROWS_PER_BATCH: i64 = 100_000;
 

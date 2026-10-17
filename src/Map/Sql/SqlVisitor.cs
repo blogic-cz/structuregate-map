@@ -9,7 +9,7 @@ namespace StructureGate;
 /// runs, with the action (`select`, `insert`, `update`, `delete`, `merge`, `truncate`, `exec`).
 ///
 /// A NAME THAT IS NO OBJECT IS NOT A TOUCH: a `#temp` table, a `@table` variable and a CTE name are local to
-/// the script, and a row naming them would read as a table nobody declared.
+/// the script (a CTE's to its one statement), and a row naming them would read as a table nobody declared.
 /// </summary>
 internal sealed class SqlVisitor : TSqlFragmentVisitor
 {
@@ -179,10 +179,28 @@ internal sealed class SqlVisitor : TSqlFragmentVisitor
 
     public override void ExplicitVisit(CreateTypeUddtStatement node) => Declare("type", node.Name, node);
 
-    public override void ExplicitVisit(CommonTableExpression node)
+    public override void ExplicitVisit(SelectStatement node) => Scoped(node, () => base.ExplicitVisit(node));
+
+    public override void ExplicitVisit(InsertStatement node) => Scoped(node, () => base.ExplicitVisit(node));
+
+    public override void ExplicitVisit(UpdateStatement node) => Scoped(node, () => base.ExplicitVisit(node));
+
+    public override void ExplicitVisit(DeleteStatement node) => Scoped(node, () => base.ExplicitVisit(node));
+
+    public override void ExplicitVisit(MergeStatement node) => Scoped(node, () => base.ExplicitVisit(node));
+
+    /// <summary>
+    /// A CTE NAME IS THE STATEMENT'S OWN, and known for the WHOLE statement before any of it is visited: ScriptDom
+    /// visits a SELECT's query before its WITH clause, so a name added as its CTE was reached came too late for the
+    /// outer FROM - and a name never forgotten hid a real table of the same name in every later statement of the file.
+    /// </summary>
+    private void Scoped(StatementWithCtesAndXmlNamespaces node, Action visit)
     {
-        ctes.Add(node.ExpressionName.Value);
-        base.ExplicitVisit(node);
+        var outer = new HashSet<string>(ctes, ctes.Comparer);
+        foreach (var cte in node.WithCtesAndXmlNamespaces?.CommonTableExpressions ?? []) ctes.Add(cte.ExpressionName.Value);
+        visit();
+        ctes.Clear();
+        ctes.UnionWith(outer);
     }
 
     public override void ExplicitVisit(InsertSpecification node)
