@@ -443,7 +443,7 @@ export class Store {
     crossing.delete(undefined);
 
     // EVERY OTHER PER-FILE TABLE TOO, since nothing outside the file needs its ids: the closure rust derives over
-    // every row reads them (`rows/partial/unchanged.rs`), and a re-extraction that renumbered a file whose rows are
+    // every row reads them (`rows/derive/unchanged.rs`), and a re-extraction that renumbered a file whose rows are
     // otherwise what they were moved the closure, which is then derived again for nothing.
     for (const name of Object.keys(this.tables)) crossing.add(name);
     crossing.delete('files');
@@ -497,7 +497,7 @@ export class Store {
    * A rollup is rebuilt WHOLE on every partial run, and minting it fresh numbers renumbered every one of its rows -
    * a route, a render created in code, a translation - each run, under rows nothing else had changed. The closure
    * reads them (`component_reach.routes`), so it moved on every run for an edit nothing it reads had seen
-   * (`rust/fbtcore/src/rows/partial/unchanged.rs`). Rebuilt from the same rows, a rollup makes the same rows in the
+   * (`rust/fbtcore/src/rows/derive/unchanged.rs`). Rebuilt from the same rows, a rollup makes the same rows in the
    * same order, so they take the same ids back. Nothing outside the rollups names one of these rows - a kept row that
    * did would have pointed at nothing after a fresh mint - so an order that moved re-points only rows this run makes.
    */

@@ -18,7 +18,7 @@ pub struct Schema {
     /// The column a row's nodes are owned by (`id`); a row without one owns them by its rowid.
     id_at: Option<usize>,
     /// Per column: whether any pass READ it from any row - what a partial run compares to decide the closure it
-    /// stored is still the answer (`rows/partial/unchanged.rs`). Set on every read, so it is exact, not listed.
+    /// stored is still the answer (`rows/derive/unchanged.rs`). Set on every read, so it is exact, not listed.
     read: Rc<[std::cell::Cell<bool>]>,
 }
 

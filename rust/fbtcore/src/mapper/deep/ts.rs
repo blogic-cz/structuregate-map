@@ -6,11 +6,15 @@
 //! at 1 again would hand a second row the id a joined row already points at. The plan costs a hash walk and
 //! no type checker, so a tree that has not moved stops here.
 //!
+//! THE ROWS STAND WHEN ONLY THE BUILD MOVED: node's rows are keyed by what produces them (`embedded::node_rows`), not
+//! by the running build, and what rust derives from them is derived again from the database (`derive_again`).
+//!
 //! A TREE WITH NO ANGULAR WORKSPACE IN IT IS NOT A FAILURE - it is the plain half's - and a workspace whose
 //! dependencies are not installed is: a map silently missing every TypeScript row looks exactly like a
 //! repository with no TypeScript in it.
 
 use super::super::protocol::Collector;
+use super::derived::{derive_again, report, Again};
 use super::Deep;
 use crate::hosts;
 use crate::rows::calls;
@@ -60,9 +64,16 @@ pub(super) fn skipped(into: &mut Collector, deep: &Deep, db: &str, root: &str, k
         && let Some(kept) = &kept
         && kept["key"].as_str() == Some(key.as_str())
     {
-        into.notes.push("the typescript half had nothing to do: no file under its roots moved since its rows were written".into());
+        let absent = kept["absent"] == Value::Bool(true);
+        let again = if absent { Again::Same } else { derive_again(into, deep, db, root) };
+        match again {
+            Again::Same => into.notes.push("the typescript half had nothing to do: no file under its roots moved since its rows were written".into()),
+            Again::Derived => into.notes.push("the typescript half did not start node: no file under its roots moved since its rows were written".into()),
+            // ITS SETUP FORGOTTEN (`tsderive::unrecorded`): node reads every file.
+            Again::Unable => return Err(fe_kept),
+        }
         into.notes.extend(kept["notes"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(String::from)));
-        return Ok(kept["absent"] == Value::Bool(true));
+        return Ok(absent);
     }
     Err(fe_kept)
 }
@@ -71,7 +82,11 @@ pub(super) fn skipped(into: &mut Collector, deep: &Deep, db: &str, root: &str, k
 pub(super) fn grounded(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: &dyn Fn(Option<&str>) -> Option<String>, fe_kept: Option<String>) -> bool {
     let (errors, notes) = (into.errors.len(), into.notes.len());
     let mut fe = None;
-    let absent = launched(into, deep, db, root, &mut fe, &[false, true], false);
+    let mut absent = launched(into, deep, db, root, &mut fe, &[false, true], false);
+    // A RUN THAT STORED NOTHING (the plan found the tree unchanged) still owes this build's derivation.
+    if !absent && into.errors.len() == errors && derive_again(into, deep, db, root) == Again::Unable {
+        absent = launched(into, deep, db, root, &mut fe, &[false, true], false);
+    }
     let absence = absence(&into.notes[notes..]);
     settle(db, key, absent, fe, fe_kept, into.errors.len() == errors, absence);
     absent
@@ -167,7 +182,7 @@ pub(super) fn launched(into: &mut Collector, deep: &Deep, db: &str, root: &str, 
                     parse_tree(into, deep, &parse, root, db, &work, None, every_hop, &|| {}, false)
                 };
                 let retry = match parsed {
-                    Parsed::Rows => store(into, db, root, &work.rows, carried, fe),
+                    Parsed::Rows => store(into, db, root, &work.rows, carried, fe, &deep.build),
                     Parsed::Retry => true,
                     Parsed::Uncarried if !whole => {
                         whole = true;
@@ -277,9 +292,11 @@ fn shared(deep: &Deep, arguments: &mut Vec<String>) {
     if let Some(config) = &deep.ts_config {
         arguments.extend(["--config".into(), config.clone()]);
     }
-    // THE RUNNING BUILD joins node's own setup hash, beside `rows`: node's plan says "unchanged" from its setup and
-    // the tree's hashes alone, so rust's key moving (`angular_arguments`) would still be answered by a stale plan.
-    arguments.extend(["--build".into(), deep.build.clone()]);
+    // WHAT PRODUCES THE ROWS joins node's own setup hash, beside `rows`: its scripts and the rust its payload passes
+    // through (`embedded::node_rows`). node's plan says "unchanged" from its setup and the tree's hashes alone, so a
+    // moved extractor would still be answered by a stale plan. NOT the running build: what only rust derives is derived
+    // again from the stored rows (`derive_again`).
+    arguments.extend(["--build".into(), crate::embedded::node_rows::extractor()]);
 }
 
 /// ASK WHAT WOULD HAVE TO BE READ - the rows that would not be are fetched beside the parse (`carried_parse`). A PLAN
@@ -401,7 +418,7 @@ fn why(into: &mut Collector, why: &Value, reads: &str) {
         causes.push("no rows of it were recorded before".into());
     }
     if why["setup_moved"] == Value::Bool(true) {
-        causes.push("its setup moved (typescript, angular, node, its config, its rows version or this build)".into());
+        causes.push("its setup moved (typescript, angular, node, its config, its rows version or the code that stores its rows)".into());
     }
     if why["template"].as_i64().unwrap_or(0) > 0 {
         causes.push(format!("{} of them are new or can move what a template resolves", why["template"]));
@@ -503,10 +520,10 @@ pub(super) fn parse_tree(into: &mut Collector, deep: &Deep, parse: &str, root: &
 
 /// THE ROWS, THE CLOSURE DERIVED FROM THEM AND THE GRAPH THE NEXT RUN PLANS WITH, stored in this process.
 /// True when nothing was stored because a run that stopped short would have left a kept row pointing at nothing.
-pub(super) fn store(into: &mut Collector, db: &str, root: &str, rows: &Path, carried: Option<u64>, fe: &mut Option<String>) -> bool {
+pub(super) fn store(into: &mut Collector, db: &str, root: &str, rows: &Path, carried: Option<u64>, fe: &mut Option<String>, build: &str) -> bool {
     // ONE SPAN FOR THE WHOLE STORE, its phases inside it: what they do not cover is the store's own `(untraced)`.
     let _storing = crate::trace::stage("typescript: store");
-    let receipt = match calls::ts_apply(Path::new(db), root, &text(rows)) {
+    let receipt = match calls::ts_apply(Path::new(db), root, &text(rows), build) {
         Ok(receipt) => receipt,
         Err(error) if error.starts_with(crate::rows::dangling::STOPPED_SHORT) => {
             into.notes.push(format!("the typescript half is reading every hop of dependents again: {error}"));
@@ -517,45 +534,8 @@ pub(super) fn store(into: &mut Collector, db: &str, root: &str, rows: &Path, car
             return false;
         }
     };
-    let mut receipt: Value = match serde_json::from_str(&receipt) {
-        Ok(receipt) => receipt,
-        Err(e) => {
-            into.errors.push(format!("HALF      {LANGUAGE}: the receipt could not be read — {e}"));
-            return false;
-        }
-    };
-    into.notes.extend(receipt["notes"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(String::from)));
-    *fe = receipt["fe"].as_str().map(String::from);
-    for (phase, ms) in receipt["phases"].as_object().into_iter().flatten() {
-        crate::trace::reported(&format!("typescript: {phase}"), ms.as_u64().unwrap_or(0));
-    }
-    // WHERE THE TIME WENT, as one note. The carry was timed before node parsed, as a stage of its own: the store never
-    // saw it, so it joins the note and is not laid back under the store's span.
-    if let (Some(ms), Some(phases)) = (carried, receipt["phases"].as_object_mut()) {
-        phases.insert("carry the rows".into(), json!(ms));
-        phases.sort_keys();
-    }
-    // WHAT `write the rows` IS MADE OF, as a breakdown: it explains that phase and adds nothing to the store.
-    for step in receipt["write_steps"].as_array().into_iter().flatten() {
-        if let (Some(name), Some(ms)) = (step[0].as_str(), step[1].as_u64()) {
-            crate::trace::breakdown_with(&format!("write the rows: {name}"), ms, Vec::new());
-        }
-    }
-    let spent: Vec<String> = receipt["phases"].as_object().into_iter().flatten()
-        .filter_map(|(phase, ms)| ms.as_i64().filter(|ms| *ms >= 1000).map(|ms| format!("{phase} {} s", seconds(ms))))
-        .collect();
-    if !spent.is_empty() {
-        into.notes.push(format!("the typescript half spent: {}", spent.join(", ")));
-    }
-    for (table, rows) in receipt["written"].as_object().into_iter().flatten() {
-        into.database.insert(table.clone(), rows.as_i64().unwrap_or(0));
-    }
+    report(into, &receipt, carried, fe);
     false
-}
-
-/// Milliseconds as whole seconds, rounded half AWAY from zero as .NET's `F0` does.
-fn seconds(ms: i64) -> i64 {
-    (ms + 500) / 1000
 }
 
 fn records(output: &str, prefix: &str) -> Vec<String> {
