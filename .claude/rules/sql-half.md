@@ -4,6 +4,7 @@ paths:
   - "rust/fbtcore/src/rows/sqlrun.rs"
   - "rust/fbtcore/src/rows/sqlshape/**"
   - "rust/fbtcore/src/cli/sqlparse.rs"
+  - "rust/fbtcore/src/sqlpg/**"
   - "rust/fbtcore/src/rows/seeds/**"
   - "rust/fbtcore/src/rows/dups.rs"
   - "rust/fbtcore/src/mapper/deep/sqlconfig.rs"
@@ -17,7 +18,8 @@ What a consumer queries (every table and column, the worked queries) is `skills/
 it in step. This file is how the half is built and the rules that keep it honest.
 
 `src/Map/Sql/` parses every `.sql` (`--ext .sql`) IN PROCESS with Microsoft's own T-SQL parser
-(`Microsoft.SqlServer.TransactSql.ScriptDom`, +5.3 MB of exe, no trim warning). Rows are stored through the
+(`Microsoft.SqlServer.TransactSql.ScriptDom`, +5.3 MB of exe, no trim warning), or with sqlparser-rs where the config
+says PostgreSQL (below). Rows are stored through the
 same store as C#, scoped by `lang = 'sql'`: `sql_objects`, `sql_columns`, `sql_keys`, `sql_refs`, `sql_steps`,
 `sql_dynamic`, parse errors in `diagnostics`. A file belongs to its nearest `.sqlproj`, which names its database
 (`SqlConfig.DatabaseOf`, the config read by `rust/fbtcore/src/mapper/deep/sqlconfig.rs`) and what it is to the
@@ -30,6 +32,19 @@ SQLCMD is not T-SQL: `:r`/`:setvar` lines are blanked and `$(Var)` becomes an id
 `include` refs. `inserted`/`deleted`, `#temp`, `@table` and CTE names are never touches - a CTE's names are known to
 its WHOLE statement before any of it is visited (`SqlVisitor.Scoped`: ScriptDom visits a SELECT's query before its
 WITH) and forgotten after it.
+
+## PostgreSQL - `rust/fbtcore/src/sqlpg/`, one producer still
+
+A file the config's `dialects` (`sqlconfig.rs::dialect_of`, a glob over the map path) names `postgres` is told to C# in
+the `sql-batch` question (`dialects`), its dialect folded into its sha. C# writes its `files` row (`dialect`) and calls
+`fbt_sql_parse` (`FbtCore.SqlParse`), then writes the rows rust answers through the SAME `CsTables` and counters
+(`SqlPostgres.cs`) - two producers of `lang = 'sql'` would each delete the other's rows. sqlparser-rs (+2.6 MB of exe,
+pure rust, `default-features = false`: its `recursive-protection` is `stacker`/`psm`, C and assembly) stops at its first
+error, so the TOKENS are split at each top-level `;` and every statement parsed on its own with its tokens' own lines;
+its recursion limit is lifted and it runs on a 512 MB-stack thread. The AST is mapped onto the same node kinds by hand
+with an explicit stack (`tree.rs`, `exprs.rs`); refs, objects and columns are read off that tree and the tokens
+(`rows.rs`). A view's query is a statement inside the CREATE VIEW, as ScriptDom has it. The fingerprint, column refs
+and views are the shared pass's - a query written in both dialects has one fingerprint (`tests/deep/sql/SqlPostgres.Tests.ps1`).
 
 ## `sql_statements` and `sql_nodes` - per file, the fingerprint filled in rust
 

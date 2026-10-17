@@ -52,12 +52,18 @@ internal static class SqlDeep
         }
         var rows = new CsTables(counters);
         var read = new List<(string Rel, string Abs)>();
+        // WHICH SQL A FILE IS - the config's `dialects`, decided by rust; a file it does not name is T-SQL.
+        var dialects = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (input.TryGetProperty("dialects", out var named) && named.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var file in named.EnumerateObject()) dialects[file.Name] = file.Value.GetString()!;
+        }
         foreach (var rel in input.GetProperty("rels").EnumerateArray().Select(r => r.GetString()!))
         {
             string text;
             try { text = File.ReadAllText(paths[rel]); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
-            Read(rows, rel, paths[rel], text, shas[rel], config);
+            Read(rows, rel, paths[rel], text, shas[rel], config, dialects.GetValueOrDefault(rel, TSql));
             read.Add((rel, paths[rel]));
         }
         return ([], rows.ToUtf8(input.GetProperty("all").GetBoolean(), first: true, final: true,
@@ -65,28 +71,35 @@ internal static class SqlDeep
     }
 
     /// <summary>One file's rows: its `files` row, what it declares, and what it touches.</summary>
-    public static void Read(CsTables rows, string rel, string abs, string text, string sha, SqlConfig config)
+    public static void Read(CsTables rows, string rel, string abs, string text, string sha, SqlConfig config, string dialect = TSql)
     {
         var project = Owner(abs);
         Rows(rows, rel, text, sha, project is null ? "" : Path.GetFileNameWithoutExtension(project),
-            project is null ? "" : config.DatabaseOf(project), project is null ? "script" : KindOf(project, abs));
+            project is null ? "" : config.DatabaseOf(project), project is null ? "script" : KindOf(project, abs), dialect);
     }
 
     /// <summary>`--sql-parse`: ONE TEXT's rows, as a file of no project has them, in the payload's own shape -
     /// rust stores them into a database in memory and derives the rest there (`rust/fbtcore/src/cli/sqlparse.rs`).</summary>
-    public static string Parse(string text, string name)
+    public static string Parse(string text, string name, string dialect)
     {
         var rows = new CsTables([]);
-        Rows(rows, name, text, "", "", "", "script");
+        Rows(rows, name, text, "", "", "", "script", dialect);
         var (buffer, length) = rows.ToUtf8(true, true, true, false, new SortedDictionary<string, string>(StringComparer.Ordinal), [], Lang);
         return System.Text.Encoding.UTF8.GetString(buffer, 0, length);
     }
 
-    private static void Rows(CsTables rows, string rel, string text, string sha, string project, string database, string kind)
+    public const string TSql = "tsql";
+
+    private static void Rows(CsTables rows, string rel, string text, string sha, string project, string database, string kind, string dialect)
     {
         var file = rows.Add("files", "f",
             ("path", rel), ("lang", Lang), ("sha", sha), ("lines", text.Count(c => c == '\n') + 1),
-            ("project", project), ("database", database), ("kind", kind), ("errors", 0));
+            ("project", project), ("database", database), ("kind", kind), ("errors", 0), ("dialect", dialect));
+        if (dialect == SqlPostgres.Dialect)
+        {
+            SqlPostgres.Write(rows, file, text, database);
+            return;
+        }
 
         var included = new List<(string Path, int Line)>();
         var prepared = SqlVisitor.Prepared(text, included);

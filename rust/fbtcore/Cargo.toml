@@ -55,6 +55,10 @@ gosyn = { version = "0.2.15", default-features = false }
 # dependency, and `sass` exposes no syntax tree, only a compile that needs every `@use` resolved first. Pure rust,
 # no default features (they are serde), and its only dependency beside a proc macro is `smallvec`.
 raffia = { version = "0.13", default-features = false }
+# THE POSTGRESQL HALF of the SQL map (`src/sqlpg/`): sqlparser-rs, pure rust, Apache-2.0. NO DEFAULT FEATURES: they are
+# `recursive-protection`, which pulls `stacker`/`psm` - C and assembly. Its recursion limit is lifted instead and the parse
+# runs on a thread with a stack sized for it.
+sqlparser = { version = "0.63", default-features = false, features = ["std"] }
 # A skill's or an agent's FRONTMATTER is YAML, and its `name` is what the doc DECLARES. Parsed, not split on
 # `:` - a description routinely holds colons, quotes and line folds.
 yaml-rust2 = { version = "0.13.0", default-features = false }

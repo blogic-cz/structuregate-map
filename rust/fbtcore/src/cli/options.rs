@@ -11,8 +11,7 @@ pub const USAGE: &str = include_str!("usage.txt");
 const POWERSHELL: [&str; 3] = [".ps1", ".psm1", ".psd1"];
 const TYPESCRIPT: [&str; 4] = [".ts", ".tsx", ".mts", ".cts"];
 
-/// The SQL `--sql-parse` reads.
-const DIALECTS: [&str; 1] = ["tsql"];
+use crate::mapper::deep::sqlconfig::DIALECTS;
 
 /// Every flag, parsed. The field names are the ones the gate and the map read their input by.
 #[derive(Default)]

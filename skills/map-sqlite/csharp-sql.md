@@ -81,7 +81,12 @@ a generated file is listed and never walked (nearly all of a real tree's rows we
 
 ## SQL (`files.lang = 'sql'`)
 
-Every `.sql` under a `.sqlproj`, parsed with Microsoft's own T-SQL parser (ScriptDom):
+Every `.sql` under a `.sqlproj`, parsed with Microsoft's own T-SQL parser (ScriptDom) - or, where the SQL config's
+`dialects` names a file `postgres`, with sqlparser-rs's PostgreSQL grammar into the SAME tables (`files.dialect`
+says which; an unqualified name is in `public`, not `dbo`; dollar-quoting, `LIMIT/OFFSET`, `RETURNING`, `::`, `ILIKE`,
+`DISTINCT ON` parse; a statement that does not is ONE `diagnostics` row, `name = 'syntax'`, and the statements around it
+still map; psql's `\i`/`\set` lines are skipped). A PostgreSQL file has no `sql_keys`, `sql_steps` or `sql_dynamic`
+rows, and a function's body is its text, not statements:
 
 | table | one row per |
 |---|---|
@@ -94,58 +99,15 @@ Every `.sql` under a `.sqlproj`, parsed with Microsoft's own T-SQL parser (Scrip
 | `sql_column_refs` | column a statement names - `statement`, `object`, `line`, `role` (the clause: `select`, `where`, `join`, `groupby`, `having`, `orderby`, `set`, `insert`, `values`, `output`, `merge_on`, `using`, `window`, `top`), `schema` + `name` (the table the alias or name stands for), `source_kind` (`table`, `cte`, `derived`, `temp`, `variable`, `pseudo` for `inserted`/`deleted`), `alias` (as written), `column` (`*` for `o.*`), `database`. An unqualified column of a query with several sources is NOT attributed: `name` is `''`, never guessed |
 | `sql_steps` | what a script does, in order: `values`, `set`, `temp`, `drop`, `flow` - the input of `sql_seeds` |
 | `sql_dynamic` | a `CREATE TRIGGER` inside a string - `name` (its literal prefix when `open` = 1: `'... T_' + @t`) |
-| `files` | `database`, `project`, `kind`: `build`, `predeploy`, `postdeploy`, `script` |
+| `files` | `database`, `project`, `kind`: `build`, `predeploy`, `postdeploy`, `script`; `dialect`: `tsql` or `postgres` |
 
 SQLCMD is handled before parsing: `:r`/`:setvar` lines are blanked and `$(Var)` becomes an identifier of
 the same length, so lines still point into the file; each `:r` becomes an `include` ref. `inserted`,
 `deleted`, `#temp`, `@table` and CTE names are never touches.
 
-**A statement's tree (`sql_nodes`) is in kinds no dialect owns**, so one query reads every SQL the half parses: the
-root is the statement's `kind`; below it `query` (a SELECT's body), `union`/`except`/`intersect` (`value` `all`),
-`item` (a select-list entry), `from`, `table` (`value` the name, children `schema`, `database`, `alias`),
-`subquery`, `join` (`value` `inner`, `left`, `right`, `full`, `cross`, `cross apply`, `outer apply`; children: the two
-sides in order, then `on`), `where`, `groupby`, `having`, `orderby` + `sort` (`asc`/`desc`), `top`, `offset`,
-`distinct`, `cte` (`value` its name), `column` (`o.Amount`, `*`), `func` (lowercased: `sum`, `row_number`, `cast`),
-`over` + `partition`, `literal`, `null`, `param` (`@id`), `op` (`=`, `<>`, `and`, `or`, `not`, `+`, `like`, `is null`,
-`between`), `in` (`value` `not` for NOT IN), `exists`, `case`/`when`, `values`/`row`, `set` (one assignment),
-`target`/`using`/`into`, `output`, `action` (a MERGE's `matched`/`not matched`), `var`, `proc`, `name`, `columndef`,
-`type`. Anything else is transparent: its children hang off the nearest node above. `fingerprint` is the same for two
-statements that differ only in literals or in how many literals an IN list holds; one more operator, column or
-table is another fingerprint.
-
-A column is attributed the way SQL resolves it: its qualifier is an alias or table name of its own query, then of
-the queries around it (a correlated subquery reads its outer query), then of the statement's UPDATE/DELETE/INSERT/MERGE
-target; the left side of a SET, an INSERT's column list and a MERGE action's columns are the target's. A select-list
-alias named again in ORDER BY is no column. **The shape of a statement is four VIEWS over `sql_nodes`** - they hold
-nothing, so they cannot disagree with it:
-
-* `sql_clauses` (`file`, `statement`, `kind`, `line`): `cte`, `where`, `groupby`, `having`, `orderby` (the query's,
-  not an OVER's), `join`/`leftjoin`/`rightjoin`/`fulljoin`/`crossjoin`/`crossapply`/`outerapply`, `top`, `offset`,
-  `distinct`, `union`/`unionall`, `except`, `intersect`, `subquery`, `values`, `output`, `window`.
-* `sql_joins` (`file`, `statement`, `type`, `joined` - `table` or `subquery`, `schema`, `name`, `alias`, `on_line`,
-  `line`): the side each join brings in; its ON columns are `sql_column_refs` rows with `role = 'join'`.
-* `sql_functions` (`file`, `statement`, `name`, `windowed`, `line`) and `sql_ctes` (`file`, `statement`, `name`, `line`).
-
-**ONE SQL TEXT, NO TREE**: `structuregate --sql-parse <file|->` (`-` reads stdin, `--dialect tsql` the default)
-prints what this half would hold for that text as JSON on stdout - `statements`, `objects`, `refs`, `column_refs`,
-`clauses`, `joins`, `functions`, `ctes`, `nodes`, `diagnostics`, each row with the columns of its table above and
-`statement` the handle that joins them - and exits 1 when the text does not parse. It is derived by the same code
-as the map, so a statement's `fingerprint` is the one a map of it holds.
-
-```sql
--- which queries LEFT JOIN Customers, and on what
-SELECT f.path, s.line, c.alias || '.' || c.column on_column FROM sql_joins j JOIN sql_statements s ON s.id = j.statement
-JOIN files f ON f.id = s.file LEFT JOIN sql_column_refs c ON c.statement = j.statement AND c.role = 'join'
-WHERE j.type = 'left' AND j.name = 'Customers';
-
--- who filters on a column
-SELECT f.path, c.line FROM sql_column_refs c JOIN files f ON f.id = c.file
-WHERE c.name = 'Orders' AND c.column = 'Status' AND c.role = 'where';
-
--- the same query, written in several places
-SELECT s.fingerprint, count(*) n, min(f.path || ':' || s.line) first FROM sql_statements s JOIN files f ON f.id = s.file
-WHERE s.kind = 'select' GROUP BY s.fingerprint HAVING n > 1 ORDER BY n DESC;
-```
+**What each statement is** - its tree (`sql_nodes`), its fingerprint, the columns it names (`sql_column_refs`),
+its shape as views (`sql_clauses`, `sql_joins`, `sql_functions`, `sql_ctes`) and `--sql-parse` for one text with
+no tree: [sql-statements.md](sql-statements.md).
 
 Two tables are DERIVED after both halves and rewritten whole each run:
 
@@ -188,6 +150,8 @@ cannot - which database a context or a connection reaches is decided at run time
   "sqlText": ["Demo.Data.Sql.Run*"], "unattributedContexts": ["App.Data.MainContext"], "default": "Main" }
 ```
 
+`"dialects": [{ "glob": "pg/**", "dialect": "postgres" }]` says which SQL a file is: a glob over its map path (`**`,
+`*`, `?`, case ignored), the first that matches deciding; every other file is `tsql`.
 `contexts`: a mapping class with that context in `typeof(...)`, or an entity with a `DbSet` in it, resolves
 there. `connections`: a method spelling that connection name runs its SQL there. `sqlText`: more methods whose
 SQL argument is parsed (`*` the only wildcard). `unattributedContexts`: where a mapping class naming no context
