@@ -16,7 +16,7 @@
 import { locationOf } from './TsNodes.mjs';
 import { catchFacts, chainOf } from './TsCatch.mjs';
 
-export function makeBodyRows({ ts, store, evalNode, describe, declFileOf, declareInline, propName }) {
+export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, propName }) {
   /**
    * THE BRANCH OR CASE A STATEMENT SITS IN IS PART OF WHAT THE STATEMENT MEANS.
    *
@@ -192,7 +192,7 @@ export function makeBodyRows({ ts, store, evalNode, describe, declFileOf, declar
       target_ref: ts.isPropertyAccessExpression(node.left) ? declFileOf(node.left.name)
         : ts.isIdentifier(node.left) ? declFileOf(node.left) : null,
       operator: ts.tokenToString(node.operatorToken.kind) ?? '=',
-      value: evalNode(rhs), expression: treeOf(rhs),
+      value: evalCell(rhs), expression: treeOf(rhs),
       source: rhs.getText(),
       reads: identifiersIn(rhs), calls: calleesIn(rhs),
       ...locationOf(node),
@@ -230,7 +230,7 @@ export function makeBodyRows({ ts, store, evalNode, describe, declFileOf, declar
       bindings,
       declared: declarationKindOf(node),
       type: node.type ? node.type.getText() : null,
-      value: evalNode(node.initializer), expression: treeOf(node.initializer),
+      value: evalCell(node.initializer), expression: treeOf(node.initializer),
       source: node.initializer.getText(),
       reads: identifiersIn(node.initializer), calls: calleesIn(node.initializer),
       ...locationOf(node),
@@ -251,7 +251,7 @@ export function makeBodyRows({ ts, store, evalNode, describe, declFileOf, declar
    *  that is the truth of a branching function, and collapsing them would invent a single answer. */
   function emitReturn(node, ownerId, classId) {
     if (!ts.isReturnStatement(node)) return;
-    const value = node.expression ? evalNode(node.expression) : null;
+    const value = node.expression ? evalCell(node.expression) : null;
     store.add('returns', 'rv', {
       ...inCase(),
       member: ownerId, class: classId,
@@ -271,7 +271,7 @@ export function makeBodyRows({ ts, store, evalNode, describe, declFileOf, declar
       ...inCase(),
       member: ownerId, class: classId,
       name: ts.isNewExpression(thrown) ? chainOf(ts, thrown.expression) : chainOf(ts, thrown),
-      value: evalNode(thrown), expression: treeOf(thrown),
+      value: evalCell(thrown), expression: treeOf(thrown),
       source: thrown.getText(),
       reads: identifiersIn(thrown), calls: calleesIn(thrown),
       ...locationOf(node),
@@ -305,7 +305,7 @@ export function makeBodyRows({ ts, store, evalNode, describe, declFileOf, declar
    * switch is on `categoryId` or `kind`.
    */
   function collectSwitch(node, ownerId, classId, walk) {
-    const discriminant = evalNode(node.expression);
+    const discriminant = evalCell(node.expression);
     // THE TREES, as for an `if`: the discriminant's row is one per SWITCH, so it also says which cases are
     // siblings - which a `default` needs, since it is every value its siblings do not name.
     const treeFor = (n, role) => (describe ? describe(n, role).id ?? null : null);
@@ -353,7 +353,7 @@ export function makeBodyRows({ ts, store, evalNode, describe, declFileOf, declar
    * row parents to the outer `if`'s ELSE row, so walking `parent` up yields "B and not A" by construction.
    */
   function collectIf(node, ownerId, classId, walk) {
-    const condition = evalNode(node.expression);
+    const condition = evalCell(node.expression);
     const source = node.expression.getText();
     // THE CONDITION'S TREE, always. `condition` is the evaluator's answer, which drops the tree of a bare
     // read and keeps only the last link of a call: `LIST.includes(this.model.level)` came back as a
@@ -392,7 +392,7 @@ export function makeBodyRows({ ts, store, evalNode, describe, declFileOf, declar
       store.add('returns', 'rv', {
         ...inCase(),
         member: ownerId, class: classId, implicit: true,
-        value: evalNode(bodyNode), expression: treeOf(bodyNode), source: bodyNode.getText(),
+        value: evalCell(bodyNode), expression: treeOf(bodyNode), source: bodyNode.getText(),
         reads: identifiersIn(bodyNode), calls: calleesIn(bodyNode), ...locationOf(bodyNode),
       });
     }

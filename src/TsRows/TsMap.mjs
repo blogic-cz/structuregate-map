@@ -215,9 +215,11 @@ async function main() {
   // 55: a nested `$module` (a lazy route in `forChild([...])`) and a nested `$ref` of an `ng_modules` list carry `id` (#75).
   // 56: `route_keys`, one row per `{{key}}` of a route's path, and such a key counts as `translations.referenced` (#74).
   // 57: a `$fn` calling `loadRemoteModule` carries `$remote`, and its route `load_children_remote(_name)` (#76).
+  // 58: a keyword literal is `{$literal, $kind}` - `undefined` and `void 0` anywhere, `null` as a whole cell - and a name a
+  //     destructuring local binds carries `$local` (#85).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 57, build: args.build,
+    config: config.file, data: config.data, rows: 58, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

@@ -17,7 +17,7 @@ import { locationOf } from './TsNodes.mjs';
 const ANGULAR_CORE = '@angular/core';
 
 export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRefAt, symbolAt,
-  evalNode, propName, jsdocOf, collectBody, angular }) {
+  evalNode, evalCell, propName, jsdocOf, collectBody, angular }) {
   /** A type as TEXT: the annotation if there is one, otherwise what the checker computed.
    *
    *  NoTruncation, and then no truncation of our own either: a 400-character union type is what the member's
@@ -184,7 +184,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     const mods = modifiersOf(m);
     const decorators = decoratorsOf(m);
     const initializer = ts.isPropertyDeclaration(m) && m.initializer ? m.initializer : null;
-    const value = initializer ? evalNode(initializer) : undefined;
+    const value = initializer ? evalCell(initializer) : undefined;
     const memberType = m.type ? m.type.getText() : null;
     const kind = kindOfMember(m);
     const name = m.name ? propName(m.name) : kind;

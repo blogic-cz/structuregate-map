@@ -59,6 +59,14 @@ runs) are compared by that, every carried field equal, never by `c:412`.
 a `local` (`{file, line, col}`, its `locals` row's own place) on a bare name a body declares. An `Fn` tree names
 its `params` and its `rest` parameter.
 
+- **A keyword literal is `{$literal, $kind}`** (rows 58, #85, `TsExpr/TsValue.mjs::cell`, `TsValueRefs.mjs::undefinedLiteral`):
+  the global `undefined` (the checker's symbol has no declaration - a shadowing local is followed) and `void 0` are
+  `{$literal: 'undefined', $kind: 'UndefinedKeyword' | 'VoidExpression'}` everywhere; `null` stays JSON null inside a
+  list or an object and is `{$literal: 'null', $kind: 'NullKeyword'}` as a WHOLE cell (`evalCell`: every statement and
+  declaration `value`, `condition`, `discriminant`), since a NULL cell is `return;`. The rust store reads that root back
+  as `Value::Null` (`store/row.rs::null_literal`, the http pass too), so no gate reads it differently. A name a
+  destructuring binds keeps its `Identifier` value plus `$local`, the `locals` row's place.
+
 - **A namespace's statements are a file's** (`TsTypeRows.mjs::moduleRows`): a class, function or const in `namespace X { .. }` is a row like a top-level one, and every row a namespace declares carries `in_module`; an AMBIENT block (`declare module`, `declare global`, `declare namespace`) yields only its interfaces and aliases.
 
 - **A top-level `X.prototype.m = function` is a `functions` row** with `form: 'prototype-method'`, `name` the assigned text and `target` the declaration a call of `m` resolves to (`TsDeclRows.mjs::prototypeRow`). Also under a top-level `if (!X.prototype.m)` and from `Object.defineProperty(X.prototype, 'm', { value: function })`, targeted through the prototype's type.

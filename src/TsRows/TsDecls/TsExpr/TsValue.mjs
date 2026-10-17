@@ -13,7 +13,7 @@
  *
  * Imports are flat: see `TsTypeRef.mjs`.
  */
-import { makeValueRefs } from './TsValueRefs.mjs';
+import { makeValueRefs, undefinedLiteral } from './TsValueRefs.mjs';
 
 /**
  * `describe` is the expressions writer, and it is OPTIONAL: given one, an unevaluable value also carries
@@ -168,7 +168,10 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
     if (ts.isNumericLiteral(node)) return Number(node.text);
     if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
     if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
+    // `null` IS ITS OWN VALUE inside a list or an object (a `null` node); a whole cell spelled `null` is `cell` below.
     if (node.kind === ts.SyntaxKind.NullKeyword) return null;
+    // `void 0` IS `undefined`, the idiom for it - only over a literal: `void this.save()` keeps its call.
+    if (ts.isVoidExpression(node) && ts.isNumericLiteral(node.expression)) return undefinedLiteral('VoidExpression');
     if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)
       || ts.isNonNullExpression(node) || ts.isTypeAssertionExpression(node)) {
       return evalNode(node.expression);
@@ -285,8 +288,19 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
     return name.getText();
   }
 
+  /**
+   * A WHOLE CELL'S VALUE (`returns.value`, `members.value`, ..): `null` there is `{$literal: 'null', $kind: 'NullKeyword'}`.
+   * A cell holding JSON null is SQL NULL - no value at all, the same as `return;` - so `return null` read as a statement
+   * that returns nothing, or as an identifier nothing was parsed out of (#85). Inside a list or an object it stays the
+   * `null` node it always was. A name the evaluator follows to a `null` (`let s = null; return s`) is that literal too.
+   */
+  function cell(node) {
+    const value = evalNode(node);
+    return value === null ? { $literal: 'null', $kind: 'NullKeyword' } : value;
+  }
+
   return {
-    evalNode, follow, unresolved, propName: propNameOf,
+    evalNode, evalCell: cell, follow, unresolved, propName: propNameOf,
     declTarget: refs.declTarget, valueDecl: refs.valueDecl,
   };
 }
