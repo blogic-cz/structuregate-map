@@ -78,9 +78,9 @@ again (`nested`), which node once asked of every row it held; a string that only
 `TsSetup/TsProgram.mjs` - each parse given back as it was parsed, or a compiler before 5.3 resolves and notes less)
 and then loads the rows as rust writes them (`readCarry`, `--carry-part`: the file read while it grows, whole once renamed).
 
-**A PARTIAL RUN KEEPS THE CLOSURE WHEN NOTHING IT READ MOVED** (`rust/fbtcore/src/rows/partial/unchanged.rs`). Every
+**A PARTIAL RUN KEEPS THE CLOSURE WHEN NOTHING IT READ MOVED** (`rust/fbtcore/src/rows/derive/unchanged.rs`). Every
 derivation records what its passes READ - each column asked of a row (`Store::reads`, flagged by `Row::get`) - in
-`_closure_reads`, and what it was derived under (setup, feature API, options, the spec's word on those columns) in
+`_closure_reads`, and what it was derived under (setup, feature API, options, the running build, the spec's word on those columns) in
 `_meta` `closure:typescript`. A partial run hashes the rows it removes before they go and the rows it writes in their
 place, per table in rowid order, every read cell with a structure as its nodes, plus what the dead-key trace makes of
 each affected file's text (`file_text` before, the disk after): all equal, and the four tables stay. That needs the
@@ -88,7 +88,7 @@ same ids back: EVERY per-file table with a unique key is claimed (`identityKeys`
 with sparse ALTERNATIVES for the rows a first key leaves out (`identityOf`: a template expression has no line), and a
 rollup takes its old ids back in the order it made them (`rollupId`, handed over by `carry` as `rollup`). A table read
 whole (no `half`) is never kept; `forget` runs before any row is written. A closure that MOVED is written as what
-changed (`rows/partial/delta.rs`): a stored row is matched to an emitted one by its content as the store holds it (its
+changed (`rows/derive/delta.rs`): a stored row is matched to an emitted one by its content as the store holds it (its
 cells, then each structure's node rows), and only the rows left over on either side are deleted or inserted.
 
 **BYTES AND ORDER FOLLOW NODE** - each found only by diffing against node on a real workspace: python's `open()`
@@ -100,19 +100,29 @@ a BOM and other trims disagree (`JS_SPACE` in `rust/fbtcore/src/rows/ts/jsstr.rs
 **THIS HALF IS NOT INCREMENTAL PER FILE, and must not become so: its rows are SEMANTIC.** Rename a component and
 the resolved rows of files that did not change become wrong. It refuses to work when the answer is already right:
 the tree's hashes AND the `setup` (compiler versions, `structuregate.ts.json` - OUTSIDE the tree - the
-extractor's `rows` number in `src/TsRows/TsMap.mjs`, and the RUNNING BUILD of the exe, handed as `--build`: rust derives
-`key_reach`, `render_path`, `gate_values` and `gate_features` inside this half, so a release that changes only those
-must reach an unchanged tree) against what the database recorded. The output database is
-excluded from that walk, since a consumer may write it inside the tree it maps.
+extractor's `rows` number in `src/TsRows/TsMap.mjs`, and WHAT PRODUCES ITS ROWS, handed as `--build`: the embedded
+scripts and the rust their payload passes through, `embedded::node_rows::extractor`) against what the database
+recorded. The output database is excluded from that walk, since a consumer may write it inside the tree it maps.
 
 **AN UNCHANGED TREE DOES NOT START NODE** (`mapper/deep/ts.rs`, key built in `mapper/deep/mod.rs`): the key is the
 tree-map entries under the WORKSPACE the last run mapped (`fe`, kept in the record) - so a C# edit beside it does
-not launch node - the files it is given, the embedded scripts, `node --version`, its arguments (the running build among them,
-so every release re-reads a tree once; two consumers of one exe share a build, but a tree mapped by `dotnet out/structuregate.dll`
-and then by the exe re-reads once too, the build being the paths, sizes and times), and what it reads
+not launch node - the files it is given, the embedded scripts, `node --version`, its arguments (what produces its rows
+among them, never the running build), and what it reads
 from OUTSIDE the tree (the borrowed `typescript`/`@angular/compiler` `package.json`, `structuregate.ts.json`), kept
 in `_meta` as `skip:typescript` after a clean run. A changed tree is hashed by the plan run, whose hashes ride
 `plan.json` into the parse run (`--hashes`).
+
+**A RELEASE THAT CHANGES ONLY WHAT RUST DERIVES READS NO TREE AGAIN.** The rust a stored node row passes through -
+node's arguments and state, the payload parse, the cells, the insert, the ids and claims, the graph, the reads proof -
+is LISTED in `rust/fbtcore/build.rs` and hashed into `--build` beside the scripts: touch a listed file and every
+consumer reads its tree once. What it derives - the closure (`rows/ts/`), the stylesheet tables (`cssmap/`), whether a
+partial run keeps them (`rows/derive/`) - is keyed by the RUNNING BUILD instead, recorded in `_meta`
+`rederive:typescript` after every derivation: when node's rows stand and another build derived them, the half does
+not start node and derives everything again from the stored rows (`mapper/deep/derived.rs::derive_again`,
+`rows/derive/tsderive.rs`), dropping the derived tables as a full run does - the closure's time, not the tree's. A
+record it cannot derive under forgets the rows' setup, and node reads every file. **A file the list names may only
+call a module it names or `NOT_SHAPING` names with why**: `node_rows::every_module_the_listed_code_names_is_classified`
+resolves every path a listed file names and fails on one that is neither.
 
 **ITS IDS RESTART WHEN IT IS THE ONLY HALF IN THE DATABASE** (`alone` in `rust/fbtcore/src/rows/half.rs`), so the
 same tree always numbers the same way: continuing them renumbered everything, and `key_reach` sorts its gate lists

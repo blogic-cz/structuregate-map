@@ -14,9 +14,10 @@ carries `half = "typescript"`.
 
 **BUMP `rows` IN THE SETUP HASH (`TsMap.mjs`) WITH EVERY CHANGE TO WHAT A ROW CARRIES**: an unchanged tree skips node and
 keeps its rows, so a deployed exe that adds a column reads a consumer's tree as unchanged for ever. A change only to a
-table rust DERIVES from these rows (`gate_values`, `key_reach`, `render_path`, the stylesheet tables) needs no bump: the
-running build is in the setup (`--build`) and in rust's key, so every release re-reads an unchanged tree once. The comment
-above it lists what each number added; add a line.
+table rust DERIVES from these rows (`gate_values`, `key_reach`, `render_path`, the stylesheet tables) needs no bump and
+reads no tree: a new build derives them again from the stored rows (`rust/fbtcore/src/rows/derive/tsderive.rs`). A change to
+the rust that STORES them is in the setup by itself (`--build` is the digest of the scripts and the files
+`rust/fbtcore/build.rs` lists). The comment above it lists what each number added; add a line.
 
 **THE MAP STATES WHAT SQLITE CANNOT RECORD** - no foreign keys, no arrays, no note of which column reaches a
 row's own file. The half derives it from the finished rows and publishes it in `_meta` (`spec:typescript`,
