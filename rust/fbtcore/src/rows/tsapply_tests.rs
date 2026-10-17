@@ -187,7 +187,7 @@ fn lab() {
     {
         let db = Connection::open(&work).unwrap();
         let whole: Vec<String> = CLOSURE_TABLES.iter().map(|t| t.to_string()).collect();
-        replace_affected(&db, &[], &[], &whole).unwrap();
+        crate::rows::dangling::replace_affected(&db, LANG, &[], &[], &whole).unwrap();
     }
     eprintln!("LAB replace {} ms", t.elapsed().as_millis());
     let t = std::time::Instant::now();

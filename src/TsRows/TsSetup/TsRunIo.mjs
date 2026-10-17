@@ -19,7 +19,7 @@ export function emit(...fields) {
 
 export function parseArgs(argv) {
   const args = { root: '', rows: '', state: '', fe: '', config: '', db: '', html: '', plan: '',
-    hashes: '', lines: '', carry: '', build: '', everyHop: false, nodeModules: [], skipDirs: ['node_modules'] };
+    hashes: '', lines: '', carry: '', carryPart: null, build: '', everyHop: false, nodeModules: [], skipDirs: ['node_modules'] };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     const value = argv[i + 1];
@@ -45,8 +45,8 @@ export function parseArgs(argv) {
     else if (flag === '--carry') { args.carry = value; i++; }
     // THE RETRY OF A RUN THAT STOPPED SHORT and found it could not (`MAP-RETRY`): every hop of dependents.
     else if (flag === '--every-hop') { args.everyHop = true; }
-    // THE CARRY IS STILL BEING WRITTEN as this run starts (`awaitCarry`).
-    else if (flag === '--carry-late') { args.carryLate = true; }
+    // THE CARRY IS STILL BEING WRITTEN as this run starts, under this name (`readCarry`).
+    else if (flag === '--carry-part') { args.carryPart = value; i++; }
   }
   return args;
 }
@@ -62,40 +62,41 @@ export function parseArgs(argv) {
  * `JSON.stringify` emits them; only `tables` is walked row by row, because that is where the size is.
  */
 /**
- * TRUE ONCE THE CARRY IS THERE, false when it could not be written. Rust writes it beside this run - it is the
- * last thing the run waits for, and the programs are parsed meanwhile - and names it only when it is whole (a rename),
- * or leaves `<carry>.failed`.
+ * THE CARRIED ROWS, READ AS THEY ARE WRITTEN and WITHOUT EVER HOLDING THE FILE AS ONE STRING.
+ *
+ * `JSON.parse(readFileSync(file, 'utf8'))` makes two strings the size of the file, and this one is hundreds of MB on a
+ * real tree - most of V8's hard ceiling of 536 870 888 characters, which no heap flag moves. One line is one row -
+ * `{"t": <table>, "r": <row>}`, and `"o": {<column>: "a" | "o"}` for a structure it was handed without (`TsCarried.mjs`:
+ * a list or an object, as a stub) - with a final `{"claims": {...}, "rollup": {...}}`. Written by
+ * `rows::carry::carry_over`; the shape is private between the two. Each row goes to `onRow(table, row)` as it is read.
+ *
+ * `part`: RUST IS STILL WRITING IT (`carried_parse`) - under that name, renamed to `file` once whole, or `<file>.failed`
+ * left. Read while it grows, so parsing the rows costs nothing on top of waiting for the last of them: a line cut at the
+ * end of what is there yet waits for the rest, and the rows end only once the rename says nothing more comes.
+ *
+ * `{claims, rollup}` once every row is read; null when the file cannot be opened, false when it failed being written.
  */
-export function awaitCarry(file) {
+export function readCarry(file, part, onRow) {
   const pause = new Int32Array(new SharedArrayBuffer(4));
+  const failed = () => part !== null && existsSync(`${file}.failed`);
+  let fd = null;
+  let growing = false;
   for (;;) {
-    if (existsSync(file)) return true;
-    if (existsSync(`${file}.failed`)) return false;
+    try {
+      fd = openSync(file, 'r');
+      break;
+    } catch { /* not whole yet, or not there at all */ }
+    if (part === null) return null;
+    if (failed()) return false;
+    try {
+      fd = openSync(part, 'r');
+      growing = true;
+      break;
+    } catch { /* not begun yet, or renamed since the first try */ }
     Atomics.wait(pause, 0, 0, 10);
   }
-}
-
-/**
- * The carried rows, read WITHOUT EVER HOLDING THE FILE AS ONE STRING.
- *
- * `JSON.parse(readFileSync(file, 'utf8'))` makes two strings the size of the file, and this one is
- * hundreds of MB on a real tree - most of V8's hard ceiling of 536 870 888 characters. That is the nearest
- * wall in this half, and `Invalid string length` is not something a heap flag moves.
- *
- * One line is one row - `{"t": <table>, "r": <row>}`, and `"o": {<column>: "a" | "o"}` for a structure it was handed
- * without (`TsCarried.mjs`: a list or an object, as a stub) - with a final `{"claims": {...}, "rollup": {...}}`.
- * Written by `rows::carry::carry_over`; the shape is private between the two.
- */
-export function readCarry(file) {
-  const tables = {};
   let claims = {};
   let rollup = {};
-  let fd;
-  try {
-    fd = openSync(file, 'r');
-  } catch {
-    return null;
-  }
   // A CHUNK CAN SPLIT A CHARACTER. `StringDecoder` holds the tail of a multi-byte sequence until the
   // rest of it arrives; `Buffer.toString` on the boundary would put a replacement character in a row.
   const decoder = new StringDecoder('utf8');
@@ -106,12 +107,19 @@ export function readCarry(file) {
     const one = JSON.parse(line);
     if (one.claims) { claims = one.claims; rollup = one.rollup ?? {}; return; }
     if (one.o) for (const [column, kind] of Object.entries(one.o)) one.r[column] = stub(kind, `${one.t}.${column}`);
-    (tables[one.t] ??= []).push(one.r);
+    onRow(one.t, one.r);
   };
   try {
     for (;;) {
       const read = readSync(fd, buffer, 0, buffer.length, null);
-      if (!read) break;
+      if (!read) {
+        if (!growing) break;
+        // WHOLE ONCE RENAMED: the writer closed the file before it renamed it, so what is left is already there.
+        if (existsSync(file)) { growing = false; continue; }
+        if (failed()) return false;
+        Atomics.wait(pause, 0, 0, 10);
+        continue;
+      }
       held += decoder.write(buffer.subarray(0, read));
       let at;
       while ((at = held.indexOf('\n')) >= 0) {
@@ -124,7 +132,7 @@ export function readCarry(file) {
   } finally {
     closeSync(fd);
   }
-  return { tables, claims, rollup };
+  return { claims, rollup };
 }
 
 export function writePayload(file, payload) {

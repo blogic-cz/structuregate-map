@@ -261,13 +261,13 @@ pub struct Rewrites<'a> {
 }
 
 impl Rewrites<'_> {
-    fn removed(&self, table: &str) -> Scope<'_> {
+    pub(crate) fn removed(&self, table: &str) -> Scope<'_> {
         let all = self.whole.contains(table) || self.derived.contains(&table);
         let kind = (table == "diagnostics").then_some(self.derived_kind);
         Scope { all, owners: self.ids, paths: self.paths, kind, above: None }
     }
 
-    fn written(&self, table: &str, mark: i64) -> Scope<'_> {
+    pub(crate) fn written(&self, table: &str, mark: i64) -> Scope<'_> {
         let all = self.derived.contains(&table);
         let kind = (table == "diagnostics").then_some(self.derived_kind);
         Scope { all, owners: &[], paths: &[], kind, above: Some(mark) }

@@ -266,17 +266,16 @@ export function startRereads({ ts, fe, store, state, planned, now, only }) {
  * reads every hop, which re-reads whatever file holds the row that broke. `walked` asks only what is known
  * after the walk - a file that turned out to need reading after its project was read; otherwise `touched`
  * is what `Store.verifyUntouched` found.
+ *
+ * A KEPT ROW NAMING AN ID THAT IS GONE is not asked here: it was, of every row held, on every run that stopped short -
+ * and rust asks it before it deletes anything, of exactly the ids that go (`rows/partial/dangling.rs`), so the run is
+ * asked again over every hop as it was.
  */
-export function cutShort(store, rereads, touched, walked) {
+export function cutShort(rereads, touched, walked) {
   if (walked) {
     return rereads.late.length
       ? `${rereads.late.length} file(s) turned out to need reading after their project was read, first ${rereads.late[0]}`
       : null;
-  }
-  const broken = store.dangling();
-  if (broken.length) {
-    return 'a row kept from a file not read again names one that is gone: '
-      + broken.map((b) => `${b.table}.${b.column} -> ${b.names}`).join(', ');
   }
   if (touched !== null) {
     return 'a row kept from a file not read again names one that was: '
