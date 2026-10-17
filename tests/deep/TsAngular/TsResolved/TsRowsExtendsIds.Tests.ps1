@@ -25,9 +25,12 @@ function Get-TsExtendsIds([string]$Db) {
     $arg = "(SELECT a.name || '@' || af.path FROM classes__extends ta JOIN classes__extends ti ON ti.owner = ta.owner " +
         "AND ti.parent = ta.n JOIN classes a ON a.id = $(Get-TsFieldSql 'classes__extends' 'ti' 'id') JOIN files af ON af.id = a.file " +
         "WHERE ta.owner = c.id AND ta.parent = 0 AND ta.role = 'type_args' AND ti.ord = 0)"
-    return Invoke-TsRowsQ $Db ("SELECT 'ext=' || c.name || '>' || coalesce(b.name || '@' || bf.path, '-') || '|' || coalesce($arg, '-') AS r " +
+    # `--width 0`: a row longer than the default width is cut with `...[+N chars]`, and the assertion reads all of it.
+    $r = Invoke-Gate --map-query $Db --width 0 --sql ("SELECT 'ext=' || c.name || '>' || coalesce(b.name || '@' || bf.path, '-') || '|' || coalesce($arg, '-') AS r " +
         "FROM classes c LEFT JOIN classes b ON b.id = $(Get-TsRootFieldSql 'classes__extends' 'c.id' 'id') " +
         "LEFT JOIN files bf ON bf.id = b.file WHERE $(Get-TsRootFieldSql 'classes__extends' 'c.id' 'text') IS NOT NULL")
+    Assert-Exit $r 0
+    return $r
 }
 
 Test-Case 'tsrows: a base class and its type argument carry the classes row the checker resolved, through an alias and a barrel' {
