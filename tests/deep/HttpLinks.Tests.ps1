@@ -141,7 +141,7 @@ Test-Case 'httplinks: the pass is said again over the rows it read and runs agai
     Assert-Line $after 'orders/all'
     Assert-NoLine $after 'orders/list'
     $api = Join-Path $tree 'api/Controllers.cs'
-    Set-Content -LiteralPath $api -Value ((Get-Content -LiteralPath $api -Raw).Replace('[HttpGet(`"[action]`")] public object List()', '[HttpGet(`"all`")] public object List()')) -NoNewline
+    Set-Content -LiteralPath $api -Value ((Get-Content -LiteralPath $api -Raw).Replace('[HttpGet("[action]")] public object List()', '[HttpGet("all")] public object List()')) -NoNewline
     [void](Invoke-HttpLinksMap $tree)
     Assert-Equal (& $replayed) $false 'replayed after a route moved'
     Assert-Line (Get-HttpLinksRows $tree $rows) 'row=GET|api/Orders/all'
