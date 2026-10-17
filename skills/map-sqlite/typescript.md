@@ -99,6 +99,9 @@ Beside the shared tables it adds the FRAMEWORK tables:
   A bare `import('./x')` or `require('./x')` is an `imports` row too, with `dynamic` = `import`/`require` and no names.
   **`imports.in_tree`** is whether the import lands in the tree (not `node_modules`, not outside the root) - what
   `external = 0` was often read as.
+* **`classes.extends`** is `{text, name, file, external, line, id, type_args}`: `text` as written, `name`/`file`/`line` the
+  declaration the checker reached (alias and barrel followed), `id` its `classes` row (none for a library class), and
+  `type_args` each type argument the same way (`extends Base<Order>`: Order's `id`), nested arguments under their own.
 * **`di`** is a constructor parameter, or a field initialised by `inject()` (`inject = 1`, `param` the field). `token`,
   `token_ref` and `token_id` name the injection token - an `@Inject(TOKEN)` or `inject()`'s argument - where `resolved`
   stays the declared TYPE; a token that is a property of a const object (`Tokens.X`)

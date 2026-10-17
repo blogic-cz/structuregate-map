@@ -50,6 +50,12 @@ runs) are compared by that, every carried field equal, never by `c:412`.
   re-export's `from` resolves to. An importer DEPENDS on its declaring file and every barrel in `via`
   (`rust/fbtcore/src/rows/partial/deps.rs`), so a partial run re-reads it when either moves.
 
+## What a name resolves to - by the declaration, never by the name written
+
+- **A base class carries its row** (rows 58, #87): `classes.extends` and each of its `type_args` (every level) hold `line`,
+  where the declaration the checker reached is (`TsClassRows.mjs::heritageRef`, alias and barrel followed), and `id`, the
+  `classes` row at that file and line (`TsRefs.mjs::rollupRefIds`); a library class, or a place two rows share, has none.
+
 ## Expression trees the gate readers need (`TsDecls/TsBody.mjs`)
 
 `value` keeps only the last link of a call chain, so the rust readers need the TREE: `returns.expression`,
