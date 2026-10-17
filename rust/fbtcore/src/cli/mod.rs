@@ -11,6 +11,7 @@ mod hook;
 mod lens;
 mod options;
 mod probe;
+mod sqlparse;
 
 use crate::gate::run::CsFile;
 use crate::mapper::{CsMap, Deep, Free};
@@ -135,6 +136,10 @@ fn asked(call: &Call, callbacks: Callbacks) -> Value {
     }
     if let Some(db) = &o.map_query {
         let exit = lens::run(db, &o.map_query_args, &mut out);
+        return answer(out, exit, true);
+    }
+    if let Some(source) = &o.sql_parse {
+        let exit = sqlparse::run(source, o.dialect.as_deref().unwrap_or("tsql"), callbacks.deep, callbacks.free, &mut out);
         return answer(out, exit, true);
     }
     // `--map-sqlite` on its own is the DEEP map without the file-level one - what a per-turn hook runs.

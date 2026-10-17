@@ -2,6 +2,8 @@
 paths:
   - "src/Map/Sql/**"
   - "rust/fbtcore/src/rows/sqlrun.rs"
+  - "rust/fbtcore/src/rows/sqlshape/**"
+  - "rust/fbtcore/src/cli/sqlparse.rs"
   - "rust/fbtcore/src/rows/seeds/**"
   - "rust/fbtcore/src/rows/dups.rs"
   - "rust/fbtcore/src/mapper/deep/sqlconfig.rs"
@@ -52,6 +54,11 @@ attributed) - a table of its own, NOT a widened `sql_refs`, because every `sql_r
 VIEWS (`sqlshape/views.rs`: `sql_clauses`, `sql_joins`, `sql_functions`, `sql_ctes`) are rewritten only when their
 text moved. **A test compares a partial run with a fresh map of the edited tree, row by row, ids replaced by what
 they name** (`tests/deep/sql/SqlStatements.Tests.ps1`) - a new per-statement table goes into its content queries.
+
+`--sql-parse` (`rust/fbtcore/src/cli/sqlparse.rs`) asks C# the callback mode `sql-parse` (`SqlDeep.Parse`: the same
+`Rows` a file of no project gets, as the payload's JSON), inserts the tables into an IN-MEMORY SQLite through
+`store::insert_rows`, runs `sqlshape::run_on` and reads the tables and views back - never a second derivation in rust
+memory, which would be a second implementation to disagree with the map.
 
 ## `sql_links` - derived after both halves, rewritten whole each run
 

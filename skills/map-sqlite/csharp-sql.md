@@ -126,6 +126,12 @@ nothing, so they cannot disagree with it:
   `line`): the side each join brings in; its ON columns are `sql_column_refs` rows with `role = 'join'`.
 * `sql_functions` (`file`, `statement`, `name`, `windowed`, `line`) and `sql_ctes` (`file`, `statement`, `name`, `line`).
 
+**ONE SQL TEXT, NO TREE**: `structuregate --sql-parse <file|->` (`-` reads stdin, `--dialect tsql` the default)
+prints what this half would hold for that text as JSON on stdout - `statements`, `objects`, `refs`, `column_refs`,
+`clauses`, `joins`, `functions`, `ctes`, `nodes`, `diagnostics`, each row with the columns of its table above and
+`statement` the handle that joins them - and exits 1 when the text does not parse. It is derived by the same code
+as the map, so a statement's `fingerprint` is the one a map of it holds.
+
 ```sql
 -- which queries LEFT JOIN Customers, and on what
 SELECT f.path, s.line, c.alias || '.' || c.column on_column FROM sql_joins j JOIN sql_statements s ON s.id = j.statement

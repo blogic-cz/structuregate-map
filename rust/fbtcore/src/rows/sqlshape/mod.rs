@@ -37,8 +37,12 @@ fn has_table(conn: &Connection, table: &str) -> rusqlite::Result<bool> {
 
 /// Fills what the statements written this run are; the number of statements it filled.
 pub fn run(db: &str) -> anyhow::Result<usize> {
-    let mut conn = Connection::open(db)?;
-    if !has_table(&conn, "sql_statements")? || !has_table(&conn, "sql_nodes")? {
+    run_on(&mut Connection::open(db)?)
+}
+
+/// The same over a connection already open - `--sql-parse` holds its one text's rows in memory.
+pub fn run_on(conn: &mut Connection) -> anyhow::Result<usize> {
+    if !has_table(conn, "sql_statements")? || !has_table(conn, "sql_nodes")? {
         return Ok(0);
     }
     // A NODE IS FOUND BY ITS STATEMENT AND ITS PARENT - this pass reads a statement's nodes, a view a node's children.
@@ -48,8 +52,8 @@ pub fn run(db: &str) -> anyhow::Result<usize> {
         "CREATE INDEX IF NOT EXISTS ix_sql_nodes_statement ON sql_nodes (statement, parent); DROP INDEX IF EXISTS ix_sql_nodes_parent",
     )?;
     // THE TABLE EXISTS WHEREVER STATEMENTS DO, rows or none: a query of it never fails on a tree with no column named.
-    crate::rows::schema::create(&conn, "sql_column_refs", &COLUMN_REFS.map(String::from))?;
-    views::write(&conn)?;
+    crate::rows::schema::create(conn, "sql_column_refs", &COLUMN_REFS.map(String::from))?;
+    views::write(conn)?;
     let text = |r: &rusqlite::Row, i: usize| -> rusqlite::Result<String> { Ok(r.get::<_, Option<String>>(i)?.unwrap_or_default()) };
     let fresh: Vec<[String; 4]> = {
         let mut stmt = conn.prepare(
