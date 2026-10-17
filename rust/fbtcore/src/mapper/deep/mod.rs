@@ -494,9 +494,10 @@ fn angular_arguments(deep: &Deep) -> Vec<String> {
     arguments.extend(deep.skip.iter().cloned());
     arguments.extend(deep.ts_config.iter().cloned());
     arguments.extend(deep.ts_html.iter().cloned());
-    // THE RUNNING BUILD: rust derives `key_reach`, `render_path`, `gate_values` and `gate_features` inside this half, so a
-    // release that changes only that leaves every other input equal and an unchanged tree kept the last release's rows.
-    arguments.push(deep.build.clone());
+    // WHAT PRODUCES ITS ROWS - the scripts and the rust their payload passes through (`embedded::node_rows`) - and NOT
+    // the running build: a release that changes only what rust derives from the rows (`key_reach`, `render_path`,
+    // `gate_values`, the stylesheet tables) derives them again from the stored rows (`ts::derive_again`), without node.
+    arguments.push(crate::embedded::node_rows::extractor());
     arguments
 }
 

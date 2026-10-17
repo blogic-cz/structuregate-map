@@ -13,10 +13,10 @@
 
 pub(crate) mod consts;
 pub(crate) mod handlers;
-mod items;
+pub(crate) mod items;
 pub(crate) mod lines;
 pub(crate) mod literals;
-mod modpath;
+pub(crate) mod modpath;
 
 use serde_json::{json, Value};
 use std::path::Path;

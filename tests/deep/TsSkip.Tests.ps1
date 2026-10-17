@@ -144,13 +144,25 @@ Test-Case 'tsskip: an edit BESIDE the workspace does not start node, and one ins
     Assert-NoLine (Invoke-TsSkipDeep $tree $mixed) $script:TsSkipQuiet
 }
 
-Test-Case 'tsskip: another BUILD of the exe runs the half again over a tree where nothing moved - its closure may derive differently' {
-    # THE RUNNING BUILD IS PART OF THE HALF'S SETUP: a release that changes only what rust derives inside this half
-    # (`key_reach`, `gate_values`) leaves the tree's bytes, the compiler and the extractor's `rows` as they were, so
-    # both skip layers kept the last release's closure for ever. The copy is a second build: another path and time.
-    $tree = New-TsSkipWorkspace
+Test-Case 'tsskip: another BUILD of the exe derives again what rust derives from the stored rows, and does not start node' {
+    # NODE'S ROWS ARE KEYED BY WHAT PRODUCES THEM (`embedded/node_rows.rs`: the scripts and the rust their payload passes
+    # through), WHAT RUST DERIVES BY THE RUNNING BUILD: a release that changes only the closure or the stylesheet tables
+    # derives them again from the stored rows (`rows/derive/tsderive.rs`) - it read the whole tree once per release. The
+    # copy is a second build of the same code: another path and time.
+    $tree = Use-Tree @{
+        'angular.json' = '{"projects":{"shop":{"projectType":"application","root":"apps/shop","sourceRoot":"apps/shop/src",' +
+            '"architect":{"build":{"options":{"tsConfig":"apps/shop/tsconfig.app.json"}}}}}}'
+        'apps/shop/tsconfig.app.json' = '{"compilerOptions":{"strict":true},"include":["src/**/*.ts"]}'
+        'apps/shop/src/main.ts'       = "export const started = true;`n"
+        'apps/shop/src/shop.css'      = ".closed { display: none; }`n.open { color: red; }`n"
+    }
+    $db = Join-Path $tree 'map.sqlite'
     Invoke-TsSkipDeep $tree | Out-Null
-    Assert-Line (Invoke-TsSkipDeep $tree) $script:TsSkipQuiet
+    $rules = "SELECT 'rules=' || count(*) FROM style_rules"
+    Assert-Line (Invoke-Gate --map-query $db --width 0 --sql $rules) 'rules=2'
+    # THE DERIVED ROWS GONE BEHIND THE MAP'S BACK: only a derivation run again brings them back.
+    & $script:Python -c "import sqlite3,sys; c = sqlite3.connect(sys.argv[1]); c.execute('DELETE FROM style_rules'); c.commit()" $db
+    Assert-Line (Invoke-Gate --map-query $db --width 0 --sql $rules) 'rules=0'
     $copy = Join-Path ([System.IO.Path]::GetTempPath()) ('sgtest-build-' + [guid]::NewGuid().ToString('N'))
     $realOut = $script:Out
     try {
@@ -159,15 +171,38 @@ Test-Case 'tsskip: another BUILD of the exe runs the half again over a tree wher
         (Get-Item (Join-Path $copy 'structuregate.dll')).LastWriteTimeUtc = [datetime]::UtcNow.AddMinutes(-7)
         $script:Out = $copy
         $other = Invoke-TsSkipDeep $tree
+        $record = Get-MetaText $db 'rederive:typescript' | ConvertFrom-Json
         $quiet = Invoke-TsSkipDeep $tree
     } finally {
         $script:Out = $realOut
         Remove-Item -Recurse -Force $copy -ErrorAction SilentlyContinue
     }
-    Assert-NoLine $other 'the typescript half had nothing to do'
-    Assert-Line $other 'the typescript half reads '
-    # THE SAME BUILD AGAIN is quiet: the build is in the key, not a reason to read on every run.
+    Assert-Line $other 'the typescript half did not start node'
+    Assert-Line $other 'derived again what rust derives from its stored rows'
+    Assert-NoLine $other 'the typescript half parsed with'
+    Assert-NoLine $other 'the typescript half reads '
+    Assert-Line (Invoke-Gate --map-query $db --width 0 --sql $rules) 'rules=2'
+    Assert-Equal ($record.build.Contains($copy)) $true 'the derivation is recorded as the second build''s'
+    # THE SAME BUILD AGAIN is quiet: the build keys what rust derives, not a reason to derive on every run.
     Assert-Line $quiet $script:TsSkipQuiet
+}
+
+Test-Case 'tsskip: what produces node''s rows moving reads every file again, over a tree where nothing moved' {
+    # A SCRIPT OR A LISTED RUST FILE ONLY MOVES WITH A NEW LIBRARY; `STRUCTUREGATE_TEST_EXTRACTOR` stands in for one, folded
+    # in where they are (`embedded/node_rows.rs`). It must reach both layers: the skip key, or node is never started,
+    # and node's setup, or its plan answers "unchanged" from the tree's hashes alone.
+    $tree = New-TsSkipWorkspace
+    Invoke-TsSkipDeep $tree | Out-Null
+    Assert-Line (Invoke-TsSkipDeep $tree) $script:TsSkipQuiet
+    $env:STRUCTUREGATE_TEST_EXTRACTOR = 'another-extractor'
+    try {
+        $moved = Invoke-TsSkipDeep $tree
+    } finally {
+        Remove-Item Env:STRUCTUREGATE_TEST_EXTRACTOR -ErrorAction SilentlyContinue
+    }
+    Assert-NoLine $moved $script:TsSkipQuiet
+    Assert-Line $moved 'the typescript half reads everything'
+    Assert-Line $moved 'its setup moved'
 }
 
 }

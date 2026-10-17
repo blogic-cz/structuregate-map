@@ -45,7 +45,7 @@ pub fn run(o: &Options, out: &mut Out) -> Option<i64> {
     } else if let Some(db) = &p.ts_apply {
         match &p.ts_payload {
             None => Err("--fbt-ts-apply needs --fbt-ts-payload".into()),
-            Some(payload) => calls::ts_apply(Path::new(db), &root, payload),
+            Some(payload) => calls::ts_apply(Path::new(db), &root, payload, ""),
         }
     } else {
         return None;

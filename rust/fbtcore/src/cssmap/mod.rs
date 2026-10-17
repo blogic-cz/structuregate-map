@@ -13,8 +13,8 @@
 //! from every stylesheet `files` row of the half - well over a thousand on a large Angular workspace, a fraction of a second - so no partial
 //! path can keep a stale rule beside a fresh one. None has an `owner_file`: `rows::partial::carry` hands such a
 //! table back to nobody, and every run deletes its rows here before writing them again. A change to what they
-//! say is a change to what the half writes: bump `rows` in `src/TsRows/TsMap.mjs`, or an unchanged workspace
-//! keeps the rows an older exe wrote.
+//! say needs no bump of `rows`: a new build derives them again from the stored rows of an unchanged workspace
+//! (`rows/derive/tsderive.rs`), without node.
 //!
 //! A SHEET THE PARSER CANNOT READ SAYS SO, and has no rows: `stylesheets.error` and a `diagnostics` row of kind
 //! `stylesheet_unparsed`. Half a sheet is not a reading of it.
