@@ -73,9 +73,13 @@ a table node rebuilds whole sends no rows at all - never an INTERNED one (`files
 measured by where its rows were minted, a workspace with no `templateUrl` made `files` a rollup's table, no partial run
 was handed it, and every file id moved under the kept rows naming them. A pass that reads a stub, replaces one or would send one back marks
 the run (`MAP-UNCARRIED`), which is asked again with every cell carried - so a list that misses a read costs time,
-never a row. On a run that stopped short, `dangling` asks every kept row - its plain cells and its NODE rows - and every
-row of a whole table the payload sends (`Digest::named`) for an id the replace removes and the payload does not hold
-again (`nested`), which node once asked of every row it held; a string that only looks like an id is no reason to retry. THE CARRY IS WRITTEN BESIDE THE PARSE
+never a row. EVERY partial run has `dangling` ask, for an id the replace removes and the payload does not hold again: every
+row of a whole table the payload sends (`Digest::named`), every kept row's NODE rows and its cells in a column a spec
+declares a join (both by index), and every cell of the files the stored graph lists as readers; a run that stopped short
+(`nested`) also every plain cell of every kept row, which node once asked of every row it held. A string that only looks
+like an id is no reason to retry. A hit on a run that stopped short asks again over every hop; on one that read every hop
+it would ask the same again, so the half READS EVERYTHING instead and says which reference it found (`EVERY_HOP`,
+`_meta.last_refresh` `dangling`): asked of the watchers alone, an id a whole table lost (`files`, v2.6.0) was stored dangling. THE CARRY IS WRITTEN BESIDE THE PARSE
 (`carried_parse`, `mapper/deep/ts.rs`): node builds every program ahead without a checker (`prewarm`,
 `TsSetup/TsProgram.mjs` - each parse given back as it was parsed, or a compiler before 5.3 resolves and notes less)
 and then loads the rows as rust writes them (`readCarry`, `--carry-part`: the file read while it grows, whole once renamed).
@@ -88,7 +92,12 @@ place, per table in rowid order, every read cell with a structure as its nodes, 
 each affected file's text (`file_text` before, the disk after): all equal, and the four tables stay. That needs the
 same ids back: EVERY per-file table with a unique key is claimed (`identityKeys`), not only those another file names,
 with sparse ALTERNATIVES for the rows a first key leaves out (`identityOf`: a template expression has no line), and a
-rollup takes its old ids back in the order it made them (`rollupId`, handed over by `carry` as `rollup`). A table read
+rollup takes its old ids back in the order it made them (`rollupId`, handed over by `carry` as `rollup`), a project by its
+name (`Store.named`). What a file read again made lands after every carried row, so the store is put back in mint order
+after the walk and again after the refs rollup (`inMintOrder`), before a rollup numbers rows by another table's order.
+**ONE DIFFERENCE FROM A FULL RUN STAYS**: a row ADDED to a file read again (a comment appended) takes the next free id,
+where a full run numbers it in walk order and every later row of its table one higher - renumbering them would rewrite
+every kept row after it. Everything else, `_meta` `spec:typescript` included, is the full run's. A table read
 whole (no `half`) is never kept; `forget` runs before any row is written. A closure that MOVED is written as what
 changed (`rows/derive/delta.rs`): a stored row is matched to an emitted one by its content as the store holds it (its
 cells, then each structure's node rows), and only the rows left over on either side are deleted or inserted.

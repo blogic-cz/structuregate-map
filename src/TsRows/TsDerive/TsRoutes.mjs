@@ -35,6 +35,15 @@ function withoutAddedIds(key, value) {
   return value;
 }
 
+/**
+ * A ROUTE'S CELL AS EXTRACTED, without the ids `rollupRefIds` adds later. This pass runs before it, so a full run's
+ * route holds none - but a partial run reads the KEPT `ng_modules` rows, stored with them, and a route copied from one
+ * held `$module.id` where a full run's did not.
+ */
+function asExtracted(value) {
+  return value === null || typeof value !== 'object' ? value : JSON.parse(JSON.stringify(value, withoutAddedIds));
+}
+
 export function rollupRoutes(store) {
   const foldSpread = makeSpreadFolder(store);
   const emitted = new Set();
@@ -132,6 +141,7 @@ export function rollupRoutes(store) {
       run_guards_and_resolvers: effective.runGuardsAndResolvers ?? null,
       outlet: effective.outlet ?? null,
     };
+    for (const key of Object.keys(fields)) fields[key] = asExtracted(fields[key]);
     // A NESTED ROUTE'S PARENT IS A ROW, NOT A PREFIX. `full_path` carried the composition and nothing carried
     // the LINK, so walking back up meant re-deriving parentage from a string.
     const id = store.add('routes', 'rt', {
@@ -141,7 +151,7 @@ export function rollupRoutes(store) {
       children: Array.isArray(effective.children) ? effective.children.length : 0,
       // `false` = the fields above are the WHOLE story. `true` = something they hold is still unknown.
       fields_incomplete: unresolvedSpread || Object.values(fields).some(hasUnresolved),
-      unresolved_spread: unresolvedSpread ? spread : undefined,
+      unresolved_spread: unresolvedSpread ? asExtracted(spread) : undefined,
       folded_from: folded ? folded.from : undefined,
       folded_shadowed: shadowed.length ? shadowed : undefined,
     });

@@ -15,6 +15,7 @@
 
 use super::super::protocol::Collector;
 use super::derived::{derive_again, report, Again};
+use super::flight::{everything, Stored};
 use super::Deep;
 use crate::hosts;
 use crate::rows::calls;
@@ -182,7 +183,14 @@ pub(super) fn launched(into: &mut Collector, deep: &Deep, db: &str, root: &str, 
                     parse_tree(into, deep, &parse, root, db, &work, None, every_hop, &|| {}, false)
                 };
                 let retry = match parsed {
-                    Parsed::Rows => store(into, db, root, &work.rows, carried, fe, &deep.build),
+                    Parsed::Rows => match store(into, db, root, &work.rows, carried, fe, &deep.build) {
+                        Stored::Done => false,
+                        Stored::Again => true,
+                        Stored::Everything => {
+                            work.clean();
+                            return everything(into, deep, db, root, fe);
+                        }
+                    },
                     Parsed::Retry => true,
                     Parsed::Uncarried if !whole => {
                         whole = true;
@@ -519,23 +527,31 @@ pub(super) fn parse_tree(into: &mut Collector, deep: &Deep, parse: &str, root: &
 }
 
 /// THE ROWS, THE CLOSURE DERIVED FROM THEM AND THE GRAPH THE NEXT RUN PLANS WITH, stored in this process.
-/// True when nothing was stored because a run that stopped short would have left a kept row pointing at nothing.
-pub(super) fn store(into: &mut Collector, db: &str, root: &str, rows: &Path, carried: Option<u64>, fe: &mut Option<String>, build: &str) -> bool {
+pub(super) fn store(into: &mut Collector, db: &str, root: &str, rows: &Path, carried: Option<u64>, fe: &mut Option<String>, build: &str) -> Stored {
     // ONE SPAN FOR THE WHOLE STORE, its phases inside it: what they do not cover is the store's own `(untraced)`.
     let _storing = crate::trace::stage("typescript: store");
     let receipt = match calls::ts_apply(Path::new(db), root, &text(rows), build) {
         Ok(receipt) => receipt,
         Err(error) if error.starts_with(crate::rows::dangling::STOPPED_SHORT) => {
             into.notes.push(format!("the typescript half is reading every hop of dependents again: {error}"));
-            return true;
+            return Stored::Again;
+        }
+        // SAID, AND KEPT FOR `_meta.last_refresh`: a partial run that reads every hop and still breaks a join is a defect
+        // of the partial path, worth a report - the map it leaves is the full run's, never the broken one.
+        Err(error) if error.starts_with(crate::rows::dangling::EVERY_HOP) => {
+            into.notes.push(format!("the typescript half reads everything instead: {error}"));
+            if let Some(Value::Object(refresh)) = into.refresh.get_mut("typescript") {
+                refresh.insert("dangling".into(), Value::from(error));
+            }
+            return Stored::Everything;
         }
         Err(error) => {
             into.errors.push(format!("HALF      {LANGUAGE}: the rows were not stored — {error}"));
-            return false;
+            return Stored::Done;
         }
     };
     report(into, &receipt, carried, fe);
-    false
+    Stored::Done
 }
 
 fn records(output: &str, prefix: &str) -> Vec<String> {

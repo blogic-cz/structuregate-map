@@ -100,6 +100,11 @@ const MORE_KEYS = [
   // is then told apart by its template row (itself claimed). Measured on a small tree, the keys above held; on a large
   // workspace one shared template left both tables without a key, and every partial run renumbered them.
   ['template', 'line', 'col', 'kind', 'order'], ['template', 'line', 'col', 'kind', 'name'],
+  // A CONSTRUCTOR'S INJECTED PARAMETER (`di`) has no member: `['class', 'member']` names an `inject()` field and left
+  // every parameter unclaimed, so a file read again renumbered its `di` rows under a full run's.
+  ['class', 'param'],
+  // A TRANSLATION KEY A SERVICE CALL HANDS OVER (`i18n_refs`, `TsI18nCalls.mjs`): its call and the key, or the prefix.
+  ['call', 'key'], ['call', 'prefix'],
 ];
 
 // The candidate keys, most identifying first. A row is claimed by the first of these that is unique
@@ -122,15 +127,6 @@ const KEY_CANDIDATES = [
   // own), a render by its node and target, an io by its member, a template string by its node and expression.
   ...MORE_KEYS.map((columns) => ({ columns, sparse: true })),
 ];
-
-/** Every id a cell holds, however deeply it is nested. */
-function idsIn(value) {
-  if (isStub(value)) return [];
-  if (isId(value)) return [value];
-  if (Array.isArray(value)) return value.flatMap(idsIn);
-  if (value && typeof value === 'object') return Object.values(value).flatMap(idsIn);
-  return [];
-}
 
 export function keyOfRow(row, columns) {
   const parts = [];
@@ -236,6 +232,8 @@ export class Store {
     this.reclaimed = 0;
     // THE IDS A ROLLUP'S ROWS HAD LAST RUN, by table and in the order they were made - see `rollupId`.
     this.reusable = new Map();
+    // THE IDS A TABLE REBUILT UNDER A NAME HAD LAST RUN, by that name - see `named`.
+    this.byName = new Map();
     // The lookups `handedBack` builds, by table and key. Empty on a full run, which is handed nothing.
     this.handed = new Map();
     this.reused = 0;
@@ -266,6 +264,10 @@ export class Store {
       row.half = HALF;
       list.push(row);
       if (row.id) this.rowById.set(row.id, row);
+      // ITS PREFIX GOES INTO THE SCHEME as a minted row's does (`note`): the spec is derived from every row this run
+      // holds, and a partial run that noted only what it minted published no `f` - no join to `files`, no anchor.
+      const cut = typeof row.id === 'string' ? row.id.indexOf(':') : -1;
+      if (cut > 0 && !this.scheme.get(row.id.slice(0, cut))?.has(name)) this.note(name, row.id.slice(0, cut));
       this.hydrated.add(row);
       // AS IT ARRIVED, for `verifyUntouched` - in the one serialization the engine does natively, never sorted or copied:
       // that was most of a partial run's per-row cost. Not a row whose table goes back WHOLE whatever happens to it:
@@ -401,7 +403,7 @@ export class Store {
     return [...this.rollupTables].filter((name) => !this.perFileTables.has(name) && !this.internedTables.has(name)).sort();
   }
 
-    /**
+  /**
    * WHICH IDS HAVE TO SURVIVE A RE-EXTRACTION, and what identifies the row that holds one.
    *
    * A partial run re-extracts a file and mints fresh ids for its rows. Every row in ANOTHER file that
@@ -413,52 +415,20 @@ export class Store {
    * The way out is not to renumber. A declaration that is still there is the SAME declaration, so it
    * keeps its id - and then nothing outside the file has to be touched at all.
    *
-   * THIS IS MEASURED, NOT LISTED. A table needs stable ids when some row in another file names one of its
-   * rows, which is the same walk `rows/partial/deps.rs` makes over every id-valued cell - and every other
-   * per-file table wants them too, below. The KEY is measured
-   * too: the first candidate that identifies a row uniquely inside its own file, everywhere in the map. A
-   * list of either would be a second statement of a fact the rows already carry, and the one that drifted
-   * would be the list.
+   * EVERY TABLE BUT `files` (interned by path, never re-minted): not only those another file names, since the closure
+   * rust derives over every row reads them all (`rows/derive/unchanged.rs`), and a re-extraction that renumbered a file
+   * whose rows are otherwise what they were moved the closure, which was then derived again for nothing. (The walk that
+   * once picked the tables another file names was kept after this made every table one, and decided nothing.)
+   *
+   * THE KEY IS MEASURED, NOT LISTED: the first candidate that identifies a row uniquely inside its own file, everywhere
+   * in the map - by a partial run too, over every row it holds (carried or made: a structure's stub is no key part, as
+   * a structure is not), so the spec it publishes is the one a full run of the same tree would. Republished, a key an
+   * edit made unique (`comments`, in a tree whose first comment it wrote) stayed out of the spec until the next full run.
    */
   identityKeys() {
-    const fileOf = new Map();
-    const tableOf = new Map();
-    for (const [name, rows] of Object.entries(this.tables)) {
-      for (const row of rows) {
-        if (!row.id) continue;
-        tableOf.set(row.id, name);
-        const home = row.owner_file ?? (typeof row.file === 'string' ? row.file : null);
-        if (home) fileOf.set(row.id, home);
-      }
-    }
-
-    // A TARGET NAMED FROM ANOTHER FILE. `files` is left out: its rows ARE files, they are never
-    // re-minted because `intern` keys them by path, and every id in the map would otherwise name it.
-    const crossing = new Set();
-    for (const rows of Object.values(this.tables)) {
-      for (const row of rows) {
-        const home = row.owner_file ?? (typeof row.file === 'string' ? row.file : null);
-        if (!home) continue;
-        for (const [column, value] of Object.entries(row)) {
-          if (column === 'id' || column === 'owner_file' || column === 'file') continue;
-          for (const id of idsIn(value)) {
-            const target = fileOf.get(id);
-            if (target !== undefined && target !== home) crossing.add(tableOf.get(id));
-          }
-        }
-      }
-    }
-    crossing.delete('files');
-    crossing.delete(undefined);
-
-    // EVERY OTHER PER-FILE TABLE TOO, since nothing outside the file needs its ids: the closure rust derives over
-    // every row reads them (`rows/derive/unchanged.rs`), and a re-extraction that renumbered a file whose rows are
-    // otherwise what they were moved the closure, which is then derived again for nothing.
-    for (const name of Object.keys(this.tables)) crossing.add(name);
-    crossing.delete('files');
     const out = {};
-    for (const name of [...crossing].sort()) {
-      const key = uniqueKeyFor(this.tables[name] ?? []);
+    for (const name of Object.keys(this.tables).filter((table) => table !== 'files').sort()) {
+      const key = uniqueKeyFor(this.tables[name]);
       // A TABLE WITH NO KEY IS REPORTED BY ITS ABSENCE. Guessing one would re-point a reference at a
       // row that merely looks alike, which is worse than minting a fresh id and resolving again.
       if (key) out[name] = key;
@@ -518,6 +488,24 @@ export class Store {
       if (id.startsWith(`${prefix}:`) && !this.rowById.has(id)) return id;
     }
     return null;
+  }
+
+  /**
+   * THE ID A ROW OF A TABLE EVERY RUN MAKES AGAIN HAD LAST RUN, BY ITS NAME: `projects` is made before any file is open
+   * and in discovery order, and a partial run minted every project a new id - every `files.project` of a full run then
+   * differed, and a kept row named a project only `repointProjects` could find again. A project is its name.
+   */
+  named(name, cells) {
+    const held = this.byName.get(name);
+    const id = held === undefined || typeof cells.name !== 'string' ? undefined : held.get(cells.name);
+    if (id === undefined) return null;
+    held.delete(cells.name);
+    return id;
+  }
+
+  /** What a partial run was handed for such a table: its rows as they were stored, `{id, name}` each. */
+  holdNames(name, rows) {
+    this.byName.set(name, new Map(rows.filter((r) => typeof r.name === 'string' && r.id).map((r) => [r.name, r.id])));
   }
 
   /** The rollups' ids a partial run was handed: `{table: [id, ...]}`, each in the order the last run made them. */
@@ -590,6 +578,7 @@ export class Store {
   inMintOrder() {
     for (const rows of Object.values(this.tables)) {
       let prefix = null;
+      let sorted = true;
       const keyed = [];
       for (const row of rows) {
         const id = typeof row.id === 'string' ? row.id : '';
@@ -597,9 +586,11 @@ export class Store {
         const n = at > 0 ? Number(id.slice(at + 1)) : NaN;
         if (!Number.isInteger(n) || (prefix !== null && prefix !== id.slice(0, at))) { keyed.length = 0; break; }
         prefix = id.slice(0, at);
+        if (keyed.length && keyed[keyed.length - 1][0] > n) sorted = false;
         keyed.push([n, row]);
       }
-      if (keyed.length !== rows.length) continue;
+      // ASKED SEVERAL TIMES A RUN (`TsMap.mjs`), so a table already in order is left without a sort.
+      if (sorted || keyed.length !== rows.length) continue;
       keyed.sort((a, b) => a[0] - b[0]);
       for (const [i, [, row]] of keyed.entries()) rows[i] = row;
     }
@@ -631,7 +622,7 @@ export class Store {
   add(name, prefix, cells) {
     (this.currentFile === null ? this.rollupTables : this.perFileTables).add(name);
     this.note(name, prefix);
-    const id = this.claimed(name, cells) ?? this.rollupId(name, prefix) ?? this.id(prefix);
+    const id = this.claimed(name, cells) ?? this.named(name, cells) ?? this.rollupId(name, prefix) ?? this.id(prefix);
     const stored = { id, ...cells, half: HALF };
     // A COLUMN OF OUR OWN, never `file`. Stamping `file` where it was empty CHANGED A FACT rather than
     // adding one: the map being reproduced leaves `expressions.file` empty for a TEMPLATE expression, and

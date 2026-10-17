@@ -387,6 +387,7 @@ async function main() {
     // above, so the scope is decided over every candidate again - `setAsideOutOfScope` moves it out on the way to the store.
     const reclaimable = store.loadClaims(claimsBack(carried.claims), state.identity ?? {});
     store.loadRollup(carried.rollup);
+    store.holdNames('projects', heldProjects);
     emptyChanged(store, planned.changed);
     repointLater = heldProjects;
     emit('MAP-NOTE', `the typescript half put back ${loaded} row(s) it is not re-extracting and `
@@ -467,7 +468,9 @@ async function main() {
     const fileById = new Map(store.table('files').map((f) => [f.id, f]));
     for (const t of store.table('templates')) {
       const row = t.file ? fileById.get(t.file) : undefined;
-      if (!row || t.inline) continue;
+      // NOT AN ORPHAN'S (no component): parsed after this on a full run, its row is not here yet - and a partial run,
+      // handed it back, filled the `chars` a full run leaves empty (see the orphans below).
+      if (!row || t.inline || t.component === null || t.component === undefined) continue;
       row.lines ??= t.lines;
       row.chars ??= t.chars;
       // TIER TOO, not only the sizes: `tier` is otherwise set by the .ts extractors and the inventory
@@ -516,8 +519,8 @@ async function main() {
   // AND NOT AGAIN FOR THE ORPHANS, though it is tempting. They are parsed after the inventory, so the
   // pass above ran before their `templates` rows existed and a few file rows keep no `chars` at all. The
   // tool this map reproduces leaves them empty too, and filling them moved those `files` rows away from
-  // it. A partial run has those template rows handed back before it starts, so it fills what a full
-  // run leaves empty - which is the difference the partial-run comparison records, not a gap to close here.
+  // it. A partial run has those template rows handed back before it starts, and `sizesFromTemplates` skips them
+  // (no component) so it leaves them empty as well.
   markReachable(store, inAnyProgram, diag);
 
   // THE TRANSLATION FILES, LAST. They are inventory rows until something opens them, and they are opened
@@ -551,6 +554,11 @@ async function main() {
     ? new Set(store.table('files').filter((f) => affected.has(f.path)).map((f) => f.id))
     : null;
   const i18nCalls = rollupI18nCalls(store, new Set(names(config, 'i18nCalls')), affectedIds, new Set(names(config, 'i18nDictionaryCalls')));
+  // WHAT THE FILES READ AGAIN MADE SINCE THE WALK - their templates' rows, their refs above - lands after every carried
+  // row, under the ids it had (`claimed`): put back in a full run's order before the first rollup that numbers its rows
+  // by another table's (`render_graph` by `renders`, `gate_index` by `gates`, `i18n_index` lists `i18n_refs`). Nothing
+  // before it mints from those tables: `routes` reads the walk's `consts` and `ng_modules`, sorted after the walk.
+  if (partial) store.inMintOrder();
   if (i18nCalls.refs) {
     emit('MAP-NOTE', `the typescript half found ${i18nCalls.refs} translation key(s) in service calls, `
       + `and ${i18nCalls.dynamic} call(s) with no static key`);
@@ -818,10 +826,9 @@ async function main() {
             // rows arrive already made - and publishing what it CAN see would shrink the list to the
             // rollups alone and make the next partial run drop `renders`.
             rebuilt: partial ? [...rebuilt].sort() : store.rebuiltTables(),
-            // WHICH IDS A RE-EXTRACTION MUST NOT CHANGE, and what identifies the row holding one. A
-            // partial run republishes what it was given, for the same reason it republishes `rebuilt`:
-            // it cannot measure this over a map it only partly walked.
-            identity: partial ? (state.identity ?? {}) : store.identityKeys() },
+            // WHICH IDS A RE-EXTRACTION MUST NOT CHANGE, and what identifies the row holding one - measured by a
+            // partial run too, which holds every row of every per-file table and makes every rollup's again.
+            identity: store.identityKeys() },
     provenance,
   };
   writePayload(args.rows, payload);
