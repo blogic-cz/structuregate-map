@@ -1,5 +1,5 @@
 <#
-    A PARTIAL RUN KEEPS THE CLOSURE IT STORED when nothing the closure read moved (`rust/fbtcore/src/rows/partial/unchanged.rs`):
+    A PARTIAL RUN KEEPS THE CLOSURE IT STORED when nothing the closure read moved (`rust/fbtcore/src/rows/derive/unchanged.rs`):
     a comment keeps it, and it is the closure a full run of the edited tree derives; an edit to a condition a key is
     chosen under moves it, and it is derived again.
 #>
@@ -95,7 +95,7 @@ Test-Case 'tsrows: an edited condition moves the closure, which a partial run de
     Assert-Equal $moved.Text $full.Text "the derived closure against a full run of the edited tree"
 }
 
-# DERIVED AGAIN, IT IS WRITTEN AS WHAT CHANGED (`rust/fbtcore/src/rows/partial/delta.rs`): the row of a key the edit did not
+# DERIVED AGAIN, IT IS WRITTEN AS WHAT CHANGED (`rust/fbtcore/src/rows/derive/delta.rs`): the row of a key the edit did not
 # move is the row that was there - the same rowid - and the row of one it moved is a new one, above every row there was.
 # Deleted and written whole, the table numbers its rows from 1 again and the moved key sits where it sat.
 Test-Case 'tsrows: a closure derived again rewrites the rows that moved and keeps the rest' {
