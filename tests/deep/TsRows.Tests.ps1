@@ -108,24 +108,6 @@ Test-Case 'tsrows: a second run replaces this half rows rather than adding to th
     Assert-Line $r '1'
 }
 
-# EVERY NODE TABLE IS INDEXED BY `value` AND BY `(role, parent)` - once, after a full run's closure is written
-# (`WriteRequest::index_nodes`: the closure's nodes went into indexed tables, most of their write), and still after a
-# partial run, whose check of the kept rows and whose stubs read through them (`rows/partial/`).
-Test-Case 'tsrows: every node table carries its value and shape index after a full run and after a partial one' {
-    $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
-    Assert-Exit $made.Result 0
-    $missing = "SELECT 'missing=' || count(*) AS m FROM _cells c WHERE " +
-        "NOT EXISTS (SELECT 1 FROM sqlite_master i WHERE i.type = 'index' AND i.name = 'ix_' || c.child || '_value') OR " +
-        "NOT EXISTS (SELECT 1 FROM sqlite_master i WHERE i.type = 'index' AND i.name = 'ix_' || c.child || '_role')"
-    Assert-Line (Invoke-TsRowsQ $made.Db $missing) 'missing=0'
-    Add-Content -LiteralPath (Join-Path $tree 'apps/shop/src/cart.ts') -Value '// demo: one comment'
-    $again = New-TsRowsDb $tree
-    Assert-Exit $again.Result 0
-    Assert-Line $again.Result 'again for 1 changed'
-    Assert-Line (Invoke-TsRowsQ $again.Db $missing) 'missing=0'
-}
-
 # A FILE THE PROGRAM CONTAINS is `core`, and its size comes from the COMPILER's own view of it: `chars` is
 # the length of the text TypeScript decoded, which is not the byte count on disk.
 Test-Case 'tsrows: a program source file is a core row with its lines and chars' {

@@ -122,7 +122,7 @@ fn the_tally_of_rows_counts_the_stylesheets_as_they_were_read_again() {
     // The counts as the write before the stylesheets left them, and then two more rules.
     let (_, mut written) = every();
     std::fs::write(root.join("web").join("s.scss"), ".a { display: none; }\n.b { color: red; }\n.c { color: blue; }\n").unwrap();
-    styles(&mut TsReceipt::default(), &mut written, &db, &root.to_string_lossy(), &root.join("web"), true).unwrap();
+    styles(&mut TsReceipt::default(), &mut written, &db, &root.to_string_lossy(), &root.join("web")).unwrap();
     let _ = std::fs::remove_dir_all(&root);
     let (total, _) = every();
     assert_eq!(written.get("style_rules"), Some(&3));
@@ -194,7 +194,7 @@ fn lab() {
     let gone = BTreeSet::new();
     let applied = store::write(&work, &WriteRequest {
         tables: &emitted, stream: None, texts: &store::Texts::Held(&BTreeMap::new()), root: &ws, shas: &Map::new(), gone: &gone,
-        full: false, counters: &Map::new(), lang: LANG, half: Some(LANG), setup: None, extra: &BTreeMap::new(), keep_existing: true, counts: true, index_nodes: true,
+        full: false, counters: &Map::new(), lang: LANG, half: Some(LANG), setup: None, extra: &BTreeMap::new(), keep_existing: true, counts: true,
     }).unwrap();
     eprintln!("LAB write the closure {} ms {:?}", t.elapsed().as_millis(), applied.steps);
 }

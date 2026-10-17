@@ -158,8 +158,7 @@ fn derive(db: &Connection, workspace: &Path, half: &str) -> Result<Derived> {
 
 /// DERIVE AND STORE, after node's rows are in: the old rows of this pass go first, whatever kind of run left
 /// them, and a `diagnostics` row only by its own kind - the rest of that table is node's.
-/// `index_nodes`: as `WriteRequest` says - false on a full run, which indexes every node table once after its closure.
-pub fn store(db_path: &Path, root: &str, workspace: &Path, half: &str, notes: &mut Vec<String>, index_nodes: bool) -> Result<BTreeMap<String, i64>> {
+pub fn store(db_path: &Path, root: &str, workspace: &Path, half: &str, notes: &mut Vec<String>) -> Result<BTreeMap<String, i64>> {
     let derived = {
         let db = Connection::open(db_path)?;
         // A TABLE NOT THERE YET HAS NOTHING TO DELETE - the first run of this pass over a database.
@@ -189,7 +188,6 @@ pub fn store(db_path: &Path, root: &str, workspace: &Path, half: &str, notes: &m
         // ITS OWN TABLES COUNTED, NOT EVERY TABLE: the rows were counted by the write before this one, and only these
         // moved since - a count of the whole database was most of this pass on a large workspace.
         counts: false,
-        index_nodes,
     })?;
     let db = Connection::open(db_path)?;
     let mut written = applied.written;

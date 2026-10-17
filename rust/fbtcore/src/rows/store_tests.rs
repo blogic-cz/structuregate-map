@@ -30,7 +30,6 @@ fn request<'a>(
         extra,
         keep_existing,
         counts: true,
-        index_nodes: true,
     }
 }
 
