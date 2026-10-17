@@ -100,6 +100,11 @@ const MORE_KEYS = [
   // is then told apart by its template row (itself claimed). Measured on a small tree, the keys above held; on a large
   // workspace one shared template left both tables without a key, and every partial run renumbered them.
   ['template', 'line', 'col', 'kind', 'order'], ['template', 'line', 'col', 'kind', 'name'],
+  // A CONSTRUCTOR'S INJECTED PARAMETER (`di`) has no member: `['class', 'member']` names an `inject()` field and left
+  // every parameter unclaimed, so a file read again renumbered its `di` rows under a full run's.
+  ['class', 'param'],
+  // A TRANSLATION KEY A SERVICE CALL HANDS OVER (`i18n_refs`, `TsI18nCalls.mjs`): its call and the key, or the prefix.
+  ['call', 'key'], ['call', 'prefix'],
 ];
 
 // The candidate keys, most identifying first. A row is claimed by the first of these that is unique
@@ -236,6 +241,8 @@ export class Store {
     this.reclaimed = 0;
     // THE IDS A ROLLUP'S ROWS HAD LAST RUN, by table and in the order they were made - see `rollupId`.
     this.reusable = new Map();
+    // THE IDS A TABLE REBUILT UNDER A NAME HAD LAST RUN, by that name - see `named`.
+    this.byName = new Map();
     // The lookups `handedBack` builds, by table and key. Empty on a full run, which is handed nothing.
     this.handed = new Map();
     this.reused = 0;
@@ -520,6 +527,24 @@ export class Store {
     return null;
   }
 
+  /**
+   * THE ID A ROW OF A TABLE EVERY RUN MAKES AGAIN HAD LAST RUN, BY ITS NAME: `projects` is made before any file is open
+   * and in discovery order, and a partial run minted every project a new id - every `files.project` of a full run then
+   * differed, and a kept row named a project only `repointProjects` could find again. A project is its name.
+   */
+  named(name, cells) {
+    const held = this.byName.get(name);
+    const id = held === undefined || typeof cells.name !== 'string' ? undefined : held.get(cells.name);
+    if (id === undefined) return null;
+    held.delete(cells.name);
+    return id;
+  }
+
+  /** What a partial run was handed for such a table: its rows as they were stored, `{id, name}` each. */
+  holdNames(name, rows) {
+    this.byName.set(name, new Map(rows.filter((r) => typeof r.name === 'string' && r.id).map((r) => [r.name, r.id])));
+  }
+
   /** The rollups' ids a partial run was handed: `{table: [id, ...]}`, each in the order the last run made them. */
   loadRollup(rollup) {
     for (const [table, ids] of Object.entries(rollup ?? {})) {
@@ -590,6 +615,7 @@ export class Store {
   inMintOrder() {
     for (const rows of Object.values(this.tables)) {
       let prefix = null;
+      let sorted = true;
       const keyed = [];
       for (const row of rows) {
         const id = typeof row.id === 'string' ? row.id : '';
@@ -597,9 +623,11 @@ export class Store {
         const n = at > 0 ? Number(id.slice(at + 1)) : NaN;
         if (!Number.isInteger(n) || (prefix !== null && prefix !== id.slice(0, at))) { keyed.length = 0; break; }
         prefix = id.slice(0, at);
+        if (keyed.length && keyed[keyed.length - 1][0] > n) sorted = false;
         keyed.push([n, row]);
       }
-      if (keyed.length !== rows.length) continue;
+      // ASKED SEVERAL TIMES A RUN (`TsMap.mjs`), so a table already in order is left without a sort.
+      if (sorted || keyed.length !== rows.length) continue;
       keyed.sort((a, b) => a[0] - b[0]);
       for (const [i, [, row]] of keyed.entries()) rows[i] = row;
     }
@@ -631,7 +659,7 @@ export class Store {
   add(name, prefix, cells) {
     (this.currentFile === null ? this.rollupTables : this.perFileTables).add(name);
     this.note(name, prefix);
-    const id = this.claimed(name, cells) ?? this.rollupId(name, prefix) ?? this.id(prefix);
+    const id = this.claimed(name, cells) ?? this.named(name, cells) ?? this.rollupId(name, prefix) ?? this.id(prefix);
     const stored = { id, ...cells, half: HALF };
     // A COLUMN OF OUR OWN, never `file`. Stamping `file` where it was empty CHANGED A FACT rather than
     // adding one: the map being reproduced leaves `expressions.file` empty for a TEMPLATE expression, and
