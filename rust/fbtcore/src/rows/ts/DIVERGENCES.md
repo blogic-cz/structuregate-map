@@ -118,7 +118,7 @@ the scope is decided over every candidate on every run. Tables that move: `rende
 `key/fields/key_inputs.rs`, `key/routes/key_routes.rs`, `key/routes/key_called.rs`, `gate/ts/gate_input_flags.rs`) no
 longer see such an edge, so `key_reach` and `gate_values` move only where one of them read one.
 
-**#50 - an orphan template's gated nodes carry their gate chain** (not yet signed off; `src/TsRows/TsMap.mjs`, `rows` 53):
+**#50 - an orphan template's gated nodes carry their gate chain** (signed off 2026-10-18; `src/TsRows/TsMap.mjs`, `rows` 53):
 an `.html` no component points at is parsed as an ORPHAN template after the inventory, and the gate rollup
 (`TsTpl/TsGateChain.mjs`) ran before it, so an orphan's node under an `*ngIf` had a `gates` row and no `gate_chain`.
 A partial run is handed those nodes back and runs the rollup over them, so it chained them and failed on
