@@ -86,9 +86,10 @@ windows = { version = "0.62", features = [
 # mimalloc, whose `-sys` crates already build C with `cc`. No bindgen: its few doors are declared by hand.
 cc = "1.2"
 
-# FOR MEASURING, NOT SHIPPING: release's optimisation level without its whole-program pass. `lto` and one codegen
-# unit made every rebuild after a one-file change take minutes; this one takes seconds and runs within a few percent
-# of the shipped code - what a profile or benchmark iteration needs (`.claude/skills/map-lab/`). Build with
+# FOR BUILDING AND MEASURING, NOT SHIPPING: release's optimisation level without its whole-program pass. `lto` and
+# one codegen unit made every rebuild after a one-file change take minutes; this one takes seconds and runs within a
+# few percent of the shipped code. A plain `dotnet build` uses it (the dll the tests run); only a publish links
+# `release`. Also what a profile or benchmark iteration needs (`.claude/skills/map-lab/`):
 # `cargo build --profile lab` / `cargo test --profile lab`.
 [profile.lab]
 inherits = "release"

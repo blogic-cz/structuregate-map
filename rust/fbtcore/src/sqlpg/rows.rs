@@ -111,8 +111,8 @@ fn spelled(source: &Source, at: usize) -> (String, String) {
     (text_of("type"), text_of("DEFAULT"))
 }
 
-/// What a statement touches, read off its tree: `(action, schema, name, column, line)`.
-pub fn refs(nodes: &[PgNode]) -> Vec<(String, String, String, String, i64)> {
+/// What a statement touches, read off its tree: `(action, database, schema, name, column, line)`.
+pub fn refs(nodes: &[PgNode]) -> Vec<(String, String, String, String, String, i64)> {
     let root = nodes.first().map_or("", |n| n.kind.as_str());
     let mut children: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
     for (i, n) in nodes.iter().enumerate() {
@@ -123,18 +123,19 @@ pub fn refs(nodes: &[PgNode]) -> Vec<(String, String, String, String, i64)> {
     let child = |i: usize, kind: &str| children[i].iter().find(|&&c| nodes[c].kind == kind).map(|&c| nodes[c].value.clone());
     let ctes: Vec<String> = nodes.iter().filter(|n| n.kind == "cte").map(|n| n.value.to_lowercase()).collect();
     let written = ["insert", "update", "delete", "merge", "truncate"].contains(&root);
-    let mut target: Option<(String, String)> = None;
+    let mut target: Option<(String, String, String)> = None;
     let mut out = Vec::new();
     for (i, node) in nodes.iter().enumerate() {
         if node.kind == "proc" {
             let (schema, name) = node.value.rsplit_once('.').map_or((String::new(), node.value.clone()), |(s, n)| (s.to_string(), n.to_string()));
-            out.push(("exec".to_string(), schema, name, String::new(), node.line));
+            out.push(("exec".to_string(), String::new(), schema, name, String::new(), node.line));
             continue;
         }
         if node.kind != "table" {
             continue;
         }
         let schema = child(i, "schema").unwrap_or_default();
+        let database = child(i, "database").unwrap_or_default();
         if schema.is_empty() && ctes.contains(&node.value.to_lowercase()) {
             continue;
         }
@@ -148,19 +149,19 @@ pub fn refs(nodes: &[PgNode]) -> Vec<(String, String, String, String, i64)> {
             _ => "select",
         };
         if wrapper == "target" && (written || root == "copy") && target.is_none() {
-            target = Some((schema.clone(), node.value.clone()));
+            target = Some((database.clone(), schema.clone(), node.value.clone()));
         }
-        out.push((action.to_string(), schema, node.value.clone(), String::new(), node.line));
+        out.push((action.to_string(), database, schema, node.value.clone(), String::new(), node.line));
     }
     // THE COLUMNS AN INSERT OR A COPY ... FROM LISTS AND AN UPDATE SETS are the target's.
-    if let Some((schema, name)) = target {
+    if let Some((database, schema, name)) = target {
         let action = if root == "copy" { "insert" } else { root };
         for node in nodes {
             let listed = matches!(root, "insert" | "copy") && node.kind == "column" && node.parent == Some(0);
             let set = root == "update" && node.kind == "column" && node.parent.is_some_and(|p| nodes[p].kind == "set" && nodes[p].parent == Some(0)) && node.ord == 0;
             if listed || set {
                 let column = node.value.rsplit('.').next().unwrap_or("").to_string();
-                out.push((action.to_string(), schema.clone(), name.clone(), column, node.line));
+                out.push((action.to_string(), database.clone(), schema.clone(), name.clone(), column, node.line));
             }
         }
     }

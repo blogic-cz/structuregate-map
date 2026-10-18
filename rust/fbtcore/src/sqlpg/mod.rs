@@ -262,9 +262,9 @@ fn write_tree(out: &mut Value, statement: usize, object: i64, nodes: &[PgNode]) 
         push(out, "nodes", json!({ "statement": statement, "n": n, "parent": node.parent, "ord": node.ord, "kind": node.kind,
             "value": node.value, "line": node.line }));
     }
-    for (action, schema, name, column, line) in rows::refs(nodes) {
+    for (action, database, schema, name, column, line) in rows::refs(nodes) {
         push(out, "refs", json!({ "statement": statement, "object": object, "action": action,
-            "schema": schema, "name": name, "column": column, "line": line }));
+            "written_database": database, "schema": schema, "name": name, "column": column, "line": line }));
     }
 }
 

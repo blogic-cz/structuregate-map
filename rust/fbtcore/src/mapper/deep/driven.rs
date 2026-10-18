@@ -43,7 +43,9 @@ pub(super) const CS_ROWS_VERSION: &str = "28";
 // 12: PostgreSQL parsed by PostgreSQL's own parser (libpg_query): a function's and a DO block's statements are child
 // rows, a FOREIGN KEY's, a partition's parent's, an attached partition's, a COPY's and a policy's tables are refs, a
 // diagnostic is where the parser stopped, and nodes are in source order.
-const SQL_ROWS_VERSION: &str = "12";
+// 13: `sql_refs` and `sql_column_refs` keep the database part as WRITTEN (`written_database`) and whether the schema was
+// (`schema_written`): `Beta.dbo.Orders` is no longer bound to the project's own `dbo.Orders`.
+const SQL_ROWS_VERSION: &str = "13";
 /// Rows held before a batch is sent - both ends pay for it, so it decides whether a large solution fits.
 const ROWS_PER_BATCH: i64 = 100_000;
 

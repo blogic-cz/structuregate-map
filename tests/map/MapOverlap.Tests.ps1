@@ -17,7 +17,11 @@ function Get-MapOverlapModules {
     if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { return $null }
     $cache = Split-Path $modules
     [void](New-Item -ItemType Directory -Path $cache -Force)
-    & npm install --no-save --silent --prefix $cache 'typescript@5' 2>&1 | Out-Null
+    # Under the cache's lock, and only if no other process filled it meanwhile: two shards installing at once
+    # corrupt the prefix, and a narrower install after a wider one prunes what the wider one added.
+    Use-CacheLock $cache {
+        if (-not (Test-Path (Join-Path $modules 'typescript/package.json'))) { & npm install --no-save --silent --prefix $cache 'typescript@5' 2>&1 | Out-Null }
+    }
     if (Test-Path (Join-Path $modules 'typescript/package.json')) { return $modules }
     return $null
 }

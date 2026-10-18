@@ -165,8 +165,32 @@
     <GatePowerShell Condition="'$(OS)' == 'Windows_NT'">powershell.exe</GatePowerShell>
     <GatePowerShell Condition="'$(OS)' != 'Windows_NT'">pwsh</GatePowerShell>
   </PropertyGroup>
-  <Target Name="RunGateTests" AfterTargets="Build" Condition="'$(SkipTests)' != 'true'">
-    <Exec Command="$(GatePowerShell) -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)../tests/Run-Tests.ps1&quot;"
+  <!--
+    ONLY WHAT A CHANGE CAN REACH, SPREAD OVER EVERY CORE. A green run leaves `out\gate-tests.stamp`; the target is
+    skipped outright while nothing it tests (the dll, the rust library beside it, the suites, the scripts and what a
+    consumer is handed) is newer, and otherwise runs `-Changed`: the suites the files changed since that stamp reach
+    (`tests\harness\Suites.ps1` - a path no rule names runs every suite). `-p:FullTests=true` drops the stamp and runs
+    every suite; `-p:GateTestJobs=1` runs them in one process, as before.
+  -->
+  <PropertyGroup>
+    <GateTestStamp>$(OutputPath)gate-tests.stamp</GateTestStamp>
+    <GateTestJobs Condition="'$(GateTestJobs)' == ''">$([System.Environment]::ProcessorCount)</GateTestJobs>
+  </PropertyGroup>
+  <ItemGroup>
+    <GateTestInput Include="$(OutputPath)structuregate.dll;$(OutputPath)$(FbtCoreShared)" />
+    <GateTestInput Include="$(MSBuildThisFileDirectory)../tests/**/*.ps1;$(MSBuildThisFileDirectory)../tests/fixtures/**" />
+    <GateTestInput Include="$(MSBuildThisFileDirectory)../scripts/**;$(MSBuildThisFileDirectory)../StructureGate.targets" />
+    <GateTestInput Include="$(MSBuildThisFileDirectory)../skills/**;$(MSBuildThisFileDirectory)../agents/**;$(MSBuildThisFileDirectory)../hooks/**;$(MSBuildThisFileDirectory)../.claude-plugin/**" />
+  </ItemGroup>
+  <Target Name="ForgetGateTests" BeforeTargets="RunGateTests" Condition="'$(FullTests)' == 'true'">
+    <Delete Files="$(GateTestStamp)" />
+  </Target>
+  <Target Name="RunGateTests" AfterTargets="Build" Condition="'$(SkipTests)' != 'true'"
+          Inputs="@(GateTestInput)" Outputs="$(GateTestStamp)">
+    <PropertyGroup>
+      <_GateTestScope Condition="'$(FullTests)' != 'true'">-Changed</_GateTestScope>
+    </PropertyGroup>
+    <Exec Command="$(GatePowerShell) -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)../tests/Run-Tests.ps1&quot; $(_GateTestScope) -Jobs $(GateTestJobs)"
           WorkingDirectory="$(MSBuildThisFileDirectory).." StandardOutputImportance="high" />
   </Target>
 
@@ -234,9 +258,13 @@
   -->
   <PropertyGroup>
     <FbtCoreDir>$(MSBuildThisFileDirectory)../rust/fbtcore</FbtCoreDir>
-    <!-- THE CARGO PROFILE: `release` (whole-program LTO) is what ships; a working build may pass
-         -p:FbtCoreProfile=lab - the same optimisation without LTO, a rebuild in seconds instead of minutes. -->
-    <FbtCoreProfile Condition="'$(FbtCoreProfile)' == ''">release</FbtCoreProfile>
+    <!-- THE CARGO PROFILE: a PUBLISH links `release` (whole-program LTO, one codegen unit) into the exe that
+         ships. A plain build - the dll the tests run - takes `lab`: the same optimisation without LTO, so a
+         one-file rust change rebuilds in seconds instead of ~4 single-threaded minutes. Same code, same
+         panics, same overflow checks; only the whole-program pass is missing. -p:FbtCoreProfile=release
+         tests what ships. -->
+    <FbtCoreProfile Condition="'$(FbtCoreProfile)' == '' And '$(PublishAot)' == 'true'">release</FbtCoreProfile>
+    <FbtCoreProfile Condition="'$(FbtCoreProfile)' == ''">lab</FbtCoreProfile>
     <FbtCoreOut>$(FbtCoreDir)/target/$(FbtCoreProfile)</FbtCoreOut>
     <!-- What cargo names the two shapes: fbtcore.lib/.dll on Windows, libfbtcore.a/.so on Linux,
          libfbtcore.a/.dylib on macOS. .NET probes `fbtcore` under each OS's own name. -->

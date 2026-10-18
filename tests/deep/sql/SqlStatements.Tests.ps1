@@ -153,3 +153,15 @@ Test-Case 'sqlstatements: a run that re-read one file holds what a fresh map of 
         throw "the partial run and the fresh map differ ($($kept.Count) vs $($fresh.Count) rows):`n$(($diff | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }) -join "`n")"
     }
 }
+
+Test-Case 'sqlstatements: a file with one bad statement keeps the rows of the good ones and counts one error' {
+    $nl = $script:SqlStmtNl
+    $tree = Use-Tree @{
+        'Demo/Demo.sqlproj' = Get-SqlStmtProject
+        'Demo/q.sql' = "SELECT Id FROM dbo.Orders;${nl}not sql at all;${nl}SELECT Email FROM dbo.Customers;$nl"
+    }
+    $db = Join-Path $tree 'sql.sqlite'
+    Invoke-Gate --root $tree --ext '.sql' --map-sqlite $db | Out-Null
+    Assert-SqlStmtRow $db "SELECT 'v=' || errors FROM files WHERE path = 'Demo/q.sql'" '1' 'one error'
+    Assert-SqlStmtRow $db "SELECT 'v=' || count(*) FROM sql_statements s JOIN files f ON f.id = s.file WHERE f.path = 'Demo/q.sql'" '2' 'two statements'
+}

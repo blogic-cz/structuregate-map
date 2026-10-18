@@ -173,7 +173,10 @@ internal static partial class SqlLinks
             files[Str(row[1])] = Str(row[0]);
             paths[Str(row[0])] = Str(row[1]);
         }
-        foreach (var row in Query(db, "SELECT id, file, line, object, action, schema, name, column, database FROM sql_refs WHERE lang = 'sql'") ?? [])
+        // A MAP BUILT BEFORE `written_database` LACKS THE COLUMN: the query then fails and every ref would go unlinked.
+        const string Select = "SELECT id, file, line, object, action, schema, name, column, database, {0} FROM sql_refs WHERE lang = 'sql'";
+        var refs = Query(db, string.Format(Select, "written_database")) ?? Query(db, string.Format(Select, "'' AS written_database")) ?? [];
+        foreach (var row in refs)
         {
             if (Str(row[4]) == "include")
             {
@@ -186,15 +189,20 @@ internal static partial class SqlLinks
                 continue;
             }
             var own = Str(row[8]);
-            var allowed = own.Length > 0 ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) { own } : null;
+            // A DATABASE WRITTEN IN THE REF (`Beta.dbo.Orders`) IS THE SCOPE, not the project's own: otherwise a view
+            // reading another project's table binds to the same-named table of its own project.
+            var written = Str(row[9]);
+            var scope = written.Length > 0 ? written : own;
+            var allowed = scope.Length > 0 ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) { scope } : null;
             string[] kinds = Str(row[4]) == "exec" ? ["procedure"] : ["table", "view", "function"];
             // THE FILE'S OWN OBJECT FIRST: a script's procedure reads the table that script creates.
-            var (status, hit, detail) = resolver.Own(Str(row[5]), Str(row[6]), Str(row[1]), kinds) is { } mine
+            var elsewhere = written.Length > 0 && !written.Equals(own, StringComparison.OrdinalIgnoreCase);
+            var (status, hit, detail) = !elsewhere && resolver.Own(Str(row[5]), Str(row[6]), Str(row[1]), kinds) is { } mine
                 ? ("bound", mine, "declared in the same file")
                 : resolver.Resolve(Str(row[5]), Str(row[6]), allowed, kinds);
             var column = Str(row[7]).Length > 0 && hit is not null ? columns.GetValueOrDefault(hit.Id)?.GetValueOrDefault(Str(row[7])) ?? "" : "";
             links.Add(new Link("sql_ref", Str(row[1]), Num(row[2]), Str(row[0]), "", "", "", Str(row[3]), Str(row[4]),
-                hit?.Database ?? own, Str(row[5]), Str(row[6]), Str(row[7]), hit?.Id ?? "", column, status, detail));
+                hit?.Database ?? scope, Str(row[5]), Str(row[6]), Str(row[7]), hit?.Id ?? "", column, status, detail));
         }
     }
 

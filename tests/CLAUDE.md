@@ -2,13 +2,19 @@
 
 ```
 tests/Run-Tests.ps1             every suite, one exit code   (-Only <prefix> runs suites by file name)
+tests/Run-Tests.ps1 -Changed    the suites a change since the last green run reaches (tests/harness/Suites.ps1)
+tests/Run-Tests.ps1 -Jobs N     the suites dealt to N processes by last run's times (out/gate-tests.times)
 tests/Run-Tests.ps1 -WindowsOnly   only the Test-WindowsCase cases (what CI on Windows asks)
 tests/Run-PsGateTests.ps1       the PowerShell rules alone   (-Update rewrites fixtures/expected.txt - then DIFF it)
 tests/fixtures/                 violations.ps1 (every rule broken), clean.ps1 (none), expected.txt
 ```
 
 `dotnet build` runs them through `RunGateTests` (`AfterTargets="Build"`, so they test the binary that build
-just produced — before it they would test the previous one). Under test is `out/structuregate.dll`, or the
+just produced — before it they would test the previous one) as `-Changed -Jobs <cores>`, and not at all while
+nothing it tests is newer than `out/gate-tests.stamp` (a green run that chose its own suites leaves it, dated when it
+STARTED); `-p:FullTests=true` runs every suite. **A new source folder needs a rule in `tests/harness/Suites.ps1`** or
+every change in it runs every suite - safe, only slow. A cache several shards fill (an `npm install` prefix, a probe
+build) is filled under `Use-CacheLock`, re-checked inside the lock. Under test is `out/structuregate.dll`, or the
 published exe when no dll exists; `PSGATE_TEST_GATE` points at any other binary (a deployed copy). Windows
 runs them under `powershell.exe` 5.1, elsewhere `pwsh`. Most of the minutes are the TypeScript halves, which
 install a compiler into a temp prefix and map a real workspace.

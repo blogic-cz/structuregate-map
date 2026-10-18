@@ -225,3 +225,22 @@ Test-Case 'sqllinks: a mapping with no context attribute maps its table in each 
     Assert-SqlLinksRows (Get-SqlLinksRows $db "SELECT 'v=' || status || '|' || database FROM sql_links WHERE kind = 'ef_table' AND entity = 'Demo.Account'") @(
         'bound|Main') 'a table only one of them has'
 }
+
+Test-Case 'sqllinks: a ref that writes another database binds there, never to the same name in its own project' {
+    $nl = $script:SqlLinksNl
+    $proj = '<Project DefaultTargets="Build"><ItemGroup><Build Include="*.sql" /></ItemGroup></Project>'
+    $db = New-SqlLinksDb @{
+        'Alpha/Alpha.sqlproj' = $proj
+        'Alpha/Orders.sql' = "CREATE TABLE dbo.Orders (Id int);$nl"
+        'Alpha/V.sql' = "CREATE VIEW dbo.V AS SELECT Id FROM Beta.dbo.Orders;$nl"
+        'Alpha/W.sql' = "CREATE VIEW dbo.W AS SELECT Id FROM dbo.Orders;$nl"
+        'Beta/Beta.sqlproj' = $proj
+        'Beta/Orders.sql' = "CREATE TABLE dbo.Orders (Id int);$nl"
+        'structuregate.sql.json' = '{ "databases": [ { "name": "Alpha", "project": "Alpha/Alpha.sqlproj" }, { "name": "Beta", "project": "Beta/Beta.sqlproj" } ] }'
+    }
+    $query = "SELECT 'v=' || l.database || '|' || l.status || '|' || o.path FROM sql_links l JOIN files f ON f.id = l.file " +
+        "LEFT JOIN (SELECT so.id, sf.path FROM sql_objects so JOIN files sf ON sf.id = so.file) o ON o.id = l.object " +
+        "WHERE l.kind = 'sql_ref' AND f.path = "
+    Assert-SqlLinksRows (Get-SqlLinksRows $db ($query + "'Alpha/V.sql'")) @('Beta|bound|Beta/Orders.sql') 'the written database decides'
+    Assert-SqlLinksRows (Get-SqlLinksRows $db ($query + "'Alpha/W.sql'")) @('Alpha|bound|Alpha/Orders.sql') 'an unqualified ref stays in its own project'
+}

@@ -31,7 +31,11 @@ function Get-TsRowsModules {
     # `@angular/router` and `@ngrx/store` as well: a route's lazy target and every state API are recognised
     # by the declaration the CHECKER resolved, so without the packages a fixture's routes and actions are
     # calls to nothing and the derived tables stay empty. `@angular/common`: a library pipe (`date`) is read off its typings.
-    & npm install --no-save --silent --prefix $cache 'typescript@5' '@angular/compiler@17' '@angular/core@17' '@angular/router@17' '@angular/common@17' '@ngrx/store@17' '@ngrx/effects@17' 2>&1 | Out-Null
+    # Under the cache's lock, and only if no other process filled it meanwhile: two shards installing at once
+    # corrupt the prefix, and a narrower install after a wider one prunes what the wider one added.
+    Use-CacheLock $cache {
+        if (-not (Test-Path (Join-Path $modules '@ngrx\effects\package.json'))) { & npm install --no-save --silent --prefix $cache 'typescript@5' '@angular/compiler@17' '@angular/core@17' '@angular/router@17' '@angular/common@17' '@ngrx/store@17' '@ngrx/effects@17' 2>&1 | Out-Null }
+    }
     if ((Test-Path (Join-Path $modules 'typescript\package.json')) -and
         (Test-Path (Join-Path $modules '@angular\compiler\package.json'))) {
         $script:TsRowsCache.Path = $modules

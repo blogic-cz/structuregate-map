@@ -45,3 +45,45 @@ Test-Case 'sqlparse: a text that does not parse exits 1 with the parser''s error
     Assert-Exit (Invoke-Gate --root $parsed.Tree --dialect tsql) 2
     Assert-Exit (Invoke-Gate --sql-parse (Join-Path $parsed.Tree 'q.sql') --dialect mysql) 2
 }
+
+Test-Case 'sqlparse: a ref keeps the database it was written with, and says whether its schema was written' {
+    $parsed = Invoke-SqlParse "SELECT o.Id FROM Alpha.dbo.Orders o JOIN Customers c ON c.Id = o.CustomerId;$($script:SqlParseNl)"
+    Assert-Exit $parsed.Run 0
+    $json = $parsed.Run.Text | ConvertFrom-Json
+    Assert-Equal (@($json.refs | ForEach-Object { "$($_.written_database)|$($_.schema)|$($_.schema_written)|$($_.name)" }) -join ',') 'Alpha|dbo|1|Orders,|dbo|0|Customers' 'refs'
+    foreach ($c in @($json.column_refs)) {
+        $want = if ($c.name -eq 'Orders') { 'Alpha|1' } else { '|0' }
+        Assert-Equal "$($c.written_database)|$($c.schema_written)" $want "column ref $($c.name).$($c.column)"
+    }
+    Assert-Equal @($json.column_refs | Where-Object { $_.name -eq 'Orders' }).Count 2 'two Orders columns'
+}
+
+Test-Case 'sqlparse: a bad statement is one error and the statements around it are still read' {
+    $nl = $script:SqlParseNl
+    $parsed = Invoke-SqlParse "SELECT Id FROM dbo.Orders;${nl}not sql at all;${nl}SELECT Email FROM dbo.Customers;$nl"
+    Assert-Exit $parsed.Run 1
+    $json = $parsed.Run.Text | ConvertFrom-Json
+    Assert-Equal @($json.statements).Count 2 'the two good statements'
+    Assert-Equal (@($json.statements | ForEach-Object { $_.line }) -join ',') '1,3' 'their real lines'
+    Assert-Equal (@($json.refs | ForEach-Object { "$($_.action)|$($_.schema).$($_.name)" }) -join ',') 'select|dbo.Orders,select|dbo.Customers' 'refs'
+    Assert-Equal (@($json.diagnostics | ForEach-Object { "$($_.line)|$($_.kind)" }) -join ',') '2|error' 'one error, on its line'
+}
+
+# A CONTROL: ScriptDom already recovers here, so this passes on the code before SqlRecover too.
+Test-Case 'sqlparse: a bad statement inside a BEGIN block blanks the whole block, not the next statement' {
+    $nl = $script:SqlParseNl
+    $parsed = Invoke-SqlParse "IF 1 = 1 BEGIN SELECT 1; bad bad; END;${nl}SELECT Id FROM dbo.Orders;$nl"
+    Assert-Exit $parsed.Run 1
+    $json = $parsed.Run.Text | ConvertFrom-Json
+    Assert-Equal (@($json.refs | ForEach-Object { "$($_.line)|$($_.action)|$($_.schema).$($_.name)" }) -join ',') '2|select|dbo.Orders' 'the ref after the block'
+    Assert-Equal @($json.diagnostics).Count 1 'one error for the block'
+}
+
+Test-Case 'sqlparse: an error on the bad statement''s own terminator blanks it, not the good statement after' {
+    $nl = $script:SqlParseNl
+    $parsed = Invoke-SqlParse "SELECT 1 +;${nl}SELECT Id FROM dbo.Orders;$nl"
+    Assert-Exit $parsed.Run 1
+    $json = $parsed.Run.Text | ConvertFrom-Json
+    Assert-Equal (@($json.refs | ForEach-Object { "$($_.line)|$($_.action)|$($_.schema).$($_.name)" }) -join ',') '2|select|dbo.Orders' 'the good ref'
+    Assert-Equal (@($json.diagnostics | ForEach-Object { $_.line }) -join ',') '1' 'one error, on line 1'
+}

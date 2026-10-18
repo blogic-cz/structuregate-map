@@ -15,7 +15,7 @@ mod views;
 use rusqlite::{Connection, OptionalExtension};
 
 /// `sql_column_refs`, in the order its rows are written. `file` is what the store drops a re-read file's rows by.
-const COLUMN_REFS: [&str; 11] = ["file", "object", "statement", "line", "role", "schema", "name", "source_kind", "alias", "column", "database"];
+const COLUMN_REFS: [&str; 13] = ["file", "object", "statement", "line", "role", "schema", "name", "source_kind", "alias", "column", "database", "written_database", "schema_written"];
 
 /// One node of a statement's tree, as `sql_nodes` holds it. `n` is its preorder number, the root 0.
 #[derive(Clone, Debug)]
@@ -53,6 +53,9 @@ pub fn run_on(conn: &mut Connection) -> anyhow::Result<usize> {
     )?;
     // THE TABLE EXISTS WHEREVER STATEMENTS DO, rows or none: a query of it never fails on a tree with no column named.
     crate::rows::schema::create(conn, "sql_column_refs", &COLUMN_REFS.map(String::from))?;
+    // A MAP BUILT BEFORE `written_database` HAS THE TABLE WITHOUT IT: `create` leaves it, and the INSERT would fail.
+    let mut existing = crate::rows::schema::existing_columns(conn, "sql_column_refs")?;
+    crate::rows::schema::widen(conn, "sql_column_refs", &mut existing, &COLUMN_REFS.map(String::from))?;
     views::write(conn)?;
     let text = |r: &rusqlite::Row, i: usize| -> rusqlite::Result<String> { Ok(r.get::<_, Option<String>>(i)?.unwrap_or_default()) };
     let fresh: Vec<[String; 5]> = {
@@ -89,7 +92,7 @@ pub fn run_on(conn: &mut Connection) -> anyhow::Result<usize> {
                 })?
                 .collect::<rusqlite::Result<_>>()?;
             for c in columns::of(&nodes, schema) {
-                named.execute(rusqlite::params![file, object, id, c.line, c.role, c.schema, c.name, c.source_kind, c.alias, c.column, database])?;
+                named.execute(rusqlite::params![file, object, id, c.line, c.role, c.schema, c.name, c.source_kind, c.alias, c.column, database, c.written_database, i64::from(c.schema_written)])?;
             }
             stamp.execute((id, fingerprint(&nodes)))?;
         }

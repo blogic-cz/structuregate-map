@@ -103,10 +103,9 @@ internal static class SqlDeep
 
         var included = new List<(string Path, int Line)>();
         var prepared = SqlVisitor.Prepared(text, included);
-        var parser = new TSql170Parser(initialQuotedIdentifiers: true);
-        TSqlFragment fragment;
-        IList<ParseError> errors;
-        using (var reader = new StringReader(prepared)) fragment = parser.Parse(reader, out errors);
+        // A BAD STATEMENT IS BLANKED, NOT THE FILE LOST - see SqlRecover.cs. Offsets and lines stay put.
+        var (fragment, recovered, errors) = SqlRecover.Parse(prepared);
+        prepared = recovered;
         foreach (var parseError in errors)
         {
             rows.Add("diagnostics", "dg", ("file", file), ("cls", ""), ("func", ""), ("line", parseError.Line),
@@ -158,6 +157,7 @@ internal static class SqlDeep
             var held = statements.Of(t.Token);
             rows.Add("sql_refs", "sr", ("file", file), ("object", Id(t.Object)), ("line", t.Line), ("lang", Lang),
                 ("action", t.Action), ("schema", Schema(t.Schema)), ("name", t.Name), ("column", t.Column),
+                ("written_database", t.Database), ("schema_written", t.Schema.Length > 0 ? 1 : 0),
                 ("database", database), ("call", ""), ("statement", held >= 0 ? sids[held] : ""));
         }
         foreach (var d in visitor.Dynamics)
@@ -179,6 +179,7 @@ internal static class SqlDeep
         {
             rows.Add("sql_refs", "sr", ("file", file), ("object", ""), ("line", line), ("lang", Lang),
                 ("action", "include"), ("schema", ""), ("name", path.Replace('\\', '/')), ("column", ""),
+                ("written_database", ""), ("schema_written", 0),
                 ("database", database), ("call", ""), ("statement", ""));
         }
     }

@@ -284,11 +284,15 @@ function Get-ProbeAssembly {
     $dll = Join-Path $cache 'bin/Debug/net10.0/Probe.dll'
     if (Test-Path $dll) { return $dll }
     [void](New-Item -ItemType Directory -Path $cache -Force)
-    [System.IO.File]::WriteAllText((Join-Path $cache 'Probe.csproj'),
-        '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>')
-    [System.IO.File]::WriteAllText((Join-Path $cache 'Ext.cs'),
-        'namespace Probe; public static class Ext { public static int Twice(this int n) { return n * 2; } }')
-    & dotnet build (Join-Path $cache 'Probe.csproj') -v quiet --nologo 2>&1 | Out-Null
+    # Under the cache's lock: two shards building one project at once race on its obj/.
+    Use-CacheLock $cache {
+        if (Test-Path $dll) { return }
+        [System.IO.File]::WriteAllText((Join-Path $cache 'Probe.csproj'),
+            '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>')
+        [System.IO.File]::WriteAllText((Join-Path $cache 'Ext.cs'),
+            'namespace Probe; public static class Ext { public static int Twice(this int n) { return n * 2; } }')
+        & dotnet build (Join-Path $cache 'Probe.csproj') -v quiet --nologo 2>&1 | Out-Null
+    }
     if (Test-Path $dll) { return $dll }
     return $null
 }
