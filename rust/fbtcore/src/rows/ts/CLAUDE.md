@@ -26,7 +26,8 @@ requires and which enum members it still permits.
   intersections and only shrink as paths are added; the cap only under-reported the maybe side.
 - **A WAY THROUGH A LITERAL `false` IS NO WAY** (`key/key_dead.rs`): an `*ngIf` or `@if` whose condition is the
   literal names no member, so no `gate_values` row can carry it. `ways_of` drops every (ref, path) through one
-  before anything folds: no live way left is `n_paths 0` - the key renders for nobody - and its roots go too.
+  before anything folds: no live way left is `n_paths 0` - the key renders for nobody - and its roots go too. A style
+  gate whose value hides on every side (`style_hides.when = always`, `[style.display]="'none'"`) is dead the same way (#54).
 - **THE CLOSURE TABLES DECLARE UNIQUE KEYS**, so a pass that files a row twice fails the insert instead of
   publishing a plausible duplicate.
 - **NO REGEX: the dead-key trace is character walks** (`sourcescan.rs`, `sourcetrace.rs`). It decides whether

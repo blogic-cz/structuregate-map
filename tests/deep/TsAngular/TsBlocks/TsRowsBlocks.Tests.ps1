@@ -60,11 +60,11 @@ function New-TsBlocksDb {
             "  ready = false; soon = false; n = 0; icuInner = 3; neg = 4; paren = 5; tpl = 6; tp = 7; clicked = 0; x = 8;`n" +
             "}`n"
     }
-    $db = Join-Path $tree 'map.sqlite'
-    $result = Invoke-Gate --root $tree --map-sqlite $db --ts-node-modules $script:TsBlocksModules `
-        --ts-config (Join-Path $tree 'structuregate.ts.json')
-    Assert-Exit $result 0
-    return $db
+    # Every case only READS this map, so the identical tree is mapped once per process (`Get-TsRowsSharedDb`).
+    $made = Get-TsRowsSharedDb $tree @('--root', $tree, '--map-sqlite', (Join-Path $tree 'map.sqlite'),
+        '--ts-node-modules', $script:TsBlocksModules, '--ts-config', (Join-Path $tree 'structuregate.ts.json'))
+    Assert-Exit $made.Result 0
+    return $made.Db
 }
 
 # The sources of the gates every node with `tag` sits under, outermost first.

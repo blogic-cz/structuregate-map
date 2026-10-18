@@ -40,7 +40,7 @@ function New-TsCollapseDb {
         'apps/shop/src/fold.component.html' = $script:TsCollapseHtml
         'apps/shop/src/fold.component.scss' = $script:TsCollapseScss
         'apps/shop/src/assets/locales/en.json' = '{"demo":{"fold":{"hid":"1","open":"2"}}}'
-    })
+    }) -Shared
 }
 
 # The lens at FULL width: a row here carries a selector and a condition past the column a terminal would cut it at.

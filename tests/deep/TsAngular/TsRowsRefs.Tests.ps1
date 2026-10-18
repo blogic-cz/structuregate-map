@@ -34,7 +34,7 @@ $script:TsRefsFiles = @{
 
 Test-Case 'tsrows: di carries the @Inject token and the inject() calls of property initialisers' {
     $tree = New-TsRowsWorkspace $script:TsRefsFiles
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT param || ' | ' || coalesce(token,'') || ' | ' || coalesce($(Get-TsRootFieldSql 'di__resolved' 'di.id' 'name'),'') || ' | ' || coalesce(inject,0) AS r " +
         "FROM di WHERE class = (SELECT id FROM classes WHERE name = 'DemoService')")
@@ -54,7 +54,7 @@ Test-Case 'tsrows: di carries the @Inject token and the inject() calls of proper
 
 Test-Case 'tsrows: an export alias still joins a route and a module declaration to the class' {
     $tree = New-TsRowsWorkspace $script:TsRefsFiles
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     Assert-Exit $made.Result 0
     $route = Invoke-TsRowsQ $made.Db ("SELECT r.path || ' | ' || c.name AS r FROM routes r JOIN classes c ON c.id = r.component_id WHERE r.path = 'a'")
     Assert-Line $route 'a | AlphaComponent'

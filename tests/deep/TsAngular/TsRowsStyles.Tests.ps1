@@ -58,7 +58,7 @@ $script:TsStylesRules ="SELECT 'sr=' || r.line || '|' || r.rule_line || '|' || r
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
 Test-Case 'tsrows: a stylesheet is a row per declaration, its SCSS nesting resolved and its @media kept' {
-    $made = New-TsRowsDb (New-TsStylesWorkspace)
+    $made = New-TsRowsDb (New-TsStylesWorkspace) -Shared
     Assert-Exit $made.Result 0
     $r = Invoke-TsStylesQ $made.Db $script:TsStylesRules
     Assert-Line $r 'sr=4|3|.legend-item|.legend-item|-|-|margin|$gap|001#'
@@ -78,7 +78,7 @@ Test-Case 'tsrows: a stylesheet is a row per declaration, its SCSS nesting resol
 }
 
 Test-Case 'tsrows: a class binding is joined to the rules that hide its class, with where each one applies' {
-    $made = New-TsRowsDb (New-TsStylesWorkspace)
+    $made = New-TsRowsDb (New-TsStylesWorkspace) -Shared
     Assert-Exit $made.Result 0
     $r = Invoke-TsStylesQ $made.Db ("SELECT 'ch=' || h.class || '|' || h.via || '|' || coalesce(g.source, h.condition) || '|' || " +
         "h.scope || '|' || f.path || '|' || h.resolved || '|' || coalesce(h.media, '-') || '|' || h.property || '|' || " +

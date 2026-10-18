@@ -15,7 +15,7 @@ if ($script:TsRowsModules -and $script:TsRowsPython) {
 # which of those reaches a row's own file, and what an id prefix names.
 Test-Case 'tsrows: the map publishes its own join spec and id scheme' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $spec = Get-TsRowsMeta $made.Db 'spec:typescript'
     $r = New-TsRowsLines @("members.class -> $($spec.joins.'members.class')")
     Assert-Line $r 'members.class -> classes'
@@ -28,7 +28,7 @@ Test-Case 'tsrows: the map publishes its own join spec and id scheme' {
 # reader selects by (#72, #73), and every node table by `(role, parent)` (#71), leads an index.
 Test-Case 'tsrows: every join the spec declares, every lookup column and every node shape is indexed' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $spec = Get-TsRowsMeta $made.Db 'spec:typescript'
     $lookups = 'key_reach.key', 'key_reach.route', 'render_path.component', 'gate_values.gate', 'gate_values.enum_name',
         'gate_features.gate', 'template_nodes.depth', 'string_literals.context', 'translations.locale', 'calls.method'
@@ -60,7 +60,7 @@ Test-Case 'tsrows: every join the spec declares, every lookup column and every n
 # list kept somewhere else.
 Test-Case 'tsrows: an id prefix that serves two tables names both' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = New-TsRowsLines @("$((Get-TsRowsMeta $made.Db 'spec:typescript').id_scheme.k)")
     Assert-Line $r 'consts | i18n_refs'
 }
@@ -115,7 +115,7 @@ Test-Case 'tsrows: a table whose joins all disagree about the file is published 
 # the one join that is actually right - pushing every template row onto a longer route for no reason.
 Test-Case 'tsrows: an inline template contains its own nodes, because the offset is applied' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $first = @((Get-TsRowsMeta $made.Db 'spec:typescript').anchors.template_nodes)[0]
     $r = New-TsRowsLines @("$($first.field) by $($first.proof)")
     Assert-Line $r 'template by containment'
@@ -149,7 +149,7 @@ Test-Case 'tsrows: the source of every text file is carried beside the rows' {
 # an argument of that call. Three rows have to be joined before the gate means anything.
 Test-Case 'tsrows: a gate reading a feature-assigned property resolves to the feature code' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT f.feature || ' via ' || g.name AS need FROM gate_features f " +
         "JOIN gates g ON g.id = f.gate")
     Assert-Line $r 'IsPromoEnabled via ngIf'
@@ -160,7 +160,7 @@ Test-Case 'tsrows: a gate reading a feature-assigned property resolves to the fe
 # FINITE domain still reach the element.
 Test-Case 'tsrows: a gate comparing an enum constant restricts that dimension to it' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT enum_name || ' ' || dimension || ' ' || op || ' ' || " +
         "$(Get-NodeRootListSql 'gate_values__values_json' 'gate_values.rowid') || ' of ' || domain AS restriction FROM gate_values")
     Assert-Line $r 'Tier tier in ["Gold"] of 2'
@@ -172,7 +172,7 @@ Test-Case 'tsrows: a gate comparing an enum constant restricts that dimension to
 # root indistinguishable from a component the walk never reached.
 Test-Case 'tsrows: a component nothing renders is its own root, at depth zero' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT depth || ' | ' || $(Get-NodeRootListSql 'render_path__hops' 'render_path.id') || ' | ' || truncated AS path " +
         "FROM render_path WHERE component = root")
     Assert-Line $r '0 | ["ng:1"] | 0'
@@ -182,7 +182,7 @@ Test-Case 'tsrows: a component nothing renders is its own root, at depth zero' {
 # a carrier on a template node - and `always_gates` is the only column a consumer may read as necessary.
 Test-Case 'tsrows: a key on a template carrier is placed, with the gates of the way in' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT route || ' | ' || n_refs || ' | ' || n_paths || ' | ' || " +
         "$(Get-NodeRootListSql 'key_reach__always_gates' 'key_reach.rowid') AS reach FROM key_reach WHERE key = 'shop.title'")
     Assert-Line $r 'template | 1 | 1 | ["g:1"]'
@@ -193,7 +193,7 @@ Test-Case 'tsrows: a key on a template carrier is placed, with the gates of the 
 # either is `absent`, which is the only reading that lets a consumer delete it.
 Test-Case 'tsrows: a key nothing references is traced against the raw source' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT route || ' | ' || trace AS verdict FROM key_reach " +
         "WHERE key = 'shop.cart.empty'")
     Assert-Line $r 'none | absent'
@@ -331,7 +331,7 @@ Test-Case 'tsrows: the same tree numbers the same way, however often it is rebui
 # thousands of template-side expressions had no owner until it did) and the orphan templates (hundreds more).
 Test-Case 'tsrows: every row records the file it was extracted from' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     Assert-Exit $made.Result 0
 
     # `calls` comes from the per-file walk, `bindings` and `template_nodes` from the template pass - the
@@ -360,7 +360,7 @@ Test-Case 'tsrows: every row records the file it was extracted from' {
 # file and neither imports the other. See `rust/fbtcore/src/rows/deps.rs`.
 Test-Case 'tsrows: the map records which files a change reaches' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     Assert-Exit $made.Result 0
 
     # IT IS STORED, not derived on demand: deriving it re-read a database of hundreds of MB and cost about a minute.
@@ -466,7 +466,7 @@ Test-Case 'tsrows: the closure tables are replaced on a rebuild, never appended'
 # from content deliberately not extracted.
 Test-Case 'tsrows: what the half could not answer is a row, not just a count' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT kind || ' ' || file AS problem FROM diagnostics"
     Assert-Line $r 'ts_not_in_any_program apps/shop/extra/dead.ts'
 }

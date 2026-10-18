@@ -40,7 +40,7 @@ $script:TsLiteralFiles = @{
 }
 
 Test-Case 'tsrows literals: a value cell spelled null is the null literal, never a NULL cell' {
-    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsLiteralFiles)
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsLiteralFiles) -Shared
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db (Get-TsLiteralSql 'returns' "m.name IN ('retNull', 'letNull', 'bare')")
     Assert-Line $r 'retNull | null | NullKeyword | - | 3'
@@ -56,7 +56,7 @@ Test-Case 'tsrows literals: a value cell spelled null is the null literal, never
 }
 
 Test-Case 'tsrows literals: the global undefined and void 0 are the undefined literal, a shadowing local is its value' {
-    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsLiteralFiles)
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsLiteralFiles) -Shared
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db (Get-TsLiteralSql 'returns' "m.name IN ('retUndef', 'retVoid', 'localUndef', 'shadow')")
     Assert-Line $r 'retUndef | undefined | UndefinedKeyword | - | 3'
@@ -70,7 +70,7 @@ Test-Case 'tsrows literals: the global undefined and void 0 are the undefined li
 }
 
 Test-Case 'tsrows literals: a returned name stays an identifier, and one a destructuring binds names its locals row' {
-    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsLiteralFiles)
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsLiteralFiles) -Shared
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db (Get-TsLiteralSql 'returns' "m.name IN ('retParam', 'retBinding')")
     Assert-Line $r 'retParam | - | Identifier | a |'

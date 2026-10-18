@@ -48,7 +48,7 @@ export function makeEmitters({ store, normalizeExpr, carriers, gateInputs, class
   }
 
   function emitExpr({ tplId, nodeId, comp, kind, name, norm, src, gate = false, gateKind = null,
-    binding = null, carrier = false, span = {} }) {
+    binding = null, carrier = false, span = {}, unit = null }) {
     const summary = dedupeSummary(summarizeExpr(norm));
     const exprId = store.add('expressions', 'x', {
       template: tplId, node: nodeId, component: comp.id, binding, kind, name,
@@ -70,6 +70,8 @@ export function makeEmitters({ store, normalizeExpr, carriers, gateInputs, class
         template: tplId, node: nodeId, component: comp.id, expression: gateExpr,
         kind, gate_kind: gateKind, name, source: src ?? null, reads: summary.reads,
         identifiers: summary.identifiers, calls: summary.calls, strings: summary.strings, ...span,
+        // A STYLE gate keeps Angular's unit: `[style.height.px]` is named `height`, its `px` would be gone (`style_hides.unit`).
+        ...(gateKind === 'style' ? { unit } : {}),
       });
     }
     // Every string literal in the expression - unfiltered, exactly as on the TypeScript side.
@@ -155,7 +157,7 @@ export function makeEmitters({ store, normalizeExpr, carriers, gateInputs, class
               : null;
     const e = emitExpr({
       tplId, nodeId, comp, kind, name: attr.name, norm, src: source, gate: gateKind !== null, gateKind,
-      binding: bindingId, carrier, span,
+      binding: bindingId, carrier, span, unit: attr.unit ?? null,
     });
     return { source, exprId: e.exprId, keys: e.keys, bindingId };
   }

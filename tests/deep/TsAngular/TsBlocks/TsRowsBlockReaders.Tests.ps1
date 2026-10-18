@@ -64,7 +64,7 @@ function New-TsBlockReadersDb {
         'apps/shop/src/assets/locales/en.json' = '{"demo":{"sw":{"alpha":"A","beta":"B","other":"O"},' +
             '"blk":{"alpha":"A","beta":"B"}}}'
     }
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     Assert-Exit $made.Result 0
     return $made.Db
 }
@@ -144,7 +144,7 @@ function New-TsBlockLoopDb {
             "}`n"
         'apps/shop/src/assets/locales/en.json' = '{"demo":{"loop":{"inside":"I","none":"N"},"ngfor":{"inside":"I"}}}'
     }
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     Assert-Exit $made.Result 0
     return $made.Db
 }

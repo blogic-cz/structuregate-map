@@ -161,3 +161,18 @@ element while `kind` is Alpha, but #52 left it no condition at all, so a key ins
 restriction on the keys under it. Tables that move: `gate_values`, `gate_features`, and `key_reach` (`always_values`, `unreadable_values`, `always_branches`,
 `maybe_branches`, `branch_senses`, `paths`, `n_paths`) for keys under such a gate. NOT claimed: `when = always` (never shown), a non-literal arm, `[ngStyle]`, and
 a `[style.height]` collapse whose partners sit on the element's classes. The new table `style_hides` moves no existing row.
+
+**#54 - a style binding never shown renders its keys for nobody; `style_hides` gains `unit` and `[ngStyle]` keys** (issue #93 follow-ups,
+`key_dead::dead_gates`, `cssmap/style.rs`, and the extractor - **`rows` 61 -> 62**: every consumer's TypeScript tree is read once again on upgrade):
+`[style.display]="'none'"` (or a ternary whose both arms hide, `style_hides.when = always`) left its element's keys unrestricted, read as rendered
+for everyone when the element is never shown. Such a gate is now dead exactly as `*ngIf="false"` is: every way through it is dropped before anything
+folds, so a key under it alone is `n_paths 0` and loses its roots and routes; `class_polarity` still maps it to `Styles`, as a literal `false` gives
+no `gate_values` row either. A `style` gate row carries `unit` (`[style.height.px]`: `name` `height`, `unit` `px`; NULL without one), and
+`style_hides.unit` is filled from it (a map stored before rows 62 falls back to the name's split). A LITERAL KEY of an `[ngStyle]` object is a
+`style_hides` row (`via = 'ngStyle'`, `gate` NULL, `expression` the binding's `expressions` row, a key's unit split off as `'height.px'` is), its
+`alone`/`hides`/`when` read from that key's value as for `[style.x]`; a non-object value (`[ngStyle]="styles"`) has no rows. Tables that move:
+`gates` (`unit` on a style gate), `style_hides` (`unit`, ngStyle rows), and `key_reach` (`n_paths`, `min_depth`, `paths`, `roots`, `routes`,
+`modules`, and every `always_*`/`maybe_*` and `branch_senses` column; `components` keeps the component, as under `*ngIf="false"`) for keys
+whose every way passes such a gate. NOT claimed: an `[ngStyle]`
+key restricts nothing (it is no gate, as an `[ngClass]` key is none), a `[style]="{..}"` object binding, a `when = always` over a value a
+member read decides, and a `[style.height]` collapse whose partners sit on the element's classes. No other table moves.

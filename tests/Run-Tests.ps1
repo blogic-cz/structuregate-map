@@ -149,6 +149,7 @@ foreach ($suite in $suites) {
     $ran = ($script:Passed + $script:Failed.Count) - $before
     Write-Host "    $ran case(s), $([int]$suiteClock.Elapsed.TotalSeconds)s"
 }
+foreach ($scratch in $script:RunScratch) { Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue }
 if ($TimesOut) {
     [System.IO.File]::WriteAllLines($TimesOut, [string[]]@($measured.Keys | ForEach-Object {
         "$_`t$($measured[$_].ToString('0.0', [Globalization.CultureInfo]::InvariantCulture))" }))

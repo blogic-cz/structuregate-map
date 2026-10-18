@@ -5,7 +5,9 @@
 //! read as rendered for everyone when it renders for no one. It is decided here, from the parsed
 //! expression, and the ways through it are dropped before anything is folded (`keyreach::ways_of`).
 //!
-//! ONLY A RENDER GATE. A `[class.x]="false"` is a gate row too, and it hides nothing.
+//! ONLY A RENDER GATE. A `[class.x]="false"` is a gate row too, and it hides nothing. A STYLE gate whose value hides
+//! on every side (`style_hides.when = always`: `[style.display]="'none'"`, a ternary of two hiding literals) is the
+//! other one: its element is never shown, so it is read exactly as `*ngIf="false"` (#54).
 
 use super::store::{Row, Store};
 use indexmap::IndexSet;
@@ -37,7 +39,11 @@ pub fn dead_gates(store: &Store<'_>) -> IndexSet<String> {
     let gates = store.table("gates");
     let render = |g: &Row| renders_at_false(str_of(g, "gate_kind"), str_of(g, "name"));
     let wanted: IndexSet<&str> = gates.iter().filter(|g| render(g)).filter_map(|g| str_of(g, "expression")).collect();
-    let mut out = IndexSet::new();
+    // A style gate never shown is dead by its `style_hides` row (written before the closure, `cssmap/style.rs`).
+    let mut out: IndexSet<String> = store.table("style_hides").iter()
+        .filter(|h| str_of(h, "when") == Some("always"))
+        .filter_map(|h| str_of(h, "gate").map(String::from))
+        .collect();
     if wanted.is_empty() {
         return out;
     }
@@ -99,5 +105,21 @@ mod tests {
             {"id": "g:case", "gate_kind": "structural", "name": "ngSwitchCase", "expression": "x:f"}
         ]));
         assert!(dead.is_empty());
+    }
+
+    #[test]
+    fn a_style_gate_that_always_hides_is_dead_and_one_that_hides_on_a_side_is_not() {
+        let tables = json!({
+            "expressions": [{"id": "x:r", "ast": {"k": "Read", "name": "shown"}}],
+            "gates": [{"id": "g:if", "gate_kind": "structural", "name": "ngIf", "expression": "x:r"}],
+            "style_hides": [
+                {"id": "cssy:1", "gate": "g:never", "when": "always"},
+                {"id": "cssy:2", "gate": "g:side", "when": "then"},
+                {"id": "cssy:3", "gate": null, "when": "always"}
+            ]
+        });
+        let map: Map<String, Value> = tables.as_object().cloned().expect("tables");
+        let store = Store::from_payload(map, "typescript");
+        assert_eq!(dead_gates(&store).into_iter().collect::<Vec<_>>(), vec!["g:never"]);
     }
 }
