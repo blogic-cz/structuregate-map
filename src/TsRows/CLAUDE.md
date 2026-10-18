@@ -69,6 +69,12 @@ runs) are compared by that, every carried field equal, never by `c:412`.
 - **A base class carries its row** (rows 58, #87): `classes.extends` and each of its `type_args` (every level) hold `line`,
   where the declaration the checker reached is (`TsClassRows.mjs::heritageRef`, alias and barrel followed), and `id`, the
   `classes` row at that file and line (`TsRefs.mjs::rollupRefIds`); a library class, or a place two rows share, has none.
+- **A union type names what its members name** (rows 61, #88, `TsDecls/TsTypeRef.mjs::refsOfUnion`): `type_ref` on `members`,
+  `members.params` and `type_members` is the ONE declaration a union's members name - `Codes | string`, `Codes | null`, and
+  `Kind | undefined` as the enum `Kind` (the checker flattens it to members) - and when they name SEVERAL (`A | B`) it is
+  null and `type_refs` lists each `{name, file, line, ...}` as a `type_ref` would be, sorted by place (the checker's order
+  is not a full and a partial run's). A parameter's `resolved` is likewise the one name its written union's members
+  resolve to. A union an alias names (`type Id = A | B`) is the alias, as before. `locals` and `returns` resolve no type.
 
 ## Expression trees the gate readers need (`TsDecls/TsBody.mjs`)
 
