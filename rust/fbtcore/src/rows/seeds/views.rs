@@ -68,7 +68,7 @@ pub fn write(conn: &Connection) -> rusqlite::Result<usize> {
             };
             select.push_str(&format!(
                 ", (SELECT v.value FROM {names} c JOIN {values} v ON v.owner = c.owner AND v.ord = c.ord \
-                 WHERE c.owner = s.id AND lower(c.value) = '{}') AS \"{}\"",
+                 WHERE c.owner = s.id AND lower(c.value) = '{}' ORDER BY c.ord LIMIT 1) AS \"{}\"",
                 literal(&column.to_lowercase()),
                 quoted(&shown)
             ));

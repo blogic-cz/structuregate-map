@@ -17,7 +17,7 @@ use std::path::Path;
 /// what stops an incremental update leaving rows of the old shape beside the new.
 /// Every half shares one database under this one version, and a version two halves
 /// disagreed on would be a database each of them thinks the other built wrong.
-pub const SCHEMA_VERSION: &str = "12";
+pub const SCHEMA_VERSION: &str = "13";
 
 pub struct Applied {
     /// Rows now in each table. Empty unless this batch said it was the last.
