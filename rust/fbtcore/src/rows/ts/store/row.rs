@@ -3,7 +3,6 @@
 
 use super::super::super::cells;
 use serde_json::{Map, Value};
-use std::collections::HashMap;
 #[cfg(test)]
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -12,7 +11,7 @@ use std::rc::Rc;
 /// its structures are read from, so no cell carries a handle of its own.
 pub struct Schema {
     pub(super) names: Vec<String>,
-    pub(super) at: HashMap<String, usize>,
+    pub(super) at: crate::rows::FastMap<String, usize>,
     /// Per column: the child table a structure column's cells are rebuilt from (`rows/cells/mod.rs`).
     nodes: Vec<Option<cells::Source>>,
     /// The column a row's nodes are owned by (`id`); a row without one owns them by its rowid.

@@ -17,7 +17,7 @@ use indexmap::IndexMap;
 use super::store::{Row, Store};
 use serde_json::Value;
 use std::cell::OnceCell;
-use std::collections::{HashMap, HashSet};
+use crate::rows::{FastMap as HashMap, FastSet as HashSet};
 use std::rc::Rc;
 
 /// (file row id, type name) - how a class or interface is told from another of the same name.
@@ -71,8 +71,8 @@ impl Classes {
             by_path.insert(path.replace('\\', "/"), id);
         }
         let mut out = Classes {
-            by_tail, by_path, by_key: HashMap::new(), key_of: HashMap::new(), parent: HashMap::new(), subs: HashMap::new(), member: HashMap::new(),
-            constructors: HashSet::new(), fn_parent: HashMap::new(), declared_in: HashMap::new(), inst: OnceCell::new(), tables: Vec::new(), built: OnceCell::new(),
+            by_tail, by_path, by_key: HashMap::default(), key_of: HashMap::default(), parent: HashMap::default(), subs: HashMap::default(), member: HashMap::default(),
+            constructors: HashSet::default(), fn_parent: HashMap::default(), declared_in: HashMap::default(), inst: OnceCell::new(), tables: Vec::new(), built: OnceCell::new(),
             overridden: OnceCell::new(),
         };
         let classes = store.table("classes");
@@ -146,7 +146,7 @@ impl Classes {
                     _ => {}
                 }
             }
-            let mut out = HashSet::new();
+            let mut out = HashSet::default();
             for row in self.tables.iter().flat_map(|t| t.iter()) {
                 row.get("value").into_iter().chain(row.get("args")).for_each(|v| walk(v, self, &mut out));
             }
@@ -264,7 +264,7 @@ impl Classes {
 
     fn answering_key(&self, key: TypeKey, name: &str) -> Vec<(String, String)> {
         let mut classes: Vec<String> = self.by_key.get(&key).cloned().into_iter().collect();
-        let (mut todo, mut seen) = (vec![key], HashSet::new());
+        let (mut todo, mut seen) = (vec![key], HashSet::default());
         while let Some(at) = todo.pop() {
             for sub in self.subs.get(&at).into_iter().flatten() {
                 if !seen.insert(sub.clone()) {
@@ -368,7 +368,7 @@ pub(super) fn add_reads(
     let assignments = store.table("assignments");
     let class_of: HashMap<String, String> = members.iter().filter_map(|m| Some((id_of(m, "id")?, text(m, "class")?))).collect();
     let getters: HashSet<String> = members.iter().filter(|m| text(m, "kind").as_deref() == Some("getter")).filter_map(|m| id_of(m, "id")).collect();
-    let mut direct: HashMap<String, Vec<(String, Vec<String>)>> = HashMap::new();
+    let mut direct: HashMap<String, Vec<(String, Vec<String>)>> = HashMap::default();
     let writes = members.iter().filter_map(|m| Some((id_of(m, "id")?, text(m, "class")?, m.get("value")?)));
     let writes = writes.chain(assignments.iter().filter_map(|a| Some((id_of(a, "target_id")?, text(a, "class")?, a.get("value")?))));
     for (member, writer, value) in writes {

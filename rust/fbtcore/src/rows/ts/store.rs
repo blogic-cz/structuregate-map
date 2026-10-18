@@ -24,7 +24,8 @@ use rusqlite::Connection;
 use serde_json::Map;
 use serde_json::Value;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use super::super::{FastMap, FastSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 mod row;
@@ -38,19 +39,19 @@ pub struct Store<'a> {
     /// Rows are read ONCE per table and cached: the passes walk the same tables
     /// repeatedly (`template_nodes` is read by five of them), and re-querying turned a
     /// tenth of a second into minutes in the first draft.
-    cache: RefCell<HashMap<String, Rc<Vec<Row>>>>,
+    cache: RefCell<FastMap<String, Rc<Vec<Row>>>>,
     /// Which columns hold a structure, as the half itself recorded when it wrote them.
-    json_columns: HashMap<String, HashSet<String>>,
+    json_columns: FastMap<String, FastSet<String>>,
     /// ...and which hold a boolean, which SQLite stores as 0 and 1.
-    bool_columns: HashMap<String, HashSet<String>>,
-    names: HashSet<String>,
+    bool_columns: FastMap<String, FastSet<String>>,
+    names: FastSet<String>,
     payload: bool,
     /// The payload's table names IN THE ORDER IT SENT THEM, kept only by a store that was handed
     /// the rows and will hand them back. `cache` is a `HashMap` and has no order to give back.
     #[cfg(test)]
     order: Vec<String>,
     /// What a pass builds from the rows and several passes ask for, built once and shared (`shared`).
-    memo: RefCell<HashMap<&'static str, Rc<dyn std::any::Any>>>,
+    memo: RefCell<FastMap<&'static str, Rc<dyn std::any::Any>>>,
     /// Derived rows this run produced, by table.
     pub emitted: HashMap<String, Vec<Row>>,
     /// WHAT THE PASSES READ: every table asked for, and each read's column names and flags (`Schema::reads`).
@@ -81,14 +82,14 @@ impl<'a> Store<'a> {
         Ok(Store {
             db: Some(db),
             half: half.to_string(),
-            cache: RefCell::new(HashMap::new()),
+            cache: RefCell::new(FastMap::default()),
             json_columns,
             bool_columns,
             names,
             payload: false,
             #[cfg(test)]
             order: Vec::new(),
-            memo: RefCell::new(HashMap::new()),
+            memo: RefCell::new(FastMap::default()),
             emitted: HashMap::new(),
             asked: RefCell::new(Vec::new()),
         })
@@ -112,7 +113,7 @@ impl<'a> Store<'a> {
     /// which is most of the peak a real run was measured at. `take_tables` hands them back.
     #[cfg(test)]
     pub fn from_payload(tables: Map<String, Value>, half: &str) -> Store<'a> {
-        let mut cache = HashMap::new();
+        let mut cache = FastMap::default();
         let mut order = Vec::with_capacity(tables.len());
         for (name, rows) in tables {
             let list: Vec<Row> = match rows {
@@ -137,12 +138,12 @@ impl<'a> Store<'a> {
             db: None,
             half: half.to_string(),
             cache: RefCell::new(cache),
-            json_columns: HashMap::new(),
-            bool_columns: HashMap::new(),
-            names: HashSet::new(),
+            json_columns: FastMap::default(),
+            bool_columns: FastMap::default(),
+            names: FastSet::default(),
             payload: true,
             order,
-            memo: RefCell::new(HashMap::new()),
+            memo: RefCell::new(FastMap::default()),
             emitted: HashMap::new(),
             asked: RefCell::new(Vec::new()),
         }
@@ -364,7 +365,7 @@ fn from_sql(raw: rusqlite::types::Value) -> Value {
     }
 }
 
-fn table_names(db: &Connection) -> Result<HashSet<String>> {
+fn table_names(db: &Connection) -> Result<FastSet<String>> {
     let mut stmt = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")?;
     let names = stmt.query_map([], |r| r.get::<_, String>(0))?;
     Ok(names
@@ -379,8 +380,8 @@ fn table_names(db: &Connection) -> Result<HashSet<String>> {
 /// stored as `{}` either way — so deciding per value would decode a string literal into
 /// an empty object for the one row in a million that writes one. The spec is the half's
 /// own statement of which columns it encoded.
-fn spec_columns(db: &Connection, half: &str, key: &str) -> HashMap<String, HashSet<String>> {
-    let mut out = HashMap::new();
+fn spec_columns(db: &Connection, half: &str, key: &str) -> FastMap<String, FastSet<String>> {
+    let mut out = FastMap::default();
     let Some(text) = crate::rows::meta::get(db, &format!("spec:{half}")) else { return out };
     let Ok(spec) = serde_json::from_str::<Value>(&text) else {
         return out;
@@ -389,7 +390,7 @@ fn spec_columns(db: &Connection, half: &str, key: &str) -> HashMap<String, HashS
         return out;
     };
     for (table, names) in columns {
-        let set: HashSet<String> = names
+        let set: FastSet<String> = names
             .as_array()
             .map(|a| {
                 a.iter()

@@ -21,7 +21,7 @@
 
 use super::store::{Row, Store};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use crate::rows::{FastMap as HashMap, FastSet as HashSet};
 
 pub(crate) fn text(row: &Row, field: &str) -> Option<String> {
     match row.get(field) {
@@ -114,15 +114,15 @@ fn plain_write(a: &Row) -> bool {
 
 impl MemberReads {
     pub fn new(store: &Store<'_>) -> MemberReads {
-        let mut writes: HashMap<(String, String), i64> = HashMap::new();
+        let mut writes: HashMap<(String, String), i64> = HashMap::default();
         for a in store.table("assignments").iter() {
             if let (true, Some(file), Some(target)) = (plain_write(a), text(a, "file"), text(a, "target")) {
                 *writes.entry((file, target)).or_default() += 1;
             }
         }
         let mut template = Reads::default();
-        let mut by_file: HashMap<String, HashMap<String, i64>> = HashMap::new();
-        let mut indexed: HashSet<String> = HashSet::new();
+        let mut by_file: HashMap<String, HashMap<String, i64>> = HashMap::default();
+        let mut indexed: HashSet<String> = HashSet::default();
         for f in store.table("files").iter() {
             let Some(id) = text(f, "id") else { continue };
             if let Some(Value::Object(counts)) = f.get("prop_reads") {
@@ -217,9 +217,9 @@ impl Unread {
         // A PLAIN `=` TO A PROPERTY IS A WRITE, NOT A READ (#68): each one in the member's own file is taken off its
         // count (another file's, `MemberReads::own_reads`).
         let assignments = store.table("assignments");
-        let mut fields = HashSet::new();
-        let mut getters: HashSet<String> = HashSet::new();
-        let mut field_ids: HashSet<String> = HashSet::new();
+        let mut fields = HashSet::default();
+        let mut getters: HashSet<String> = HashSet::default();
+        let mut field_ids: HashSet<String> = HashSet::default();
         for m in store.table("members").iter() {
             let (Some(id), Some(class), Some(name), Some(file)) = (text(m, "id"), text(m, "class"), text(m, "name"), text(m, "file")) else { continue };
             let kind = text(m, "kind");
@@ -286,11 +286,11 @@ impl Unread {
 #[cfg(test)]
 mod tests {
     use super::identifiers;
-    use std::collections::HashSet;
+    use crate::rows::FastSet as HashSet;
 
     #[test]
     fn every_identifier_of_any_length_is_read() {
-        let mut out = HashSet::new();
+        let mut out = HashSet::default();
         identifiers("a.id?.x2 + f(1abc, $v) && b!.c", &mut out);
         for name in ["a", "id", "x2", "f", "$v", "b", "c"] {
             assert!(out.contains(name), "{name}");

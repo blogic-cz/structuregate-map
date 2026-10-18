@@ -10,6 +10,12 @@
 //! different processes. They are now one, so the rows are memory the extractor already
 //! owns and the batching exists only to bound peak memory, not to cross a pipe.
 
+/// THE MAPS ON A HOT PATH - a row's column by name, a table by name, the closure's lookups: foldhash, not std's SipHash,
+/// which hashed every key against an attacker the map's own rows never are. Seeded per process like std's, so an order
+/// it gives is no more stable than std's was: nothing may depend on it.
+pub type FastMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState>;
+pub type FastSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
+
 pub mod calls;
 pub mod cells;
 pub use cells::meta;

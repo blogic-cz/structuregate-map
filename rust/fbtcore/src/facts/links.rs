@@ -54,7 +54,7 @@ fn seed(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT s.id, s.file, s.line, s.condition, \
                 (SELECT v.value FROM {names} c JOIN {values} v ON v.owner = c.owner AND v.ord = c.ord \
-                 WHERE c.owner = s.id AND lower(c.value) = lower(?3)) \
+                 WHERE c.owner = s.id AND lower(c.value) = lower(?3) ORDER BY c.ord LIMIT 1) \
          FROM sql_seeds s WHERE s.status <> 'temp' AND lower(CASE s.schema WHEN '' THEN 'dbo' ELSE s.schema END) = ?1 \
            AND lower(s.name) = ?2 ORDER BY s.id",
     ))?;

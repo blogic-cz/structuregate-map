@@ -107,7 +107,9 @@ pub fn put(db: &Connection, key: &str, value: &str) -> Result<()> {
         match deep(value).ok().filter(is_structured) {
             Some(structure) => {
                 db.execute("INSERT INTO _meta (key, value) VALUES (?1, NULL)", [key])?;
+                // `_meta` is small and read key by key, before any `index_values` of a fresh map: keyed at once.
                 let mut writer = Writer::new(db, TABLE, COLUMN)?;
+                super::key_index(db, &nodes_table())?;
                 writer.tree(key, &structure)?;
                 writer.finish()?;
             }

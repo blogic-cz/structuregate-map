@@ -19,10 +19,12 @@
 //! document's headers), and a column per name was a table past SQLite's column limit, `Home` and `home` one
 //! column. The root of every cell is one node, so `[]` and `{}` are rows too and an absent cell is no row at all.
 //!
-//! COMPACT, because there are tens of millions: `(owner, n)` is the primary key of a `WITHOUT ROWID` table - one
-//! b-tree that holds the rows AND finds a cell, a node and a node's children (`owner = ? AND parent = ?` reads the
-//! owner's few nodes off it) - and `value` is the only index. An `(owner, parent)` index cost a sixth of the map and a
-//! quarter of the row write, and served no query the key does not.
+//! COMPACT, because there are tens of millions: `(owner, n)` is a UNIQUE index - it finds a cell, a node and a node's
+//! children (`owner = ? AND parent = ?` reads the owner's few nodes off it) - beside `value` and `(role, parent)`. An
+//! `(owner, parent)` index cost a sixth of the map and a quarter of the row write, and served no query the key does not.
+//! The table is an ORDINARY ROWID TABLE and the key is built AFTER its rows (`index_values`): a `WITHOUT ROWID` table
+//! keyed `(owner, n)` placed every node in its b-tree as it landed, and the largest node table wrote a fifth slower.
+//! So a node table SCANS IN INSERT ORDER, not key order: a reader that needs an order says `ORDER BY owner, n`.
 //! A node carries no `file`, `owner_file` or `half`: every delete that scopes a row takes its nodes THROUGH the row
 //! (`delete_children`), so nothing is stored twice. `_cells` records which columns of which table went where.
 //!
@@ -149,20 +151,22 @@ fn owner_key(owner: &SqlValue) -> String {
 /// THE COLUMNS OF EVERY CHILD TABLE, fixed and in this order.
 pub const COLUMNS: &[&str] = &["owner", "n", "parent", "role", "ord", "node", "value"];
 
-/// A child table, made once with its two indexes and registered.
+/// A child table, made once and registered - its indexes, the `(owner, n)` key among them, come after its rows
+/// (`index_values`).
 pub fn create(db: &Connection, table: &str, column: &str) -> Result<String> {
     let child_table = child(table, column);
     let t = schema::escape(&child_table);
     db.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS \"{t}\" (owner NOT NULL, n INTEGER NOT NULL, parent INTEGER, role TEXT, \
-         ord INTEGER, node TEXT NOT NULL, value, PRIMARY KEY (owner, n)) WITHOUT ROWID;"
+         ord INTEGER, node TEXT NOT NULL, value);"
     ))?;
     register(db, table, column)?;
     Ok(child_table)
 }
 
-/// THE `value` AND `(role, parent)` INDEXES, made AFTER the rows are in. `(role, parent)` answers a SHAPE across every
-/// owner - each root `$ref`, each `$template` list (#71): the primary key serves only a lookup inside one owner. Made
+/// THE UNIQUE `(owner, n)` KEY AND THE `value` AND `(role, parent)` INDEXES, made AFTER the rows are in. The key finds a
+/// cell and a node, and refuses a node written twice. `(role, parent)` answers a SHAPE across every
+/// owner - each root `$ref`, each `$template` list (#71): the key serves only a lookup inside one owner. Made
 /// by `store::write` once per write, by `store::insert_rows` per table. Built during the insert, every node landed at
 /// a random place in it, and on a large workspace that was most of the time the store spent; one sort over the
 /// finished table is a fraction of that. `IF NOT EXISTS`, so a partial run inserts into the index a full run built.
@@ -176,12 +180,20 @@ pub fn index_values(db: &Connection) -> Result<()> {
         rows.collect::<rusqlite::Result<_>>()?
     };
     for child_table in children {
+        key_index(db, &child_table)?;
         let t = schema::escape(&child_table);
         db.execute_batch(&format!(
             "CREATE INDEX IF NOT EXISTS \"ix_{t}_value\" ON \"{t}\" (value); \
              CREATE INDEX IF NOT EXISTS \"ix_{t}_role\" ON \"{t}\" (role, parent)"
         ))?;
     }
+    Ok(())
+}
+
+/// One child table's unique `(owner, n)` key, made when it is not there yet.
+pub fn key_index(db: &Connection, child_table: &str) -> Result<()> {
+    let t = schema::escape(child_table);
+    db.execute_batch(&format!("CREATE UNIQUE INDEX IF NOT EXISTS \"ix_{t}_key\" ON \"{t}\" (owner, n)"))?;
     Ok(())
 }
 

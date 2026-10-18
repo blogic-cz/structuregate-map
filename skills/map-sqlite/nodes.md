@@ -7,7 +7,7 @@
 | column | meaning |
 |---|---|
 | `owner` | the id of the row the cell belongs to (`#<rowid>` for a table without one) |
-| `n` | the node's preorder number in that cell; the ROOT is `n = 0`. A node IS `(owner, n)` |
+| `n` | the node's preorder number in that cell; the ROOT is `n = 0`. A node IS `(owner, n)` - a unique index, so a node table scans in no promised order: `ORDER BY owner, n` (or `ord`) where order matters |
 | `parent` | the `n` of the node it hangs off, NULL for the root |
 | `role` | its KEY in the parent object (`k`, `name`, `args`); an item of a member list carries the list's key too |
 | `ord` | its index in a list |

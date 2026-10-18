@@ -134,7 +134,7 @@ pub fn dangling(db: &Connection, plan: &Replace<'_>, deps: &Map<String, Value>, 
             let mut home = db.prepare(&format!("SELECT owner_file FROM \"{}\" WHERE {} = ?1", escape(table), if *has_id { "id" } else { "rowid" }))?;
             let mut home_at = db.prepare(&format!("SELECT owner_file FROM \"{}\" WHERE rowid = ?1", escape(table)))?;
             for (column, child) in super::cells::columns_of(db, table) {
-                let sql = format!("SELECT DISTINCT owner, value FROM \"{}\" WHERE value IN temp.sg_vanished", escape(&child));
+                let sql = format!("SELECT DISTINCT owner, value FROM \"{}\" WHERE value IN temp.sg_vanished ORDER BY value, owner", escape(&child));
                 let mut stmt = db.prepare(&sql)?;
                 let hits: Vec<(String, String)> = stmt
                     .query_map([], |r| Ok((r.get::<_, Sql>(0)?, r.get::<_, String>(1)?)))?

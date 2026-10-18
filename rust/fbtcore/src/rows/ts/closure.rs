@@ -24,7 +24,7 @@
 //! `truncated` stays as a column because a consumer filters on it, and is always 0.
 
 use std::sync::Arc;
-use std::collections::HashMap;
+use crate::rows::FastMap as HashMap;
 use super::key_branches::Branches;
 use super::store::{Row, Store};
 use indexmap::{IndexMap, IndexSet};
@@ -124,7 +124,7 @@ fn edge_sites(store: &Store<'_>) -> impl Fn(&Row) -> Site + use<> {
 /// Interning happens HERE, once, while the DAG is built. The walk itself never looks an id up.
 #[derive(Default)]
 struct Ids {
-    held: std::collections::HashMap<Arc<str>, Arc<str>>,
+    held: HashMap<Arc<str>, Arc<str>>,
 }
 
 impl Ids {
@@ -263,7 +263,7 @@ impl Memo {
     /// A memo with a named budget, so a test can say what happens when it runs out.
     #[cfg(test)]
     pub fn spending(paths: usize) -> Memo {
-        Memo { held: HashMap::new(), spent: MEMO_PATHS.saturating_sub(paths) }
+        Memo { held: HashMap::default(), spent: MEMO_PATHS.saturating_sub(paths) }
     }
 }
 
