@@ -134,13 +134,15 @@
        and figures leaked into comments and fixtures more than once. `leak-deny.txt` at the root lists the terms
        that may never appear - one per line, matched literally and case-sensitively - and is gitignored, because
        it holds exactly those terms. `git grep` reads tracked AND untracked files on both platforms, so a new file
-       is caught before it is added. No list (a clone, CI) or no git: nothing to check. -->
+       is caught before it is added. No list (a clone, CI) or no git: nothing to check. VENDORED UPSTREAM SOURCE
+       (`rust/fbtcore/vendor/`, PostgreSQL's parser) is left out: it is nobody's tree but its authors', and a short
+       term matches inside its words. -->
   <PropertyGroup>
     <LeakDenyFile Condition="'$(LeakDenyFile)' == ''">$(MSBuildThisFileDirectory)..\leak-deny.txt</LeakDenyFile>
   </PropertyGroup>
   <Target Name="LeakGuard" BeforeTargets="CoreCompile"
           Condition="'$(SkipLeakGuard)' != 'true' And Exists('$(LeakDenyFile)') And Exists('$(MSBuildThisFileDirectory)..\.git')">
-    <Exec Command="git -C &quot;$(MSBuildThisFileDirectory)..&quot; grep -n -I -F --untracked -f &quot;$(LeakDenyFile)&quot; -- ."
+    <Exec Command="git -C &quot;$(MSBuildThisFileDirectory)..&quot; grep -n -I -F --untracked -f &quot;$(LeakDenyFile)&quot; -- . &quot;:(exclude)rust/fbtcore/vendor&quot;"
           IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="low">
       <Output TaskParameter="ConsoleOutput" ItemName="LeakHit" />
       <Output TaskParameter="ExitCode" PropertyName="LeakFound" />
