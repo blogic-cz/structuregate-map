@@ -82,15 +82,15 @@ a generated file is listed and never walked (nearly all of a real tree's rows we
 ## SQL (`files.lang = 'sql'`)
 
 Every `.sql` under a `.sqlproj`, parsed with Microsoft's own T-SQL parser (ScriptDom) - or, where the SQL config's
-`dialects` names a file `postgres`, with sqlparser-rs's PostgreSQL grammar into the SAME tables (`files.dialect`
-says which; an unqualified name is in `public`, not `dbo`; dollar-quoting, `LIMIT/OFFSET`, `RETURNING`, `::`, `ILIKE`,
-`DISTINCT ON` parse; a statement that does not is ONE `diagnostics` row, `name = 'syntax'`, and the statements around it
-still map; psql's `\i`/`\set` lines are skipped). A PostgreSQL file has no `sql_keys`, `sql_steps` or `sql_dynamic`
-rows, and a function's body is its text, not statements:
+`dialects` names a file `postgres`, with PostgreSQL's OWN parser (libpg_query) into the SAME tables (`files.dialect`
+says which; an unqualified name is in `public`, not `dbo`; a statement that does not parse is ONE `diagnostics` row,
+`name = 'syntax'`, where the parser stopped, and the statements around it still map). A function's and a DO block's
+statements, and the refs only PostgreSQL has, are in [sql-statements.md](sql-statements.md#postgresql). A PostgreSQL
+file has no `sql_keys`, `sql_steps` or `sql_dynamic` rows:
 
 | table | one row per |
 |---|---|
-| `sql_objects` | table, view, procedure, function, trigger, type, sequence, index - `database`, `schema`, `name`, `source` |
+| `sql_objects` | table, view, procedure, function, trigger, type, sequence, index (PostgreSQL also `policy`) - `database`, `schema`, `name`, `source` |
 | `sql_columns` | column - `type`, `nullable`, `identity`, `key`, `default_expr`, `computed` |
 | `sql_keys` | primary, unique, foreign (`ref_schema`, `ref_name`, `ref_columns`), check, default, index |
 | `sql_refs` | what a statement touches - `action` (`select`, `insert`, `update`, `delete`, `merge`, `truncate`, `exec`, `include`), the column where it names one, `statement` the `sql_statements.id` it is in (`''` for an `include`) |

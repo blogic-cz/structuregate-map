@@ -3,8 +3,8 @@ using System.Text.Json;
 namespace StructureGate;
 
 /// <summary>
-/// A POSTGRESQL FILE'S ROWS, parsed in rust (`rust/fbtcore/src/sqlpg/`, sqlparser-rs) and written here as a T-SQL
-/// file's are - the same tables, the same columns, the same ids from the same counters - so the SQL half stays ONE
+/// A POSTGRESQL FILE'S ROWS, parsed in rust by PostgreSQL's own parser (`rust/fbtcore/src/sqlpg/`, libpg_query) and
+/// written here as a T-SQL file's are - the same tables, the same columns, the same ids from the same counters - so the SQL half stays ONE
 /// producer of `lang = 'sql'` rows: two writing separately would each delete the other's. An unqualified name is in
 /// `public`, as PostgreSQL resolves it, not in `dbo`.
 /// </summary>
