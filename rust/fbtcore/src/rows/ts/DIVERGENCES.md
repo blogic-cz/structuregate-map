@@ -126,7 +126,7 @@ A partial run is handed those nodes back and runs the rollup over them, so it ch
 Tables that move: `template_nodes` `gate_chain`/`gate_depth` inside an orphan template, and through them `key_reach`
 only for a key an orphan template spells under a gate.
 
-**#51 - a rule that hides as a whole proves its class hides** (PROPOSED, not yet signed off; issue #89, `cssmap/collapse.rs`,
+**#51 - a rule that hides as a whole proves its class hides** (signed off 2026-10-18; issue #89, `cssmap/collapse.rs`,
 no `rows` bump - `cssmap/` is derived, `NOT_SHAPING` in `rust/fbtcore/build.rs`): `style_rules.hides` was only `display: none`
 and `visibility: hidden|collapse`, so `.collapsed-x { height: 0; overflow: hidden }` and `.faded-x { opacity: 0;
 pointer-events: none }` gave no `class_hides` row and a class gate toggling them was no visibility condition (#30). Now
