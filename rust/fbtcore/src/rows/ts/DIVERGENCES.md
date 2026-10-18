@@ -153,3 +153,11 @@ no `gate_values`/`gate_features` row and no `bind:` condition. Whether a `[style
 move: `gate_values`, `gate_features` (rows of style gates gone), and `key_reach` (`always_values`, `unreadable_values`,
 `always_branches`, `maybe_branches`, `branch_senses`, `paths`, `n_paths`) for keys under a style gate; `gates`/`always_gates`
 keep the gate. No other table moves.
+
+**#53 - a hiding `[style.display]`/`[style.visibility]` ternary restricts its keys on its showing side** (issue #93 part B2, `gate_values::class_polarity`,
+no `rows` bump - `rows/ts/` is derived, `NOT_SHAPING` in `rust/fbtcore/build.rs`): `[style.display]="kind === K.Alpha ? 'none' : 'block'"` hides its
+element while `kind` is Alpha, but #52 left it no condition at all, so a key inside was unrestricted. A style gate whose `style_hides.when` is `then`/`else`
+(a ternary of two literals, one hiding) is now `Polarity::Shown`: `gate_values`/`gate_features` rows of its showing condition (`kind not_in ["Alpha"]`) and a
+restriction on the keys under it. Tables that move: `gate_values`, `gate_features`, and `key_reach` (`always_values`, `unreadable_values`, `always_branches`,
+`maybe_branches`, `branch_senses`, `paths`, `n_paths`) for keys under such a gate. NOT claimed: `when = always` (never shown), a non-literal arm, `[ngStyle]`, and
+a `[style.height]` collapse whose partners sit on the element's classes. The new table `style_hides` moves no existing row.

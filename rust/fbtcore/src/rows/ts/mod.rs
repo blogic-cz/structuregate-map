@@ -50,6 +50,8 @@ pub mod gate_same_enum;
 pub mod gate_tsrows;
 #[path = "gate/gate_values.rs"]
 pub mod gate_values;
+#[path = "gate/ts/gate_polarity.rs"]
+pub mod gate_polarity;
 pub mod jsstr;
 #[path = "key/key_arms.rs"]
 pub mod key_arms;

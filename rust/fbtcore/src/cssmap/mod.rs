@@ -23,6 +23,7 @@ mod collapse;
 mod hides;
 mod select;
 mod sheet;
+mod style;
 #[cfg(test)]
 mod tests;
 
@@ -35,7 +36,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// The tables this pass owns, deleted and written again by every run of the half.
-pub(crate) const TABLES: &[&str] = &["stylesheets", "style_rules", "class_hides"];
+pub(crate) const TABLES: &[&str] = &["stylesheets", "style_rules", "class_hides", "style_hides"];
 
 /// The kind of the `diagnostics` row a sheet that did not parse gets.
 pub(crate) const UNPARSED: &str = "stylesheet_unparsed";
@@ -136,13 +137,16 @@ fn derive(db: &Connection, workspace: &Path, half: &str) -> Result<Derived> {
         }
     }
     let joined = hides::join(db, half, &rule_rows);
+    let styled = style::rows(db, half);
     let mut notes = vec![format!(
         "the typescript half read {} stylesheet(s) into {} rule declaration(s), {} of them hiding; {} class binding \
-         match(es) to a hiding rule",
+         match(es) to a hiding rule; {} style binding(s), {} of them hiding",
         files.len(),
         rule_rows.len(),
         rule_rows.iter().filter(|r| r.get("hides").and_then(Value::as_i64) == Some(1)).count(),
-        joined.len()
+        joined.len(),
+        styled.len(),
+        styled.iter().filter(|r| r.get("hides").and_then(Value::as_i64) == Some(1)).count()
     )];
     if let Some(first) = unparsed.first() {
         notes.push(format!("the typescript half could not parse {} stylesheet(s), first {first}", unparsed.len()));
@@ -151,6 +155,7 @@ fn derive(db: &Connection, workspace: &Path, half: &str) -> Result<Derived> {
     tables.insert("stylesheets".into(), Value::Array(sheet_rows));
     tables.insert("style_rules".into(), Value::Array(rule_rows));
     tables.insert("class_hides".into(), Value::Array(joined));
+    tables.insert("style_hides".into(), Value::Array(styled));
     if !diagnostics.is_empty() {
         tables.insert("diagnostics".into(), Value::Array(diagnostics));
     }

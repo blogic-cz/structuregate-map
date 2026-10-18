@@ -175,13 +175,14 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
             // stylesheet proves hiding. A `gateInputs` property (`[disabled]`), a style, `*ngFor`, `*ngSwitchCase` at
             // `false` hide nothing - the edge then carries no condition for that gate (#37).
             let kind = cell(g, "gate_kind");
-            let hides = polarity.get(gid).copied() == Some(true)
+            let hides = matches!(polarity.get(gid), Some(super::gate_values::Polarity::Hides | super::gate_values::Polarity::Shown(_)))
                 || kind.as_deref() == Some("hidden")
                 || super::key_dead::renders_at_false(kind.as_deref(), cell(g, "name").as_deref());
             // A CLASS GATE: the element shows while it is FALSE when its class hides; no condition when it only styles.
-            let ast = match polarity.get(gid).copied() {
-                Some(true) => json!({"k": "Not", "expr": ast}),
-                Some(false) => continue,
+            let ast = match polarity.get(gid) {
+                Some(super::gate_values::Polarity::Hides) => json!({"k": "Not", "expr": ast}),
+                Some(super::gate_values::Polarity::Styles) => continue,
+                Some(super::gate_values::Polarity::Shown(c)) => c.clone(),
                 None => ast,
             };
             let mut hit = false;
