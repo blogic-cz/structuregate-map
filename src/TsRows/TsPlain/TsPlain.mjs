@@ -40,7 +40,7 @@ import { createRequire } from 'node:module';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadAliases } from './TsGate.Map.mjs';
-import { resolveToolchain } from './TsResolve.mjs';
+import { cacheCompiles, resolveToolchain } from './TsResolve.mjs';
 import { Rows, readFile, skippedFile } from './TsPlainRows.mjs';
 
 /** What the `files` rows of this half are stamped with. NOT `typescript`: that is the Angular half's, and
@@ -129,6 +129,7 @@ function compiler(root, declared) {
             + 'pass --ts-node-modules <dir>' };
     }
     let ts;
+    cacheCompiles();
     try { ts = createRequire(path.join(found.nodeModules, 'noop.js'))('typescript'); } catch (error) {
         return { why: `typescript in ${found.nodeModules} could not be loaded - ${error.message}` };
     }

@@ -144,3 +144,12 @@ another rule. Tables that move: `style_rules.hides`, `class_hides` (new rows), a
 whose class only such a rule hides becomes a condition read as `!c` - `gate_values`/`gate_features` for it, and `key_reach`
 (`always_values`, `unreadable_values`, `always_branches`, `maybe_branches`, `branch_senses`, `paths`, `n_paths`) for keys
 under it or behind an edge it decides (#14, #37). No other table moves.
+
+**#52 - a `[style.x]` binding is no visibility condition** (signed off 2026-10-18; issue #93, `gate_values::class_polarity`,
+no `rows` bump - `rows/ts/` is derived, `NOT_SHAPING` in `rust/fbtcore/build.rs`): `[style.color]="kind === K.Alpha && 'red'"`
+was read as a POSITIVE condition, so a key in that element was restricted to `kind in ["Alpha"]` although the element is always
+shown and only its colour changes. A style gate now maps to `false` in `class_polarity`, as a class that only styles does (#30):
+no `gate_values`/`gate_features` row and no `bind:` condition. Whether a `[style.display]` value hides is not read. Tables that
+move: `gate_values`, `gate_features` (rows of style gates gone), and `key_reach` (`always_values`, `unreadable_values`,
+`always_branches`, `maybe_branches`, `branch_senses`, `paths`, `n_paths`) for keys under a style gate; `gates`/`always_gates`
+keep the gate. No other table moves.

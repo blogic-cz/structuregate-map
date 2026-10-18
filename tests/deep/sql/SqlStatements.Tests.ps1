@@ -165,3 +165,18 @@ Test-Case 'sqlstatements: a file with one bad statement keeps the rows of the go
     Assert-SqlStmtRow $db "SELECT 'v=' || errors FROM files WHERE path = 'Demo/q.sql'" '1' 'one error'
     Assert-SqlStmtRow $db "SELECT 'v=' || count(*) FROM sql_statements s JOIN files f ON f.id = s.file WHERE f.path = 'Demo/q.sql'" '2' 'two statements'
 }
+
+# The last statement of the bad file has no `;`: one error, and the batch's other file is still mapped.
+Test-Case 'sqlstatements: a bad file with no `;` after its last statement does not abort the batch' {
+    $nl = $script:SqlStmtNl
+    $tree = Use-Tree @{
+        'Demo/Demo.sqlproj' = Get-SqlStmtProject
+        'Demo/good.sql' = "SELECT Id FROM dbo.Orders;$nl"
+        'Demo/bad.sql' = 'not sql'
+    }
+    $db = Join-Path $tree 'sql.sqlite'
+    $run = Invoke-Gate --root $tree --ext '.sql' --map-sqlite $db
+    Assert-Exit $run 0
+    Assert-SqlStmtRow $db "SELECT 'v=' || count(*) FROM sql_statements s JOIN files f ON f.id = s.file WHERE f.path = 'Demo/good.sql'" '1' 'the good file keeps its statement'
+    Assert-SqlStmtRow $db "SELECT 'v=' || errors FROM files WHERE path = 'Demo/bad.sql'" '1' 'one error'
+}

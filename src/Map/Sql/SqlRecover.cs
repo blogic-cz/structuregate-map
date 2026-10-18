@@ -26,40 +26,46 @@ internal static class SqlRecover
         var (fragment, errors) = ParseOnce(parser, prepared);
         if (errors.Count == 0) return (fragment, prepared, errors);
 
-        var spans = Spans(parser, prepared);
-        var blanked = new HashSet<int>();
-        var kept = new List<ParseError>();
-        var text = prepared;
-        while (true)
+        var (firstFragment, firstErrors) = (fragment, errors);
+        // A RECOVERY BUG COSTS THE STATEMENTS OF THAT FILE, NEVER THE FILE OR THE BATCH: any failure falls back to the first pass.
+        try
         {
-            var chars = text.ToCharArray();
-            var lost = new List<ParseError>();
-            var confirmed = false;
-            foreach (var error in errors)
+            var spans = Spans(parser, prepared);
+            var blanked = new HashSet<int>();
+            var kept = new List<ParseError>();
+            var text = prepared;
+            while (true)
             {
-                var k = spans.FindIndex(s => s.Start <= error.Offset && error.Offset < s.End);
-                if (k < 0) { lost.Add(error); continue; }
-                var candidates = error.Offset >= spans[k].Term && spans[k].Term >= 0 && k + 1 < spans.Count ? new[] { k + 1, k } : [k];
-                if (candidates.All(c => blanked.Contains(spans[c].Start))) continue;
-                var found = false;
-                foreach (var c in candidates.Where(c => !blanked.Contains(spans[c].Start)))
+                var chars = text.ToCharArray();
+                var lost = new List<ParseError>();
+                var confirmed = false;
+                foreach (var error in errors)
                 {
-                    var alone = Blank(text, spans, c);
-                    var own = ParseOnce(new TSql170Parser(initialQuotedIdentifiers: true), alone).Errors;
-                    if (own.Count == 0) continue;
-                    blanked.Add(spans[c].Start);
-                    kept.Add(own[0]);
-                    Blank(chars, spans[c].Start, spans[c].End);
-                    found = confirmed = true;
-                    break;
+                    var k = spans.FindIndex(s => s.Start <= error.Offset && error.Offset < s.End);
+                    if (k < 0) { lost.Add(error); continue; }
+                    var candidates = error.Offset >= spans[k].Term && spans[k].Term >= 0 && k + 1 < spans.Count ? new[] { k + 1, k } : [k];
+                    if (candidates.All(c => blanked.Contains(spans[c].Start))) continue;
+                    var found = false;
+                    foreach (var c in candidates.Where(c => !blanked.Contains(spans[c].Start)))
+                    {
+                        var alone = Blank(text, spans, c);
+                        var own = ParseOnce(new TSql170Parser(initialQuotedIdentifiers: true), alone).Errors;
+                        if (own.Count == 0) continue;
+                        blanked.Add(spans[c].Start);
+                        kept.Add(own[0]);
+                        Blank(chars, spans[c].Start, spans[c].End);
+                        found = confirmed = true;
+                        break;
+                    }
+                    if (!found) lost.Add(error);
                 }
-                if (!found) lost.Add(error);
+                if (!confirmed) return (fragment, text, [.. kept, .. lost]);
+                text = new string(chars);
+                (fragment, errors) = ParseOnce(parser, text);
+                if (errors.Count == 0) return (fragment, text, kept);
             }
-            if (!confirmed) return (fragment, text, [.. kept, .. lost]);
-            text = new string(chars);
-            (fragment, errors) = ParseOnce(parser, text);
-            if (errors.Count == 0) return (fragment, text, kept);
         }
+        catch (Exception e) when (e is not OutOfMemoryException) { return (firstFragment, prepared, firstErrors); }
     }
 
     // EVERY CHARACTER OF A RANGE A SPACE BUT THE LINE BREAKS, so lines and offsets stay put.
@@ -95,11 +101,13 @@ internal static class SqlRecover
         var spans = new List<(int Start, int End, int Term)>();
         var open = 0;
         var start = -1;
+        var end = 0;
         for (var i = 0; i < tokens.Count; i++)
         {
             var token = tokens[i];
             if (Blank(token)) continue;
             if (start < 0) start = token.Offset;
+            end = token.Offset + token.Text.Length;
             var next = Next(tokens, i);
             switch (token.TokenType)
             {
@@ -112,11 +120,7 @@ internal static class SqlRecover
                     break;
             }
         }
-        if (start >= 0)
-        {
-            var last = tokens[^1];
-            spans.Add((start, last.Offset + last.Text.Length, -1));
-        }
+        if (start >= 0) spans.Add((start, end, -1));
         return spans;
     }
 
