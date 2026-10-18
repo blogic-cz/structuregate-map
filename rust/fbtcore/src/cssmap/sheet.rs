@@ -22,6 +22,8 @@ use raffia::ast::{
 };
 use raffia::{Parser, Spanned, Syntax};
 
+use super::collapse::{self, Facts};
+
 /// One declaration under one resolved selector.
 #[derive(Debug, Clone)]
 pub struct Decl {
@@ -39,7 +41,9 @@ pub struct Decl {
     pub value: String,
     pub important: bool,
     /// `display: none`, `visibility: hidden` or `visibility: collapse`, read off the parsed value: a variable or a
-    /// function there is NOT a hide, because what it evaluates to is not written here.
+    /// function there is NOT a hide, because what it evaluates to is not written here. Or the zero of a rule that
+    /// hides as a whole - `height: 0` with `overflow: hidden`, `opacity: 0` with `pointer-events: none`
+    /// (`collapse.rs`).
     pub hides: bool,
     pub live: bool,
 }
@@ -87,6 +91,8 @@ struct Ctx {
     media: Vec<String>,
     context: Vec<String>,
     live: bool,
+    /// What the rule around a `&`-nested rule of the same element says about hiding (`collapse.rs`).
+    carry: Facts,
 }
 
 /// Whitespace runs as one space, ends trimmed: a selector split over lines is still one selector.
@@ -213,19 +219,26 @@ impl<'s> Walk<'s> {
     fn rule(&mut self, list: &SelectorList, block: &SimpleBlock, ctx: &Ctx, bare: bool) {
         let mut inner = ctx.clone();
         inner.targets = self.targets(list, &ctx.targets, bare);
+        if bare || !collapse::same_element(list) {
+            inner.carry = Facts::default();
+        }
         self.block(&block.statements, &inner);
     }
 
     fn block(&mut self, statements: &[Statement], ctx: &Ctx) {
-        for statement in statements {
+        // THE RULE AS A WHOLE: what its declarations decide together, and what its `&`-nested rules inherit.
+        let (carry, hiding) = Facts::of(statements, &ctx.carry);
+        let ctx = &Ctx { carry, ..ctx.clone() };
+        for (at, statement) in statements.iter().enumerate() {
             match statement {
                 Statement::QualifiedRule(rule) => self.rule(&rule.selector, &rule.block, ctx, false),
                 Statement::LessConditionalQualifiedRule(rule) => {
                     let mut inner = ctx.clone();
+                    inner.carry = Facts::default();
                     inner.context.push(format!("when {}", squeeze(self.slice(rule.guard.span.start, rule.guard.span.end))));
                     self.rule(&rule.selector, &rule.block, &inner, false);
                 }
-                Statement::Declaration(decl) => self.decl(decl, ctx),
+                Statement::Declaration(decl) => self.decl(decl, ctx, hiding.contains(&at)),
                 Statement::AtRule(at) => self.at_rule(at, ctx),
                 Statement::SassIfAtRule(rule) => {
                     let mut clauses = vec![("@if", Some(&rule.if_clause.condition), &rule.if_clause.block)];
@@ -235,6 +248,7 @@ impl<'s> Walk<'s> {
                     }
                     for (word, condition, block) in clauses {
                         let mut inner = ctx.clone();
+                        inner.carry = Facts::default();
                         inner.context.push(match condition {
                             Some(c) => format!("{word} {}", squeeze(self.slice(c.span().start, c.span().end))),
                             None => word.to_string(),
@@ -245,6 +259,7 @@ impl<'s> Walk<'s> {
                 Statement::UnknownSassAtRule(at) => {
                     if let Some(block) = &at.block {
                         let mut inner = ctx.clone();
+                        inner.carry = Facts::default();
                         inner.context.push(squeeze(self.slice(at.span.start, block.span.start)));
                         self.block(&block.statements, &inner);
                     }
@@ -253,6 +268,7 @@ impl<'s> Walk<'s> {
                     let mut inner = ctx.clone();
                     inner.targets = Vec::new();
                     inner.live = false;
+                    inner.carry = Facts::default();
                     inner.context.push(format!("mixin {}", squeeze(self.slice(mixin.span.start, mixin.block.span.start))));
                     self.block(&mixin.block.statements, &inner);
                 }
@@ -269,6 +285,7 @@ impl<'s> Walk<'s> {
         }
         let prelude = at.prelude.as_ref().map(|p| squeeze(self.slice(p.span().start, p.span().end)));
         let mut inner = ctx.clone();
+        inner.carry = Facts::default();
         match (name.as_str(), &at.prelude) {
             ("media", _) => inner.media.push(prelude.unwrap_or_default()),
             ("at-root", Some(AtRulePrelude::SassAtRoot(root))) => {
@@ -293,7 +310,7 @@ impl<'s> Walk<'s> {
         self.block(&block.statements, &inner);
     }
 
-    fn decl(&mut self, decl: &Declaration, ctx: &Ctx) {
+    fn decl(&mut self, decl: &Declaration, ctx: &Ctx, by_rule: bool) {
         if ctx.targets.is_empty() {
             return;
         }
@@ -312,11 +329,12 @@ impl<'s> Walk<'s> {
             [ComponentValue::InterpolableIdent(InterpolableIdent::Literal(id))] => Some(id.name.to_ascii_lowercase()),
             _ => None,
         };
-        let hides = literal
-            && matches!(
-                (property.as_str(), word.as_deref()),
-                ("display", Some("none")) | ("visibility", Some("hidden")) | ("visibility", Some("collapse"))
-            );
+        let hides = by_rule
+            || literal
+                && matches!(
+                    (property.as_str(), word.as_deref()),
+                    ("display", Some("none")) | ("visibility", Some("hidden")) | ("visibility", Some("collapse"))
+                );
         let important = decl.important.is_some()
             || decl.value.iter().any(|v| matches!(v, ComponentValue::ImportantAnnotation(_)));
         let (line, col) = self.pos(decl.span.start);
@@ -349,7 +367,7 @@ pub fn read(text: &str, syntax: Syntax) -> Sheet {
     let recovered = parser.recoverable_errors().len();
     match parsed {
         Ok(sheet) => {
-            let ctx = Ctx { targets: Vec::new(), media: Vec::new(), context: Vec::new(), live: true };
+            let ctx = Ctx { targets: Vec::new(), media: Vec::new(), context: Vec::new(), live: true, carry: Facts::default() };
             walk.block(&sheet.statements, &ctx);
             Sheet { decls: walk.out, error: None, recovered }
         }

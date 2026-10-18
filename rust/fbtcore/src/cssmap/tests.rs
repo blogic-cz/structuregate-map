@@ -111,3 +111,47 @@ fn a_hiding_rule_meets_an_ng_class_and_its_own_sheet_through_their_nodes() {
     assert_eq!(joined.len(), 1);
     assert_eq!((joined[0]["via"].clone(), joined[0]["scope"].clone()), (json!("ngClass"), json!("own")));
 }
+
+/// `resolved|property` of every declaration that HIDES.
+fn hiding(text: &str) -> Vec<String> {
+    rows(text, Syntax::Scss).iter().filter(|d| d.hides).map(|d| format!("{}|{}", d.resolved, d.property)).collect()
+}
+
+#[test]
+fn a_rule_hides_when_its_zero_has_its_partner() {
+    let text = ".c { height: 0; overflow: hidden; }\n.m { max-height: 0px; overflow: auto clip; }\n\
+                .y { height: 0; overflow-y: hidden; }\n.f { opacity: 0; pointer-events: none; }\n\
+                .p { opacity: 0%; pointer-events: none; padding: 4px; }\n\
+                .v { padding: 0 8px; height: 0; overflow: hidden; display: block; min-height: auto; }\n";
+    assert_eq!(hiding(text), vec![".c|height", ".m|max-height", ".y|height", ".f|opacity", ".p|opacity", ".v|height"]);
+}
+
+#[test]
+fn a_zero_without_its_partner_or_with_a_box_left_does_not_hide() {
+    let text = ".a { height: 0; }\n.b { opacity: 0; }\n.c { overflow: hidden; pointer-events: none; }\n\
+                .d { height: $h; overflow: hidden; }\n.e { height: 0%; overflow: hidden; }\n\
+                .f { height: 0; overflow: hidden; padding: 4px 0; }\n.g { height: 0; overflow: hidden; min-height: 2px; }\n\
+                .h { height: 0; overflow: hidden; display: inline; }\n.i { height: 0; overflow: $o; }\n\
+                .j { height: 0; overflow: hidden; overflow: visible; }\n.k { height: calc(0px); overflow: hidden; }\n\
+                .l { opacity: 0.01; pointer-events: none; }\n.m { height: 0; overflow: hidden visible; }\n";
+    assert_eq!(hiding(text), Vec::<String>::new());
+}
+
+#[test]
+fn the_cascade_inside_a_rule_and_important_decide_the_partner() {
+    let text = ".a { overflow: hidden !important; height: 0; overflow: visible; }\n\
+                .b { height: 0 !important; height: 10px; overflow: hidden; }\n\
+                .c { overflow: visible; height: 0; overflow: hidden; }\n";
+    assert_eq!(hiding(text), vec![".a|height", ".b|height", ".c|height"]);
+}
+
+#[test]
+fn a_nested_rule_of_the_same_element_inherits_the_partner_and_nothing_else_does() {
+    let text = ".panel { overflow: hidden; padding: 0;\n  &.closed { max-height: 0; }\n  &--gone { height: 0; }\n  \
+                .x { height: 0; }\n  &::before { height: 0; }\n  @media print { height: 0; }\n  \
+                &.open { height: 0; overflow: visible; }\n}\n\
+                .card { overflow: hidden !important; &.shut { height: 0; overflow: visible; } }\n\
+                .pad { overflow: hidden; padding: 6px; &.shut { height: 0; padding-top: 0; } }\n\
+                .fade { pointer-events: none; &:not(.on) { opacity: 0; } }\n";
+    assert_eq!(hiding(text), vec![".panel.closed|max-height", ".card.shut|height", ".fade:not(.on)|opacity"]);
+}
