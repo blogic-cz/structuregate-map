@@ -389,7 +389,12 @@ pub fn gate_features_with(
         let extra = if iterated { Some(&iter_props) } else { None };
 
         // A CLASS GATE reads on the false side when its class hides, and is no condition when it only styles.
-        let negated = match id_of(g, "id").and_then(|id| polarity.get(&id).copied()) { Some(true) => true, Some(false) => continue, None => false };
+        let (ast, negated) = match id_of(g, "id").and_then(|id| polarity.get(&id)) {
+            Some(super::gate_values::Polarity::Hides) => (ast, true),
+            Some(super::gate_values::Polarity::Styles) => continue,
+            Some(super::gate_values::Polarity::Shown(c)) => (c, false),
+            None => (ast, false),
+        };
 
         let mut got = OrderedSet::new();
         {

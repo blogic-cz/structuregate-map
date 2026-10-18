@@ -27,7 +27,6 @@ use super::gate_predicates::{predicate_restriction, predicates};
 use super::store::{Row, Store};
 use indexmap::{IndexMap, IndexSet};
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
 
 const EQ: &[&str] = &["===", "=="];
 const NE: &[&str] = &["!==", "!="];
@@ -43,28 +42,16 @@ fn slash(v: Option<&Value>) -> String {
     }
 }
 
-fn text(row: &Row, field: &str) -> Option<String> {
+pub(super) fn text(row: &Row, field: &str) -> Option<String> {
     match row.get(field) {
         Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
         _ => None,
     }
 }
 
-/// A CLASS GATE IS A VISIBILITY CONDITION ONLY WHEN A STYLESHEET PROVES ITS CLASS HIDES (`class_hides`, scope `own` or
-/// `shared`; `other` reaches only through `::ng-deep`/`None` encapsulation, which nothing proves): then the element
-/// renders while the binding is FALSE. A class that only styles is no condition. A STYLE gate (`[style.x]`) is never a
-/// condition here either (#52): a style binding restyles, and whether a `[style.display]` value hides is a later, separate
-/// classification; read positively it restricted a key of an element that is always shown. Absent: neither kind of gate.
-pub fn class_polarity(store: &Store<'_>) -> HashMap<String, bool> {
-    let hiding: HashSet<String> = store.table("class_hides").iter()
-        .filter(|h| matches!(text(h, "scope").as_deref(), Some("own" | "shared")))
-        .filter_map(|h| id_of(h, "gate")).collect();
-    store.table("gates").iter()
-        .filter(|g| matches!(text(g, "gate_kind").as_deref(), Some("class" | "style")))
-        .filter_map(|g| id_of(g, "id")).map(|id| { let h = hiding.contains(&id); (id, h) }).collect()
-}
+pub use super::gate_polarity::{class_polarity, Polarity};
 
-fn id_of(row: &Row, field: &str) -> Option<String> {
+pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
     match row.get(field) {
         None | Some(Value::Null) => None,
         Some(Value::String(s)) => Some(s.clone()),
@@ -399,7 +386,12 @@ pub fn gate_values_with(
         let Some(ast) = e.get("ast").filter(|a| !a.is_null()) else { continue };
 
         // A CLASS GATE reads on the false side when its class hides, and is no condition when it only styles.
-        let negated = match id_of(g, "id").and_then(|id| polarity.get(&id).copied()) { Some(true) => true, Some(false) => continue, None => false };
+        let (ast, negated) = match id_of(g, "id").and_then(|id| polarity.get(&id)) {
+            Some(Polarity::Hides) => (ast, true),
+            Some(Polarity::Styles) => continue,
+            Some(Polarity::Shown(c)) => (c, false),
+            None => (ast, false),
+        };
 
         let mut found = OrderedSet::new();
         necessary_either(&props.expand(ast), negated, &mut leaf, &mut either, &mut found);
