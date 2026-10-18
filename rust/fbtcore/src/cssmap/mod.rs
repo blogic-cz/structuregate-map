@@ -19,6 +19,7 @@
 //! A SHEET THE PARSER CANNOT READ SAYS SO, and has no rows: `stylesheets.error` and a `diagnostics` row of kind
 //! `stylesheet_unparsed`. Half a sheet is not a reading of it.
 
+mod collapse;
 mod hides;
 mod select;
 mod sheet;

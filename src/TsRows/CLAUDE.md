@@ -144,7 +144,10 @@ carry no `owner_file`.
   emits it (`&` the parent, a parent list multiplies), `subject`, `classes` (required of the element, never one in
   `:not()`), `on_element` (0 for a pseudo-element), `media`, `context` (every other enclosing at-rule, ` > `-joined),
   `property`, `value`, `important`, `hides` (`display: none`, `visibility: hidden|collapse` as written - a
-  `$variable` is not), `live` (0 inside a `@mixin` and for a `%placeholder`).
+  `$variable` is not - or the ZERO of a rule that hides as a whole, #89, `cssmap/collapse.rs`: `height`/`max-height: 0`
+  with `overflow(-y): hidden|clip` and no vertical padding, non-zero `min-height`, `display: inline|contents` in the rule;
+  `opacity: 0` with `pointer-events: none`; a `&.x`-nested rule inherits its outer rule's partners), `live` (0 inside a
+  `@mixin` and for a `%placeholder`).
 - **`class_hides`** (`cssh:`): a `[class.x]` gate (`via = 'class'`) or a literal `[ngClass]` key (`via =
   'ngClass'`) joined to every live, on-element, hiding rule whose subject requires the class - `bare` (the whole
   selector is `.x`) and `scope`: `own` (the component's `styleUrls`), `other` (another component's: reaches only
