@@ -56,6 +56,7 @@ const NOT_SHAPING: &[(&str, &str)] = &[
 fn main() {
     let src = Path::new(&std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR")).join("src");
     println!("cargo:rerun-if-changed=build.rs");
+    compile_pg_query();
     let mut files: Vec<String> = Vec::new();
     for (entry, _) in LISTED {
         println!("cargo:rerun-if-changed=src/{entry}");
@@ -155,4 +156,57 @@ impl Fnv {
     fn hex(&self) -> String {
         format!("{:016x}{:016x}", self.0, self.1)
     }
+}
+
+/// LIBPG_QUERY - PostgreSQL's own parser (`vendor/libpg_query/`, see its README) - compiled with the `cc` crate into a
+/// static archive linked into this library, as SQLite and mimalloc are: nothing beside the exe. The files and include
+/// paths are libpg_query's own build's (`Makefile`, and on MSVC `Makefile.msvc`: the same files, plus the include
+/// folders `port/win32` and `port/win32_msvc`). Two defines are this build's own:
+///
+/// - `YYMAXDEPTH`: bison stops a parse at 10 000 stack levels by default - a statement nested deeper is "memory
+///   exhausted". Both grammars (`gram.c`, `pl_gram.c`) guard the default with `#ifndef`, so it is lifted here to what
+///   PostgreSQL's 1 GB allocation limit (`MaxAllocSize`) allows anyway: the parse is bounded by memory, not by a count.
+/// - `DEBUG`: without it every parse call `dup2`s the PROCESS's stderr into a pipe and back - two threads parsing at
+///   once leave stderr pointing at a closed pipe. The library writes nothing to stderr (`send_message_to_server_log` is
+///   empty in it); `DEBUG` only drops that redirection (`pg_query_parse.c`, `pg_query_scan.c`, ...).
+///
+/// NOT on the node-rows list above: it shapes SQL rows, which `SQL_ROWS_VERSION` keys, not node's.
+fn compile_pg_query() {
+    let root = Path::new(&std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR")).join("vendor/libpg_query");
+    println!("cargo:rerun-if-changed=vendor/libpg_query");
+    let target = std::env::var("TARGET").expect("cargo sets TARGET");
+    let mut build = cc::Build::new();
+    for dir in ["src", "src/postgres"] {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(root.join(dir))
+            .unwrap_or_else(|e| panic!("vendor/libpg_query/{dir} could not be listed: {e}"))
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "c"))
+            .collect();
+        files.sort();
+        build.files(files);
+    }
+    build
+        .file(root.join("vendor/protobuf-c/protobuf-c.c"))
+        .file(root.join("vendor/xxhash/xxhash.c"))
+        .file(root.join("protobuf/pg_query.pb-c.c"))
+        .include(&root)
+        .include(root.join("vendor"))
+        .include(root.join("src/postgres/include"))
+        .include(root.join("src/include"))
+        .define("YYMAXDEPTH", "1073741823")
+        .define("DEBUG", None)
+        .warnings(false);
+    if target.contains("windows") {
+        build.include(root.join("src/postgres/include/port/win32"));
+        if target.contains("msvc") {
+            build.include(root.join("src/postgres/include/port/win32_msvc"));
+        }
+    }
+    if !target.contains("msvc") {
+        // PostgreSQL's C assumes both (its configure requires them; `Makefile` passes them): signed overflow wraps, and
+        // a pointer may be read through another type. MSVC does neither optimisation, so `Makefile.msvc` passes neither.
+        build.flag_if_supported("-fwrapv").flag_if_supported("-fno-strict-aliasing");
+    }
+    build.compile("pg_query");
 }

@@ -55,10 +55,6 @@ gosyn = { version = "0.2.15", default-features = false }
 # dependency, and `sass` exposes no syntax tree, only a compile that needs every `@use` resolved first. Pure rust,
 # no default features (they are serde), and its only dependency beside a proc macro is `smallvec`.
 raffia = { version = "0.13", default-features = false }
-# THE POSTGRESQL HALF of the SQL map (`src/sqlpg/`): sqlparser-rs, pure rust, Apache-2.0. NO DEFAULT FEATURES: they are
-# `recursive-protection`, which pulls `stacker`/`psm` - C and assembly. Its recursion limit is lifted instead and the parse
-# runs on a thread with a stack sized for it.
-sqlparser = { version = "0.63", default-features = false, features = ["std"] }
 # A skill's or an agent's FRONTMATTER is YAML, and its `name` is what the doc DECLARES. Parsed, not split on
 # `:` - a description routinely holds colons, quotes and line folds.
 yaml-rust2 = { version = "0.13.0", default-features = false }
@@ -67,7 +63,11 @@ yaml-rust2 = { version = "0.13.0", default-features = false }
 memmap2 = "0.9"
 # THE ALLOCATOR. The map allocates and frees millions of small cells, and on a large Angular workspace the system heap was a
 # quarter of the exe's CPU. Compiled C, linked in statically like SQLite - nothing beside the exe.
-mimalloc = { version = "0.1", default-features = false }
+# `local_dynamic_tls` (unix only): mimalloc's own default is `initial-exec`, which marks the whole library STATIC_TLS, and
+# glibc then has to fit ALL its thread-locals - libpg_query's included - into the few hundred bytes it keeps spare for a
+# `dlopen`ed library: the test build's `libfbtcore.so` failed to load ("cannot allocate memory in static TLS block").
+# In the exe the linker turns the access back into the direct one, so the shipped code is the same.
+mimalloc = { version = "0.1", default-features = false, features = ["local_dynamic_tls"] }
 # `--facts-pull` (`src/facts/pull.rs`), the one thing this tool fetches: a document's version and its Markdown export
 # from the Drive API. rustls with `ring` and the webpki roots compiled in, so nothing beside the exe and no system TLS.
 ureq = { version = "3", default-features = false, features = ["rustls"] }
@@ -79,6 +79,12 @@ windows = { version = "0.62", features = [
   "Win32_System_IO",
   "Win32_Security",
 ] }
+
+[build-dependencies]
+# THE POSTGRESQL HALF of the SQL map (`src/sqlpg/`) is PostgreSQL's own parser, libpg_query, vendored as C source
+# (`vendor/libpg_query/`) and compiled by `build.rs` into a static archive linked into this library - like SQLite and
+# mimalloc, whose `-sys` crates already build C with `cc`. No bindgen: its few doors are declared by hand.
+cc = "1.2"
 
 # FOR MEASURING, NOT SHIPPING: release's optimisation level without its whole-program pass. `lto` and one codegen
 # unit made every rebuild after a one-file change take minutes; this one takes seconds and runs within a few percent

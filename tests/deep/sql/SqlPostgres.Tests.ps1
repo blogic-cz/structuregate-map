@@ -1,8 +1,10 @@
 <#
-    PostgreSQL in the SQL half: a file the SQL config's `dialects` names `postgres` is parsed by sqlparser-rs
-    (`rust/fbtcore/src/sqlpg/`) into the same tables ScriptDom fills - `files.dialect` says which - with `public` as the
-    default schema, one diagnostic per statement that does not parse, and a tree in the same kinds, so a query written
-    in both dialects has one fingerprint.
+    PostgreSQL in the SQL half: a file the SQL config's `dialects` names `postgres` is parsed by PostgreSQL's own parser
+    (libpg_query, `rust/fbtcore/src/sqlpg/`) into the same tables ScriptDom fills - `files.dialect` says which - with
+    `public` as the default schema, one diagnostic per statement that does not parse, where the parser stopped, and a
+    tree in the same kinds, so a query written in both dialects has one fingerprint. A function's and a DO block's
+    statements are statements of their own; a FOREIGN KEY's, a partition's parent's and an attached partition's tables
+    are refs; a statement nested past bison's default stack parses.
 
     Its helpers are its own, prefixed `SqlPg` - `-Only` runs this suite alone.
 #>
@@ -73,4 +75,71 @@ Test-Case 'sqlpostgres: one query in both dialects is one fingerprint' {
         ($run.Text | ConvertFrom-Json).statements[0].fingerprint
     }
     if ($prints[0].Length -ne 16 -or $prints[0] -ne $prints[1]) { throw "the dialects disagree on the query's shape: $($prints -join ' vs ')" }
+}
+
+# Each statement as `line:kind:` and the line of the statement it is inside (`-` for none); each ref as
+# `line:action:schema.name.column`. Single quotes: `$$` and `$body$` are PostgreSQL's quotes, not PowerShell's.
+$script:SqlPgStatements = "SELECT 'v=' || group_concat(x, ',') FROM (SELECT s.line || ':' || s.kind || ':' ||" +
+    " CASE WHEN s.parent = '' THEN '-' ELSE (SELECT p.line FROM sql_statements p WHERE p.id = s.parent) END x FROM sql_statements s ORDER BY s.line, s.kind)"
+$script:SqlPgRefs = "SELECT 'v=' || group_concat(x, ',') FROM (SELECT r.line || ':' || r.action || ':' || r.schema || '.' || r.name || '.' || r.column x" +
+    " FROM sql_refs r ORDER BY r.line, r.action, r.name, r.column)"
+
+Test-Case 'sqlpostgres: a DO block is a statement, and each statement in it is one of its own' {
+    $nl = $script:SqlPgNl
+    $made = New-SqlPgDb @{
+        'structuregate.sql.json' = $script:SqlPgConfig
+        'pg/do.sql' = ('DO $$' + $nl + 'BEGIN' + $nl + '  DELETE FROM alpha.logs WHERE id < 5;' + $nl +
+            '  INSERT INTO alpha.audit (note) VALUES (''x'');' + $nl + 'END $$;' + $nl)
+    }
+    Assert-SqlPgRow $made.Db $script:SqlPgStatements '1:do:-,3:delete:1,4:insert:1' 'the DO block and the statements in it, on their own lines'
+    Assert-SqlPgRow $made.Db $script:SqlPgRefs '3:delete:alpha.logs.,4:insert:alpha.audit.,4:insert:alpha.audit.note' 'what they touch'
+}
+
+Test-Case 'sqlpostgres: a PL/pgSQL function''s statements are its children, its parameters and variables params, never columns' {
+    $nl = $script:SqlPgNl
+    $body = @('CREATE FUNCTION shop.add_order(p_id int, p_amount numeric) RETURNS numeric', 'LANGUAGE plpgsql AS $body$', 'DECLARE',
+        '  v_total numeric := 0;', 'BEGIN', '  INSERT INTO shop.orders (id, amount) VALUES (p_id, p_amount);',
+        '  SELECT sum(amount) INTO v_total FROM shop.orders WHERE id = p_id;', '  IF v_total > (SELECT count(*) FROM shop.items) THEN',
+        '    UPDATE shop.orders SET amount = amount - 1 WHERE id = p_id;', '  END IF;', '  RETURN v_total;', 'END', '$body$;') -join $nl
+    $made = New-SqlPgDb @{ 'structuregate.sql.json' = $script:SqlPgConfig; 'pg/f.sql' = $body + $nl }
+    Assert-SqlPgRow $made.Db $script:SqlPgStatements '1:create function:-,6:insert:1,7:select:1,8:if:1,9:update:1' 'the function and its statements, each on its line'
+    Assert-SqlPgRow $made.Db $script:SqlPgRefs ('6:insert:shop.orders.,6:insert:shop.orders.amount,6:insert:shop.orders.id,7:select:shop.orders.,' +
+        '8:select:shop.items.,9:update:shop.orders.,9:update:shop.orders.amount') 'what they touch'
+    $columns = "SELECT 'v=' || group_concat(x, ',') FROM (SELECT c.line || ':' || c.name || '.' || c.column || ':' || c.role x FROM sql_column_refs c ORDER BY c.line, c.column, c.role)"
+    Assert-SqlPgRow $made.Db $columns ('6:orders.amount:insert,6:orders.id:insert,7:orders.amount:select,7:orders.id:where,' +
+        '9:orders.amount:set,9:orders.amount:set,9:orders.id:where') 'the columns they name - no parameter or variable among them'
+    $params = "SELECT 'v=' || group_concat(value, ',') FROM (SELECT DISTINCT value FROM sql_nodes WHERE kind = 'param' ORDER BY value)"
+    Assert-SqlPgRow $made.Db $params 'p_amount,p_id,v_total' 'the parameters and the variable, as params'
+}
+
+Test-Case 'sqlpostgres: a foreign key''s table, a partition''s parent and an attached partition are refs' {
+    $nl = $script:SqlPgNl
+    $made = New-SqlPgDb @{
+        'structuregate.sql.json' = $script:SqlPgConfig
+        'pg/p.sql' = ("CREATE TABLE shop.customers (id int PRIMARY KEY);$nl" +
+            "CREATE TABLE shop.orders (id int, customer_id int REFERENCES shop.customers (id)) PARTITION BY RANGE (id);$nl" +
+            "CREATE TABLE shop.orders_old PARTITION OF shop.orders FOR VALUES FROM (0) TO (100);$nl" +
+            "ALTER TABLE shop.orders ATTACH PARTITION shop.orders_new FOR VALUES FROM (100) TO (200);$nl")
+    }
+    Assert-SqlPgRow $made.Db $script:SqlPgRefs '2:references:shop.customers.,3:inherits:shop.orders.,4:alter:shop.orders.,4:attach:shop.orders_new.' 'the tables they name'
+}
+
+Test-Case 'sqlpostgres: a statement that does not parse is one diagnostic where the parser stopped, not where the statement starts' {
+    $nl = $script:SqlPgNl
+    $made = New-SqlPgDb @{
+        'structuregate.sql.json' = $script:SqlPgConfig
+        'pg/b.sql' = "SELECT 1;${nl}SELECT a,$nl       b$nl  FORM shop.items;${nl}SELECT 2;$nl"
+    }
+    Assert-SqlPgRow $made.Db "SELECT 'v=' || group_concat(line || ':' || kind, ',') FROM (SELECT line, kind FROM sql_statements ORDER BY line)" '1:select,5:select' 'the statements around it'
+    Assert-SqlPgRow $made.Db "SELECT 'v=' || count(*) || '|' || min(line) || '|' || (instr(min(source), '(line 4, column 8)') > 0) FROM diagnostics" '1|4|1' 'one error, at the parser''s position'
+}
+
+Test-Case 'sqlpostgres: 20 000 nested parentheses parse - the grammar''s stack has no depth cap' {
+    $nl = $script:SqlPgNl
+    $made = New-SqlPgDb @{
+        'structuregate.sql.json' = $script:SqlPgConfig
+        'pg/d.sql' = 'SELECT ' + ('(' * 20000) + '1' + (')' * 20000) + " AS deep FROM shop.t;$nl"
+    }
+    Assert-SqlPgRow $made.Db "SELECT 'v=' || errors FROM files WHERE path = 'pg/d.sql'" '0' 'no error'
+    Assert-SqlPgRow $made.Db "SELECT 'v=' || count(*) || '|' || (SELECT group_concat(name) FROM sql_refs) FROM sql_statements" '1|t' 'the statement and its table'
 }
