@@ -87,3 +87,19 @@ Test-Case 'sqlparse: an error on the bad statement''s own terminator blanks it, 
     Assert-Equal (@($json.refs | ForEach-Object { "$($_.line)|$($_.action)|$($_.schema).$($_.name)" }) -join ',') '2|select|dbo.Orders' 'the good ref'
     Assert-Equal (@($json.diagnostics | ForEach-Object { $_.line }) -join ',') '1' 'one error, on line 1'
 }
+
+# A failing text whose LAST statement has no `;` once crashed the recovery (the end-of-file token has no text).
+Test-Case 'sqlparse: a bad text with no `;` after its last statement is one error, not a crash' {
+    $parsed = Invoke-SqlParse 'not sql'
+    Assert-Exit $parsed.Run 1
+    $json = $parsed.Run.Text | ConvertFrom-Json
+    Assert-Equal @($json.statements).Count 0 'no statement'
+    Assert-Equal (@($json.diagnostics | ForEach-Object { "$($_.line)|$($_.kind)" }) -join ',') '1|error' 'one error'
+
+    $parsed = Invoke-SqlParse "not sql;$($script:SqlParseNl)SELECT Id FROM dbo.Orders"
+    Assert-Exit $parsed.Run 1
+    $json = $parsed.Run.Text | ConvertFrom-Json
+    Assert-Equal (@($json.refs | ForEach-Object { "$($_.action)|$($_.schema).$($_.name)" }) -join ',') 'select|dbo.Orders' 'the ref after the bad statement'
+    Assert-Equal (@($json.statements | ForEach-Object { $_.line }) -join ',') '2' 'its line'
+    Assert-Equal (@($json.diagnostics | ForEach-Object { "$($_.line)|$($_.kind)" }) -join ',') '1|error' 'one error'
+}

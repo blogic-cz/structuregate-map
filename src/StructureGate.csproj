@@ -29,6 +29,10 @@
     <OutputPath>$(MSBuildThisFileDirectory)..\out\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <!-- NO COMMIT HASH IN THE ASSEMBLY: the SDK appends `+<sha>` to the informational version, so every commit
+         recompiled an unchanged dll and the build then ran every suite against "a rebuilt gate". Nothing reads it;
+         the version a consumer sees is the release tag. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -176,11 +180,16 @@
     <GateTestStamp>$(OutputPath)gate-tests.stamp</GateTestStamp>
     <GateTestJobs Condition="'$(GateTestJobs)' == ''">$([System.Environment]::ProcessorCount)</GateTestJobs>
   </PropertyGroup>
+  <!-- What a RUN writes beside the inputs is no input: the gate's own `.fbt/` snapshot and python's bytecode would
+       otherwise date every build after the stamp, and the tests would never be skipped. -->
+  <PropertyGroup>
+    <_GateTestScratch>$(MSBuildThisFileDirectory)../**/.fbt/**;$(MSBuildThisFileDirectory)../**/__pycache__/**</_GateTestScratch>
+  </PropertyGroup>
   <ItemGroup>
     <GateTestInput Include="$(OutputPath)structuregate.dll;$(OutputPath)$(FbtCoreShared)" />
-    <GateTestInput Include="$(MSBuildThisFileDirectory)../tests/**/*.ps1;$(MSBuildThisFileDirectory)../tests/fixtures/**" />
-    <GateTestInput Include="$(MSBuildThisFileDirectory)../scripts/**;$(MSBuildThisFileDirectory)../StructureGate.targets" />
-    <GateTestInput Include="$(MSBuildThisFileDirectory)../skills/**;$(MSBuildThisFileDirectory)../agents/**;$(MSBuildThisFileDirectory)../hooks/**;$(MSBuildThisFileDirectory)../.claude-plugin/**" />
+    <GateTestInput Include="$(MSBuildThisFileDirectory)../tests/**/*.ps1;$(MSBuildThisFileDirectory)../tests/fixtures/**" Exclude="$(_GateTestScratch)" />
+    <GateTestInput Include="$(MSBuildThisFileDirectory)../scripts/**;$(MSBuildThisFileDirectory)../StructureGate.targets" Exclude="$(_GateTestScratch)" />
+    <GateTestInput Include="$(MSBuildThisFileDirectory)../skills/**;$(MSBuildThisFileDirectory)../agents/**;$(MSBuildThisFileDirectory)../hooks/**;$(MSBuildThisFileDirectory)../.claude-plugin/**" Exclude="$(_GateTestScratch)" />
   </ItemGroup>
   <Target Name="ForgetGateTests" BeforeTargets="RunGateTests" Condition="'$(FullTests)' == 'true'">
     <Delete Files="$(GateTestStamp)" />

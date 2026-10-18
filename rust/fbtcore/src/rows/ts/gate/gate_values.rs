@@ -52,13 +52,15 @@ fn text(row: &Row, field: &str) -> Option<String> {
 
 /// A CLASS GATE IS A VISIBILITY CONDITION ONLY WHEN A STYLESHEET PROVES ITS CLASS HIDES (`class_hides`, scope `own` or
 /// `shared`; `other` reaches only through `::ng-deep`/`None` encapsulation, which nothing proves): then the element
-/// renders while the binding is FALSE. A class that only styles is no condition. Absent: not a class gate.
+/// renders while the binding is FALSE. A class that only styles is no condition. A STYLE gate (`[style.x]`) is never a
+/// condition here either (#52): a style binding restyles, and whether a `[style.display]` value hides is a later, separate
+/// classification; read positively it restricted a key of an element that is always shown. Absent: neither kind of gate.
 pub fn class_polarity(store: &Store<'_>) -> HashMap<String, bool> {
     let hiding: HashSet<String> = store.table("class_hides").iter()
         .filter(|h| matches!(text(h, "scope").as_deref(), Some("own" | "shared")))
         .filter_map(|h| id_of(h, "gate")).collect();
     store.table("gates").iter()
-        .filter(|g| text(g, "gate_kind").as_deref() == Some("class"))
+        .filter(|g| matches!(text(g, "gate_kind").as_deref(), Some("class" | "style")))
         .filter_map(|g| id_of(g, "id")).map(|id| { let h = hiding.contains(&id); (id, h) }).collect()
 }
 

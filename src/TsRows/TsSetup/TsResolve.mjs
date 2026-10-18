@@ -13,6 +13,7 @@
  * structuregate is two files in a consumer and has no `node_modules` of its own to fall back to. A
  * workspace with nothing installed is therefore a named reason, not a quietly worse map.
  */
+import * as nodeModule from 'node:module';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { existsSync, readFileSync } from 'node:fs';
@@ -109,7 +110,18 @@ export function versionMismatch(feRoot, ngVersion) {
     + 'recorded wrongly or not at all';
 }
 
+/**
+ * NODE'S COMPILE CACHE, ON before the borrowed compiler loads: `typescript.js` is megabytes of JavaScript that every
+ * run compiled again - about a tenth of mapping a small tree, paid on each per-turn refresh. Node keeps the cache under
+ * its temp folder (or NODE_COMPILE_CACHE), keyed by each file's content, so a new compiler is never served an old one;
+ * NODE_DISABLE_COMPILE_CACHE=1 turns it off. A node before 22.1 has no such call and runs as before.
+ */
+export function cacheCompiles() {
+  try { if (typeof nodeModule.enableCompileCache === 'function') nodeModule.enableCompileCache(); } catch { /* run uncached */ }
+}
+
 export async function loadToolchain(nodeModules) {
+  cacheCompiles();
   const req = createRequire(path.join(nodeModules, 'noop.js'));
   const ts = req('typescript');
   // @angular/compiler is ESM: imported by RESOLVED PATH and not by bare specifier, because this script's

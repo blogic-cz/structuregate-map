@@ -85,7 +85,7 @@ Every `.sql` under a `.sqlproj`, parsed with Microsoft's own T-SQL parser (Scrip
 `dialects` names a file `postgres`, with PostgreSQL's OWN parser (libpg_query) into the SAME tables (`files.dialect`
 says which; an unqualified name is in `public`, not `dbo`; a statement that does not parse is ONE `diagnostics` row,
 `name = 'syntax'`, where the parser stopped, and the statements around it still map). A function's and a DO block's
-statements, and the refs only PostgreSQL has, are in [sql-statements.md](sql-statements.md#postgresql). A PostgreSQL
+statements, and the refs only PostgreSQL has, are in [sql-statements.md](sql-statements.md#postgresql). In T-SQL a statement that does not parse is ONE `diagnostics` row and costs only the text between the `;`/`GO` on either side of it (outside BEGIN...END) - an unterminated statement beside it goes with it; a `CREATE PROCEDURE/FUNCTION/TRIGGER` with no `GO` after it owns every statement up to the end of its batch (`parent`). A PostgreSQL
 file has no `sql_keys`, `sql_steps` or `sql_dynamic` rows:
 
 | table | one row per |

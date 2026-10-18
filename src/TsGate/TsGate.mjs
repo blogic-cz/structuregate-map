@@ -41,6 +41,7 @@
     its reason next to the code.
 */
 
+import * as nodeModule from 'node:module';
 import { createRequire } from 'node:module';
 import { existsSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -78,6 +79,9 @@ function args(argv) {
  * never ran.
  */
 function resolveFrom(root, id) {
+    // NODE'S COMPILE CACHE before the compiler loads - the same call as TsResolve.mjs::cacheCompiles, which this
+    // script does not import.
+    try { if (typeof nodeModule.enableCompileCache === 'function') nodeModule.enableCompileCache(); } catch { /* run uncached */ }
     const origins = [
         pathToFileURL(path.join(path.resolve(root), 'package.json')),
         import.meta.url,
