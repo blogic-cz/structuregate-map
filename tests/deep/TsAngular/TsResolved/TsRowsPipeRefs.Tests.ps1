@@ -57,7 +57,7 @@ function Get-TsPipeRefs([string]$Db, [string]$Table = 'expressions') {
 }
 
 Test-Case 'tsrows: a template pipe usage carries the pipe its own scope resolves, never another of the same name' {
-    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsPipeFiles)
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsPipeFiles) -Shared
     Assert-Exit $made.Result 0
     $refs = Get-TsPipeRefs $made.Db
     # The NgModule's own declaration; the standalone pipe a module IMPORTS; a standalone component's own `imports` (an alias).
@@ -75,7 +75,7 @@ Test-Case 'tsrows: a template pipe usage carries the pipe its own scope resolves
 }
 
 Test-Case 'tsrows: a library pipe is external, two of one name in scope are ambiguous, a missing one is a diagnostic' {
-    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsPipeFiles)
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsPipeFiles) -Shared
     Assert-Exit $made.Result 0
     $refs = Get-TsPipeRefs $made.Db
     # `date` through `CommonModule`'s exports, and through a standalone component's own `DatePipe`.

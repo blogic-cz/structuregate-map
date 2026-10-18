@@ -284,8 +284,15 @@
     <FbtCoreShared Condition="'$(OS)' != 'Windows_NT' And !$([MSBuild]::IsOSPlatform('OSX'))">libfbtcore.so</FbtCoreShared>
   </PropertyGroup>
 
+  <!-- A PUBLISH LINKS ONLY THE STATIC SHAPE, so it builds only that: under `release`'s whole-program LTO the second
+       output cost about a twelfth of the rust build for a .dll nothing ships. A plain build keeps `cargo build` - the
+       incremental `lab` build of both shapes is seconds, and switching shapes would throw its cache away. -->
+  <PropertyGroup>
+    <_FbtCoreCargo Condition="'$(PublishAot)' == 'true'">rustc --lib --crate-type staticlib</_FbtCoreCargo>
+    <_FbtCoreCargo Condition="'$(PublishAot)' != 'true'">build</_FbtCoreCargo>
+  </PropertyGroup>
   <Target Name="BuildFbtCore" BeforeTargets="BeforeCompile">
-    <Exec Command="cargo build --profile $(FbtCoreProfile) --manifest-path &quot;$(FbtCoreDir)/Cargo.toml&quot;"
+    <Exec Command="cargo $(_FbtCoreCargo) --profile $(FbtCoreProfile) --manifest-path &quot;$(FbtCoreDir)/Cargo.toml&quot;"
           WorkingDirectory="$(FbtCoreDir)" />
     <Error Condition="!Exists('$(FbtCoreOut)/$(FbtCoreStatic)')"
            Text="structuregate: $(FbtCoreStatic) was not produced - is the rust toolchain installed and on PATH?" />

@@ -12,7 +12,7 @@ if ($script:TsRowsModules -and $script:TsRowsPython) {
 # text, because the text alone leaves a consumer matching names against candidate files by hand.
 Test-Case 'tsrows: a class records its heritage, resolved, and the decorators on it' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT name, abstract, exported, $(Get-TsRootFieldSql 'classes__extends' 'classes.id' 'text') AS base, " +
         "$(Get-TsItemFieldSql 'classes__implements' 'classes.id' 0 'text') AS iface FROM classes WHERE name = 'CartComponent'")
     Assert-Line $r 'Base'
@@ -28,7 +28,7 @@ Test-Case 'tsrows: a class records its heritage, resolved, and the decorators on
 # names - a locally-defined `Component` would otherwise be counted as the framework's.
 Test-Case 'tsrows: an Angular decorator is told apart from a local one by where it is declared' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT j.value FROM classes__angular j WHERE j.owner = classes.id AND j.parent = 0 AND j.ord = 0) AS ng FROM classes " +
         "WHERE name = 'CartComponent'")
     Assert-Line $r 'Component'
@@ -38,7 +38,7 @@ Test-Case 'tsrows: an Angular decorator is told apart from a local one by where 
 # join key half the map is built on.
 Test-Case 'tsrows: a decorator publishes its arguments as values' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT name, $(Get-TsItemFieldSql 'class_decorators__args' 'class_decorators.id' 0 'selector') AS selector " +
         "FROM class_decorators WHERE name = 'Component'")
     Assert-Line $r 'app-cart'
@@ -46,7 +46,7 @@ Test-Case 'tsrows: a decorator publishes its arguments as values' {
 
 Test-Case 'tsrows: a member records its kind, visibility, modifiers and evaluated value' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT kind, visibility, static, optional, value FROM members " +
         "WHERE name = 'VERSION'")
     Assert-Line $r 'property'
@@ -61,7 +61,7 @@ Test-Case 'tsrows: a member records its kind, visibility, modifiers and evaluate
 # path is asserted too - these rows anchor by `owner_file`, and the lens joined `file`, which is NULL here.
 Test-Case 'tsrows: --find reaches a member and names the file that owns it' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-Gate --map-query $made.Db --find 'greet'
     Assert-Exit $r 0
     $row = @($r.Lines | Where-Object { $_ -match '^members\s' })
@@ -74,7 +74,7 @@ Test-Case 'tsrows: --find reaches a member and names the file that owns it' {
 
 Test-Case 'tsrows: a method member carries its parameters' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT kind, $(Get-TsItemFieldSql 'members__params' 'members.id' 0 'name') AS first_param, " +
         "$(Get-TsItemFieldSql 'members__params' 'members.id' 0 'type') AS first_type FROM members WHERE name = 'greet'")
     Assert-Line $r 'method'
@@ -85,7 +85,7 @@ Test-Case 'tsrows: a method member carries its parameters' {
 # is resolved to where it is declared rather than left as a name.
 Test-Case 'tsrows: a constructor parameter is a di row, with the type it resolves to' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT param, type, $(Get-TsRootFieldSql 'di__resolved' 'di.id' 'file') AS declared_in " +
         "FROM di ORDER BY param")
     Assert-Line $r 'cart'
@@ -97,7 +97,7 @@ Test-Case 'tsrows: a constructor parameter is a di row, with the type it resolve
 # was invisible - a consumer saw a complete-looking row that silently dropped the rest.
 Test-Case 'tsrows: a call records its callee, its target and every argument' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT callee, method, (SELECT count(*) FROM calls__args j WHERE j.owner = calls.id AND j.parent = 0) AS n FROM calls " +
         "WHERE method = 'compute'")
     Assert-Line $r 'this.compute'
@@ -108,7 +108,7 @@ Test-Case 'tsrows: a call records its callee, its target and every argument' {
 # onward - which is what the language does, stated rather than approximated.
 Test-Case 'tsrows: a call argument is labelled with the parameter it fills, rest included' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     # THE FOURTH argument: at position 2 the rest parameter is simply the third entry of the list, so a
     # build with no absorb rule labels it correctly anyway and the case proves nothing.
     $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT j.value FROM calls__arg_params j WHERE j.owner = calls.id AND j.parent = 0 AND j.ord = 0) AS first, " +
@@ -121,7 +121,7 @@ Test-Case 'tsrows: a call argument is labelled with the parameter it fills, rest
 # it is a member of THIS component and not a local.
 Test-Case 'tsrows: an assignment to a class property records the target, its scope and the row it sets' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT a.target, a.scope, a.operator, m.name AS sets " +
         "FROM assignments a LEFT JOIN members m ON m.id = a.target_id WHERE a.target = 'total'")
     Assert-Line $r 'this'
@@ -132,7 +132,7 @@ Test-Case 'tsrows: an assignment to a class property records the target, its sco
 # whatever the call returns. Nothing here infers that pairing - it records the two halves.
 Test-Case 'tsrows: a destructuring local records each binding and the shared initializer' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT destructured, $(Get-TsItemFieldSql 'locals__bindings' 'locals.id' 0 'local') AS first, " +
         "source FROM locals WHERE destructured = 1")
     Assert-Line $r 'id'
@@ -143,7 +143,7 @@ Test-Case 'tsrows: a destructuring local records each binding and the shared ini
 # need: an `else` branch means the condition is FALSE, and without it a consumer would invert half the chain.
 Test-Case 'tsrows: an if produces a then and an else branch, each carrying the condition' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT sense, condition_source FROM branches ORDER BY sense")
     Assert-Line $r 'then'
     Assert-Line $r 'else'
@@ -154,7 +154,7 @@ Test-Case 'tsrows: an if produces a then and an else branch, each carrying the c
 # per clause would make a consumer walk backwards to discover 1 leads there too.
 Test-Case 'tsrows: a fallthrough case group is one row carrying every label' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT count(*) FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = 0) AS n, discriminant_source, is_default " +
         "FROM switch_cases WHERE is_default = 0")
     Assert-Line $r '2'
@@ -165,7 +165,7 @@ Test-Case 'tsrows: a fallthrough case group is one row carrying every label' {
 # branch it sits in, which is the whole reason branches are rows.
 Test-Case 'tsrows: a return records the branch it sits in' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT r.source, b.sense FROM returns r JOIN branches b ON b.id = r.branch " +
         "WHERE r.source = '''big'''")
     Assert-Line $r 'then'
@@ -175,7 +175,7 @@ Test-Case 'tsrows: a return records the branch it sits in' {
 # body it sits in. Attributed to the enclosing method, the method looks like it declares what it does not.
 Test-Case 'tsrows: an inline callback is its own function row, parented to the body it sits in' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT f.form, f.inline, m.name AS sits_in FROM functions f " +
         "LEFT JOIN members m ON m.id = f.parent WHERE f.inline = 1")
     Assert-Line $r 'arrow'
@@ -197,7 +197,7 @@ Test-Case 'tsrows: an inline callback is its own function row, parented to the b
 # directory - which is what lets a template and its class be joined at all.
 Test-Case 'tsrows: a component resolves its templateUrl to the file row for that template' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT c.selector, c.standalone, f.path AS template FROM components c " +
         "JOIN files f ON f.id = c.template_file WHERE c.name = 'BasketComponent'")
     Assert-Line $r 'app-basket'
@@ -208,7 +208,7 @@ Test-Case 'tsrows: a component resolves its templateUrl to the file row for that
 # only the plural dropped the stylesheet of every component written the new way.
 Test-Case 'tsrows: a component records its stylesheet under either spelling' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT j.value FROM components__style_urls j WHERE j.owner = components.id AND j.parent = 0 AND j.ord = 0) AS style FROM components " +
         "WHERE name = 'BasketComponent'")
     Assert-Line $r './basket.scss'
@@ -217,7 +217,7 @@ Test-Case 'tsrows: a component records its stylesheet under either spelling' {
 # A DIRECTIVE IS NOT A COMPONENT, a pipe is neither, and an injectable says where it is provided.
 Test-Case 'tsrows: directives, pipes and injectables are their own rows' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $d = Invoke-TsRowsQ $made.Db "SELECT name, selector FROM directives"
     Assert-Line $d 'appHighlight'
     $p = Invoke-TsRowsQ $made.Db "SELECT pipe_name, pure FROM pipes"
@@ -230,7 +230,7 @@ Test-Case 'tsrows: directives, pipes and injectables are their own rows' {
 # unmatchable from the template side.
 Test-Case 'tsrows: an aliased Input binds under its alias, and a required one says so' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     # `binding_name` ALONE: asked beside `alias`, the alias column answers the assertion and a build that
     # binds under the member name passes.
     $r = Invoke-TsRowsQ $made.Db "SELECT binding_name FROM io WHERE member = 'label'"
@@ -243,7 +243,7 @@ Test-Case 'tsrows: an aliased Input binds under its alias, and a required one sa
 # map that only knew the decorator would report the component as having none.
 Test-Case 'tsrows: a signal input is an io row, marked as a signal' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT member, kind, signal FROM io WHERE member = 'size'"
     Assert-Line $r 'input'
     Assert-Line $r 'size'
@@ -253,7 +253,7 @@ Test-Case 'tsrows: a signal input is an io row, marked as a signal' {
 # and read without flattening the module reads as exporting NOTHING.
 Test-Case 'tsrows: a nested NgModule array is flattened, so the module exports what it really exports' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT count(*) FROM ng_modules__exports j WHERE j.owner = ng_modules.id AND j.parent = 0) AS n, " +
         "$(Get-TsItemFieldSql 'ng_modules__exports' 'ng_modules.id' 0 'name') AS first FROM ng_modules WHERE name = 'BasketModule'")
     Assert-Line $r '2'
@@ -264,7 +264,7 @@ Test-Case 'tsrows: a nested NgModule array is flattened, so the module exports w
 # including the structural directive desugared into a Template wrapper.
 Test-Case 'tsrows: a template becomes nodes, with the tag, the order and the parent of each' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT n.kind, n.tag FROM template_nodes n JOIN templates t ON t.id = n.template " +
         "WHERE t.name = 'BasketComponent' ORDER BY n.[order]")
     Assert-Line $r 'Element'
@@ -277,7 +277,7 @@ Test-Case 'tsrows: a template becomes nodes, with the tag, the order and the par
 # there: the candidate is the same row, set aside in `renders_out_of_scope` (#40).
 Test-Case 'tsrows: an element that matches a component selector is a render edge to it' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $every = 'renders_out_of_scope'
     $r = Invoke-TsRowsQ $made.Db ("SELECT r.to_name, r.kind, r.tag, r.via FROM $every r WHERE r.tag = 'app-cart'")
     Assert-Line $r 'CartComponent'
@@ -293,7 +293,7 @@ Test-Case 'tsrows: an element that matches a component selector is a render edge
 # own binding type, and a declared input is the caller's judgement.
 Test-Case 'tsrows: a structural directive, a class binding and an @if block are each gates, labelled' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT DISTINCT gate_kind FROM gates ORDER BY gate_kind"
     Assert-Line $r 'structural'
     Assert-Line $r 'class'
@@ -304,7 +304,7 @@ Test-Case 'tsrows: a structural directive, a class binding and an @if block are 
 # attribute beside it is not a key, and neither is the interpolation.
 Test-Case 'tsrows: a literal through the carrier pipe is a translation reference, and nothing else is' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT key, kind, pipe FROM i18n_refs"
     Assert-Line $r 'shop.title'
     Assert-Line $r 'translate_pipe'
@@ -314,7 +314,7 @@ Test-Case 'tsrows: a literal through the carrier pipe is a translation reference
 # A STATIC ATTRIBUTE IS A BINDING ROW TOO, with its value - no pattern decides which values are interesting.
 Test-Case 'tsrows: a static attribute and a bound input are both binding rows' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT kind, name, value, source FROM bindings WHERE name IN ('class','label')"
     Assert-Line $r 'attribute'
     Assert-Line $r 'intro'
@@ -325,7 +325,7 @@ Test-Case 'tsrows: a static attribute and a bound input are both binding rows' {
 # `full_path` carries the composition within ONE declaration and would repeat every shared segment.
 Test-Case 'tsrows: a nested route carries its parent row and its absolute path' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT c.path AS child, p.path AS parent, c.absolute_path FROM routes c " +
         "JOIN routes p ON p.id = c.parent_route")
     Assert-Line $r 'basket'
@@ -336,7 +336,7 @@ Test-Case 'tsrows: a nested route carries its parent row and its absolute path' 
 # pass can walk from.
 Test-Case 'tsrows: a route resolves its component to the class that declares it' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT r.path, c.name FROM routes r JOIN classes c ON c.id = r.component_id " +
         "WHERE r.path = 'shop'")
     Assert-Line $r 'CartComponent'
@@ -346,7 +346,7 @@ Test-Case 'tsrows: a route resolves its component to the class that declares it'
 # edges, which is what says a component is live at all.
 Test-Case 'tsrows: a routed component is reachable from an entry point' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT name, is_root, root_count FROM component_reach WHERE name = 'CartComponent'")
     Assert-Line $r 'CartComponent'
     # ...and a component nothing renders or routes says so, which is only a claim because the whole
@@ -359,7 +359,7 @@ Test-Case 'tsrows: a routed component is reachable from an entry point' {
 # template binds, so the join is on THAT and not on the member.
 Test-Case 'tsrows: a template binding is attributed to the input it fills' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT u.input, i.member, i.bound_count FROM input_usage u " +
         "JOIN io i ON i.id = u.io WHERE u.input = 'label'")
     Assert-Line $r 'label'
@@ -375,7 +375,7 @@ Test-Case 'tsrows: a template binding is attributed to the input it fills' {
 # property the application calls, so publishing the raw key made `name` wrong for about a third of the rows.
 Test-Case 'tsrows: an action group publishes one row per event, under the dispatched name' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT name, event, type, [group] FROM state_actions WHERE [group] IS NOT NULL"
     Assert-Line $r 'events.setstep'
     Assert-Line $r 'setStep'
@@ -385,7 +385,7 @@ Test-Case 'tsrows: an action group publishes one row per event, under the dispat
 # the hole names a const whose value the map already holds - so the fold is a JOIN, not a guess.
 Test-Case 'tsrows: an action type built from a template literal is folded to its string' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT name, type FROM state_actions WHERE name = 'reset'"
     Assert-Line $r '[Shop] reset'
 }
@@ -393,7 +393,7 @@ Test-Case 'tsrows: an action type built from a template literal is folded to its
 # A REDUCER HANDLER JOINS AN ACTION TO THE PATHS IT WRITES - the whole point of the state graph.
 Test-Case 'tsrows: a reducer handler records the action it answers and what it writes' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT reducer_name, action_source, $(Get-NodeRootListSql 'state_handlers__writes' 'state_handlers.id') AS writes FROM state_handlers")
     Assert-Line $r 'reducer'
     Assert-Line $r 'shopActions.reset'

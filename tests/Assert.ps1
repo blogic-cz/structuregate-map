@@ -86,6 +86,12 @@ function Invoke-Gate {
     $gate = Get-GateInvocation
     $all = @($gate.Lead)
     foreach ($argument in $GateArgs) { foreach ($part in @($argument)) { if ($null -ne $part) { $all += "$part" } } }
+    # A map handed out from a cache (`$script:FrozenMaps`) is only read: another case is handed the same one.
+    $mapAt = [array]::IndexOf($all, '--map-sqlite')
+    if ($script:FrozenMaps.Count -gt 0 -and $mapAt -ge 0 -and $mapAt + 1 -lt $all.Count -and
+        $script:FrozenMaps.ContainsKey([System.IO.Path]::GetFullPath($all[$mapAt + 1]))) {
+        throw "a shared map is only read - $($all[$mapAt + 1]) came from a cache, so this case must map without -Shared"
+    }
     # A $null is DROPPED, never sent as "": pwsh 7 splats an `if` that produced nothing as one $null, where
     # 5.1 splatted no argument at all, and the gate then refused an empty argument it was never meant to get.
     # `2>&1` turns a native command's stderr into an ErrorRecord, and with $ErrorActionPreference = 'Stop'
@@ -176,10 +182,16 @@ $script:InWindowsCase = $false
 
 function Test-Case([string]$Name, [scriptblock]$Body) {
     if ($script:WindowsOnlyRun -and -not $script:InWindowsCase) { return }
+    $script:CaseName = $Name
     $script:CurrentTree = $null
     $script:CaseTrees.Clear()
+    $script:FrozenMaps.Clear()
     try {
         & $Body
+        foreach ($db in $script:FrozenMaps.Keys) {
+            $frozen = $script:FrozenMaps[$db]
+            if ((Get-TreeDigest $frozen.Tree $db) -ne $frozen.Digest) { throw "the tree of the shared map $db changed while the case ran - map it without -Shared" }
+        }
         $script:Passed++
         foreach ($tree in $script:CaseTrees) {
             if (Test-Path $tree) { Remove-Item $tree -Recurse -Force -ErrorAction SilentlyContinue }
@@ -193,6 +205,34 @@ function Test-Case([string]$Name, [scriptblock]$Body) {
             Write-Host "        tree kept: $tree"
         }
     }
+}
+
+# MAPS A CASE WAS HANDED FROM A CACHE (`New-TsRowsDb -Shared`), by full database path: the tree each describes and that
+# tree's digest when the map was made. Such a map is only READ - `Invoke-Gate` refuses another `--map-sqlite` run over it,
+# and `Test-Case` fails a case whose tree changed under it - because the next case is handed the same map.
+$script:FrozenMaps = @{}
+# Folders a suite keeps for the whole process (a cache of maps), removed by `Run-Tests.ps1` once its suites ran.
+$script:RunScratch = New-Object System.Collections.ArrayList
+
+# A digest of every file under a tree, its path and its bytes, files under `$Skip` (a database and its -wal/-shm)
+# left out, `$Salt` mixed in. Folders are walked in name order, so the same tree always digests the same.
+function Get-TreeDigest([string]$Root, [string]$Skip, [string]$Salt = '') {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $buffer = New-Object System.IO.MemoryStream
+    $full = [System.IO.Path]::GetFullPath($Root)
+    if ($Skip) { $Skip = [System.IO.Path]::GetFullPath($Skip) }
+    foreach ($file in @(Get-ChildItem -LiteralPath $full -Recurse -File -Force | Sort-Object { $_.FullName } -CaseSensitive)) {
+        if ($Skip -and $file.FullName.StartsWith($Skip)) { continue }
+        # What READING a SQLite file leaves beside it - a query opens the tree map's `.fbt/deep.sqlite` - is no change.
+        if ($file.Name.EndsWith('-shm') -or ($file.Name.EndsWith('-wal') -and $file.Length -eq 0)) { continue }
+        $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
+        $name = [System.Text.Encoding]::UTF8.GetBytes($file.FullName.Substring($full.Length) + "`0$($bytes.Length)`0")
+        $buffer.Write($name, 0, $name.Length)
+        $buffer.Write($bytes, 0, $bytes.Length)
+    }
+    $salted = [System.Text.Encoding]::UTF8.GetBytes($Salt)
+    $buffer.Write($salted, 0, $salted.Length)
+    return [System.BitConverter]::ToString($sha.ComputeHash($buffer.ToArray())).Replace('-', '')
 }
 
 # A case whose subject only EXISTS on Windows - Windows PowerShell 5.1's grammar, `cmd`, the .NET Framework.

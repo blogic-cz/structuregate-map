@@ -43,7 +43,7 @@ function New-TsBranchTree {
 }
 
 Test-Case 'tsrows: a key assigned under an if carries the value its condition permits' {
-    $made = New-TsRowsDb (New-TsBranchTree)
+    $made = New-TsRowsDb (New-TsBranchTree) -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || route || ' | ' || " +
         "$(Get-TsItemFieldSql 'key_reach__always_values' 'key_reach.rowid' 0 'dimension') || ' ' || $(Get-TsItemFieldSql 'key_reach__always_values' 'key_reach.rowid' 0 'op') || ' ' || " +
         "$(Get-NodeItemListSql 'key_reach__always_values' 'key_reach.rowid' 0 'values') AS reach FROM key_reach WHERE key LIKE 'tips.%'")
@@ -55,7 +55,7 @@ Test-Case 'tsrows: a key assigned under an if carries the value its condition pe
 # THE BRANCH IS PUBLISHED APART FROM THE GATES: `always_gates` names `gates` rows and nothing else, and a key
 # written once with no condition has no branch that always holds.
 Test-Case 'tsrows: a key also written with no condition needs no branch, and branches stay out of the gates' {
-    $made = New-TsRowsDb (New-TsBranchTree)
+    $made = New-TsRowsDb (New-TsBranchTree) -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || (SELECT count(*) FROM key_reach__always_branches jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) || ' | ' || " +
         "(SELECT count(*) FROM key_reach__maybe_branches jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) || ' | ' || $(Get-NodeRootListSql 'key_reach__always_gates' 'key_reach.rowid') || ' | ' || " +
         "(SELECT CASE WHEN count(*) = 0 THEN '[]' ELSE '[{' END FROM key_reach__always_values jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) AS reach " +

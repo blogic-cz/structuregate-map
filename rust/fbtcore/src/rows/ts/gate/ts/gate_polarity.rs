@@ -24,7 +24,8 @@ pub enum Polarity {
 /// renders while the binding is FALSE (`Hides`). A class that only styles is no condition (`Styles`). A STYLE gate
 /// (`[style.x]`) restyles and is `Styles` too (#52), EXCEPT a `[style.display]`/`[style.visibility]` ternary of two
 /// literals whose one arm hides (`style_hides.when` = `then`/`else`, #53): it is `Shown` on its showing side. `always`
-/// (never shown) is deliberately NOT claimed here, nor is a non-literal arm. Absent: neither kind of gate.
+/// (never shown) stays `Styles` HERE, as `*ngIf="false"` names no member either: `key_dead::dead_gates` drops every way
+/// through it (#54). A non-literal arm is not claimed, nor an `[ngStyle]` key (no gate). Absent: neither kind of gate.
 pub fn class_polarity(store: &Store<'_>) -> HashMap<String, Polarity> {
     let hiding: HashSet<String> = store.table("class_hides").iter()
         .filter(|h| matches!(text(h, "scope").as_deref(), Some("own" | "shared")))

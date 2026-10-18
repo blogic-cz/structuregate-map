@@ -39,7 +39,7 @@ function New-TsRowsKeysConstTree {
 }
 
 Test-Case 'tsrows keys: a const object member bound through a field is a field binding' {
-    $made = New-TsRowsDb (New-TsRowsKeysConstTree)
+    $made = New-TsRowsDb (New-TsRowsKeysConstTree) -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT key || ' | ' || route AS reach FROM key_reach WHERE key = 'set.hint'"
     Assert-Line $r 'set.hint | field_binding'
 }
@@ -47,14 +47,14 @@ Test-Case 'tsrows keys: a const object member bound through a field is a field b
 # THE KEY SITS IN A FILE THAT DECLARES NO COMPONENT, so its literal reaches none: only the field it is
 # read into, and the node binding that field, name the component it renders in.
 Test-Case 'tsrows keys: a const object from another file reaches the component that binds its member' {
-    $made = New-TsRowsDb (New-TsRowsKeysConstTree)
+    $made = New-TsRowsDb (New-TsRowsKeysConstTree) -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT 'hits=' || count(*) AS reach FROM key_reach k JOIN key_reach__components j ON j.owner = '#' || k.rowid AND j.parent = 0 " +
         "JOIN components c ON c.id = j.value WHERE k.key = 'set.sharedhint' AND c.name = 'SettingsComponent'")
     Assert-Line $r 'hits=1'
 }
 
 Test-Case 'tsrows keys: a const object member assigned under an if carries that branch' {
-    $made = New-TsRowsDb (New-TsRowsKeysConstTree)
+    $made = New-TsRowsDb (New-TsRowsKeysConstTree) -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || (SELECT count(*) FROM key_reach__always_branches jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) || ' | ' || " +
         "$(Get-NodeItemListSql 'key_reach__always_values' 'key_reach.rowid' 0 'values') AS reach FROM key_reach WHERE key = 'set.guarded'")
     Assert-Line $r 'set.guarded | 1 | ["B"]'
@@ -63,7 +63,7 @@ Test-Case 'tsrows keys: a const object member assigned under an if carries that 
 # A LIST OF OBJECTS IS NOT A KEY. `RULES` holds `set.v` and the getter bound in the template returns it, but
 # no value is the key - reaching into it would claim every string of every rule object.
 Test-Case 'tsrows keys: a key inside a const list of objects stays a bare literal' {
-    $made = New-TsRowsDb (New-TsRowsKeysConstTree)
+    $made = New-TsRowsDb (New-TsRowsKeysConstTree) -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT key || ' | ' || route AS reach FROM key_reach WHERE key = 'set.v'"
     Assert-Line $r 'set.v | literal'
     Assert-NoLine $r 'field_binding'
@@ -97,7 +97,7 @@ function New-TsRowsKeysLocaleTree {
 }
 
 Test-Case 'tsrows keys: a locale array becomes one row per element, named by its index' {
-    $made = New-TsRowsDb (New-TsRowsKeysLocaleTree)
+    $made = New-TsRowsDb (New-TsRowsKeysLocaleTree) -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT key || ' | ' || text AS tr FROM translations WHERE key LIKE 'regions.%'"
     Assert-Line $r 'regions.North[0] | Alpha'
     Assert-Line $r 'regions.North[1] | Beta'
@@ -106,7 +106,7 @@ Test-Case 'tsrows keys: a locale array becomes one row per element, named by its
 
 # THE WHOLE LIST IS WHAT THE CALL READS, and the file defines it: no gap, and the locale that defines it.
 Test-Case 'tsrows keys: an i18n call reading a whole locale array is a defined key' {
-    $made = New-TsRowsDb (New-TsRowsKeysLocaleTree)
+    $made = New-TsRowsDb (New-TsRowsKeysLocaleTree) -Shared
     # `defined_in` is a list, so node rows: its locales are the root's items.
     $locales = "(SELECT '[' || group_concat(char(34) || d.value || char(34), ',' ORDER BY d.ord) || ']' FROM i18n_index__defined_in d " +
         "WHERE d.owner = i18n_index.id AND d.parent = 0)"
@@ -121,7 +121,7 @@ Test-Case 'tsrows keys: an i18n call reading a whole locale array is a defined k
 }
 
 Test-Case 'tsrows keys: a locale array element is referenced exactly when its array is' {
-    $made = New-TsRowsDb (New-TsRowsKeysLocaleTree)
+    $made = New-TsRowsDb (New-TsRowsKeysLocaleTree) -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || referenced AS tr FROM translations " +
         "WHERE key IN ('regions.South[0]', 'regions.North[0]')")
     Assert-Line $r 'regions.South[0] | 1'
@@ -131,7 +131,7 @@ Test-Case 'tsrows keys: a locale array element is referenced exactly when its ar
 # A `+` CHAIN WITH A HOLE is every key its pieces spell, as a template literal is: `'labels.' + kind` is no
 # static key, so no i18n ref names `labels.laptop` - the chain is the only evidence it is used here.
 Test-Case 'tsrows keys: a key built by a + chain reaches the component it is built in' {
-    $made = New-TsRowsDb (New-TsRowsKeysLocaleTree)
+    $made = New-TsRowsDb (New-TsRowsKeysLocaleTree) -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || route || ' | ' || (SELECT count(*) FROM key_reach__components jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) AS reach " +
         "FROM key_reach WHERE key = 'labels.laptop'")
     Assert-Line $r 'labels.laptop | literal | 1'

@@ -18,7 +18,10 @@ $script:TsStyleGatesHtml = @(
     '<div [style.opacity]="o">c</div>'
     '<span [style.display]="kind === K.Alpha ? ''none'' : ''block''">{{ ''demo.paint.none'' | translate }}</span>'
     '<i [style.visibility]="kind === K.Gamma ? ''hidden'' : null">{{ ''demo.paint.hidden'' | translate }}</i>'
-    '<b [style.display]="''none''">x</b>'
+    '<b [style.display]="''none''">{{ ''demo.paint.never'' | translate }}</b>'
+    '<b *ngIf="false">{{ ''demo.paint.offif'' | translate }}</b>'
+    '<p [ngStyle]="{ display: kind === K.Beta ? ''none'' : ''block'', ''visibility'': ''hidden'', ''height.px'': h }">n</p>'
+    '<p [ngStyle]="styles">m</p>'
 ) -join "`n"
 
 function New-TsStyleGatesDb {
@@ -28,11 +31,11 @@ function New-TsStyleGatesDb {
             "import { DemoIDs } from './kinds';`n" +
             "@Component({ selector: 'demo-paint', standalone: true, templateUrl: './paint.component.html', " +
             "styleUrls: ['./paint.component.scss'] })`n" +
-            "export class PaintComponent { K = DemoIDs; shown = true; h = 0; o = 1; @Input() kind!: DemoIDs; }`n"
+            "export class PaintComponent { K = DemoIDs; shown = true; h = 0; o = 1; styles = {}; @Input() kind!: DemoIDs; }`n"
         'apps/shop/src/paint.component.html' = $script:TsStyleGatesHtml
         'apps/shop/src/paint.component.scss' = '.gone-x { display: none; }'
-        'apps/shop/src/assets/locales/en.json' = '{"demo":{"paint":{"color":"1","gone":"2","none":"3","hidden":"4"}}}'
-    })
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"paint":{"color":"1","gone":"2","none":"3","hidden":"4","never":"5","offif":"6"}}}'
+    }) -Shared
 }
 
 function Invoke-TsStyleGatesQ([string]$Path, [string]$Sql) {
@@ -63,14 +66,65 @@ Test-Case 'tsrows: a style binding is no visibility condition, a hiding class is
 Test-Case 'tsrows: style_hides says which style gates hide their element and on which side (#93 A)' {
     $made = New-TsStyleGatesDb
     Assert-Exit $made.Result 0
-    $r = Invoke-TsStyleGatesQ $made.Db "SELECT 'sh=' || property || '|' || coalesce(unit, '') || '|' || condition || '|' || alone || '|' || hides || '|' || coalesce([when], '') AS r FROM style_hides ORDER BY id"
+    $r = Invoke-TsStyleGatesQ $made.Db "SELECT 'sh=' || property || '|' || coalesce(unit, '') || '|' || condition || '|' || alone || '|' || hides || '|' || coalesce([when], '') AS r FROM style_hides WHERE via = 'style' ORDER BY id"
     Assert-Line $r 'sh=color||kind === K.Alpha && ''red''|0|0|'
     Assert-Line $r 'sh=display||shown ? ''block'' : ''none''|1|1|else'
-    Assert-Line $r 'sh=height||h|0|0|'
+    Assert-Line $r 'sh=height|px|h|0|0|'
     Assert-Line $r 'sh=opacity||o|0|0|'
     Assert-Line $r 'sh=display||kind === K.Alpha ? ''none'' : ''block''|1|1|then'
     Assert-Line $r 'sh=visibility||kind === K.Gamma ? ''hidden'' : null|1|1|then'
     Assert-Line $r 'sh=display||''none''|1|1|always'
+}
+
+
+# (a) ANGULAR'S UNIT IS KEPT (#54): `[style.height.px]` is a gate named `height` that carries `unit = px`, and
+# `style_hides.unit` is read from it; a binding with no unit has none.
+Test-Case 'tsrows: a style gate keeps its unit, and style_hides reads it (#54)' {
+    $made = New-TsStyleGatesDb
+    Assert-Exit $made.Result 0
+    $g = Invoke-TsStyleGatesQ $made.Db "SELECT 'gu=' || name || '|' || coalesce(unit, '') || '#' AS r FROM gates WHERE gate_kind = 'style'"
+    Assert-Line $g 'gu=height|px#'
+    Assert-Line $g 'gu=opacity|#'
+    $r = Invoke-TsStyleGatesQ $made.Db "SELECT 'su=' || property || '|' || coalesce(unit, '') || '|' || condition AS r FROM style_hides WHERE via = 'style'"
+    Assert-Line $r 'su=height|px|h'
+}
+
+# (b) A LITERAL `[ngStyle]` MAP IS ONE `style_hides` ROW PER KEY (#54), each value read as a `[style.x]` value is; no gate.
+# A value that is no object literal gives no row.
+Test-Case 'tsrows: style_hides has a row per literal ngStyle key, none for a non-literal value (#54)' {
+    $made = New-TsStyleGatesDb
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsStyleGatesQ $made.Db ("SELECT 'ns=' || s.via || '|' || s.property || '|' || coalesce(s.unit, '') || '|' || s.alone || '|' || " +
+        "s.hides || '|' || coalesce(s.[when], '') || '|' || coalesce(s.gate, '-') || '|' || e.name || '#' AS r " +
+        "FROM style_hides s JOIN expressions e ON e.id = s.expression WHERE s.via = 'ngStyle' ORDER BY s.id")
+    Assert-Line $r 'ns=ngStyle|display||1|1|then|-|ngStyle#'
+    Assert-Line $r 'ns=ngStyle|visibility||1|1|always|-|ngStyle#'
+    Assert-Line $r 'ns=ngStyle|height|px|0|0||-|ngStyle#'
+    $n = Invoke-TsStyleGatesQ $made.Db "SELECT 'nn=' || COUNT(*) || '#' AS r FROM style_hides WHERE via = 'ngStyle'"
+    Assert-Line $n 'nn=3#'
+    $none = Invoke-TsStyleGatesQ $made.Db ("SELECT 'nl=' || COUNT(*) || '#' AS r FROM style_hides s JOIN expressions e ON e.id = s.expression " +
+        "WHERE e.source = 'styles'")
+    Assert-Line $none 'nl=0#'
+    $ng = Invoke-TsStyleGatesQ $made.Db "SELECT 'nx=' || COUNT(*) || '#' AS r FROM expressions WHERE name = 'ngStyle'"
+    Assert-Line $ng 'nx=2#'
+}
+
+# (c) A STYLE BINDING NEVER SHOWN IS `*ngIf="false"` (#54): `[style.display]="'none'"` hides its element on every side, so the
+# key under it renders on no way - the same `key_reach` row as a key under a literal false in the same template.
+Test-Case 'tsrows: a key under a style that always hides renders on no way, as under *ngIf=false (#54)' {
+    $made = New-TsStyleGatesDb
+    Assert-Exit $made.Result 0
+    # Every scalar of the row, and how many nodes each list holds: gate ids differ, the shape of the answer must not.
+    $lists = @('roots', 'routes', 'modules', 'components', 'paths', 'always_gates', 'maybe_gates', 'always_branches',
+        'maybe_branches', 'always_values', 'unreadable_values') |
+        ForEach-Object { "(SELECT COUNT(*) FROM key_reach__$_ c WHERE c.owner = '#' || k.rowid)" }
+    $cols = "k.n_paths || '|' || coalesce(k.min_depth, '') || '|' || coalesce(k.route, '') || '|' || k.n_refs || '|' || " +
+        ($lists -join " || '|' || ")
+    $r = Invoke-TsStyleGatesQ $made.Db "SELECT 'kr=' || k.key || '|' || $cols AS r FROM key_reach k WHERE k.key IN ('demo.paint.never', 'demo.paint.offif')"
+    Assert-Line $r 'kr=demo.paint.never|0|'
+    Assert-Line $r 'kr=demo.paint.offif|0|'
+    $agree = Invoke-TsStyleGatesQ $made.Db "SELECT 'agree=' || COUNT(DISTINCT $cols) || '#' AS r FROM key_reach k WHERE k.key IN ('demo.paint.never', 'demo.paint.offif')"
+    Assert-Line $agree 'agree=1#'
 }
 
 }

@@ -49,7 +49,7 @@ Beside the shared tables it adds the FRAMEWORK tables:
   class - a `renders_out_of_scope` candidate is no render. A render created in code names the method that returned the class
   (`returned_by`) and each way it was returned (`return_ways`, `returns` ids); a `case` or `if` every way sits
   in lands in `render_path.branches`. `templates`/`template_nodes`/`bindings` are the template side; `gates`/
-  `gate_values` what hides a node (`gates.gate_kind = 'hidden'` is `[hidden]`/`[attr.hidden]`, whose `expression` is a row holding the NEGATED condition) (`op` in/not_in/unknown; `listed_json` (child table `gate_values__listed_json`) what a config object lists, even an
+  `gate_values` what hides a node (`gates.gate_kind = 'hidden'` is `[hidden]`/`[attr.hidden]`, whose `expression` is a row holding the NEGATED condition; a `style` gate carries `unit`, `px` of `[style.height.px]` whose `name` is `height`) (`op` in/not_in/unknown; `listed_json` (child table `gate_values__listed_json`) what a config object lists, even an
   exclusion the map cannot polarise); `state_*` NgRx; `di`/`injectables` injection.
 * **`route_keys`** (`rk:`) is one row per `{{key}}` in a route's own `path` (`'{{routes.order.detail}}/:id'`, as a
   translating router resolves it): `route` (`routes.id`), `file` (the route's), `ord` (the `/`-separated segment the

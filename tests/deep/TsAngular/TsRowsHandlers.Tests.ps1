@@ -18,7 +18,7 @@ $script:TsRowsHandlersGuard = "export class Guard {`n  state = '';`n" +
 if ($script:TsRowsModules -and $script:TsRowsPython) {
 
 Test-Case 'tsrows: a catch clause is a handlers row of the Angular half' {
-    $made = New-TsRowsDb (New-TsRowsWorkspace @{ 'apps/shop/src/guard.ts' = $script:TsRowsHandlersGuard })
+    $made = New-TsRowsDb (New-TsRowsWorkspace @{ 'apps/shop/src/guard.ts' = $script:TsRowsHandlersGuard }) -Shared
     Assert-Exit $made.Result 0
     # Digits: bare, name_read, passes, raises, reraises, finally.
     $r = Invoke-TsRowsQ $made.Db ("SELECT 'h=' || line || ':' || try_line || ':' || name || ':' || bare || name_read || passes" +
@@ -29,7 +29,7 @@ Test-Case 'tsrows: a catch clause is a handlers row of the Angular half' {
 }
 
 Test-Case 'tsrows: a try is a branch no statement sits in, and a throw is a raises row under its branch' {
-    $made = New-TsRowsDb (New-TsRowsWorkspace @{ 'apps/shop/src/guard.ts' = $script:TsRowsHandlersGuard })
+    $made = New-TsRowsDb (New-TsRowsWorkspace @{ 'apps/shop/src/guard.ts' = $script:TsRowsHandlersGuard }) -Shared
     Assert-Exit $made.Result 0
     $b = Invoke-TsRowsQ $made.Db "SELECT 'b=' || line || ':' || sense || ':' || coalesce(parent, '-') FROM branches ORDER BY line"
     Assert-Line $b 'b=4:try:-'

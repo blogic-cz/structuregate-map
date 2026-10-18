@@ -224,9 +224,10 @@ async function main() {
   // 61: a union type names what its members name (#88): `type_ref` (and a parameter's `resolved`) is the ONE declaration
   //     a union's members name (`Codes | string`, `Codes | null`, `Kind | undefined` as `Kind`), and `type_refs` lists them
   //     when they name several (`A | B`) - on `members`, `members.params` and `type_members`.
+  // 62: a `style` gate carries `unit`, Angular's unit of `[style.height.px]` (`px`), which its `name` drops (#54).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 61, build: args.build,
+    config: config.file, data: config.data, rows: 62, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

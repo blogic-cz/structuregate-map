@@ -153,8 +153,11 @@ carry no `owner_file`.
   selector is `.x`) and `scope`: `own` (the component's `styleUrls`), `other` (another component's: reaches only
   through `::ng-deep` or `ViewEncapsulation.None`), `shared` (no component names the sheet). `class_hides` is written
   BEFORE the closure and read by it (`class_polarity`): a class gate restricts only through a row of scope `own` or `shared`.
-- **`style_hides`** (`cssy:`): one row per `[style.x]` gate - `property`, `unit` (always NULL for now: the extractor drops Angular's `.px`), `condition`, `alone` (`display`/`visibility`),
-  `hides`, and `when` from its literal value or two-literal ternary: `always`/`never`/`then`/`else`, NULL when not a literal (#53).
+- **`style_hides`** (`cssy:`): one row per `[style.x]` gate (`via = 'style'`) - `property`, `unit` (the gate row's `unit`, rows 62:
+  Angular's `px` of `[style.height.px]`, which the gate's `name` drops), `condition`, `alone` (`display`/`visibility`), `hides`, and `when`
+  from its literal value or two-literal ternary: `always`/`never`/`then`/`else`, NULL when not a literal (#53) - then one per LITERAL key of an
+  `[ngStyle]` object (`via = 'ngStyle'`, `gate` NULL, `'height.px'` split into property and unit, #54). A gate of `when = always` is dead
+  as `*ngIf="false"` is (`key_dead`); an ngStyle row restricts nothing.
 
 Not followed, so not claimed: `@extend`, a mixin's body at its `@include`, `@use`/`@import` between sheets, and a
 component's inline `styles: [...]`.

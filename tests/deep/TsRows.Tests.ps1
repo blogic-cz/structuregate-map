@@ -19,7 +19,7 @@ if ($script:TsRowsModules -and $script:TsRowsPython) {
 
 Test-Case 'tsrows: a workspace project is a row, with the name, dir and source root it declares' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db "SELECT name, dir, project_type, source_root FROM projects"
     Assert-Line $r 'shop'
@@ -32,7 +32,7 @@ Test-Case 'tsrows: a workspace project is a row, with the name, dir and source r
 # project with no code in it - so the config the BUILD TARGET names has to win over the one in the folder.
 Test-Case 'tsrows: the tsconfig a build target declares is the one the project is read through' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT tsconfig FROM projects"
     Assert-Line $r 'apps/shop/tsconfig.app.json'
 }
@@ -55,7 +55,7 @@ Test-Case 'tsrows: a usable root tsconfig still loses to the one the build targe
 # among them - it names no sources, so reading the project through it would yield an empty program.
 Test-Case 'tsrows: the tsconfigs that were not chosen are published, and an empty one is not' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     # ONE ROW PER CANDIDATE, not the JSON cell: the query lens truncates a column to its width, so a
     # third candidate appearing at the end of the array was cut off and the assertion below could not see
     # it - the case passed against a build that published the empty config.
@@ -67,7 +67,7 @@ Test-Case 'tsrows: the tsconfigs that were not chosen are published, and an empt
 
 Test-Case 'tsrows: every target the project declares is recorded' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT j.value AS target FROM projects p JOIN projects__targets j ON j.owner = p.id AND j.parent = 0"
     Assert-Line $r 'build'
     Assert-Line $r 'test'
@@ -112,7 +112,7 @@ Test-Case 'tsrows: a second run replaces this half rows rather than adding to th
 # the length of the text TypeScript decoded, which is not the byte count on disk.
 Test-Case 'tsrows: a program source file is a core row with its lines and chars' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT tier, parsed, reachable, lines, chars FROM files WHERE path = 'apps/shop/src/main.ts'"
     Assert-Line $r 'core'
     Assert-Line $r '1'
@@ -122,7 +122,7 @@ Test-Case 'tsrows: a program source file is a core row with its lines and chars'
 # that is absent from one that was never opened - a .scss is in neither program nor template.
 Test-Case 'tsrows: a file no program contains is still a row, as unparsed inventory' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT tier, parsed, reachable, content_hash FROM files WHERE path = 'apps/shop/src/theme.scss'"
     Assert-Line $r 'inventory'
     # `reachable` is null for a file that is not a program concept at all, and the digest is still taken:
@@ -134,7 +134,7 @@ Test-Case 'tsrows: a file no program contains is still a row, as unparsed invent
 # never ships, and that is a finding rather than a missing row.
 Test-Case 'tsrows: a .ts in the tree that no program contains is recorded as unreachable' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT path, reachable FROM files WHERE reachable = 0"
     Assert-Line $r 'apps/shop/extra/dead.ts'
     Assert-NoLine $r 'apps/shop/src/main.ts'
@@ -144,7 +144,7 @@ Test-Case 'tsrows: a .ts in the tree that no program contains is recorded as unr
 # reference holds, and the whole point is that the two join.
 Test-Case 'tsrows: a translation file becomes rows, keyed by the dotted path' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT locale, key, text FROM translations ORDER BY key, locale"
     Assert-Line $r 'shop.cart.empty'
     Assert-Line $r 'Empty'
@@ -162,7 +162,7 @@ Test-Case 'tsrows: a translation file becomes rows, keyed by the dotted path' {
 # it, and `keys` is what says how much it carries.
 Test-Case 'tsrows: the locale file itself records its locale and how many keys it defines' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     # Two leaves: `shop.title` and `shop.cart.empty`. A nested object is not a key, its leaves are.
     $r = Invoke-TsRowsQ $made.Db ("SELECT locale || ' | ' || keys AS locale_keys, parsed FROM files " +
         "WHERE path LIKE '%locales/en.json'")
@@ -186,7 +186,7 @@ Test-Case 'tsrows: no locale directories named means no translation rows are cla
 # consumer asking "who uses this class" would have to re-implement module resolution.
 Test-Case 'tsrows: an import records the file the compiler resolved it to' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT i.module, i.external, i.resolved, f.path AS resolved_path " +
         "FROM imports i LEFT JOIN files f ON f.id = i.resolved_file WHERE i.module = './helpers'")
     Assert-Line $r 'apps/shop/src/helpers.ts'
@@ -197,7 +197,7 @@ Test-Case 'tsrows: an import records the file the compiler resolved it to' {
 # consumer should not have to re-parse the clause to tell them apart.
 Test-Case 'tsrows: an import records its names, the kind of each, and the name a rename came through' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'imports__names' 'n' 'name') AS name, $(Get-TsFieldSql 'imports__names' 'n' 'kind') AS kind, $(Get-TsFieldSql 'imports__names' 'n' 'as') AS renamed_from " +
         "FROM imports i JOIN imports__names n ON n.owner = i.id AND n.parent = 0 ORDER BY name")
     Assert-Line $r 'Basket'
@@ -215,7 +215,7 @@ Test-Case 'tsrows: an import records its names, the kind of each, and the name a
 # build actually loads needs to tell the two apart.
 Test-Case 'tsrows: a type-only import is recorded as one' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT module, type_only FROM imports WHERE type_only = 1"
     Assert-Line $r './cart'
 }
@@ -244,7 +244,7 @@ Test-Case 'tsrows: a bare specifier is external even when it resolves inside the
 # inside method bodies, and a statement-level pass finds ZERO of them there.
 Test-Case 'tsrows: a comment inside a method body is a row, in the declaration it sits in' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT kind, context, text FROM comments ORDER BY line"
     Assert-Line $r 'Greeter.greet'
     Assert-Line $r 'a business rule lives here'
@@ -256,7 +256,7 @@ Test-Case 'tsrows: a comment inside a method body is a row, in the declaration i
 # is what makes that class public meant pattern-matching the source line.
 Test-Case 'tsrows: an export records the local name, the exported name and the file it re-exports from' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT $(Get-NodeRootListSql 'exports__names' 'exports.id') AS names, $(Get-NodeRootListSql 'exports__exported_as' 'exports.id') AS exported_as, [from] FROM exports ORDER BY line"
     Assert-Line $r 'Greeter'
     Assert-Line $r 'Welcomer'
@@ -267,7 +267,7 @@ Test-Case 'tsrows: an export records the local name, the exported name and the f
 # from `'laptop'` passed to a call, and `context`/`property` are what publish it.
 Test-Case 'tsrows: a string literal records the kind of node it sits in' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT value, context, property FROM string_literals WHERE value = 'laptop'"
     Assert-Line $r 'PropertyAssignment'
 }
@@ -276,7 +276,7 @@ Test-Case 'tsrows: a string literal records the kind of node it sits in' {
 # source text would make every consumer resolve the enum for itself - which it cannot do without a compiler.
 Test-Case 'tsrows: a computed enum key is published as the value it folds to' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT property FROM string_literals WHERE value = 'laptop'"
     Assert-Line $r '1'
     Assert-NoLine $r 'Category.Hardware'
@@ -286,7 +286,7 @@ Test-Case 'tsrows: a computed enum key is published as the value it folds to' {
 # the initializer alone would leave `High` with nothing, and a consumer cannot fold it without a compiler.
 Test-Case 'tsrows: an enum member carries the value the compiler folded, inherited numbering included' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     # ONE MEMBER, ONE VALUE. Asked over every member at once, a query's output holds the other members'
     # numbers too, and an assertion on `2` passed against a build that published nothing for `High`.
     $r = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'enums__members' 'm' 'value') AS high_value FROM enums e JOIN enums__members m ON m.owner = e.id AND m.parent = 0 " +
@@ -299,7 +299,7 @@ Test-Case 'tsrows: an enum member carries the value the compiler folded, inherit
 
 Test-Case 'tsrows: a const enum is recorded as one' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db "SELECT name, [const] FROM enums ORDER BY name"
     Assert-Line $r 'Flag'
     Assert-Line $r 'Level'
@@ -309,7 +309,7 @@ Test-Case 'tsrows: a const enum is recorded as one' {
 # lands on `cell.label` pointed at a file:line with no row to join to.
 Test-Case 'tsrows: a nested type member is its own row, with the dotted path and its parent' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT t.path, t.optional, p.path AS parent_path FROM type_members t " +
         "LEFT JOIN type_members p ON p.id = t.parent WHERE t.path LIKE 'cell%' ORDER BY t.path")
     Assert-Line $r 'cell.label'
@@ -325,7 +325,7 @@ Test-Case 'tsrows: a nested type member is its own row, with the dotted path and
 # declaration.
 Test-Case 'tsrows: a type member resolves its own type to the declaration it names' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     # `type_ref` ALONE. Selected beside `type`, the text `Row[]` satisfies an assertion on `Row` and a build
     # resolving nothing passes.
     # `rows: Row[]` resolves to `Array`, and the declared type a consumer is after is its ELEMENT. Both are
@@ -339,7 +339,7 @@ Test-Case 'tsrows: a type member resolves its own type to the declaration it nam
 # contributed nothing and a read landing on it stopped dead.
 Test-Case 'tsrows: an alias built from a mapped type still publishes its members, marked as computed' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT a.name, t.name AS member, t.via FROM type_members t " +
         "JOIN type_aliases a ON a.id = t.owner WHERE a.name = 'Slim'")
     Assert-Line $r 'computed'
@@ -352,7 +352,7 @@ Test-Case 'tsrows: an alias built from a mapped type still publishes its members
 # has, so no type is recognised by name.
 Test-Case 'tsrows: an alias of an array publishes no members of its own' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT count(*) AS members FROM type_members t JOIN type_aliases a " +
         "ON a.id = t.owner WHERE a.name = 'RowList'")
     Assert-Line $r '0'
@@ -362,7 +362,7 @@ Test-Case 'tsrows: an alias of an array publishes no members of its own' {
 # `[1, 2]` with no record of WHICH members those were.
 Test-Case 'tsrows: a const referring to an enum member keeps the member AND its value' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'consts__value' 'r' '$enum') AS member, $(Get-TsFieldSql 'consts__value' 'r' 'value') AS folded FROM consts c JOIN consts__value r ON r.owner = c.id AND r.n = 0 " +
         "WHERE c.name = 'LEVEL'")
     Assert-Line $r 'Category.Hardware'
@@ -373,7 +373,7 @@ Test-Case 'tsrows: a const referring to an enum member keeps the member AND its 
 # the object STARTS with, and resolving it would assert runtime state the map cannot know.
 Test-Case 'tsrows: a static class field resolves, and an instance field deliberately does not' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $static = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'consts__value' 'r' 'value') AS folded FROM consts c JOIN consts__value r ON r.owner = c.id AND r.n = 0 " +
         "WHERE c.name = 'FLAG'")
     Assert-Line $static 'IsXEnabled'
@@ -390,7 +390,7 @@ Test-Case 'tsrows: a static class field resolves, and an instance field delibera
 # leaving it opaque made hundreds of declared components invisible.
 Test-Case 'tsrows: a spread of a known array is flattened into the value' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     # THREE elements, the last of them 3: an unflattened spread would be one opaque element plus 3.
     $r = Invoke-TsRowsQ $made.Db ("SELECT (SELECT count(*) FROM consts__value j WHERE j.owner = c.id AND j.parent = 0) AS n, " +
         "(SELECT j.value FROM consts__value j WHERE j.owner = c.id AND j.parent = 0 AND j.ord = 2) AS last " +
@@ -404,7 +404,7 @@ Test-Case 'tsrows: a spread of a known array is flattened into the value' {
 # the object is always there - the same mistake as an empty guard list reading "unguarded".
 Test-Case 'tsrows: a conditional value keeps the operator and both operands' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $r = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'consts__value' 'r' '$logic') AS op, " +
         "(SELECT $(Get-TsFieldSql 'consts__value' 'o' 'id') FROM consts__value l JOIN consts__value o ON o.owner = l.owner AND o.parent = l.n WHERE l.owner = r.owner AND l.parent = r.n AND l.role = '`$operands' AND o.ord = 1) AS then_id " +
         "FROM consts c JOIN consts__value r ON r.owner = c.id AND r.n = 0 WHERE c.name = 'MAYBE'")
@@ -416,7 +416,7 @@ Test-Case 'tsrows: a conditional value keeps the operator and both operands' {
 # pattern-match it; `reads`/`identifiers` make the same fact joinable.
 Test-Case 'tsrows: a value that cannot be known still publishes what it reads' {
     $tree = New-TsRowsWorkspace
-    $made = New-TsRowsDb $tree
+    $made = New-TsRowsDb $tree -Shared
     $text = Invoke-TsRowsQ $made.Db ("SELECT $(Get-TsFieldSql 'consts__value' 'r' '$expr') AS text FROM consts c JOIN consts__value r ON r.owner = c.id AND r.n = 0 " +
         "WHERE c.name = 'DYNAMIC'")
     Assert-Line $text 'window.location.href'
