@@ -107,7 +107,7 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
       const id = store.add('type_members', 'tm', {
         owner, file: fid, name, path, parent,
         type: m.type ? m.type.getText() : null,
-        type_ref: m.type ? typeRefAt(m.type) : null,
+        ...(m.type ? typeRefAt(m.type) : { type_ref: null }),
         optional: !!m.questionToken,
         kind: ts.SyntaxKind[m.kind] ?? 'unknown',
         ...locationOf(m.name ?? m),
@@ -160,7 +160,7 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
         // WHERE THE PROPERTY REALLY LIVES. A computed type borrows its members, so the row is anchored at
         // the borrowed declaration and says so: `via: 'computed'` keeps the two kinds of row apart.
         via: 'computed',
-        type_ref: decl.type ? typeRefAt(decl.type) : null,
+        ...(decl.type ? typeRefAt(decl.type) : { type_ref: null }),
         ...locationOf(decl),
       });
     }

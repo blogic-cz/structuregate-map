@@ -221,9 +221,12 @@ async function main() {
   // 59: `classes.extends` and each of its `type_args` carry the declaration's `line` and the `id` of its `classes` row (#87).
   // 60: `pipe_refs` on a template expression and string - each pipe usage resolved by its component's scope - and
   // `external_pipes` on `components`/`ng_modules`, a library entry's pipes read off its typings (#86).
+  // 61: a union type names what its members name (#88): `type_ref` (and a parameter's `resolved`) is the ONE declaration
+  //     a union's members name (`Codes | string`, `Codes | null`, `Kind | undefined` as `Kind`), and `type_refs` lists them
+  //     when they name several (`A | B`) - on `members`, `members.params` and `type_members`.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 60, build: args.build,
+    config: config.file, data: config.data, rows: 61, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

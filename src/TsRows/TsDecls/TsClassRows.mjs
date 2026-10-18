@@ -143,6 +143,28 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
 
   const typeIdentifier = (typeNode) => (ts.isTypeReferenceNode(typeNode) ? typeNode.typeName : null);
 
+  /** Every member of a union as WRITTEN, `(A | B) | null` flattened, or the type node alone when it is no union. */
+  const unionParts = (typeNode) => {
+    if (ts.isParenthesizedTypeNode(typeNode)) return unionParts(typeNode.type);
+    return ts.isUnionTypeNode(typeNode) ? typeNode.types.flatMap(unionParts) : [typeNode];
+  };
+
+  /**
+   * WHERE THE NAME A PARAMETER'S TYPE IS WRITTEN WITH IS DECLARED. A union (`Codes | string`, `Codes | null`) has no
+   * name of its own, so it asked the symbol of the union node and resolved nothing (#88): its members are asked, and
+   * the ONE declaration they name is the answer. Several (`A | B`) are no one answer - `type_refs` lists them.
+   */
+  const resolvedOf = (typeNode) => {
+    const parts = unionParts(typeNode);
+    if (parts.length === 1) return declFileOf(typeIdentifier(typeNode) ?? typeNode);
+    const named = new Map();
+    for (const part of parts) {
+      const ref = typeIdentifier(part) ? declFileOf(typeIdentifier(part)) : null;
+      if (ref) named.set(`${ref.file}\u0000${ref.name}`, ref);
+    }
+    return named.size === 1 ? [...named.values()][0] : null;
+  };
+
   function paramsOf(node) {
     return [...(node.parameters ?? [])].map((p) => ({
       name: p.name.getText(),
@@ -151,8 +173,8 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
       rest: !!p.dotDotDotToken,
       default: p.initializer ? evalNode(p.initializer) : undefined,
       decorators: decoratorsOf(p),
-      resolved: p.type ? declFileOf(typeIdentifier(p.type) ?? p.type) : null,
-      type_ref: p.type ? typeRefAt(p.type) : null,
+      resolved: p.type ? resolvedOf(p.type) : null,
+      ...(p.type ? typeRefAt(p.type) : { type_ref: null }),
     }));
   }
 
@@ -229,7 +251,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
       // method: every un-annotated method resolved to itself. For a PROPERTY the same question
       // is exactly right - `items$ = new BehaviorSubject<Item[]>([])` has no annotation and a fully
       // known type, and refusing it left every RxJS-style member unresolvable.
-      type_ref: m.type ? typeRefAt(m.type) : kind === 'property' ? typeRefAt(m) : null,
+      ...(m.type ? typeRefAt(m.type) : kind === 'property' ? typeRefAt(m) : { type_ref: null }),
       value,
       params: isSignature ? paramsOf(m) : fnValued ? paramsOf(initializer) : undefined,
       decorators,
