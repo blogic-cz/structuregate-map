@@ -68,9 +68,24 @@ $script:NuGetPackages = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES }
 # WHAT IS UNDER TEST. `structuregate.dll` is what a build just produced, so it is preferred: a published
 # exe can be older than the source being tested, and a test that silently checks last week's binary is
 # worse than no test. PSGATE_TEST_GATE overrides for a one-off (e.g. testing a deployed copy).
+#
+# THE READYTORUN COPY (`out\r2r\`, the csproj's `PublishGateR2R`) is the same build precompiled - Roslyn and ScriptDom
+# not JIT-compiled again on every run - and is taken only while it is at least as new as the dll AND the rust library
+# beside it: a build that did not refresh it (`-p:SkipTests=true`, then this script by hand) tests the dll.
 function Get-GateInvocation {
     if ($env:PSGATE_TEST_GATE) { return @{ File = $env:PSGATE_TEST_GATE; Lead = @() } }
     $dll = Join-Path $script:Out 'structuregate.dll'
+    $r2r = Join-Path (Join-Path $script:Out 'r2r') 'structuregate.dll'
+    if ((Test-Path $dll) -and (Test-Path $r2r)) {
+        $fresh = (Get-Item $r2r).LastWriteTimeUtc -ge (Get-Item $dll).LastWriteTimeUtc
+        foreach ($native in @('libfbtcore.so', 'fbtcore.dll', 'libfbtcore.dylib')) {
+            $built = Join-Path $script:Out $native
+            if (-not (Test-Path $built)) { continue }
+            $copied = Join-Path (Join-Path $script:Out 'r2r') $native
+            if (-not (Test-Path $copied) -or (Get-Item $copied).LastWriteTimeUtc -lt (Get-Item $built).LastWriteTimeUtc) { $fresh = $false }
+        }
+        if ($fresh) { return @{ File = 'dotnet'; Lead = @($r2r) } }
+    }
     if (Test-Path $dll) { return @{ File = 'dotnet'; Lead = @($dll) } }
     $exe = Join-Path $script:Out 'win-x64\publish\structuregate.exe'
     if (Test-Path $exe) { return @{ File = $exe; Lead = @() } }
@@ -207,12 +222,13 @@ function Test-Case([string]$Name, [scriptblock]$Body) {
     }
 }
 
-# MAPS A CASE WAS HANDED FROM A CACHE (`New-TsRowsDb -Shared`), by full database path: the tree each describes and that
+# MAPS A CASE WAS HANDED FROM A CACHE (`Get-SharedMap`, harness/SharedMap.ps1), by full database path: the tree each describes and that
 # tree's digest when the map was made. Such a map is only READ - `Invoke-Gate` refuses another `--map-sqlite` run over it,
 # and `Test-Case` fails a case whose tree changed under it - because the next case is handed the same map.
 $script:FrozenMaps = @{}
 # Folders a suite keeps for the whole process (a cache of maps), removed by `Run-Tests.ps1` once its suites ran.
 $script:RunScratch = New-Object System.Collections.ArrayList
+. (Join-Path $PSScriptRoot 'harness/SharedMap.ps1')
 
 # A digest of every file under a tree, its path and its bytes, files under `$Skip` (a database and its -wal/-shm)
 # left out, `$Salt` mixed in. Folders are walked in name order, so the same tree always digests the same.

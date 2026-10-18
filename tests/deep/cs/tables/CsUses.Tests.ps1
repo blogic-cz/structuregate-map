@@ -45,16 +45,16 @@ function Get-CsUsesLines([string]$Db, [string]$Where) {
 
 Test-Case 'csuses: a property written, read in a lambda and in an expression tree is a refs row each time' {
     $tree = Use-Tree @{ 'Item.cs' = $script:CsUsesSource; 'Demo.csproj' = $script:CsUsesProject }
-    $db = Join-Path $tree 'map.sqlite'
-    Invoke-Gate --root $tree --ext .cs --map-sqlite $db | Out-Null
+    # Only READ, so the map may be the other case's (`Get-SharedMap`, harness/SharedMap.ps1).
+    $db = (Get-SharedMap $tree @('--root', $tree, '--ext', '.cs', '--map-sqlite', (Join-Path $tree 'map.sqlite'))).Db
     $bound = (Get-CsUsesLines $db "symbol = 'Demo.Item.Start'") -join ' '
     Assert-Equal $bound 'L12:item.Start:property L15:m.Start:property L18:x.Start:property L19:x.Start:property L21:Start:property' 'the bound uses'
 }
 
 Test-Case 'csuses: a use the compiler could not bind is still a row - unbound, by the name it is written as' {
     $tree = Use-Tree @{ 'Item.cs' = $script:CsUsesSource; 'Demo.csproj' = $script:CsUsesProject }
-    $db = Join-Path $tree 'map.sqlite'
-    Invoke-Gate --root $tree --ext .cs --map-sqlite $db | Out-Null
+    # Only READ, so the map may be the other case's (`Get-SharedMap`, harness/SharedMap.ps1).
+    $db = (Get-SharedMap $tree @('--root', $tree, '--ext', '.cs', '--map-sqlite', (Join-Path $tree 'map.sqlite'))).Db
     # `b.Missing` does not exist, so `y` has no type and `y.Start` binds to nothing: a MAYBE, never a guess.
     $unbound = (Get-CsUsesLines $db "symbol = ''") -join ' '
     Assert-Equal $unbound 'L22:y.Start:unbound' 'the unbound use'

@@ -10,11 +10,15 @@
 $script:CsRowsPython = [bool]$script:Python
 if (-not $script:CsRowsPython) { Write-Host '    (no python on this machine - the deep C# map cases are not run)' }
 
-# Build the deep map over a throwaway tree and hand back the database path.
-function New-CsDb([hashtable]$Files, [string]$Ext = '.cs') {
+# Build the deep map over a throwaway tree and hand back the database path. `-Shared` is a case's PROMISE that it only
+# READS this map - never edits the tree, maps it again or writes the database - so it may come from the harness's cache
+# (`Get-SharedMap`, harness/SharedMap.ps1), another case's copy restored at the path it was built at.
+function New-CsDb([hashtable]$Files, [string]$Ext = '.cs', [switch]$Shared) {
     $tree = Use-Tree $Files
     $db = Join-Path $tree 'map.sqlite'
-    $result = Invoke-Gate --root $tree --ext $Ext --map --map-out (Join-Path $tree 'm.json') --map-sqlite $db
+    $map = @('--root', $tree, '--ext', $Ext, '--map', '--map-out', (Join-Path $tree 'm.json'), '--map-sqlite', $db)
+    if ($Shared) { $made = Get-SharedMap $tree $map; $db = $made.Db; $result = $made.Result }
+    else { $result = Invoke-Gate $map }
     Assert-Exit $result 0
     if (-not (Test-Path $db)) { throw "no database was written. Output:`n$($result.Text)" }
     return $db
@@ -47,11 +51,11 @@ function New-MixedTree {
 # A tree with a real .csproj in it. That is all a compilation needs here: no `bin`, no restore, no MSBuild -
 # the framework reference pack on this machine is enough to bind `string`, `object` and everything the file
 # declares itself.
-function New-ProjectTree([hashtable]$Files) {
+function New-ProjectTree([hashtable]$Files, [switch]$Shared) {
     $project = @'
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
 </Project>
 '@
-    return New-CsDb ($Files + @{ 'Demo.csproj' = $project })
+    return New-CsDb ($Files + @{ 'Demo.csproj' = $project }) -Shared:$Shared
 }

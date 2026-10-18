@@ -41,10 +41,13 @@ public class Rules
 }
 '@
 
-function New-CsCasesDb([hashtable]$Files) {
+# `-Shared`: the case only READS the map, so it may be another case's (`Get-SharedMap`, harness/SharedMap.ps1).
+function New-CsCasesDb([hashtable]$Files, [switch]$Shared) {
     $tree = Use-Tree $Files
     $db = Join-Path $tree 'map.sqlite'
-    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    $map = @('--root', $tree, '--ext', '.cs', '--map-sqlite', $db)
+    if ($Shared) { $made = Get-SharedMap $tree $map; Assert-Exit $made.Result 0; return $made.Db }
+    Assert-Exit (Invoke-Gate $map) 0
     return $db
 }
 
@@ -64,7 +67,7 @@ function Get-CsCasesMember([string]$Db, [string]$Name) {
 }
 
 Test-Case 'cscases: a bound enum carries every member with the number the compiler folded' {
-    $db = New-CsCasesDb @{ 'Ids.cs' = $script:CsCasesSource; 'Demo.csproj' = $script:CsCasesProject }
+    $db = New-CsCasesDb -Shared @{ 'Ids.cs' = $script:CsCasesSource; 'Demo.csproj' = $script:CsCasesProject }
     Assert-Equal (Get-CsCasesValue $db "SELECT count(*) FROM enums") '1' 'enums rows'
     Assert-Equal (Get-CsCasesValue $db "SELECT symbol || '|' || exported || '|' || underlying || '|' || (owner_file = file) FROM enums") 'Demo.Kinds|1|int|1' 'the enum row'
     Assert-Equal (Get-CsCasesValue $db "SELECT (SELECT count(*) FROM enums__members j WHERE j.owner = enums.id AND j.parent = 0) FROM enums") '6' 'members'
@@ -88,7 +91,7 @@ Test-Case 'cscases: without a model a member is numbered only where the source a
 }
 
 Test-Case 'cscases: each case section is a switch_cases row - labels, the members they bind, their numbers, the guard' {
-    $db = New-CsCasesDb @{ 'Ids.cs' = $script:CsCasesSource; 'Demo.csproj' = $script:CsCasesProject }
+    $db = New-CsCasesDb -Shared @{ 'Ids.cs' = $script:CsCasesSource; 'Demo.csproj' = $script:CsCasesProject }
     Assert-Equal (Get-CsCasesValue $db "SELECT count(*) FROM switch_cases WHERE kind = 'case'") '3' 'case sections'
     # TWO LABELS, ONE SECTION: `case Extra: case Next:` share their statements, so they share their row.
     $both = "SELECT (SELECT count(*) FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = 0) || '|' || (SELECT j.value FROM switch_cases__labels j WHERE j.owner = switch_cases.id AND j.parent = 0 AND j.ord = 1) || '|' || (SELECT j.value FROM switch_cases__label_symbols j WHERE j.owner = switch_cases.id AND j.parent = 0 AND j.ord = 0) || '|' || (SELECT j.value FROM switch_cases__label_values j WHERE j.owner = switch_cases.id AND j.parent = 0 AND j.ord = 0) || ',' || (SELECT j.value FROM switch_cases__label_values j WHERE j.owner = switch_cases.id AND j.parent = 0 AND j.ord = 1) FROM switch_cases WHERE line = 9"
@@ -102,7 +105,7 @@ Test-Case 'cscases: each case section is a switch_cases row - labels, the member
 }
 
 Test-Case 'cscases: each switch-expression arm is a row, with what it evaluates to' {
-    $db = New-CsCasesDb @{ 'Ids.cs' = $script:CsCasesSource; 'Demo.csproj' = $script:CsCasesProject }
+    $db = New-CsCasesDb -Shared @{ 'Ids.cs' = $script:CsCasesSource; 'Demo.csproj' = $script:CsCasesProject }
     Assert-Equal (Get-CsCasesValue $db "SELECT count(*) FROM switch_cases WHERE kind = 'arm'") '3' 'arms'
     Assert-Equal (Get-CsCasesValue $db "SELECT (SELECT j.value FROM switch_cases__label_values j WHERE j.owner = switch_cases.id AND j.parent = 0 AND j.ord = 0) || '|' || result FROM switch_cases WHERE line = 20") '0|"base"' 'the first arm'
     Assert-Equal (Get-CsCasesValue $db "SELECT guard FROM switch_cases WHERE line = 21") 'true' 'the guarded arm'
@@ -123,7 +126,7 @@ Test-Case 'cscases: a re-read file REPLACES its enum and case rows' {
 # WHAT A CASE DOES, joined to the case: a row inside a section or an arm carries `case` = that switch_cases row, as the
 # TypeScript half's rows do. A bare `returns` row of `return 1;` said the method returns 1, full stop.
 Test-Case 'cscases: a row inside a case section or an arm carries the case it sits in' {
-    $db = New-CsCasesDb @{ 'Ids.cs' = $script:CsCasesSource; 'Demo.csproj' = $script:CsCasesProject }
+    $db = New-CsCasesDb -Shared @{ 'Ids.cs' = $script:CsCasesSource; 'Demo.csproj' = $script:CsCasesProject }
     $returnIn = "SELECT s.line || ':' || s.kind FROM returns r JOIN switch_cases s ON s.id = r.""case"" WHERE r.line = "
     Assert-Equal (Get-CsCasesValue $db ($returnIn + '11')) '9:case' 'return 1 sits in the Extra/Next section'
     Assert-Equal (Get-CsCasesValue $db ($returnIn + '13')) '12:case' 'return 2 sits in the guarded section'

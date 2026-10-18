@@ -35,12 +35,14 @@ test around an internal method passes while all of that regresses. (The rust uni
   `Assert-Line`, `Assert-NoLine`, `Assert-Equal`; the TypeScript compiler helpers (`Get-TsModules`, …).
 - A suite that throws OUTSIDE a case is one failure, and the suites after it still run.
 
-**A read-only TypeScript map is built once per input per suite process**: `New-TsRowsDb <tree> -Shared` (and
-`Get-TsRowsSharedDb` under it, `deep/TsRows.Helpers.ps1`) keys a map on every file of the tree, every gate argument and
-the binary, and a later case with the same key gets a COPY of the first map's tree and database restored, file times
-kept, at the path it was built at - so `_meta`'s roots and the freshness note are what a fresh map gives. Pass `-Shared`
-only from a case that never edits its tree, maps it again or hands its database to `--map-sqlite`: the harness freezes such
-a map (`$script:FrozenMaps`) and fails the case that tries. `SGTEST_TSROWS_SHARED_LOG=<file>` logs each hit and miss.
+**A read-only deep map is built once per input per suite process**: `Get-SharedMap <tree> <gate args>`
+(`harness/SharedMap.ps1`, dot-sourced by `Assert.ps1`) keys a map on every file of the tree, every gate argument, every
+`STRUCTUREGATE_*` variable and the binary, and a later case with the same key gets a COPY of the first map's tree and
+database restored, file times kept, at the path it was built at - so `_meta`'s roots and the freshness note are what a
+fresh map gives. A suite opts in AT THE CALL SITE: `New-TsRowsDb -Shared`, `New-CsDb`/`New-ProjectTree -Shared`, the
+`-Shared` of a suite's own map helper (`New-SqlLinksDb`, `New-SqlMapDb`, `New-CsCasesDb`, ...). Only from a case that never
+edits its tree, maps it again, writes its database or builds in it: the harness freezes such a map (`$script:FrozenMaps`)
+and fails the case that tries. `SGTEST_SHARED_MAP_LOG=<file>` logs each hit and miss.
 
 **Suites are found RECURSIVELY and sorted by FILE NAME, not path**, then dot-sourced into one scope. A suite
 can move into a subfolder without changing the order; a suite helper named like a harness function replaces

@@ -34,10 +34,13 @@ namespace Demo.Models
 }
 '@
 
-function New-CsMembersDb {
+# `-Shared`: the case only READS the map, so it may be another case's (`Get-SharedMap`, harness/SharedMap.ps1).
+function New-CsMembersDb([switch]$Shared) {
     $tree = Use-Tree @{ 'App/Account.cs' = $script:CsMembersSource; 'App/App.csproj' = $script:CsMembersProject }
     $db = Join-Path $tree 'map.sqlite'
-    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    $map = @('--root', $tree, '--ext', '.cs', '--map-sqlite', $db)
+    if ($Shared) { $made = Get-SharedMap $tree $map; Assert-Exit $made.Result 0; return $made.Db }
+    Assert-Exit (Invoke-Gate $map) 0
     return $db
 }
 
@@ -54,7 +57,7 @@ function Assert-CsMembersRow([string]$Db, [string]$Sql, [string]$Expected, [stri
 }
 
 Test-Case 'csmembers: every member of a type is a row, and joins to its uses by symbol' {
-    $db = New-CsMembersDb
+    $db = New-CsMembersDb -Shared
     $members = "SELECT 'v=' || m.name || '|' || m.kind || '|' || m.symbol || '|' || m.type || '|' || m.visibility || '|' || $(Get-NodeRootListSql 'members__accessors' 'm.id' ', ') FROM members m JOIN files f ON f.id = m.file WHERE f.lang = 'csharp'"
     Assert-CsMembersRow $db $members 'Reference|property|Demo.Models.Account.Reference|string|public|["get", "private set"]' 'a property'
     Assert-CsMembersRow $db $members 'total|field|Demo.Models.Account.total|int|private|[]' 'the second declarator of a field'
@@ -65,7 +68,7 @@ Test-Case 'csmembers: every member of a type is a row, and joins to its uses by 
 }
 
 Test-Case 'csmembers: every local a body declares is a row, and every comment, with where it sits' {
-    $db = New-CsMembersDb
+    $db = New-CsMembersDb -Shared
     $locals = "SELECT 'v=' || l.name || '|' || l.declared || '|' || l.type || '|' || l.func FROM locals l JOIN files f ON f.id = l.file WHERE f.lang = 'csharp'"
     Assert-CsMembersRow $db $locals 'reference|local|string|Run' 'a declared variable, its var resolved'
     Assert-CsMembersRow $db $locals 'c|foreach|char|Run' 'a foreach variable'

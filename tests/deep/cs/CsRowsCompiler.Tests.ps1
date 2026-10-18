@@ -169,7 +169,7 @@ if ($script:CsRowsPython) {
 Test-Case 'folded: an interpolated string is followed to its operands, across files' {
     # `GetConstantValue` answers only for compile-time constants, and a `static readonly` is not one - so
     # the row that somebody looking for this path would have found came back empty.
-    $db = New-ProjectTree @{
+    $db = New-ProjectTree -Shared @{
         'Paths.cs' = Get-FoldingSample
         'Roots.cs' = 'namespace Demo; public static class Roots { public static readonly string Data = "/data"; }'
     }
@@ -183,7 +183,7 @@ Test-Case 'folded: an interpolated string is followed to its operands, across fi
 
 Test-Case 'folded: a piece that cannot be known folds to NOTHING, not to half a path' {
     # Half a path is worse than none, because it looks like a path.
-    $db = New-ProjectTree @{
+    $db = New-ProjectTree -Shared @{
         'Paths.cs' = Get-FoldingSample
         'Roots.cs' = 'namespace Demo; public static class Roots { public static readonly string Data = "/data"; }'
     }
@@ -191,7 +191,7 @@ Test-Case 'folded: a piece that cannot be known folds to NOTHING, not to half a 
 }
 
 Test-Case 'enum: a member is a NAME, never the number it happens to be' {
-    $db = New-ProjectTree @{
+    $db = New-ProjectTree -Shared @{
         'Paths.cs' = Get-FoldingSample
         'Roots.cs' = 'namespace Demo; public static class Roots { public static readonly string Data = "/data"; }'
     }
@@ -212,7 +212,7 @@ Test-Case 'enum: a number that names no member says so, in a form nothing can mi
 }
 
 Test-Case 'folded: a value that is not constant still says what it BINDS to' {
-    $db = New-ProjectTree @{
+    $db = New-ProjectTree -Shared @{
         'Paths.cs' = Get-FoldingSample
         'Roots.cs' = 'namespace Demo; public static class Roots { public static readonly string Data = "/data"; }'
     }
@@ -222,7 +222,7 @@ Test-Case 'folded: a value that is not constant still says what it BINDS to' {
 Test-Case 'refs: a reference to something THIS codebase declares is a row, resolved' {
     # `reads` is what the text says. This is what it means - the declaration it binds to - so "who touches
     # this field" is a query rather than a grep across two spellings of one name.
-    $db = New-ProjectTree @{
+    $db = New-ProjectTree -Shared @{
         'Paths.cs' = Get-FoldingSample
         'Roots.cs' = 'namespace Demo; public static class Roots { public static readonly string Data = "/data"; }'
     }

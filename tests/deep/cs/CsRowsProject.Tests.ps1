@@ -38,14 +38,14 @@ if ($script:CsRowsPython) {
 Test-Case 'objects: an array, a tuple and an initializer are CONSTRUCTS with their type and their slots' {
     # "What is this thing configured with" is a question about the construct, and the construct had no row:
     # an initializer was one assignment per line with no sense of the object they belong to.
-    $db = New-ProjectTree @{ 'Build.cs' = Get-ConstructSample }
+    $db = New-ProjectTree -Shared @{ 'Build.cs' = Get-ConstructSample }
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM objects WHERE kind = 'array' AND type = 'string[]' AND slots = 2") '1' 'the array'
     Assert-Line (Invoke-CsQ $db --sql "SELECT type FROM objects WHERE kind = 'tuple'") '(string code, int count)'
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM objects WHERE kind = 'initializer' AND type = 'Demo.Options'") '1' 'the initializer, resolved'
 }
 
 Test-Case 'objects: a slot carries the member name and what the value folds to' {
-    $db = New-ProjectTree @{ 'Build.cs' = Get-ConstructSample }
+    $db = New-ProjectTree -Shared @{ 'Build.cs' = Get-ConstructSample }
     $r = Invoke-CsQ $db --sql "SELECT name, const, const_kind FROM arguments a JOIN objects o ON o.id = a.object WHERE o.kind = 'initializer' ORDER BY a.position"
     Assert-Line $r 'Region'
     Assert-Line $r 'US'
@@ -58,7 +58,7 @@ Test-Case 'objects: a slot carries the member name and what the value folds to' 
 Test-Case 'objects: an initializer slot is NOT also an assignment row' {
     # The same fact under two names is two places to keep right. The slot row is the one that says which
     # object it belongs to, so the assignment row stands down.
-    $db = New-ProjectTree @{ 'Build.cs' = Get-ConstructSample }
+    $db = New-ProjectTree -Shared @{ 'Build.cs' = Get-ConstructSample }
     # `kind = 'assign'` is what an initializer's `Region = Us` would have produced. The row that remains is
     # the PROPERTY's own default (`kind = 'property'`), which is a different fact about a different line.
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM assignments WHERE target = 'Region' AND kind = 'assign'") '0' 'no duplicate assignment row'

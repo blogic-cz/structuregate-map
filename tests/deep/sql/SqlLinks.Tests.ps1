@@ -134,10 +134,13 @@ namespace Demo
     }
 }
 
-function New-SqlLinksDb([hashtable]$Files) {
+# `-Shared`: the case only READS the map, so it may be another case's (`Get-SharedMap`, harness/SharedMap.ps1).
+function New-SqlLinksDb([hashtable]$Files, [switch]$Shared) {
     $tree = Use-Tree $Files
     $db = Join-Path $tree 'links.sqlite'
-    $run = Invoke-Gate --root $tree --ext '.cs,.sql' --sql-config (Join-Path $tree 'structuregate.sql.json') --map-sqlite $db
+    $map = @('--root', $tree, '--ext', '.cs,.sql', '--sql-config', (Join-Path $tree 'structuregate.sql.json'), '--map-sqlite', $db)
+    if ($Shared) { $made = Get-SharedMap $tree $map; $db = $made.Db; $run = $made.Result }
+    else { $run = Invoke-Gate $map }
     Assert-Exit $run 0
     return $db
 }
@@ -160,7 +163,7 @@ function Assert-SqlLinksRows([string[]]$Actual, [string[]]$Expected, [string]$Wh
 }
 
 Test-Case 'sqllinks: an interpolated string whose holes are values binds its tables' {
-    $db = New-SqlLinksDb (Get-SqlLinksTree)
+    $db = New-SqlLinksDb (Get-SqlLinksTree) -Shared
     Assert-SqlLinksRows (Get-SqlLinksText $db 'Purge') @(
         'delete|Sales.Drafts|bound|Main', 'delete|Sales.Notes|bound|Main') 'TOP, a quoted date and IN (...) are values'
     $detail = Get-SqlLinksRows $db "SELECT 'v=' || detail FROM sql_links WHERE func = 'Purge' AND name = 'Drafts'"
@@ -172,7 +175,7 @@ Test-Case 'sqllinks: an interpolated string whose holes are values binds its tab
 }
 
 Test-Case 'sqllinks: string.Format, a literal concatenation and a loop over literals are SQL text' {
-    $db = New-SqlLinksDb (Get-SqlLinksTree)
+    $db = New-SqlLinksDb (Get-SqlLinksTree) -Shared
     Assert-SqlLinksRows (Get-SqlLinksText $db 'ClearArchive') @('delete|Sales.PriceArchive|bound|Main') 'string.Format with no arguments'
     Assert-SqlLinksRows (Get-SqlLinksText $db 'ByTier') @('select|Sales.PriceArchive|bound|Main') 'a {0} in a value position'
     Assert-SqlLinksRows (Get-SqlLinksText $db 'Both') @('select|Sales.PriceArchive|bound|Main', 'select|Sales.Products|bound|Main') 'two literals joined'
@@ -182,7 +185,7 @@ Test-Case 'sqllinks: string.Format, a literal concatenation and a loop over lite
 }
 
 Test-Case 'sqllinks: nameof and const holes are their values, and a dynamic name beside known ones is partial' {
-    $db = New-SqlLinksDb (Get-SqlLinksTree)
+    $db = New-SqlLinksDb (Get-SqlLinksTree) -Shared
     Assert-SqlLinksRows (Get-SqlLinksText $db 'Folded') @('select|Sales.Products|bound|Main') 'nameof in the select list, a const table'
     Assert-SqlLinksRows (Get-SqlLinksText $db 'SchemaAndTable') @('select|Sales.PriceRules|bound|Main') 'a const schema and a const table'
     Assert-SqlLinksRows (Get-SqlLinksText $db 'Country') @('select|App.Countries|bound|Main') 'nameof holes and one value hole'
@@ -191,7 +194,7 @@ Test-Case 'sqllinks: nameof and const holes are their values, and a dynamic name
 }
 
 Test-Case 'sqllinks: a trigger dynamic SQL builds for each row of a VALUES list is dynamic, a name the list lacks is missing' {
-    $db = New-SqlLinksDb (Get-SqlLinksTree)
+    $db = New-SqlLinksDb (Get-SqlLinksTree) -Shared
     $triggers = Get-SqlLinksRows $db "SELECT 'v=' || name || '|' || status || '|' || database || '|' || detail FROM sql_links WHERE kind = 'ef_trigger' ORDER BY name"
     Assert-SqlLinksRows $triggers @(
         "Track_Accounts|dynamic|Main|created by dynamic SQL at Main/Triggers.sql:5 as 'Track_' + 'Accounts', a row of the list at Main/Triggers.sql:2",
@@ -200,7 +203,7 @@ Test-Case 'sqllinks: a trigger dynamic SQL builds for each row of a VALUES list 
 }
 
 Test-Case 'sqllinks: several databases fall to the default, a script outside every project is no candidate, and binds its own objects' {
-    $db = New-SqlLinksDb (Get-SqlLinksTree)
+    $db = New-SqlLinksDb (Get-SqlLinksTree) -Shared
     Assert-SqlLinksRows (Get-SqlLinksRows $db "SELECT 'v=' || status || '|' || database || '|' || detail FROM sql_links WHERE func = 'Settings'") @(
         'bound|Main|default of Main, Other') 'the configured default decides'
     Assert-SqlLinksRows (Get-SqlLinksRows $db "SELECT 'v=' || status || '|' || database || '|' || detail FROM sql_links WHERE func = 'Notify'") @(
@@ -217,7 +220,7 @@ Test-Case 'sqllinks: several databases fall to the default, a script outside eve
 }
 
 Test-Case 'sqllinks: a mapping with no context attribute maps its table in each unattributedContexts database that has it' {
-    $db = New-SqlLinksDb (Get-SqlLinksTree)
+    $db = New-SqlLinksDb (Get-SqlLinksTree) -Shared
     Assert-SqlLinksRows (Get-SqlLinksRows $db "SELECT 'v=' || status || '|' || database FROM sql_links WHERE kind = 'ef_table' AND entity = 'Demo.Option' ORDER BY database") @(
         'bound|Main', 'bound|Other') 'Logs has no App.Options and gets no row'
     Assert-SqlLinksRows (Get-SqlLinksRows $db "SELECT 'v=' || database || '|' || member FROM sql_links WHERE kind = 'ef_column' AND entity = 'Demo.Option' ORDER BY database") @(
