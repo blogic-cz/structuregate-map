@@ -24,7 +24,7 @@ function declSite(d) {
   return { file: canonicalPath(sf.fileName), line: sf.getLineAndCharacterOfPosition(pos).line + 1 };
 }
 
-/** A type node -> the declaration it names, or null when the checker cannot name one. */
+/** A type node -> `{type_ref, type_refs?}`: the declaration(s) it names, `type_ref: null` when the checker names none. */
 export function makeTypeResolver(ts, checker) {
   /**
    * `{unwrapped}` - the innermost declared type reached by following wrappers that take EXACTLY ONE type
@@ -70,14 +70,8 @@ export function makeTypeResolver(ts, checker) {
     return { element: { name, ...where } };
   }
 
-  return (node) => {
-    let type;
-    try {
-      type = checker.getTypeAtLocation(node);
-    } catch {
-      return null;
-    }
-    if (!type) return null;
+  /** The declaration ONE type names, or null: an anonymous type, a primitive, `null` name none. */
+  function refOfType(type) {
     // AN ALIAS IS NAMED WHERE THE AUTHOR NAMED IT. `type Foo = {...}` used at a member reaches the
     // anonymous object type unless the alias symbol is asked for first, and the alias is what a reader is
     // looking for.
@@ -96,5 +90,42 @@ export function makeTypeResolver(ts, checker) {
       ...(elementOf(type) ?? {}),
       ...(unwrappedOf(type) ?? {}),
     };
+  }
+
+  /**
+   * A UNION NAMES WHAT ITS MEMBERS NAME (#88). `code: Codes | string` is a union type with no symbol of its own, so
+   * asking it alone named nothing and the parameter lost the in-tree type it accepts. Each member is asked instead;
+   * one that is a member of an enum (`Kind | undefined` flattens to `Kind.A | Kind.B | undefined`) is asked as its
+   * enum, so the enum is named once and not each member. The answers are deduplicated and sorted by place: the
+   * checker interns a union's members in the order they are first asked for, which a full and a partial run do not
+   * share. A union whose own alias names it (`type Id = Codes | string`) is that alias, as before.
+   */
+  function refsOfUnion(type) {
+    const out = new Map();
+    for (const part of type.types) {
+      const whole = (part.flags & ts.TypeFlags.EnumLiteral) !== 0 ? checker.getBaseTypeOfLiteralType(part) : part;
+      const ref = refOfType(whole);
+      if (ref) out.set(`${ref.file}\u0000${ref.line}\u0000${ref.name}`, ref);
+    }
+    return [...out.values()].sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line
+      || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)));
+  }
+
+  /**
+   * `{type_ref}` - the ONE declaration the node's type names (a union with one such member, `Codes | null`,
+   * names it) - or `{type_ref: null, type_refs}` when a union names SEVERAL: picking one of `A | B` would claim
+   * the other is not accepted. `type_refs` is absent otherwise, so the two never repeat each other.
+   */
+  return (node) => {
+    let type;
+    try {
+      type = checker.getTypeAtLocation(node);
+    } catch {
+      return { type_ref: null };
+    }
+    if (!type) return { type_ref: null };
+    if (type.aliasSymbol || type.getSymbol() || !type.isUnion()) return { type_ref: refOfType(type) };
+    const refs = refsOfUnion(type);
+    return refs.length > 1 ? { type_ref: null, type_refs: refs } : { type_ref: refs[0] ?? null };
   };
 }

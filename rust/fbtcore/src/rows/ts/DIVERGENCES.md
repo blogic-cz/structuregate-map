@@ -125,3 +125,22 @@ A partial run is handed those nodes back and runs the rollup over them, so it ch
 `template_nodes.gate_chain/gate_depth` of rows it had not made. The rollup now runs after the orphans on every run.
 Tables that move: `template_nodes` `gate_chain`/`gate_depth` inside an orphan template, and through them `key_reach`
 only for a key an orphan template spells under a gate.
+
+**#51 - a rule that hides as a whole proves its class hides** (PROPOSED, not yet signed off; issue #89, `cssmap/collapse.rs`,
+no `rows` bump - `cssmap/` is derived, `NOT_SHAPING` in `rust/fbtcore/build.rs`): `style_rules.hides` was only `display: none`
+and `visibility: hidden|collapse`, so `.collapsed-x { height: 0; overflow: hidden }` and `.faded-x { opacity: 0;
+pointer-events: none }` gave no `class_hides` row and a class gate toggling them was no visibility condition (#30). Now
+decided over every declaration of ONE rule: `height: 0` or `max-height: 0` (a literal zero, bare or a length; not a
+percentage) WITH `overflow` / `overflow-y` `hidden|clip` (a two-value `overflow` by its second value), unless the rule also
+holds a `min-height` other than zero/`auto`, a vertical padding other than zero, or `display: inline|contents`; and
+`opacity: 0` (or `0%`) WITH `pointer-events: none`. `hides = 1` lands on the zero (`height`/`max-height`/`opacity`), never on
+the partner. Inside the rule the cascade holds (a later declaration wins unless the earlier is `!important` and it is
+not); a `$variable`, a Less `@variable` or a function is no literal - as a zero or partner it does not count, as a
+disqualifier it refuses. A rule nested as `&` plus classes, ids, attributes or pseudo-classes of the SAME element inherits
+the outer rule's partners and disqualifiers (its own win unless the outer one is `!important`); `&--x`, `& .x`, `&::before`,
+an `@media`/`@if`/mixin block and two separate rules are never joined. `media`/`context` are kept on the row as for any
+declaration. Not seen: keyboard focus and screen readers still reach a transparent element; padding or `min-height` from
+another rule. Tables that move: `style_rules.hides`, `class_hides` (new rows), and through `class_polarity` a class gate
+whose class only such a rule hides becomes a condition read as `!c` - `gate_values`/`gate_features` for it, and `key_reach`
+(`always_values`, `unreadable_values`, `always_branches`, `maybe_branches`, `branch_senses`, `paths`, `n_paths`) for keys
+under it or behind an edge it decides (#14, #37). No other table moves.
