@@ -43,6 +43,14 @@ function Invoke-DocFactsMap([string]$Tree) {
     return Invoke-Gate --root $Tree --ext '.cs,.sql' --map-sqlite $db --facts-config (Join-Path $Tree 'structuregate.facts.json')
 }
 
+# The map of a new `Get-DocFactsTree`, for a case that only READS it: it may be another case's (`Get-SharedMap`,
+# harness/SharedMap.ps1), restored at the path it was built at. Hands back the tree and the gate's result.
+function New-DocFactsSharedMap {
+    $tree = Use-Tree (Get-DocFactsTree)
+    return Get-SharedMap $tree @('--root', $tree, '--ext', '.cs,.sql', '--map-sqlite', (Join-Path $tree 'facts.sqlite'),
+        '--facts-config', (Join-Path $tree 'structuregate.facts.json'))
+}
+
 function Get-DocFactsRows([string]$Tree, [string]$Sql) {
     $r = Invoke-Gate --map-query (Join-Path $Tree 'facts.sqlite') --sql $Sql --width 0 --limit 0
     Assert-Exit $r 0
@@ -57,8 +65,9 @@ function Assert-DocFactsRow([string]$Tree, [string]$Sql, [string]$Expected, [str
 $script:DocFactsLinks = "SELECT 'v=' || l.facts || '|' || l.key || '|' || l.value || '|' || l.name || '|' || l.status FROM doc_links l"
 
 Test-Case 'docfacts: a document''s table is checked against a seeded column and an enum, both ways' {
-    $tree = Use-Tree (Get-DocFactsTree)
-    $run = Invoke-DocFactsMap $tree
+    $made = New-DocFactsSharedMap
+    $tree = $made.Tree
+    $run = $made.Result
     Assert-Exit $run 0
     Assert-Line $run 'the document facts: 4 row(s) in doc_facts; doc_links 2 bound, 2 missing in code, 3 missing in doc'
     Assert-DocFactsRow $tree "SELECT 'v=' || facts || '|' || subsection || '|' || key || '|' || label || '|' || file || '|' || line FROM doc_facts" 'codes|Software line|250|Ghost|docs/guide.md|17' 'a fact of the second table, its bold paragraph and its line'
@@ -70,8 +79,9 @@ Test-Case 'docfacts: a document''s table is checked against a seeded column and 
 }
 
 Test-Case 'docfacts: a seeded table is a typed view, and a type declared twice is listed with its members' {
-    $tree = Use-Tree (Get-DocFactsTree)
-    Assert-Exit (Invoke-DocFactsMap $tree) 0
+    $made = New-DocFactsSharedMap
+    Assert-Exit $made.Result 0
+    $tree = $made.Tree
     Assert-DocFactsRow $tree "SELECT 'v=' || ProductID || '|' || Name FROM seed_Sales_Products" '103|Old' 'a column read by name, not by position'
     Assert-DocFactsRow $tree "SELECT 'v=' || name || '|' || places || '|' || members_differ || '|' || detail FROM duplicate_types" 'PlanIDs|2|1|{Basic=101, Plus=102} at App/Ids.cs:1; {Basic=101} at App/Copy.cs:1' 'two copies that disagree'
 }

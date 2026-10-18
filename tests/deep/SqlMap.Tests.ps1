@@ -57,10 +57,13 @@ function Get-SqlMapTree {
     }
 }
 
-function New-SqlMapDb([hashtable]$Files) {
+# `-Shared`: the case only READS the map, so it may be another case's (`Get-SharedMap`, harness/SharedMap.ps1).
+function New-SqlMapDb([hashtable]$Files, [switch]$Shared) {
     $tree = Use-Tree $Files
     $db = Join-Path $tree 'sql.sqlite'
-    $run = Invoke-Gate --root $tree --ext '.cs,.sql' --sql-config (Join-Path $tree 'structuregate.sql.json') --map-sqlite $db
+    $map = @('--root', $tree, '--ext', '.cs,.sql', '--sql-config', (Join-Path $tree 'structuregate.sql.json'), '--map-sqlite', $db)
+    if ($Shared) { $made = Get-SharedMap $tree $map; $tree = $made.Tree; $db = $made.Db; $run = $made.Result }
+    else { $run = Invoke-Gate $map }
     Assert-Exit $run 0
     return [pscustomobject]@{ Tree = $tree; Db = $db; Run = $run }
 }
@@ -78,7 +81,7 @@ function Assert-SqlMapRow([string]$Db, [string]$Sql, [string]$Expected, [string]
 }
 
 Test-Case 'sqlmap: a sqlproj is parsed into objects, columns, keys and what each file is to the build' {
-    $db = (New-SqlMapDb (Get-SqlMapTree)).Db
+    $db = (New-SqlMapDb (Get-SqlMapTree) -Shared).Db
     Assert-SqlMapRow $db "SELECT 'v=' || database || '|' || kind || '|' || schema || '.' || name FROM sql_objects" 'Main|table|App.Accounts' 'a table'
     Assert-SqlMapRow $db "SELECT 'v=' || database || '|' || kind || '|' || schema || '.' || name FROM sql_objects" 'Other|table|App.Accounts' 'the same table in the other database'
     Assert-SqlMapRow $db "SELECT 'v=' || database || '|' || kind || '|' || schema || '.' || name FROM sql_objects" 'Main|trigger|App.TrigOrders' 'a trigger'
@@ -93,7 +96,7 @@ Test-Case 'sqlmap: a sqlproj is parsed into objects, columns, keys and what each
 }
 
 Test-Case 'sqlmap: what SQL touches - a trigger through its alias and never `inserted`, a seed script by column, a deploy script by the files it runs' {
-    $db = (New-SqlMapDb (Get-SqlMapTree)).Db
+    $db = (New-SqlMapDb (Get-SqlMapTree) -Shared).Db
     $refs = Get-SqlMapRows $db "SELECT 'v=' || r.action || '|' || r.schema || '.' || r.name || '|' || r.column FROM sql_refs r"
     if ($refs -notcontains 'update|App.Orders|AccountID') { throw "the aliased UPDATE target is App.Orders:`n$($refs -join "`n")" }
     if ($refs -like '*inserted*') { throw "`inserted` is no table:`n$($refs -join "`n")" }
@@ -104,7 +107,7 @@ Test-Case 'sqlmap: what SQL touches - a trigger through its alias and never `ins
 }
 
 Test-Case 'sqlmap: C# reaches the database - EF by its context, Dapper by its connection, and nothing is guessed' {
-    $db = (New-SqlMapDb (Get-SqlMapTree)).Db
+    $db = (New-SqlMapDb (Get-SqlMapTree) -Shared).Db
     $ef = "SELECT 'v=' || l.kind || '|' || l.entity || '|' || l.status || '|' || l.database FROM sql_links l WHERE l.kind = 'ef_table'"
     # Both databases hold App.Accounts; the mapping class names MainContext in typeof(...), and Main is its database.
     Assert-SqlMapRow $db $ef 'ef_table|Demo.Account|bound|Main' 'the context decides'

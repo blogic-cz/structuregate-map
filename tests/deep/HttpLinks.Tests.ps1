@@ -91,15 +91,20 @@ function Get-HttpLinksRows([string]$Tree, [string]$Sql) {
 
 if ($script:HttpLinksModules) {
 
-# A tree per case: the harness removes a case's trees when it ends.
-function Get-HttpLinksTree {
+# A tree per case: the harness removes a case's trees when it ends. `-Shared`: the case only READS the map, so it may be
+# another case's (`Get-SharedMap`, harness/SharedMap.ps1), restored at the path it was built at.
+function Get-HttpLinksTree([switch]$Shared) {
     $tree = New-HttpLinksTree
-    $script:HttpLinksRun = Invoke-HttpLinksMap $tree
-    return $tree
+    if (-not $Shared) { $script:HttpLinksRun = Invoke-HttpLinksMap $tree; return $tree }
+    $made = Get-SharedMap $tree @('--root', $tree, '--ext', '.cs,.ts', '--map-sqlite', (Join-Path $tree 'map.sqlite'),
+        '--ts-node-modules', $script:HttpLinksModules)
+    Assert-Exit $made.Result 0
+    $script:HttpLinksRun = $made.Result
+    return $made.Tree
 }
 
 Test-Case 'httplinks: a C# endpoint carries its class route, constants folded and tokens replaced' {
-    $tree = Get-HttpLinksTree
+    $tree = Get-HttpLinksTree -Shared
     $r = Get-HttpLinksRows $tree "SELECT 'ep=' || verb || '|' || template || '|' || cls || '.' || method AS e FROM http_endpoints"
     Assert-Line $r 'ep=POST|api/calculations/save-calculation|CalculationController.Save'
     Assert-Line $r 'ep=GET|api/calculations/{id}|CalculationController.Get'
@@ -110,7 +115,7 @@ Test-Case 'httplinks: a C# endpoint carries its class route, constants folded an
 }
 
 Test-Case 'httplinks: a call through a wrapper and a direct call each reach their endpoint, and the wrapper itself is no call' {
-    $tree = Get-HttpLinksTree
+    $tree = Get-HttpLinksTree -Shared
     $r = Get-HttpLinksRows $tree ("SELECT 'link=' || h.verb || '|' || m.name || '->' || e.cls || '.' || e.method || '|' || l.how AS x " +
         "FROM http_links l JOIN http_calls h ON h.id = l.call JOIN http_endpoints e ON e.id = l.endpoint JOIN members m ON m.id = h.member")
     Assert-Line $r 'link=POST|save->CalculationController.Save|exact'

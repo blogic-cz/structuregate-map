@@ -227,7 +227,7 @@ function New-TsRowsWorkspace([hashtable]$Extra = @{}) {
 # The deep map over a tree, with the compiler this half has to borrow and the application knowledge it
 # cannot derive. Hands back the database path, the gate's result and the tree the map describes.
 # `-Shared` is a case's PROMISE that it only READS this map: it never maps the tree again, never edits it, never
-# hands the database to another `--map-sqlite` run. Such a map may come from `Get-TsRowsSharedDb`'s cache.
+# hands the database to another `--map-sqlite` run. Such a map may come from `Get-SharedMap`'s cache.
 function New-TsRowsDb([string]$Tree, [switch]$Shared) {
     $db = Join-Path $Tree 'map.sqlite'
     $config = Join-Path $Tree 'structuregate.ts.json'
@@ -237,67 +237,10 @@ function New-TsRowsDb([string]$Tree, [switch]$Shared) {
     return [pscustomobject]@{ Db = $db; Result = (Invoke-Gate $gateArgs); Tree = $Tree }
 }
 
-# ONE MAP PER INPUT, PER SUITE PROCESS. A deep map of the smallest fixture is ~1.6 s of node and TypeScript startup, and
-# most read-only cases map the very same tree. The key is the WHOLE input: every file of the tree on disk (path and
-# bytes), every gate argument with the tree's own path taken out, and the binary under test - anything different maps
-# afresh. A hit RESTORES the first map's snapshot (tree, database and `.fbt`, every file time kept) at the SAME path
-# that map was built at, so `_meta`'s roots and the freshness check see exactly what the first case saw; the case's own
-# tree (identical bytes) is deleted, so a case that read it after all fails instead of reading a tree the map is not
-# of. That path is free only once the earlier case passed and its tree was removed: otherwise this maps afresh. Every
-# map handed out here is FROZEN (`$script:FrozenMaps`, Assert.ps1): another `--map-sqlite` run over it throws, and
-# a tree that changed under it fails the case at its end. Kept in memory and in one TEMP folder per process, never across runs.
+# ONE MAP PER INPUT, PER SUITE PROCESS: the harness's `Get-SharedMap` (harness/SharedMap.ps1) - the key, the snapshot
+# restored at the path it was built at, and the freeze.
 function Get-TsRowsSharedDb([string]$Tree, [object[]]$GateArgs) {
-    if ($null -eq $script:TsRowsShared) {
-        $dir = Join-Path ([System.IO.Path]::GetTempPath()) "sgtest-$([System.Guid]::NewGuid().ToString('N').Substring(0,12))"
-        [void](New-Item -ItemType Directory -Path $dir -Force)
-        $script:TsRowsShared = @{ Dir = $dir; Entries = @{} }
-        [void]$script:RunScratch.Add($dir)
-    }
-    # The database lives IN the tree, or the snapshot would not carry it.
-    $db = "$($GateArgs[[array]::IndexOf($GateArgs, '--map-sqlite') + 1])"
-    if (-not $db.StartsWith($Tree.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar)) { throw "a shared map's database must be inside its tree: $db" }
-    # A database already there would make this run an UPDATE, which is never shared.
-    if (Test-Path -LiteralPath $db) { throw "a shared map is built from nothing, and $db already exists - map it without -Shared" }
-    $gate = Get-GateInvocation
-    $spelled = @($GateArgs | ForEach-Object { "$_".Replace($Tree, '<tree>') }) -join "`n"
-    $key = Get-TreeDigest $Tree '' ($spelled + "`n" + $gate.File + "`n" + ($gate.Lead -join "`n"))
-    $entry = $script:TsRowsShared.Entries[$key]
-    if ($entry -and -not (Test-Path -LiteralPath $entry.Tree)) {
-        Copy-TsRowsTree $entry.Snap $entry.Tree
-        Register-Tree $entry.Tree
-        Remove-Item -LiteralPath $Tree -Recurse -Force
-        $made = [pscustomobject]@{ Db = $entry.Db; Tree = $entry.Tree
-            Result = [pscustomobject]@{ Exit = $entry.Result.Exit; Lines = @($entry.Result.Lines); Text = $entry.Result.Text } }
-        $digest = $entry.Digest
-        $how = 'hit'
-    } else {
-        $made = [pscustomobject]@{ Db = $db; Tree = $Tree; Result = (Invoke-Gate $GateArgs) }
-        $digest = Get-TreeDigest $Tree $made.Db
-        $how = 'fresh'
-        if (-not $entry) {
-            $snap = Join-Path $script:TsRowsShared.Dir $key
-            Copy-TsRowsTree $Tree $snap
-            $script:TsRowsShared.Entries[$key] = @{ Tree = $Tree; Db = $db; Snap = $snap; Result = $made.Result; Digest = $digest }
-            $how = 'miss'
-        }
-    }
-    $script:FrozenMaps[[System.IO.Path]::GetFullPath($made.Db)] = @{ Tree = $made.Tree; Digest = $digest }
-    if ($env:SGTEST_TSROWS_SHARED_LOG) {
-        [System.IO.File]::AppendAllText($env:SGTEST_TSROWS_SHARED_LOG, "$how`t$key`t$($made.Tree)`t$($script:CaseName)`n")
-    }
-    return $made
-}
-
-# A tree copied with every file's and folder's time kept: the freshness check compares them with the database's.
-function Copy-TsRowsTree([string]$From, [string]$To) {
-    [void](New-Item -ItemType Directory -Path $To -Force)
-    foreach ($item in @(Get-ChildItem -LiteralPath $From -Force)) {
-        $target = Join-Path $To $item.Name
-        if ($item.PSIsContainer) { Copy-TsRowsTree $item.FullName $target; continue }
-        [System.IO.File]::Copy($item.FullName, $target, $true)
-        [System.IO.File]::SetLastWriteTimeUtc($target, $item.LastWriteTimeUtc)
-    }
-    [System.IO.Directory]::SetLastWriteTimeUtc($To, (Get-Item -LiteralPath $From -Force).LastWriteTimeUtc)
+    return Get-SharedMap $Tree $GateArgs
 }
 
 # One SQL query through the exe's own lens, as rows of text.

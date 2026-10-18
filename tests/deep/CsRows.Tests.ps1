@@ -44,7 +44,7 @@ public sealed class Reader : IReader
 if ($script:CsRowsPython) {
 
 Test-Case 'csrows: a call is a row, with its callee, its scope and its own source' {
-    $db = New-CsDb @{ 'Reader.cs' = Get-CsSample }
+    $db = New-CsDb -Shared @{ 'Reader.cs' = Get-CsSample }
     $r = Invoke-CsQ $db --sql "SELECT callee, cls, func, args, kwargs, source FROM calls WHERE callee = 'Registry.Resolve'"
     Assert-Line $r 'Registry.Resolve'
     # SCOPE IS RECORDED, NOT INFERRED: the row says which type and which member it sits in.
@@ -57,12 +57,12 @@ Test-Case 'csrows: a call is a row, with its callee, its scope and its own sourc
 Test-Case 'csrows: `new Thing()` is a call OF Thing, the way a python class call is' {
     # Both languages answer "who constructs this" with one query, and a row that said `new` would join to
     # nothing.
-    $db = New-CsDb @{ 'Reader.cs' = Get-CsSample }
+    $db = New-CsDb -Shared @{ 'Reader.cs' = Get-CsSample }
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM calls WHERE callee = 'ArgumentException'") '1' 'the construction is a call of the type'
 }
 
 Test-Case 'csrows: an expression carries what it READS and CALLS, so a query never re-parses it' {
-    $db = New-CsDb @{ 'Reader.cs' = Get-CsSample }
+    $db = New-CsDb -Shared @{ 'Reader.cs' = Get-CsSample }
     # The READS COLUMN ALONE, because `calls` carries the same name for this expression: a case that asked
     # for both passed while the chain was not being read at all.
     $r = Invoke-CsQ $db --sql "SELECT $(Get-NodeRootListSql 'expressions__reads' 'expressions.id') AS reads FROM expressions WHERE source LIKE '%Registry.Resolve(%'"
@@ -87,7 +87,7 @@ Test-Case 'csrows: an expression''s shape is its WHOLE skeleton, every level and
 }
 
 Test-Case 'csrows: the tables a C# tree produces' {
-    $db = New-CsDb @{ 'Reader.cs' = Get-CsSample }
+    $db = New-CsDb -Shared @{ 'Reader.cs' = Get-CsSample }
     foreach ($pair in @(@('imports', 'System.Text'), @('consts', 'Prefix'), @('exports', 'Reader'),
                         @('classes', 'IReader'), @('functions', 'Load'), @('decorators', 'Route'),
                         @('parameters', 'size'), @('branches', 'if'), @('raises', 'ArgumentException'),
@@ -104,7 +104,7 @@ Test-Case 'csrows: the tables a C# tree produces' {
 Test-Case 'csrows: a static readonly field reads the constant it is built from' {
     # `static readonly` is how C# writes what python writes as a module-level capital name. Without the row,
     # a constant used only to build another one looks dead.
-    $db = New-CsDb @{ 'Reader.cs' = Get-CsSample }
+    $db = New-CsDb -Shared @{ 'Reader.cs' = Get-CsSample }
     $r = Invoke-CsQ $db --sql "SELECT $(Get-NodeRootListSql 'consts__reads' 'consts.id') AS reads FROM consts WHERE name = 'Root'"
     Assert-Line $r 'Prefix'
     # AND THE CHAIN IT IS BUILT WITH, written out: `Defaults.Suffix` is a read of `Defaults` and of
@@ -113,7 +113,7 @@ Test-Case 'csrows: a static readonly field reads the constant it is built from' 
 }
 
 Test-Case 'csrows: the three ways of writing a using are told apart by kind' {
-    $db = New-CsDb @{ 'Reader.cs' = Get-CsSample }
+    $db = New-CsDb -Shared @{ 'Reader.cs' = Get-CsSample }
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM imports WHERE kind = 'static' AND module = 'System.Math'") '1' 'a using static'
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM imports WHERE kind = 'alias' AND alias = 'Shorthand'") '1' 'an alias'
 }
@@ -169,12 +169,20 @@ function Invoke-MixedMap([string]$Tree) {
         --map-sqlite (Join-Path $Tree 'map.sqlite')
 }
 
+# The same map of a new `New-MixedTree`, for a case that only READS it: it may be another case's (`Get-SharedMap`,
+# harness/SharedMap.ps1), restored at the path it was built at. Hands back the database.
+function New-MixedSharedDb {
+    $tree = New-MixedTree
+    $made = Get-SharedMap $tree @('--root', $tree, '--ext', '.py,.cs', '--map', '--map-out', (Join-Path $tree 'm.json'),
+        '--map-sqlite', (Join-Path $tree 'map.sqlite'))
+    Assert-Exit $made.Result 0
+    return $made.Db
+}
+
 if ($script:CsRowsPython) {
 
 Test-Case 'mixed: one database holds both languages and each file says which half wrote it' {
-    $tree = New-MixedTree
-    Assert-Exit (Invoke-MixedMap $tree) 0
-    $db = Join-Path $tree 'map.sqlite'
+    $db = New-MixedSharedDb
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM files WHERE lang = 'python'") '2' 'the python files'
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM files WHERE lang = 'csharp'") '2' 'the C# files'
 }
@@ -182,9 +190,7 @@ Test-Case 'mixed: one database holds both languages and each file says which hal
 Test-Case 'mixed: the C# half does not take the python rows with it' {
     # Unscoped, the second half reads the first half's files as deleted and drops every row it wrote - and
     # a run that mapped both languages ends with a database holding one.
-    $tree = New-MixedTree
-    Assert-Exit (Invoke-MixedMap $tree) 0
-    $db = Join-Path $tree 'map.sqlite'
+    $db = New-MixedSharedDb
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM consts WHERE name = 'TOTAL'") '1' 'the python const survived'
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM calls WHERE callee = 'helper.run'") '1' 'the python call survived'
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM functions WHERE name = 'Go'") '1' 'the C# member is there too'
@@ -193,9 +199,7 @@ Test-Case 'mixed: the C# half does not take the python rows with it' {
 Test-Case 'mixed: no row id is handed out twice across the two halves' {
     # The ids are continued from what the database recorded, not restarted per half: two rows sharing one id
     # is a join that silently pulls the wrong row.
-    $tree = New-MixedTree
-    Assert-Exit (Invoke-MixedMap $tree) 0
-    $db = Join-Path $tree 'map.sqlite'
+    $db = New-MixedSharedDb
     Assert-Equal (Get-CsScalar $db 'SELECT count(*) FROM (SELECT id FROM files GROUP BY id HAVING count(*) > 1)') '0' 'no duplicate file ids'
     Assert-Equal (Get-CsScalar $db 'SELECT count(*) FROM (SELECT id FROM functions GROUP BY id HAVING count(*) > 1)') '0' 'no duplicate function ids'
 }
@@ -361,7 +365,7 @@ if ($script:CsRowsPython) {
 Test-Case 'semantic: a call carries the symbol it binds to, and the overload it picked' {
     # `Send` is one string in the text and two methods in the type. A map that cannot tell them apart
     # answers "who calls Send" with both, forever.
-    $db = New-ProjectTree @{ 'Mail.cs' = Get-SemanticSample }
+    $db = New-ProjectTree -Shared @{ 'Mail.cs' = Get-SemanticSample }
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM calls WHERE symbol = 'Demo.Mail.Send'") '2' 'both calls bound'
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM calls WHERE signature = 'Demo.Mail.Send(string, bool, bool)'") '1' 'the three-argument overload'
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM calls WHERE signature = 'Demo.Mail.Send(int)'") '1' 'and the other one'
@@ -370,7 +374,7 @@ Test-Case 'semantic: a call carries the symbol it binds to, and the overload it 
 Test-Case 'semantic: an argument carries the parameter name the CALLEE declares' {
     # `Send("a@example.com", true, false)` is three values and no meaning until the signature is in hand. This is
     # the row no parse tree can produce, and the reason the semantic pass is worth its cost.
-    $db = New-ProjectTree @{ 'Mail.cs' = Get-SemanticSample }
+    $db = New-ProjectTree -Shared @{ 'Mail.cs' = Get-SemanticSample }
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM arguments WHERE name = 'retry' AND source = 'true'") '1' 'retry is named'
     # AND THE FOLDED VALUE IS SPELLED AS C# SPELLS IT: `True` is the .NET ToString of a bool and appears in
     # no C# file, so a query joining `const` back to source would find nothing.
@@ -382,7 +386,7 @@ Test-Case 'semantic: an argument carries the parameter name the CALLEE declares'
 Test-Case 'semantic: a const is folded to what it actually holds' {
     # `Prefix + "send"` is two names and an operator in the text. The value is what somebody searching for a
     # route is looking for.
-    $db = New-ProjectTree @{ 'Mail.cs' = Get-SemanticSample }
+    $db = New-ProjectTree -Shared @{ 'Mail.cs' = Get-SemanticSample }
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM consts WHERE name = 'Route' AND value = 'api/send'") '1' 'folded'
 }
 
@@ -390,13 +394,13 @@ Test-Case 'semantic: an expression carries its static type' {
     # `var` hides the type in the text, and a query about a type cannot do without it. A written-out name
     # (`Route.Length`) is deliberately NOT an expression row - it is already carried as a read - so the row
     # asserted on here is the arithmetic around it.
-    $db = New-ProjectTree @{ 'Mail.cs' = Get-SemanticSample }
+    $db = New-ProjectTree -Shared @{ 'Mail.cs' = Get-SemanticSample }
     Assert-Line (Invoke-CsQ $db --sql "SELECT type FROM expressions WHERE source = 'Route.Length + 1'") 'int'
     Assert-Line (Invoke-CsQ $db --sql "SELECT type FROM expressions WHERE source LIKE '%Prefix + %'") 'string'
 }
 
 Test-Case 'semantic: a file says which project compiled it, and whether it was bound at all' {
-    $db = New-ProjectTree @{ 'Mail.cs' = Get-SemanticSample }
+    $db = New-ProjectTree -Shared @{ 'Mail.cs' = Get-SemanticSample }
     Assert-Equal (Get-CsScalar $db "SELECT count(*) FROM files WHERE path = 'Mail.cs' AND project = 'Demo' AND semantic = 1") '1' 'bound by Demo'
 }
 
