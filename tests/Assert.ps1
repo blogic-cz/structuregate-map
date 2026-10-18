@@ -278,10 +278,14 @@ function Get-TypeScriptPath([string]$Spec = 'typescript') {
     if (Test-TypeScriptComplete $modules) { return $modules }
     # A CACHE THAT HAS LOST A FILE IS REBUILT, not trusted for having a package.json: one that had lost only
     # the native compiler's lib.d.ts failed every TypeScript case in the suite with "node did not finish".
-    if (Test-Path $modules) { Remove-Item $modules -Recurse -Force -ErrorAction SilentlyContinue }
     if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { return $null }
     [void](New-Item -ItemType Directory -Path $cache -Force)
-    & npm install --no-save --silent --prefix $cache $Spec 2>&1 | Out-Null
+    # Under the cache's lock (tests/harness/Suites.ps1), and only if no other process repaired it meanwhile.
+    Use-CacheLock $cache {
+        if (Test-TypeScriptComplete $modules) { return }
+        if (Test-Path $modules) { Remove-Item $modules -Recurse -Force -ErrorAction SilentlyContinue }
+        & npm install --no-save --silent --prefix $cache $Spec 2>&1 | Out-Null
+    }
     if (Test-TypeScriptComplete $modules) { return $modules }
     return $null
 }

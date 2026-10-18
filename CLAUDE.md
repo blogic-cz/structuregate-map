@@ -15,9 +15,10 @@ new top-level doc. [README.md](README.md) is the public front page; `rust/fbt/RE
 ## Commands
 
 ```bash
-dotnet build src/StructureGate.csproj                      # builds AND runs every black-box test (minutes)
+dotnet build src/StructureGate.csproj                      # builds AND runs the black-box suites the change reaches, on every core
+dotnet build src/StructureGate.csproj -p:FullTests=true    # every suite (before a release)
 dotnet build src/StructureGate.csproj -p:SkipTests=true    # skip them
-powershell -NoProfile -File tests\Run-Tests.ps1 -Only Map   # one suite
+powershell -NoProfile -File tests\Run-Tests.ps1 -Only Map   # one suite (-Changed: what changed since the last green run; -Jobs N)
 cargo test --manifest-path rust/fbtcore/Cargo.toml          # the rust unit tests (not run by the build)
 powershell -NoProfile -File scripts\Connect-Gate.ps1 -Path <tree>  # wire a new consumer (-DryRun first)
 dotnet publish src/StructureGate.csproj -c Release -r win-x64 -p:PublishAot=true

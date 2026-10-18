@@ -18,6 +18,9 @@ pub struct ColumnRef {
     pub line: i64,
     pub role: String,
     pub schema: String,
+    /// The database part as written (`Beta` of `Beta.dbo.Orders`), "" when none; `schema_written` is false when `schema` is the default.
+    pub written_database: String,
+    pub schema_written: bool,
     pub name: String,
     pub source_kind: String,
     pub alias: String,
@@ -29,6 +32,8 @@ pub struct ColumnRef {
 struct Source {
     kind: &'static str,
     schema: String,
+    written_database: String,
+    schema_written: bool,
     name: String,
     alias: String,
 }
@@ -98,10 +103,12 @@ pub fn of(nodes: &[Node], default_schema: &str) -> Vec<ColumnRef> {
                     "table"
                 };
                 let schema = if kind == "table" { spelled.unwrap_or(default_schema).to_string() } else { String::new() };
-                Source { kind, schema, name, alias: tree.child(i, "alias").unwrap_or("").to_string() }
+                let written_database = if kind == "table" { tree.child(i, "database").unwrap_or("").to_string() } else { String::new() };
+                let schema_written = kind == "table" && spelled.is_some();
+                Source { kind, schema, written_database, schema_written, name, alias: tree.child(i, "alias").unwrap_or("").to_string() }
             }
             "subquery" => match tree.child(i, "alias") {
-                Some(alias) => Source { kind: "derived", schema: String::new(), name: String::new(), alias: alias.to_string() },
+                Some(alias) => Source { kind: "derived", schema: String::new(), written_database: String::new(), schema_written: false, name: String::new(), alias: alias.to_string() },
                 None => continue,
             },
             _ => continue,
@@ -145,11 +152,11 @@ pub fn of(nodes: &[Node], default_schema: &str) -> Vec<ColumnRef> {
         } else {
             resolve(&tree, &sources, i, &qualifier)
         };
-        let (schema, name, source_kind, alias) = match found {
-            Some(s) => (s.schema, s.name, s.kind.to_string(), s.alias),
-            None => (String::new(), String::new(), String::new(), qualifier.last().map(|q| q.to_string()).unwrap_or_default()),
+        let (schema, written_database, schema_written, name, source_kind, alias) = match found {
+            Some(s) => (s.schema, s.written_database, s.schema_written, s.name, s.kind.to_string(), s.alias),
+            None => (String::new(), String::new(), false, String::new(), String::new(), qualifier.last().map(|q| q.to_string()).unwrap_or_default()),
         };
-        refs.push(ColumnRef { line: nodes[i].line, role, schema, name, source_kind, alias, column });
+        refs.push(ColumnRef { line: nodes[i].line, role, schema, written_database, schema_written, name, source_kind, alias, column });
     }
     refs
 }

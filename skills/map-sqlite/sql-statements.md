@@ -29,6 +29,7 @@ nothing, so they cannot disagree with it:
   `distinct`, `union`/`unionall`, `except`, `intersect`, `subquery`, `values`, `output`, `window`.
 * `sql_joins` (`file`, `statement`, `type`, `joined` - `table` or `subquery`, `schema`, `name`, `alias`, `on_line`,
   `line`): the side each join brings in; its ON columns are `sql_column_refs` rows with `role = 'join'`.
+* `sql_refs` and `sql_column_refs` keep `database` as the PROJECT's; `written_database` is the part as written (`''` when none), `schema_written` 1 when the schema was written and 0 when `schema` is the default.
 * `sql_functions` (`file`, `statement`, `name`, `windowed`, `line`) and `sql_ctes` (`file`, `statement`, `name`, `line`).
 
 **ONE SQL TEXT, NO TREE**: `structuregate --sql-parse <file|->` (`-` reads stdin; `--dialect tsql`, the default, or `postgres`)

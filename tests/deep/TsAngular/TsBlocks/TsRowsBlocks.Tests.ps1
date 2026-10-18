@@ -22,7 +22,8 @@ function Get-TsBlocksModules {
     if (-not (& $ready)) {
         if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { return $null }
         [void](New-Item -ItemType Directory -Path $cache -Force)
-        & npm install --no-save --silent --prefix $cache 'typescript@5' '@angular/compiler@22' '@angular/core@22' 2>&1 | Out-Null
+        # Under the cache's lock: two shards installing into one prefix at once corrupt it.
+        Use-CacheLock $cache { if (-not (& $ready)) { & npm install --no-save --silent --prefix $cache 'typescript@5' '@angular/compiler@22' '@angular/core@22' 2>&1 | Out-Null } }
     }
     if (& $ready) { $script:TsBlocksCache.Path = $modules }
     return $script:TsBlocksCache.Path

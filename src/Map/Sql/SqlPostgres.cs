@@ -63,6 +63,7 @@ internal static class SqlPostgres
         {
             rows.Add("sql_refs", "sr", ("file", file), ("object", Of(objects, Number(r, "object"))), ("line", Number(r, "line")), ("lang", SqlDeep.Lang),
                 ("action", Text(r, "action")), ("schema", Schema(Text(r, "schema"))), ("name", Text(r, "name")), ("column", Text(r, "column")),
+                ("written_database", Text(r, "written_database")), ("schema_written", Text(r, "schema").Length > 0 ? 1 : 0),
                 ("database", database), ("call", ""), ("statement", Of(statements, Number(r, "statement"))));
         }
     }

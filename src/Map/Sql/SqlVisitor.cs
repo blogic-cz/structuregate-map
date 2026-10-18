@@ -19,7 +19,7 @@ internal sealed class SqlVisitor : TSqlFragmentVisitor
     public sealed record Key(int Object, string Kind, string Name, string Schema, string Table, List<string> Columns,
         string RefSchema, string RefName, List<string> RefColumns, int Line);
     /// <summary>`Token`: where in the script's tokens it is, so the statement holding it can be found.</summary>
-    public sealed record Touch(int Object, string Action, string Schema, string Name, string Column, int Line, int Token);
+    public sealed record Touch(int Object, string Action, string Schema, string Database, string Name, string Column, int Line, int Token);
     /// <summary>A `CREATE TRIGGER` inside a string - dynamic SQL. `Open` when the name runs on past the literal
     /// (`'CREATE TRIGGER Demo_' + @Name`): `Name` is then only the prefix every trigger it builds has.</summary>
     public sealed record Dynamic(string Kind, string Name, bool Open, int Line, string Source);
@@ -313,11 +313,13 @@ internal sealed class SqlVisitor : TSqlFragmentVisitor
     {
         var base_ = name?.BaseIdentifier?.Value ?? "";
         var schema = name?.SchemaIdentifier?.Value ?? "";
+        // THE DATABASE AS WRITTEN (`Beta.dbo.Orders`): a ref that names another database is not this project's table.
+        var database = name?.DatabaseIdentifier?.Value ?? "";
         if (base_.Length == 0 || base_.StartsWith('#') || base_.StartsWith('@')) return;
         if (schema.Length == 0 && ctes.Contains(base_)) return;
         // A TRIGGER'S `inserted` AND `deleted` are the rows of the statement that fired it, not tables.
         if (schema.Length == 0 && base_.ToLowerInvariant() is "inserted" or "deleted") return;
-        Touches.Add(new Touch(owner, action, schema, base_, column, at.StartLine, at.FirstTokenIndex));
+        Touches.Add(new Touch(owner, action, schema, database, base_, column, at.StartLine, at.FirstTokenIndex));
     }
 
     /// <summary>

@@ -143,3 +143,13 @@ Test-Case 'sqlpostgres: 20 000 nested parentheses parse - the grammar''s stack h
     Assert-SqlPgRow $made.Db "SELECT 'v=' || errors FROM files WHERE path = 'pg/d.sql'" '0' 'no error'
     Assert-SqlPgRow $made.Db "SELECT 'v=' || count(*) || '|' || (SELECT group_concat(name) FROM sql_refs) FROM sql_statements" '1|t' 'the statement and its table'
 }
+
+Test-Case 'sqlpostgres: a ref keeps the catalog it was written with, and says whether its schema was written' {
+    $nl = $script:SqlPgNl
+    $made = New-SqlPgDb @{
+        'structuregate.sql.json' = $script:SqlPgConfig
+        'pg/c.sql' = "SELECT o.id FROM alpha.public.orders o JOIN customers c ON c.id = o.customer_id;$nl"
+    }
+    Assert-SqlPgRow $made.Db "SELECT 'v=' || group_concat(x, ',') FROM (SELECT r.written_database || '|' || r.schema || '|' || r.schema_written || '|' || r.name x FROM sql_refs r ORDER BY r.rowid)" 'alpha|public|1|orders,|public|0|customers' 'the refs'
+    Assert-SqlPgRow $made.Db "SELECT 'v=' || group_concat(DISTINCT written_database || '|' || schema_written) FROM sql_column_refs WHERE name = 'orders'" 'alpha|1' 'the column refs of the qualified table'
+}
