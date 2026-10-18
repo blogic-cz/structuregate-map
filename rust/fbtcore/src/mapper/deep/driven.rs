@@ -40,7 +40,10 @@ pub(super) const CS_ROWS_VERSION: &str = "28";
 // `sql_refs.statement`.
 // 10: `sql_column_refs` and the shape views, derived from `sql_nodes` for the statements a run writes.
 // 11: `files.dialect`, and a file the config's `dialects` names `postgres` parsed by sqlparser-rs (`sqlpg/`).
-const SQL_ROWS_VERSION: &str = "11";
+// 12: PostgreSQL parsed by PostgreSQL's own parser (libpg_query): a function's and a DO block's statements are child
+// rows, a FOREIGN KEY's, a partition's parent's, an attached partition's, a COPY's and a policy's tables are refs, a
+// diagnostic is where the parser stopped, and nodes are in source order.
+const SQL_ROWS_VERSION: &str = "12";
 /// Rows held before a batch is sent - both ends pay for it, so it decides whether a large solution fits.
 const ROWS_PER_BATCH: i64 = 100_000;
 

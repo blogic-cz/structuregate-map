@@ -1,84 +1,136 @@
 //! WHAT A POSTGRESQL STATEMENT DECLARES AND TOUCHES, in the rows the T-SQL half writes: `sql_objects` for a CREATE,
-//! `sql_columns` for a table's columns, and `sql_refs` - read off the statement's tree (`tree.rs`), so a ref is
-//! what a `table` node says: the TARGET of an INSERT/UPDATE/DELETE/MERGE/TRUNCATE is that action, any other a
-//! `select`, and a CTE's name is no table. A column's type and DEFAULT are the source's own text.
+//! `sql_columns` for a table's columns, and `sql_refs` - read off the statement's tree (`tree.rs`), so a ref is what a
+//! `table` node says by where it sits: the TARGET of an INSERT/UPDATE/DELETE/MERGE/TRUNCATE is that action (of a COPY
+//! ... FROM `insert`, of an ALTER TABLE `alter`, of a CREATE POLICY `policy`), a FOREIGN KEY's table `references`, a
+//! PARTITION OF / INHERITS parent `inherits`, an ATTACH/DETACH PARTITION's table `attach`/`detach`, a CALL's procedure
+//! `exec`, any other table `select`; a CTE's name is no table. A column's type and DEFAULT are the source's own text.
 
-use super::tree::{dotted, parts, PgNode};
-use super::Text;
+use super::scan::Source;
+use super::tree::{strings, text, typed, Ctx, PgNode};
 use serde_json::{json, Value};
-use sqlparser::ast::{ColumnOption, Expr, GeneratedAs, ObjectName, Statement, TableConstraint};
-use sqlparser::tokenizer::Token;
 
 /// The object a CREATE declares: `(kind, schema, name, parent)`.
-pub fn declared(statement: &Statement) -> Option<(&'static str, String, String, String)> {
-    let split = |name: &ObjectName| {
-        let p = parts(name);
-        let schema = if p.len() >= 2 { p[p.len() - 2].value.clone() } else { String::new() };
-        (schema, p.last().map_or(String::new(), |i| i.value.clone()))
+pub fn declared(ctx: &Ctx, kind: &str, body: &Value) -> Option<(&'static str, String, String, String)> {
+    let spell = |s: &str| ctx.spell(s);
+    let rel = |rv: &Value| {
+        let ([_, schema, name], _) = ctx.rel_parts(rv);
+        (schema, name)
     };
-    let (kind, name, parent) = match statement {
-        Statement::CreateTable(t) => ("table", &t.name, String::new()),
-        Statement::CreateView(v) => ("view", &v.name, String::new()),
-        Statement::CreateFunction(f) => ("function", &f.name, String::new()),
-        Statement::CreateIndex(i) => ("index", i.name.as_ref()?, dotted(&i.table_name)),
-        Statement::CreateTrigger(t) => ("trigger", &t.name, dotted(&t.table_name)),
-        Statement::CreateSequence { name, .. } => ("sequence", name, String::new()),
-        Statement::CreateType { name, .. } => ("type", name, String::new()),
+    let path = |parts: Vec<String>| {
+        let schema = if parts.len() >= 2 { spell(&parts[parts.len() - 2]) } else { String::new() };
+        (schema, parts.last().map_or(String::new(), |n| spell(n)))
+    };
+    let (kind, (schema, name), parent) = match kind {
+        "CreateStmt" => ("table", rel(&body["relation"]), String::new()),
+        "CreateTableAsStmt" if text(body, "objtype") == "OBJECT_MATVIEW" => ("view", rel(&body["into"]["rel"]), String::new()),
+        "CreateTableAsStmt" => ("table", rel(&body["into"]["rel"]), String::new()),
+        "ViewStmt" => ("view", rel(&body["view"]), String::new()),
+        "CreateFunctionStmt" if body["is_procedure"].as_bool() == Some(true) => ("procedure", path(strings(&body["funcname"])), String::new()),
+        "CreateFunctionStmt" => ("function", path(strings(&body["funcname"])), String::new()),
+        "IndexStmt" => ("index", (String::new(), spell(body["idxname"].as_str()?)), ctx.relation(&body["relation"])),
+        "CreateTrigStmt" => ("trigger", (String::new(), spell(text(body, "trigname"))), ctx.relation(&body["relation"])),
+        "CreateSeqStmt" => ("sequence", rel(&body["sequence"]), String::new()),
+        "CompositeTypeStmt" => ("type", rel(&body["typevar"]), String::new()),
+        "CreateEnumStmt" | "CreateRangeStmt" => ("type", path(strings(&body["typeName"])), String::new()),
+        "CreateDomainStmt" => ("type", path(strings(&body["domainname"])), String::new()),
+        "CreatePolicyStmt" => ("policy", (String::new(), spell(text(body, "policy_name"))), ctx.relation(&body["table"])),
         _ => return None,
     };
-    let (schema, base) = split(name);
-    Some((kind, schema, base, parent))
+    Some((kind, schema, name, parent))
 }
 
 /// A CREATE TABLE's columns, `object` the index of its object row.
-pub fn columns(statement: &Statement, object: usize, text: &Text) -> Vec<Value> {
-    let Statement::CreateTable(table) = statement else { return Vec::new() };
-    let mut keyed: Vec<String> = Vec::new();
-    for constraint in &table.constraints {
-        if let TableConstraint::PrimaryKey(pk) = constraint {
-            for column in &pk.columns {
-                if let Expr::Identifier(i) = &column.column.expr {
-                    keyed.push(i.value.to_lowercase());
-                }
-            }
-        }
-    }
+pub fn columns(ctx: &Ctx, body: &Value, object: usize) -> Vec<Value> {
+    let elements: Vec<(&str, &Value)> = body["tableElts"].as_array().into_iter().flatten().filter_map(typed).collect();
+    let keyed: Vec<String> = elements
+        .iter()
+        .filter(|(t, c)| *t == "Constraint" && text(c, "contype") == "CONSTR_PRIMARY")
+        .flat_map(|(_, c)| strings(&c["keys"]))
+        .map(|k| k.to_lowercase())
+        .collect();
     let mut rows = Vec::new();
-    for (position, column) in table.columns.iter().enumerate() {
-        let (type_text, default_text) = text.column(&column.name);
+    for (position, (_, column)) in elements.iter().filter(|(t, _)| *t == "ColumnDef").enumerate() {
+        let name = text(column, "colname");
+        let at = ctx.at(column);
+        let (type_text, default_text) = at.map_or((String::new(), String::new()), |a| spelled(ctx.source, a));
         let mut nullable = true;
-        let mut key = keyed.contains(&column.name.value.to_lowercase());
+        let mut key = keyed.contains(&name.to_lowercase());
         let lower = type_text.to_lowercase();
         let mut identity = matches!(lower.as_str(), "serial" | "bigserial" | "smallserial" | "serial4" | "serial8" | "serial2");
-        for option in &column.options {
-            match &option.option {
-                ColumnOption::NotNull => nullable = false,
-                ColumnOption::PrimaryKey(_) => key = true,
-                ColumnOption::Identity(_) => identity = true,
-                ColumnOption::Generated { generated_as: GeneratedAs::Always | GeneratedAs::ByDefault, generation_expr: None, .. } => identity = true,
+        for (_, constraint) in column["constraints"].as_array().into_iter().flatten().filter_map(typed) {
+            match text(constraint, "contype") {
+                "CONSTR_NOTNULL" => nullable = false,
+                "CONSTR_PRIMARY" => key = true,
+                "CONSTR_IDENTITY" => identity = true,
                 _ => {}
             }
         }
         if key {
             nullable = false;
         }
-        let line = if column.name.span.start.line > 0 { column.name.span.start.line as i64 } else { 0 };
-        rows.push(json!({ "object": object, "position": position, "name": column.name.value, "type": type_text,
-            "nullable": nullable, "identity": identity, "key": key, "default": default_text, "line": line }));
+        rows.push(json!({ "object": object, "position": position, "name": ctx.dotted_at(at, &[name.to_string()]), "type": type_text,
+            "nullable": nullable, "identity": identity, "key": key, "default": default_text, "line": at.map_or(0, |a| ctx.source.line(a)) }));
     }
     rows
+}
+
+/// A column definition's type and DEFAULT as the source spells them: the tokens after its name up to the first
+/// constraint keyword, and after DEFAULT up to the next one - at the definition's own parenthesis depth.
+fn spelled(source: &Source, at: usize) -> (String, String) {
+    const STOP: [&str; 11] = ["NOT", "NULL", "DEFAULT", "PRIMARY", "UNIQUE", "REFERENCES", "CHECK", "CONSTRAINT", "GENERATED", "COLLATE", "IDENTITY"];
+    let start = source.token_at(at);
+    let mut open_parens = 0i64;
+    let mut runs: Vec<(String, Vec<usize>)> = vec![("type".into(), Vec::new())];
+    for (i, token) in source.tokens.iter().enumerate().skip(start + 1) {
+        let word = source.word(token);
+        if Source::comment(token) {
+            continue;
+        }
+        match word {
+            "(" => open_parens += 1,
+            ")" if open_parens == 0 => break,
+            ")" => open_parens -= 1,
+            "," | ";" if open_parens == 0 => break,
+            _ if open_parens == 0 && token.keyword && STOP.contains(&word.to_ascii_uppercase().as_str()) => {
+                runs.push((word.to_ascii_uppercase(), Vec::new()));
+                continue;
+            }
+            _ => {}
+        }
+        if let Some(run) = runs.last_mut() {
+            run.1.push(i);
+        }
+    }
+    let text_of = |kind: &str| {
+        runs.iter()
+            .find(|r| r.0 == kind)
+            .and_then(|r| Some((*r.1.first()?, *r.1.last()?)))
+            .map(|(a, b)| source.range(source.tokens[a].start, source.tokens[b].end))
+            .unwrap_or_default()
+    };
+    (text_of("type"), text_of("DEFAULT"))
 }
 
 /// What a statement touches, read off its tree: `(action, schema, name, column, line)`.
 pub fn refs(nodes: &[PgNode]) -> Vec<(String, String, String, String, i64)> {
     let root = nodes.first().map_or("", |n| n.kind.as_str());
-    let children = |i: usize| nodes.iter().enumerate().filter(move |(_, n)| n.parent == Some(i)).map(|(c, _)| c);
-    let child = |i: usize, kind: &str| children(i).find(|&c| nodes[c].kind == kind).map(|c| nodes[c].value.clone());
+    let mut children: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
+    for (i, n) in nodes.iter().enumerate() {
+        if let Some(p) = n.parent {
+            children[p].push(i);
+        }
+    }
+    let child = |i: usize, kind: &str| children[i].iter().find(|&&c| nodes[c].kind == kind).map(|&c| nodes[c].value.clone());
     let ctes: Vec<String> = nodes.iter().filter(|n| n.kind == "cte").map(|n| n.value.to_lowercase()).collect();
     let written = ["insert", "update", "delete", "merge", "truncate"].contains(&root);
     let mut target: Option<(String, String)> = None;
     let mut out = Vec::new();
     for (i, node) in nodes.iter().enumerate() {
+        if node.kind == "proc" {
+            let (schema, name) = node.value.rsplit_once('.').map_or((String::new(), node.value.clone()), |(s, n)| (s.to_string(), n.to_string()));
+            out.push(("exec".to_string(), schema, name, String::new(), node.line));
+            continue;
+        }
         if node.kind != "table" {
             continue;
         }
@@ -86,54 +138,31 @@ pub fn refs(nodes: &[PgNode]) -> Vec<(String, String, String, String, i64)> {
         if schema.is_empty() && ctes.contains(&node.value.to_lowercase()) {
             continue;
         }
-        let is_target = written && node.parent.is_some_and(|p| nodes[p].kind == "target");
-        if is_target && target.is_none() {
+        let wrapper = node.parent.map_or("", |p| nodes[p].kind.as_str());
+        let action = match (wrapper, root) {
+            ("target", r) if written => r,
+            ("target", "copy") => "insert",
+            ("target", "alter table") => "alter",
+            ("target", "create policy") => "policy",
+            ("references" | "inherits" | "attach" | "detach", _) => wrapper,
+            _ => "select",
+        };
+        if wrapper == "target" && (written || root == "copy") && target.is_none() {
             target = Some((schema.clone(), node.value.clone()));
         }
-        out.push((if is_target { root.to_string() } else { "select".into() }, schema, node.value.clone(), String::new(), node.line));
+        out.push((action.to_string(), schema, node.value.clone(), String::new(), node.line));
     }
-    // THE COLUMNS AN INSERT LISTS AND AN UPDATE SETS are the target's.
+    // THE COLUMNS AN INSERT OR A COPY ... FROM LISTS AND AN UPDATE SETS are the target's.
     if let Some((schema, name)) = target {
-        for (i, node) in nodes.iter().enumerate() {
-            let listed = root == "insert" && node.kind == "column" && node.parent == Some(0);
+        let action = if root == "copy" { "insert" } else { root };
+        for node in nodes {
+            let listed = matches!(root, "insert" | "copy") && node.kind == "column" && node.parent == Some(0);
             let set = root == "update" && node.kind == "column" && node.parent.is_some_and(|p| nodes[p].kind == "set" && nodes[p].parent == Some(0)) && node.ord == 0;
             if listed || set {
                 let column = node.value.rsplit('.').next().unwrap_or("").to_string();
-                out.push((root.to_string(), schema.clone(), name.clone(), column, nodes[i].line));
+                out.push((action.to_string(), schema.clone(), name.clone(), column, node.line));
             }
         }
     }
     out
-}
-
-impl Text<'_> {
-    /// A column definition's type and DEFAULT as the source spells them: the tokens after its name up to the first
-    /// constraint keyword, and after DEFAULT up to the next one - at the definition's own parenthesis depth.
-    fn column(&self, name: &sqlparser::ast::Ident) -> (String, String) {
-        let Some(start) = self.tokens.iter().position(|t| t.span.start == name.span.start && name.span.start.line > 0) else {
-            return (String::new(), String::new());
-        };
-        const STOP: [&str; 11] = ["NOT", "NULL", "DEFAULT", "PRIMARY", "UNIQUE", "REFERENCES", "CHECK", "CONSTRAINT", "GENERATED", "COLLATE", "IDENTITY"];
-        let mut open_parens = 0i64;
-        let mut runs: Vec<(String, Vec<usize>)> = vec![("type".into(), Vec::new())];
-        for (i, token) in self.tokens.iter().enumerate().skip(start + 1) {
-            match &token.token {
-                Token::LParen => open_parens += 1,
-                Token::RParen if open_parens == 0 => break,
-                Token::RParen => open_parens -= 1,
-                Token::Comma if open_parens == 0 => break,
-                Token::Word(w) if open_parens == 0 && STOP.contains(&w.value.to_uppercase().as_str()) && w.quote_style.is_none() => {
-                    runs.push((w.value.to_uppercase(), Vec::new()));
-                    continue;
-                }
-                Token::Whitespace(_) => continue,
-                _ => {}
-            }
-            if let Some(run) = runs.last_mut() {
-                run.1.push(i);
-            }
-        }
-        let spelled = |kind: &str| runs.iter().find(|r| r.0 == kind).map(|r| self.range(&r.1)).unwrap_or_default();
-        (spelled("type"), spelled("DEFAULT"))
-    }
 }

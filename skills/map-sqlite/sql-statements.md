@@ -12,7 +12,9 @@ sides in order, then `on`), `where`, `groupby`, `having`, `orderby` + `sort` (`a
 `over` + `partition`, `literal`, `null`, `param` (`@id`), `op` (`=`, `<>`, `and`, `or`, `not`, `+`, `like`, `is null`,
 `between`), `in` (`value` `not` for NOT IN), `exists`, `case`/`when`, `values`/`row`, `set` (one assignment),
 `target`/`using`/`into`, `output`, `action` (a MERGE's `matched`/`not matched`), `var`, `proc`, `name`, `columndef`,
-`type`. Anything else is transparent: its children hang off the nearest node above. `fingerprint` is the same for two
+`type`; PostgreSQL adds `limit` and, around a `table` that is no read, `references` (a FOREIGN KEY's), `inherits` (a
+`PARTITION OF`/`INHERITS` parent), `attach`/`detach`. Anything else is transparent: its children hang off the nearest
+node above. `fingerprint` is the same for two
 statements that differ only in literals or in how many literals an IN list holds; one more operator, column or
 table is another fingerprint.
 
@@ -48,4 +50,27 @@ WHERE c.name = 'Orders' AND c.column = 'Status' AND c.role = 'where';
 -- the same query, written in several places
 SELECT s.fingerprint, count(*) n, min(f.path || ':' || s.line) first FROM sql_statements s JOIN files f ON f.id = s.file
 WHERE s.kind = 'select' GROUP BY s.fingerprint HAVING n > 1 ORDER BY n DESC;
+```
+
+## PostgreSQL
+
+Parsed by PostgreSQL's own parser (libpg_query, PostgreSQL 17's grammar), into the same tables and kinds. A name is
+as the source SPELLS it (`Orders`, though PostgreSQL folds it to `orders`) - compare names `COLLATE NOCASE`. A
+diagnostic is on the line where the parser stopped, its message ending `(line L, column C)`.
+
+**A body's statements are statements**, `parent` the CREATE FUNCTION / CREATE PROCEDURE / DO, `object` the function:
+every SQL statement of a `LANGUAGE plpgsql` body or a DO block (its `line` the body's line plus PL/pgSQL's own line
+number), a PL/pgSQL expression or assignment that reads a table (`kind` `set`, `if`, `return`, `for`, `declare`, ...),
+every statement of a `LANGUAGE sql` body and of a `BEGIN ATOMIC` one. A parameter or a variable the body declares is
+a `param` node, never a column, as PL/pgSQL resolves it.
+
+**Refs T-SQL has no word for**: `references` (a FOREIGN KEY's table), `inherits` (a `PARTITION OF` or `INHERITS`
+parent), `attach`/`detach` (`ALTER TABLE ... ATTACH|DETACH PARTITION`'s table), `alter` (the table an ALTER TABLE
+changes), `policy` (`CREATE POLICY ... ON`); `COPY ... FROM` is an `insert` (its column list too), `COPY ... TO` a
+`select`, `CALL` an `exec`.
+
+```sql
+-- what a function or DO block touches, statement by statement
+SELECT p.kind, s.line, s.kind, r.action, r.schema || '.' || r.name FROM sql_statements s
+JOIN sql_statements p ON p.id = s.parent JOIN sql_refs r ON r.statement = s.id ORDER BY s.line;
 ```

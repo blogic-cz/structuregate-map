@@ -18,8 +18,8 @@ What a consumer queries (every table and column, the worked queries) is `skills/
 it in step. This file is how the half is built and the rules that keep it honest.
 
 `src/Map/Sql/` parses every `.sql` (`--ext .sql`) IN PROCESS with Microsoft's own T-SQL parser
-(`Microsoft.SqlServer.TransactSql.ScriptDom`, +5.3 MB of exe, no trim warning), or with sqlparser-rs where the config
-says PostgreSQL (below). Rows are stored through the
+(`Microsoft.SqlServer.TransactSql.ScriptDom`, +5.3 MB of exe, no trim warning), or with PostgreSQL's own parser where the
+config says PostgreSQL (below). Rows are stored through the
 same store as C#, scoped by `lang = 'sql'`: `sql_objects`, `sql_columns`, `sql_keys`, `sql_refs`, `sql_steps`,
 `sql_dynamic`, parse errors in `diagnostics`. A file belongs to its nearest `.sqlproj`, which names its database
 (`SqlConfig.DatabaseOf`, the config read by `rust/fbtcore/src/mapper/deep/sqlconfig.rs`) and what it is to the
@@ -38,13 +38,32 @@ WITH) and forgotten after it.
 A file the config's `dialects` (`sqlconfig.rs::dialect_of`, a glob over the map path) names `postgres` is told to C# in
 the `sql-batch` question (`dialects`), its dialect folded into its sha. C# writes its `files` row (`dialect`) and calls
 `fbt_sql_parse` (`FbtCore.SqlParse`), then writes the rows rust answers through the SAME `CsTables` and counters
-(`SqlPostgres.cs`) - two producers of `lang = 'sql'` would each delete the other's rows. sqlparser-rs (+2.6 MB of exe,
-pure rust, `default-features = false`: its `recursive-protection` is `stacker`/`psm`, C and assembly) stops at its first
-error, so the TOKENS are split at each top-level `;` and every statement parsed on its own with its tokens' own lines;
-its recursion limit is lifted and it runs on a 512 MB-stack thread. The AST is mapped onto the same node kinds by hand
-with an explicit stack (`tree.rs`, `exprs.rs`); refs, objects and columns are read off that tree and the tokens
-(`rows.rs`). A view's query is a statement inside the CREATE VIEW, as ScriptDom has it. The fingerprint, column refs
-and views are the shared pass's - a query written in both dialects has one fingerprint (`tests/deep/sql/SqlPostgres.Tests.ps1`).
+(`SqlPostgres.cs`) - two producers of `lang = 'sql'` would each delete the other's rows.
+
+THE PARSER IS POSTGRESQL'S OWN, as every half's is its language's own: libpg_query (PostgreSQL 17's grammar and
+scanner), VENDORED as C source in `rust/fbtcore/vendor/libpg_query/` (its README: the tag, the commit, what was kept)
+and compiled by `rust/fbtcore/build.rs` with `cc` into a static archive inside fbtcore - no bindgen, the few doors are
+`ffi.rs`. NOT the `pg_query` crate: it needs bindgen and libclang, writes into its own source when `protoc` is on PATH,
+and its protobuf decode stops at 100 levels. The vendored folder is outside `src/`, so the regex ban's rust search and
+the gate's walk (`.c`/`.h` are no measured extension) never reach it; LeakGuard skips it (upstream text, no consumer's).
+Three things this build changes and why (`build.rs`): `YYMAXDEPTH` lifted in both grammars (bison's 10 000 levels was a
+depth cap; PostgreSQL's 1 GB allocation limit is the bound now), `DEBUG` defined (without it every call `dup2`s the
+process's stderr, which two threads race), and mimalloc's `local_dynamic_tls` (its `initial-exec` made the test build's
+`.so` STATIC_TLS, and libpg_query's thread-locals no longer fit glibc's spare static TLS).
+
+ONE THREAD PARSES for the life of the process (`mod.rs`, a 512 MB stack for the library's recursive JSON printer): the
+library registers a `pthread` key per thread it first sees, and keys run out. The JSON is read without serde_json's
+recursion limit and walked with an explicit stack. The whole file is parsed at once; where the parser stops, the
+statement holding its position (between top-level `;` of PostgreSQL's own scanner, `pg_query_scan`) is ONE diagnostic
+at that position and the text on each side is parsed again; a quote never closed stops the scanner, and what comes
+before that statement is still read. Nodes are numbered in SOURCE order like ScriptDom's (a node's place is the least
+of its own location and its children's, `tree.rs`), AND/OR rebuilt as T-SQL's left-deep pairs, and a name keeps the
+source's SPELLING (`scan.rs`: PostgreSQL folds `Orders` to `orders`, ScriptDom does not) - so a query written in both
+dialects has one tree and one fingerprint (`tests/deep/sql/SqlPostgres.Tests.ps1`). Refs are read off the tree by the
+wrapper a `table` sits in (`rows.rs`). A view's query, a PL/pgSQL function's and DO block's statements
+(`pg_query_parse_plpgsql`, each `PLpgSQL_expr` parsed again in its own parse mode), a `LANGUAGE sql` body's and a
+`BEGIN ATOMIC` body's are statements inside the CREATE/DO (`bodies.rs`); a PL/pgSQL name is a `param`. The
+fingerprint, column refs and views are the shared pass's.
 
 ## `sql_statements` and `sql_nodes` - per file, the fingerprint filled in rust
 
