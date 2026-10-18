@@ -1,0 +1,9 @@
+# The gitleaks rules, plus one allowance: the vendored xxHash header (libpg_query's dependency, rust/fbtcore/vendor/)
+# names its built-in hash constants `secret`, and the generic api-key rule reads those tables as keys. Only that one
+# file, so a real key anywhere else - the vendored tree included - still fails the job.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "vendored xxHash constant tables, not credentials"
+paths = ['''^rust/fbtcore/vendor/libpg_query/vendor/xxhash/xxhash\.h$''']
