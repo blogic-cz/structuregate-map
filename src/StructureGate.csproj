@@ -141,6 +141,13 @@
        is caught before it is added. No list (a clone, CI) or no git: nothing to check. VENDORED UPSTREAM SOURCE
        (`rust/fbtcore/vendor/`, PostgreSQL's parser) is left out: it is nobody's tree but its authors', and a short
        term matches inside its words. -->
+  <!-- THE GC GIVES BACK WHAT IT NO LONGER USES (`System.GC.ConserveMemory`, compiled into the NativeAOT exe as a runtime
+       knob): by default it kept the heap it had grown to - on a large solution the C# half held 1.35 GB more than its live
+       objects, dead batch payloads and fragmentation it would have reused, never returned. Measured: peak 5.65 to 4.30 GB, time the same. -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="7" />
+  </ItemGroup>
+
   <PropertyGroup>
     <LeakDenyFile Condition="'$(LeakDenyFile)' == ''">$(MSBuildThisFileDirectory)..\leak-deny.txt</LeakDenyFile>
   </PropertyGroup>

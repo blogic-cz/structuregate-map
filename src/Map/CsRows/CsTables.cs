@@ -25,6 +25,9 @@ internal sealed class CsTables
 
     public int Rows => tables.Sum(t => t.Value.Count);
 
+    /// <summary>How long the last payload was - the next one's starting capacity (`ToUtf8`).</summary>
+    private static int LastLength;
+
     public string Add(string table, string prefix, params (string Key, object Value)[] cells)
     {
         Counters.TryGetValue(prefix, out var used);
@@ -78,7 +81,9 @@ internal sealed class CsTables
     public (byte[] Buffer, int Length) ToUtf8(bool all, bool first, bool final, bool reset,
         SortedDictionary<string, string> shas, List<(string Rel, string Abs)> read, string lang = "csharp")
     {
-        var stream = new MemoryStream();
+        // SIZED BY THE LAST BATCH: grown by doubling, every batch left the smaller buffers it outgrew behind - tens of MB
+        // each, hundreds of MB of garbage the GC held on to. Batches are bounded by rows, so the last one's size is a close guess.
+        var stream = new MemoryStream(LastLength + LastLength / 8);
         // NO NESTING LIMIT: the writer's own default of 1000 is a cap on how deep an expression's shape may be.
         using (var json = new Utf8JsonWriter(stream, new JsonWriterOptions { MaxDepth = int.MaxValue }))
         {
@@ -124,6 +129,7 @@ internal sealed class CsTables
             json.WriteEndObject();
             json.WriteEndObject();
         }
+        LastLength = (int)Math.Min(stream.Length, int.MaxValue / 2);
         return (stream.GetBuffer(), (int)stream.Length);
     }
 
