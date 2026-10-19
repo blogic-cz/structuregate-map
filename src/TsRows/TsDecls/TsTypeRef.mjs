@@ -99,10 +99,22 @@ export function makeTypeResolver(ts, checker) {
    * enum, so the enum is named once and not each member. The answers are deduplicated and sorted by place: the
    * checker interns a union's members in the order they are first asked for, which a full and a partial run do not
    * share. A union whose own alias names it (`type Id = Codes | string`) is that alias, as before.
+   *
+   * AN INTERSECTION NAMES WHAT ITS PARTS NAME TOO (#97): `Payload & { Extra?: Extra }` - what a generic's
+   * `TPayload & {..}` instantiates to - has no symbol of its own, so it named nothing and every read past it stopped.
+   * Its parts are asked as a union's are; an anonymous part names nothing, so `X & {..}` names `X`. A part that is
+   * itself an unaliased union or intersection (`(A & {..}) | null`) is walked into - the parts are finite and the
+   * checker builds no cycle of them.
    */
-  function refsOfUnion(type) {
+  function refsOfParts(type) {
     const out = new Map();
-    for (const part of type.types) {
+    const parts = [...type.types];
+    while (parts.length) {
+      const part = parts.pop();
+      if (!part.aliasSymbol && !part.getSymbol() && (part.isUnion() || part.isIntersection())) {
+        parts.push(...part.types);
+        continue;
+      }
       const whole = (part.flags & ts.TypeFlags.EnumLiteral) !== 0 ? checker.getBaseTypeOfLiteralType(part) : part;
       const ref = refOfType(whole);
       if (ref) out.set(`${ref.file}\u0000${ref.line}\u0000${ref.name}`, ref);
@@ -113,7 +125,7 @@ export function makeTypeResolver(ts, checker) {
 
   /**
    * `{type_ref}` - the ONE declaration the node's type names (a union with one such member, `Codes | null`,
-   * names it) - or `{type_ref: null, type_refs}` when a union names SEVERAL: picking one of `A | B` would claim
+   * names it, an intersection with one named part too) - or `{type_ref: null, type_refs}` when a union or an intersection names SEVERAL: picking one of `A | B` would claim
    * the other is not accepted. `type_refs` is absent otherwise, so the two never repeat each other. `given` is a type the
    * caller already holds - a borrowed member's type INSTANTIATED for the alias that borrows it (#96) - asked instead.
    */
@@ -125,8 +137,8 @@ export function makeTypeResolver(ts, checker) {
       return { type_ref: null };
     }
     if (!type) return { type_ref: null };
-    if (type.aliasSymbol || type.getSymbol() || !type.isUnion()) return { type_ref: refOfType(type) };
-    const refs = refsOfUnion(type);
+    if (type.aliasSymbol || type.getSymbol() || !(type.isUnion() || type.isIntersection())) return { type_ref: refOfType(type) };
+    const refs = refsOfParts(type);
     return refs.length > 1 ? { type_ref: null, type_refs: refs } : { type_ref: refs[0] ?? null };
   };
 }
