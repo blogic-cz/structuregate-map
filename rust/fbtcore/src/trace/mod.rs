@@ -24,6 +24,8 @@
 //! thread that runs stages beside the main one (the TypeScript half's node, while C# compiles) is `adopt`ed under a
 //! span the main thread had open; any other worker's spans hang under the main thread's innermost.
 
+#[cfg(feature = "metrics")]
+pub mod metrics;
 mod otlp;
 pub mod report;
 
@@ -133,6 +135,47 @@ pub fn begin(given: Option<&str>, last: Option<String>, detail: bool, resource: 
         *slot = Some(run);
         ON.store(true, Ordering::Relaxed);
     }
+}
+
+/// TIMES `$body` AS ONE ITEM OF A METRIC - `metric!("store: insert", table, { .. })` - and is `$body` alone without the
+/// `metrics` feature: no clock, no item, no branch in a release (`metrics.rs`). The item is evaluated only when timed.
+macro_rules! metric {
+    ($name:expr, $item:expr, $body:block) => {{
+        #[cfg(feature = "metrics")]
+        let started = std::time::Instant::now();
+        let value = $body;
+        #[cfg(feature = "metrics")]
+        $crate::trace::metrics::record($name, &$item, started.elapsed());
+        value
+    }};
+}
+pub(crate) use metric;
+
+/// WHAT A HOST IS HANDED TO TALLY ITS OWN METRICS: `SG_METRICS=<file>` - `metrics.json` beside `beside`, a file of the
+/// host's work folder - in a `metrics` build (node, `TsMetrics.mjs`), nothing otherwise: a release's host times nothing.
+pub fn host_metrics(beside: &std::path::Path) -> Option<(String, String)> {
+    #[cfg(feature = "metrics")]
+    return Some(("SG_METRICS".to_string(), beside.with_file_name("metrics.json").to_string_lossy().into_owned()));
+    #[cfg(not(feature = "metrics"))]
+    {
+        let _ = beside;
+        None
+    }
+}
+
+/// The host's tallies merged into the run's trace and their file removed - see `host_metrics`. Nothing without the feature.
+pub fn merge_host_metrics(beside: &std::path::Path) {
+    #[cfg(feature = "metrics")]
+    let file = &beside.with_file_name("metrics.json");
+    #[cfg(feature = "metrics")]
+    if let Ok(tallied) = std::fs::read_to_string(file)
+        && let Ok(entries) = serde_json::from_str::<Value>(&tallied)
+    {
+        metrics::merge_host(&entries);
+        let _ = std::fs::remove_file(file);
+    }
+    #[cfg(not(feature = "metrics"))]
+    let _ = beside;
 }
 
 /// A stage, timed from here until the guard drops. Free when nothing is traced.
@@ -301,6 +344,12 @@ pub fn finish(exit: i64) -> Option<String> {
     run.spans[0].attributes.push(("process.exit.code".into(), Value::from(exit)));
     let mut spans = std::mem::take(&mut run.spans);
     spans.append(&mut run.files);
+    #[cfg(feature = "metrics")]
+    for (name, ns, attributes) in metrics::drain() {
+        let id = run.span_id();
+        let parent = Some(spans[0].id.clone());
+        spans.push(Span { id, parent, name, start_ns: end_ns.saturating_sub(ns), end_ns, attributes });
+    }
     let mut line = otlp::encode(&run.trace_id, &run.resource, &spans, exit).to_string();
     line.push('\n');
     let mut failed = Vec::new();

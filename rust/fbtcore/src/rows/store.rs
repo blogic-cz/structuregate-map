@@ -496,7 +496,7 @@ pub fn write(path: &Path, req: &WriteRequest<'_>) -> Result<Applied> {
         if let Some(h) = req.half {
             stamp.push((half::HALF_COLUMN.to_string(), Value::String(h.to_string())));
         }
-        insert(&db, table, rows, &stamp)?;
+        crate::trace::metric!("store: insert", table, { insert(&db, table, rows, &stamp)? });
     }
     if let Some(stream) = req.stream {
         stream(&mut |table, rows| {

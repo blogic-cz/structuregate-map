@@ -86,14 +86,21 @@ internal static class CsSemantics
         _ => false,
     } ? type : null;
 
+    /// <summary>Where a node is, for a metric's slowest item: its file and line. Built only by a metrics build.</summary>
+    private static string Where(SyntaxNode node) =>
+        $"{node.SyntaxTree.FilePath}:{node.SyntaxTree.GetLineSpan(node.Span).StartLinePosition.Line + 1}";
+
     public static ISymbol? Bound(SemanticModel? model, SyntaxNode node)
     {
         if (model is null) return null;
         try
         {
+            long timed = 0;
+            CsMetrics.Start(ref timed);
             var info = TypeOnly(node) is { } type
                 ? model.GetSpeculativeSymbolInfo(type.SpanStart, type, SpeculativeBindingOption.BindAsTypeOrNamespace)
                 : model.GetSymbolInfo(node);
+            CsMetrics.Stop($"roslyn: symbol of {node.Kind()} in {node.Parent?.Kind()}", Where(node), timed);
             if (info.Symbol is not null) return info.Symbol;
             return info.CandidateSymbols.Length == 1 ? info.CandidateSymbols[0] : null;
         }
@@ -127,9 +134,12 @@ internal static class CsSemantics
         if (model is null || node is not ExpressionSyntax expression) return "";
         try
         {
+            long timed = 0;
+            CsMetrics.Start(ref timed);
             var info = TypeOnly(expression) is { } written
                 ? model.GetSpeculativeTypeInfo(written.SpanStart, written, SpeculativeBindingOption.BindAsTypeOrNamespace)
                 : model.GetTypeInfo(expression);
+            CsMetrics.Stop($"roslyn: type of {expression.Kind()} in {expression.Parent?.Kind()}", Where(expression), timed);
             var type = info.Type ?? info.ConvertedType;
             return type is null or IErrorTypeSymbol ? "" : type.ToDisplayString(Typed);
         }

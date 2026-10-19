@@ -6,6 +6,7 @@
  * because a worktree has none of its own. That affects third-party imports only; resolution inside the
  * project is unchanged.
  */
+import { timed } from './TsMetrics.mjs';
 import path from 'node:path';
 import { builtinModules } from 'node:module';
 
@@ -77,7 +78,8 @@ function shareSourceFiles(ts, host, options) {
 export function prewarm(ts, projects, nodeModules) {
   for (const project of projects) {
     try {
-      const { program } = createProgram(ts, project.tsconfig, nodeModules, null, new Set(), false);
+      const { program } = timed('typescript: build a program ahead', project.tsconfig,
+        () => createProgram(ts, project.tsconfig, nodeModules, null, new Set(), false));
       for (const sf of program.getSourceFiles()) {
         sf.resolvedModules = undefined;
         sf.resolvedTypeReferenceDirectiveNames = undefined;
