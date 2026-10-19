@@ -131,6 +131,11 @@ pub fn begin(given: Option<&str>, last: Option<String>, detail: bool, resource: 
     let id = run.span_id();
     run.spans.push(Span { id, parent: None, name: "structuregate".into(), start_ns: started_ns, end_ns: 0, attributes: owned(attributes) });
     run.open.push((run.main, 0));
+    // METRICS: what rust holds, sampled beside the run's own trace file (`metrics::sample_memory`).
+    #[cfg(feature = "metrics")]
+    if let Some(at) = run.last.as_ref().or(run.path.as_ref()) {
+        metrics::sample_memory(std::path::PathBuf::from(format!("{at}.rust-mem.tsv")));
+    }
     if let Ok(mut slot) = RUN.lock() {
         *slot = Some(run);
         ON.store(true, Ordering::Relaxed);

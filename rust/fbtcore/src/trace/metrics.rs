@@ -14,6 +14,63 @@ use std::ffi::c_char;
 use std::sync::Mutex;
 use std::time::Duration;
 
+/// EVERY RUST ALLOCATION, COUNTED: mimalloc underneath, the bytes held now kept in one atomic. The `metrics` build's
+/// allocator only (`lib.rs`); `sample_memory` writes the count beside the trace, so a phase's memory can be split into
+/// rust's own and the rest (.NET's heap, SQLite's allocations through libc, the runtime).
+pub struct Counting;
+
+static HELD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[global_allocator]
+static ALLOCATOR: Counting = Counting;
+
+unsafe impl std::alloc::GlobalAlloc for Counting {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        let p = unsafe { mimalloc::MiMalloc.alloc(layout) };
+        if !p.is_null() {
+            HELD.fetch_add(layout.size(), std::sync::atomic::Ordering::Relaxed);
+        }
+        p
+    }
+    unsafe fn dealloc(&self, p: *mut u8, layout: std::alloc::Layout) {
+        unsafe { mimalloc::MiMalloc.dealloc(p, layout) };
+        HELD.fetch_sub(layout.size(), std::sync::atomic::Ordering::Relaxed);
+    }
+    unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
+        let p = unsafe { mimalloc::MiMalloc.alloc_zeroed(layout) };
+        if !p.is_null() {
+            HELD.fetch_add(layout.size(), std::sync::atomic::Ordering::Relaxed);
+        }
+        p
+    }
+    unsafe fn realloc(&self, p: *mut u8, layout: std::alloc::Layout, size: usize) -> *mut u8 {
+        let q = unsafe { mimalloc::MiMalloc.realloc(p, layout, size) };
+        if !q.is_null() {
+            HELD.fetch_add(size, std::sync::atomic::Ordering::Relaxed);
+            HELD.fetch_sub(layout.size(), std::sync::atomic::Ordering::Relaxed);
+        }
+        q
+    }
+}
+
+/// The bytes rust holds now - for a phase-only harness that measures one step.
+pub fn held() -> usize {
+    HELD.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// THE BYTES RUST HOLDS, twice a second, as `<epoch ns>\t<bytes>` lines in `file` - from now until the process ends.
+pub fn sample_memory(file: std::path::PathBuf) {
+    let _ = std::thread::Builder::new().name("metrics: memory".into()).spawn(move || {
+        use std::io::Write;
+        let Ok(mut out) = std::fs::File::create(&file) else { return };
+        loop {
+            let ns = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+            let _ = writeln!(out, "{ns}\t{}", HELD.load(std::sync::atomic::Ordering::Relaxed));
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    });
+}
+
 /// How many slow items a run keeps - the slowest.
 const SLOWEST: usize = 2000;
 

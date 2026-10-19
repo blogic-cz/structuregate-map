@@ -15,6 +15,8 @@
 //! the release profile does not set `panic = "abort"`.
 
 /// Every rust allocation, and only rust's: nothing allocated here is freed by the host (`fbt_string_free` is ours).
+/// A `metrics` build counts them on the way (`trace::metrics::Counting`).
+#[cfg(not(feature = "metrics"))]
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
