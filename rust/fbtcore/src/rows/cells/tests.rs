@@ -137,3 +137,29 @@ fn a_delete_through_rows_whose_id_is_a_number_takes_their_nodes() {
     assert!(!all.contains_key("1"), "row 1's nodes are gone: {all:?}");
     assert_eq!(all.get("2"), Some(&json!(["c"])));
 }
+
+#[test]
+fn a_join_on_owner_filtered_by_role_or_value_looks_the_owner_up_in_the_index() {
+    // #94: a rowid node table's index ends at its declared columns. Without `owner` in the role and value indexes this
+    // join searched by `(role, parent)` alone and read every `role = 'v'` row of every owner for each outer row.
+    let db = Connection::open_in_memory().unwrap();
+    let rows = vec![
+        json!({"id": "x:1", "binding": "b", "ast": {"k": "Literal", "v": "a"}}),
+        json!({"id": "x:2", "binding": "", "ast": {"k": "Read", "name": "a"}}),
+    ];
+    super::super::store::insert_rows(&db, "expressions", &rows).unwrap();
+    index_values(&db).unwrap();
+    let query = "SELECT v.value FROM expressions e \
+                 JOIN expressions__ast k ON k.owner = e.id JOIN expressions__ast v ON v.owner = e.id \
+                 WHERE e.binding <> '' AND k.parent = 0 AND k.role = 'k' AND k.value = 'Literal' \
+                 AND v.parent = k.parent AND v.role = 'v' AND v.node = 'string'";
+    let mut stmt = db.prepare(&format!("EXPLAIN QUERY PLAN {query}")).unwrap();
+    let plan: Vec<String> = stmt.query_map([], |r| r.get::<_, String>(3)).unwrap().map(|r| r.unwrap()).collect();
+    assert_eq!(plan.iter().filter(|l| l.contains("expressions__ast")).count(), 2, "{plan:?}");
+    // The outer loop may start from either table; every node table searched INSIDE it is searched by its owner.
+    for line in plan.iter().skip(1).filter(|l| l.contains("expressions__ast")) {
+        assert!(line.contains("owner=?"), "a node table inside the join is searched by its owner: {plan:?}");
+    }
+    let found: String = db.query_row(query, [], |r| r.get(0)).unwrap();
+    assert_eq!(found, "a");
+}

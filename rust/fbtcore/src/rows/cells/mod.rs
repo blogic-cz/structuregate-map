@@ -164,9 +164,11 @@ pub fn create(db: &Connection, table: &str, column: &str) -> Result<String> {
     Ok(child_table)
 }
 
-/// THE UNIQUE `(owner, n)` KEY AND THE `value` AND `(role, parent)` INDEXES, made AFTER the rows are in. The key finds a
-/// cell and a node, and refuses a node written twice. `(role, parent)` answers a SHAPE across every
-/// owner - each root `$ref`, each `$template` list (#71): the key serves only a lookup inside one owner. Made
+/// THE UNIQUE `(owner, n)` KEY AND THE `(value, owner, n)` AND `(role, parent, owner, n)` INDEXES, made AFTER the rows
+/// are in. The key finds a cell and a node, and refuses a node written twice. `(role, parent)` answers a SHAPE across
+/// every owner - each root `$ref`, each `$template` list (#71): the key serves only a lookup inside one owner. Both
+/// end in the key because a rowid table's index carries only the rowid: without `owner` a join on it filtered by role
+/// or value reads every row of that role for each outer row (#94). Made
 /// by `store::write` once per write, by `store::insert_rows` per table. Built during the insert, every node landed at
 /// a random place in it, and on a large workspace that was most of the time the store spent; one sort over the
 /// finished table is a fraction of that. `IF NOT EXISTS`, so a partial run inserts into the index a full run built.
@@ -183,8 +185,8 @@ pub fn index_values(db: &Connection) -> Result<()> {
         key_index(db, &child_table)?;
         let t = schema::escape(&child_table);
         db.execute_batch(&format!(
-            "CREATE INDEX IF NOT EXISTS \"ix_{t}_value\" ON \"{t}\" (value); \
-             CREATE INDEX IF NOT EXISTS \"ix_{t}_role\" ON \"{t}\" (role, parent)"
+            "CREATE INDEX IF NOT EXISTS \"ix_{t}_value\" ON \"{t}\" (value, owner, n); \
+             CREATE INDEX IF NOT EXISTS \"ix_{t}_role\" ON \"{t}\" (role, parent, owner, n)"
         ))?;
     }
     Ok(())
