@@ -15,6 +15,7 @@ fn table(db: &Connection, rows: &[(&str, i64, &str, Value)]) {
         db.execute("INSERT INTO t (id, a, b, half) VALUES (?1, ?2, ?3, 'typescript')", (id, a, b)).unwrap();
         writer.tree(id, c).unwrap();
     }
+    writer.finish().unwrap();
 }
 
 fn hash(rows: &[(&str, i64, &str, Value)], columns: &[&str]) -> String {

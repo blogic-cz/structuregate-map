@@ -4,7 +4,9 @@ use serde_json::json;
 fn round_trip(value: &Value) -> Value {
     // Through the real writer and the real reader: the table the store makes, nothing hand-built.
     let db = Connection::open_in_memory().unwrap();
-    Writer::new(&db, "t", "c").unwrap().tree("x:1", value).unwrap();
+    let mut writer = Writer::new(&db, "t", "c").unwrap();
+    writer.tree("x:1", value).unwrap();
+    writer.finish().unwrap();
     load_all(&db, "t", "c").unwrap().remove("x:1").unwrap()
 }
 
