@@ -241,10 +241,12 @@ fn with_nodes(name: &str, test: impl FnOnce(&Connection)) {
     let mut ast = cells::Writer::new(&db, "expressions", "ast").unwrap();
     ast.tree("x:1", &json!({"k": "Literal", "v": false})).unwrap();
     ast.tree("7", &json!({"k": "Read", "name": "n"})).unwrap();
+    ast.finish().unwrap();
     drop(ast);
     let mut list = cells::Writer::new(&db, "hops", "list").unwrap();
     list.tree("#1", &json!(["first"])).unwrap();
     list.tree("#2", &json!(["second", 2])).unwrap();
+    list.finish().unwrap();
     drop(list);
     test(&db);
     drop(db);
@@ -313,6 +315,7 @@ fn a_whole_cell_spelled_null_reads_as_null_and_undefined_stays_its_literal() {
     value.tree("rv:1", &json!({"$literal": "null", "$kind": "NullKeyword"})).unwrap();
     value.tree("rv:2", &json!({"$literal": "undefined", "$kind": "UndefinedKeyword"})).unwrap();
     value.tree("rv:3", &json!([{"$literal": "null", "$kind": "NullKeyword"}])).unwrap();
+    value.finish().unwrap();
     drop(value);
     {
         let store = Store::from_db(&db, "typescript").unwrap();
