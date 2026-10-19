@@ -40,6 +40,18 @@ internal sealed class CsModels
     private readonly Dictionary<string, CSharpCompilation?> built = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> building = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// THE LAST TURN EACH COMPILATION IS NEEDED IN, by its cache key: its own project's turn in the mapping order, or the
+    /// turn of a later project whose restored closure holds it (`CsProject.Projects` is the whole closure, each a direct
+    /// reference). Kept, every compilation of a large solution stayed in `built` to the end - the C# half's memory only
+    /// ever grew, to most of a machine's. Once its last turn is past, nothing later references it and it is let go
+    /// (<see cref="Evict"/>). A compilation the plan does not name (a multi-targeted reference reached through another
+    /// project's framework) is never let go.
+    /// </summary>
+    private readonly Dictionary<string, int> lastTurn = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> turnOf = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> evicted = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>The referenced projects `--skip` keeps out, and their built assemblies - see CsSkipped.</summary>
     public CsSkipped? Skipped { get; init; }
     private string? current;
@@ -69,9 +81,43 @@ internal sealed class CsModels
 
     /// <summary>The files, PROJECT BY PROJECT. Sent in any other order, each file would rebuild the
     /// compilation its project needs and the run would never finish.</summary>
-    public List<string> Order(IEnumerable<string> files) =>
-        [.. files.OrderBy(rel => owner.GetValueOrDefault(rel) ?? "", StringComparer.OrdinalIgnoreCase)
+    public List<string> Order(IEnumerable<string> files)
+    {
+        List<string> ordered = [.. files.OrderBy(rel => owner.GetValueOrDefault(rel) ?? "", StringComparer.OrdinalIgnoreCase)
             .ThenBy(rel => rel, StringComparer.Ordinal)];
+        Plan(ordered);
+        return ordered;
+    }
+
+    /// <summary>Each compilation's last turn in this order - see <see cref="lastTurn"/>.</summary>
+    private void Plan(List<string> ordered)
+    {
+        lastTurn.Clear();
+        turnOf.Clear();
+        evicted.Clear();
+        foreach (var rel in ordered)
+        {
+            if (owner.GetValueOrDefault(rel) is not { } csproj || turnOf.ContainsKey(csproj)) continue;
+            var turn = turnOf[csproj] = turnOf.Count;
+            lastTurn[KeyOf(csproj, null)] = turn;
+            var project = CsProject.Load(csproj);
+            foreach (var referenced in project?.Projects ?? []) lastTurn[KeyOf(referenced, project!.Framework)] = turn;
+        }
+    }
+
+    /// <summary>The cache key of a project's compilation for a consumer's framework - as <see cref="Compile"/> keys it.</summary>
+    private static string KeyOf(string csproj, string? consumer) => csproj + "|" + (CsProject.Load(csproj, consumer)?.Framework ?? "");
+
+    /// <summary>Every compilation whose last turn is before <paramref name="turn"/>, let go with its Razor output.</summary>
+    private void Evict(int turn)
+    {
+        foreach (var key in built.Keys.Where(k => lastTurn.TryGetValue(k, out var last) && last < turn).ToList())
+        {
+            built.Remove(key);
+            razors.Remove(key);
+            evicted.Add(key);
+        }
+    }
 
     /// <summary>The mapped files of a project, then every other `.cs` the project owns, each once.</summary>
     private static List<(string Rel, string Abs)> Whole(List<(string Rel, string Abs)> mapped, string folder, string csproj)
@@ -149,6 +195,8 @@ internal sealed class CsModels
     private void Build(string csproj)
     {
         current = csproj;
+        compilation = null;
+        if (turnOf.TryGetValue(csproj, out var turn)) Evict(turn);
         trees.Clear();
         excluded.Clear();
         razorOf.Clear();
@@ -206,8 +254,12 @@ internal sealed class CsModels
     /// is compiled once per framework its consumers pick (`framework::pick` in `rust/fbtcore/src/csproj/`).</param>
     private CSharpCompilation? Compile(string csproj, bool register, string? consumer = null)
     {
-        var key = csproj + "|" + (CsProject.Load(csproj, consumer)?.Framework ?? "");
+        var key = KeyOf(csproj, consumer);
         if (built.TryGetValue(key, out var ready)) return ready;
+        // ASKED AFTER ITS LAST TURN - a file sent again out of the order the plan was made for. Compiled again and kept from
+        // then on: every compilation still held that references this project has it in its closure, so its last turn was
+        // not past either, and no two compilations of one project meet in one reference set.
+        if (evicted.Remove(key)) lastTurn.Remove(key);
         // A cycle in the project graph is illegal in MSBuild and still possible in a half-edited tree. The
         // guard makes it a missing reference rather than a stack overflow.
         if (!building.Add(key)) return null;
