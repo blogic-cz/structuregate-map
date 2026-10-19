@@ -51,6 +51,7 @@ pub fn sdk_style(csproj: &str) -> bool {
     document.root_element().attribute("Sdk").is_some() || disk::elements(&document, "Sdk").next().is_some()
 }
 
+pub use assets::missing_packages;
 pub use project::emitted_of;
 
 /// The folder a project sits in.

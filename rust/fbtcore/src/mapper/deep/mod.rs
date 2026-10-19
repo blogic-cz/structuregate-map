@@ -18,7 +18,6 @@ mod inputs;
 mod passes;
 mod payload;
 pub use payload::stored_nothing;
-pub use driven::UNRESTORED;
 mod reasons;
 mod refresh;
 mod rust;

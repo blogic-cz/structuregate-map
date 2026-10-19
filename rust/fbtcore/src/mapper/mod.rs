@@ -12,10 +12,12 @@
 mod check;
 mod docroot;
 pub(crate) mod deep;
-pub(crate) use deep::{stored_nothing, UNRESTORED};
+pub(crate) use deep::stored_nothing;
+pub(crate) use restore::{PACKAGES_GONE, UNRESTORED};
 mod halves;
 mod kept;
 pub(crate) mod protocol;
+mod restore;
 mod script;
 mod stale;
 

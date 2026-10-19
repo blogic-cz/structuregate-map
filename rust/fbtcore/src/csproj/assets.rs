@@ -54,3 +54,18 @@ pub fn of(folder: &str) -> Option<Arc<Assets>> {
     }
     parsed
 }
+
+/// THE PACKAGES A RESTORE RECORDED THAT ARE NOT ON DISK: a `package` library whose folder no listed package folder
+/// holds. A restored project whose packages were cleared from the NuGet folder since binds as one never restored -
+/// thousands of compile errors and empty resolved columns - while its `project.assets.json` says it was.
+pub fn missing_packages(folder: &str) -> Vec<String> {
+    let Some(root) = of(folder) else { return Vec::new() };
+    root.libraries.iter()
+        .filter(|(_, library)| library.kind.as_deref() == Some("package"))
+        .filter_map(|(name, library)| {
+            let relative = library.path.as_deref()?;
+            let present = root.package_folders.keys().any(|at| super::disk::is_dir(&super::disk::combine(&[at, relative])));
+            (!present).then(|| name.clone())
+        })
+        .collect()
+}
