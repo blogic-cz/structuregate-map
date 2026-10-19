@@ -60,6 +60,16 @@ export function rollupTemplateReads(store) {
   for (const row of store.table('classes')) baseOfClass.set(row.id, ownerOf(row.extends));
 
   const propOf = (owner, name) => {
+    // SEVERAL TYPES AT ONCE - a member whose `type_refs` lists several (`A | B`, `A & B`, #97): the name is the ONE row
+    // any of them answers with; two different rows is no answer, as picking one of `A | B` would claim the other away.
+    if (owner?.kind === 'any') {
+      const hits = new Map();
+      for (const one of owner.of) {
+        const hit = propOf(one, name);
+        if (hit !== undefined) hits.set(hit.id, hit);
+      }
+      return hits.size === 1 ? [...hits.values()][0] : undefined;
+    }
     let current = owner;
     const seen = new Set();
     while (current !== null && !seen.has(current.id)) {
@@ -76,13 +86,27 @@ export function rollupTemplateReads(store) {
   /** The owner a type_ref's UNWRAPPED field names - the innermost type behind single-argument wrappers. */
   const unwrappedOwnerOf = (ref) => (ref?.unwrapped === undefined ? null : ownerOf(ref.unwrapped));
 
+  /** The owner a member's type names: its `type_ref`, or every owner its `type_refs` list names (#97) - one alone, or
+   *  several as one `any` owner `propOf` asks together. Null when it names none: the chain stops there. */
+  const ownerOfRow = (row) => {
+    if (row.type_ref != null) return ownerOf(row.type_ref);
+    const all = new Map();
+    for (const ref of Array.isArray(row.type_refs) ? row.type_refs : []) {
+      const one = ownerOf(ref);
+      if (one !== null) all.set(`${one.kind}:${one.id}`, one);
+    }
+    return all.size === 0 ? null : all.size === 1 ? [...all.values()][0] : { kind: 'any', of: [...all.values()] };
+  };
+
+  // A HOP WHOSE TYPE IS UNKNOWN ENDS THE CHAIN. It kept the PREVIOUS owner, so `{{ x.y }}` over an untyped `x` looked
+  // `y` up on the component again and named the component's own `y` - a target the read never reaches.
   const hopOf = (owner, name) => {
     const row = propOf(owner, name);
     if (!row) return null;
     const file = pathById.get(row.file);
     const line = typeof row.line === 'number' ? row.line : null;
     if (file === undefined || line === null) return null;
-    return { name, file, line, row: row.id, owner: ownerOf(row.type_ref) ?? owner };
+    return { name, file, line, row: row.id, owner: ownerOfRow(row) };
   };
 
   // Which class each template expression belongs to. EVERY template expression carries `node`; only some
@@ -234,7 +258,7 @@ export function rollupTemplateReads(store) {
             const row = propOf(cursor, name);
             if (!row) { cursor = null; break; }
             last = row;
-            cursor = ownerOf(row.type_ref) ?? cursor;
+            cursor = ownerOfRow(row);
           }
           if (last) { found = last.type_ref; return; }
         }
@@ -269,7 +293,7 @@ export function rollupTemplateReads(store) {
       const row = owner === null ? undefined : propOf(owner, name);
       if (!row) return null;
       ref = row.type_ref ?? null;
-      owner = ownerOf(ref);
+      owner = ownerOfRow(row);
     }
     return { owner, ref };
   };

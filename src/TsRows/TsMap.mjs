@@ -228,9 +228,10 @@ async function main() {
   // 62: a `style` gate carries `unit`, Angular's unit of `[style.height.px]` (`px`), which its `name` drops (#54).
   // 63: a getter or setter without an annotation carries the type the checker infers and its `type_ref` (#95).
   // 64: a computed type member borrowed from a generic is typed as the alias instantiates it, not by its type parameter (#96).
+  // 65: an intersection names what its parts name (#97); a template read follows `type_refs` and stops at a hop of unknown type.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 64, build: args.build,
+    config: config.file, data: config.data, rows: 65, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

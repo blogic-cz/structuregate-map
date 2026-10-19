@@ -81,6 +81,11 @@ runs) are compared by that, every carried field equal, never by `c:412`.
 - **A member an alias borrows from a generic is typed as the alias instantiates it** (rows 64, #96, `TsDecls/TsTypeRows.mjs::typeMemberRowsFromType`):
   `type PayloadBox = Box<Payload>` gives its `computed` member `Payload: TPayload` the type `Payload` and its `type_ref`, the checker's type for the
   alias, wherever it differs from the declared one - a member nothing instantiates keeps its annotation's text.
+- **An intersection names what its parts name** (rows 65, #97, `TsDecls/TsTypeRef.mjs::refsOfParts`): `X & { .. }` is `type_ref` X, `A & B`
+  lists both in `type_refs` as a union naming several does; a part that is itself an unaliased union or intersection is walked into.
+  A TEMPLATE READ follows `type_refs` (`TsTpl/TsTplReads.mjs::ownerOfRow`): the next name resolves when exactly ONE listed type declares
+  it. A hop whose type names nothing ENDS the chain - it kept the previous owner, so `{{ x.y }}` over an untyped `x` named the
+  component's own `y`.
 
 ## Expression trees the gate readers need (`TsDecls/TsBody.mjs`)
 
