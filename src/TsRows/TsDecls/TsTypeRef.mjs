@@ -114,12 +114,13 @@ export function makeTypeResolver(ts, checker) {
   /**
    * `{type_ref}` - the ONE declaration the node's type names (a union with one such member, `Codes | null`,
    * names it) - or `{type_ref: null, type_refs}` when a union names SEVERAL: picking one of `A | B` would claim
-   * the other is not accepted. `type_refs` is absent otherwise, so the two never repeat each other.
+   * the other is not accepted. `type_refs` is absent otherwise, so the two never repeat each other. `given` is a type the
+   * caller already holds - a borrowed member's type INSTANTIATED for the alias that borrows it (#96) - asked instead.
    */
-  return (node) => {
-    let type;
+  return (node, given = null) => {
+    let type = given;
     try {
-      type = checker.getTypeAtLocation(node);
+      type ??= checker.getTypeAtLocation(node);
     } catch {
       return { type_ref: null };
     }

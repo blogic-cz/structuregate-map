@@ -78,6 +78,9 @@ runs) are compared by that, every carried field equal, never by `c:412`.
 - **A getter or setter is typed as a property is** (rows 63, #95, `TsDecls/TsClassRows.mjs::memberRow`): without an annotation
   its `type` and `type_ref` are what the checker infers - an accessor's symbol is the property's, never a function type - so a
   template read chained off `get vm() { return this.load<Outer>(); }` resolves past it. A method still takes only its annotation.
+- **A member an alias borrows from a generic is typed as the alias instantiates it** (rows 64, #96, `TsDecls/TsTypeRows.mjs::typeMemberRowsFromType`):
+  `type PayloadBox = Box<Payload>` gives its `computed` member `Payload: TPayload` the type `Payload` and its `type_ref`, the checker's type for the
+  alias, wherever it differs from the declared one - a member nothing instantiates keeps its annotation's text.
 
 ## Expression trees the gate readers need (`TsDecls/TsBody.mjs`)
 
