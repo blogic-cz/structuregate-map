@@ -98,7 +98,7 @@ internal sealed partial class CsRows : CSharpSyntaxWalker
 
         if (!compiled || excluded) return;
 
-        var unneeded = model is not null ? Diagnostics(rows, model, declared ?? [], file, markup) : null;
+        var unneeded = model is not null ? Diagnostics(rows, model, declared ?? [], file, markup, generated) : null;
 
         // A GENERATED FILE IS LISTED, NOT WALKED. Nobody asks which function reads a constant inside an EF
         // model snapshot, and the rows are not free: on a real tree, most of the
@@ -162,11 +162,16 @@ internal sealed partial class CsRows : CSharpSyntaxWalker
 
     /// <returns>Where each `using` the compiler calls unnecessary (CS8019, hidden) starts - or null when the file has an
     /// error, since a `using` whose types did not resolve is not "unused".</returns>
-    private static HashSet<int>? Diagnostics(CsTables rows, SemanticModel model, IReadOnlyList<Diagnostic> declared, string file, bool markup)
+    private static HashSet<int>? Diagnostics(CsTables rows, SemanticModel model, IReadOnlyList<Diagnostic> declared, string file, bool markup,
+        bool generated)
     {
         var errors = 0;
         var unneeded = new HashSet<int>();
-        foreach (var diagnostic in model.GetSyntaxDiagnostics().Concat(declared).Concat(model.GetMethodBodyDiagnostics()))
+        // A GENERATED FILE'S BODIES ARE NOT BOUND for their errors: it is listed, never walked, and binding an EF model
+        // builder's every statement to report on code nobody wrote was a third of a large solution's C# time. Its syntax
+        // and declaration errors - what decides whether the files that use it bind - are still rows.
+        var bodies = generated ? [] : model.GetMethodBodyDiagnostics();
+        foreach (var diagnostic in model.GetSyntaxDiagnostics().Concat(declared).Concat(bodies))
         {
             if (diagnostic.Id == "CS8019") unneeded.Add(diagnostic.Location.SourceSpan.Start);
             if (diagnostic.Severity != DiagnosticSeverity.Error) continue;

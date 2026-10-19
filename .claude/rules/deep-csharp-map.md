@@ -49,7 +49,9 @@ hand-written files, and on a large consumer solution their seed methods (`Insert
 expensive rows of the map: one data project spends most of a minute binding them, all of it inside Roslyn. A CONSUMER
 keeps them out with `--map-exclude "**/Migrations/*.cs"` (`sources/glob.rs`, the matcher `--skip-file` shares): compiled, listed as
 `excluded`, never walked, and folded into the sha so toggling it re-reads exactly those files. The FILE-LEVEL half applies the same rule one step softer:
-a generated file is still joined (its declares/uses are real edges), it is only not fingerprinted.
+a generated file is still joined (its declares/uses are real edges), it is only not fingerprinted. A generated file's METHOD BODIES ARE NOT BOUND for `diagnostics`
+(`CsRows.Diagnostics`): its syntax and declaration errors stay rows, and binding every statement of an EF model builder
+for errors nobody reads was a third of a large solution's C# rows.
 
 A PROJECT REACHED AS A REFERENCE IS COMPILED WITHOUT KEEPING ITS TREES; when its own files are mapped the
 cache answers with that compilation and they must be put back by path (`CsModels.Build`) — without it

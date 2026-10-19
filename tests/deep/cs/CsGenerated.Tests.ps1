@@ -134,3 +134,14 @@ Test-Case 'generated: output of a generator assembly the build record no longer 
     Invoke-CsGeneratedMap $tree | Out-Null
     Assert-Equal (Get-CsGeneratedNumber $tree "SELECT count(*) FROM diagnostics WHERE name = 'CS0229'") '1' 'compiled'
 }
+
+Test-Case 'generated: a generated file keeps its declaration errors, and its bodies are not bound for theirs' {
+    # Listed, never walked: binding an EF model builder's every statement for its errors was a third of a large
+    # solution's C# time, to report on code nobody wrote. What decides whether the files using it bind stays a row.
+    $tree = Use-Tree @{ 'Demo.csproj' = $script:CsGeneratedProject
+        'Model.Designer.cs' = "namespace Demo;`npublic class Model`n{`n    public Missing.Thing Shape() => null;`n    public int Build() { return Unknown.Value; }`n}`n" }
+    Invoke-CsGeneratedMap $tree | Out-Null
+    Assert-Equal (Get-CsGeneratedNumber $tree "SELECT generated FROM files WHERE path = 'Model.Designer.cs'") '1' 'a generated file'
+    Assert-Equal (Get-CsGeneratedNumber $tree "SELECT count(*) FROM diagnostics WHERE line = 4") '1' 'the declaration error'
+    Assert-Equal (Get-CsGeneratedNumber $tree "SELECT count(*) FROM diagnostics WHERE line = 5") '0' 'no body error'
+}
