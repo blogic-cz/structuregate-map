@@ -271,6 +271,30 @@ Test-Case 'project: a project that was never restored is a WARNING in the map su
     Assert-Equal (Get-MetaText $db 'unrestored:csharp') '[]' 'and the list empty'
 }
 
+Test-Case 'project: a restored project whose packages left the package folder is a WARNING in the map summary' {
+    # A CLEARED NUGET FOLDER: the restore record stayed, the packages did not, and the tree bound as one never restored -
+    # thousands of compile errors under no warning at all.
+    $tree = Use-Tree @{
+        'lib/Lib.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+        'lib/Lib.cs'     = 'namespace Lib; public class Engine { public Missing.Thing Run() { return null; } }'
+    }
+    $packages = (Join-Path $tree 'packages').Replace('\', '/') + '/'
+    [void](New-Item -ItemType Directory -Path (Join-Path $tree 'lib/obj') -Force)
+    [System.IO.File]::WriteAllText((Join-Path $tree 'lib/obj/project.assets.json'),
+        '{"version":3,"targets":{},"libraries":{"Demo.Json/1.0.0":{"type":"package","path":"demo.json/1.0.0"}},"packageFolders":{"' + $packages + '":{}}}')
+    $db = Join-Path $tree 'map.sqlite'
+    $map = @('--root', $tree, '--ext', '.cs', '--map', '--map-out', (Join-Path $tree 'm.json'), '--map-sqlite', $db)
+    $gone = Invoke-Gate @map
+    Assert-Exit $gone 0
+    Assert-Line $gone 'WARNING      1 C# project(s) missing restored packages (restored, but packages its obj/project.assets.json lists are in no package folder: lib/Lib.csproj (1))'
+    Assert-NoLine $gone 'never restored'
+    # THE PACKAGE IS BACK: the warning goes.
+    [void](New-Item -ItemType Directory -Path (Join-Path $tree 'packages/demo.json/1.0.0') -Force)
+    $back = Invoke-Gate @map
+    Assert-Exit $back 0
+    Assert-NoLine $back 'missing restored packages'
+}
+
 }
 
 if ($script:CsRowsPython) {

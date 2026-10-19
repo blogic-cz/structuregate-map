@@ -286,7 +286,7 @@ pub fn report(input: &Input, graph: &Graph) -> Vec<String> {
     for note in input.notes.iter().filter(|n| crate::mapper::stored_nothing(n)) {
         lines.push(format!("  not stored   {note}"));
     }
-    for note in input.notes.iter().filter(|n| n.contains(crate::mapper::UNRESTORED)) {
+    for note in input.notes.iter().filter(|n| n.contains(crate::mapper::UNRESTORED) || n.contains(crate::mapper::PACKAGES_GONE)) {
         lines.push(format!("  WARNING      {note}"));
     }
     lines

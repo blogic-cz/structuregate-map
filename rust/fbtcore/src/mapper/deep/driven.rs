@@ -156,7 +156,7 @@ pub fn csharp(into: &mut Collector, db: &str, root: &str, hashed: Hashed, roots:
         // IT RAN, AND RE-READ NONE: "0 file(s) re-read", never the silence of a run with no deep half.
         into.reread = into.reread.max(0);
         into.refresh.insert("csharp".into(), json!({ "reread": 0, "dropped": 0, "files": shas.len() }));
-        unrestored(into, db, root, &owned);
+        crate::mapper::restore::unrestored(into, db, root, &owned);
         reasons::keep(db, CS_ROWS_VERSION, &parts, before.as_ref());
         return;
     }
@@ -313,7 +313,7 @@ pub fn csharp(into: &mut Collector, db: &str, root: &str, hashed: Hashed, roots:
     }
     {
         let _checking = crate::trace::stage("csharp: find unrestored projects");
-        unrestored(into, db, root, &owned);
+        crate::mapper::restore::unrestored(into, db, root, &owned);
     }
     let spent_parts: Vec<String> = ["compile", "rows", "payload", "store"].iter().zip(spent.borrow().iter())
         .filter(|(_, ms)| **ms >= 1000).map(|(name, ms)| format!("{name} {} s", (ms + 500) / 1000)).collect();
@@ -348,39 +348,6 @@ fn compile_phases(root: &str, phases: &BTreeMap<String, [u64; 7]>) {
         facts.push(("structuregate.csharp.assemblies_shared".into(), Value::from(p[6])));
         crate::trace::breakdown_with(&format!("csharp project: {named}"), p[..4].iter().sum(), facts);
     }
-}
-
-/// What a note about projects that were never restored starts with - the map's summary says it as a WARNING.
-pub const UNRESTORED: &str = "C# project(s) never restored";
-
-/// A TREE WHOSE PROJECTS WERE NEVER RESTORED IS SAID TO BE ONE. Roslyn still binds it - without the NuGet
-/// packages, the referenced assets or the generators - so every count looked right while hundreds of files carried
-/// compile errors and every resolved column was empty. An SDK project with no `obj/project.assets.json` is one;
-/// the list is kept in `_meta` as `unrestored:csharp`, so a reader of the database can tell too.
-fn unrestored(into: &mut Collector, db: &str, root: &str, projects: &[String]) {
-    let missing: Vec<&String> = projects.iter()
-        .filter(|csproj| crate::csproj::sdk_style(csproj))
-        .filter(|csproj| crate::csproj::parent(csproj).is_none_or(|folder| !Path::new(&folder).join("obj").join("project.assets.json").is_file()))
-        .collect();
-    let named: Vec<String> = missing.iter()
-        .map(|p| Path::new(p).strip_prefix(root).map_or_else(|_| p.to_string(), |r| r.to_string_lossy().replace('\\', "/")))
-        .collect();
-    let Ok(conn) = rusqlite::Connection::open(db) else { return };
-    // WRITTEN ONLY WHEN IT CHANGES: a run that changed nothing writes nothing.
-    let listed = serde_json::Value::from(named.clone()).to_string();
-    if crate::rows::meta::get(&conn, "unrestored:csharp").as_deref() != Some(listed.as_str()) {
-        let _ = crate::rows::meta::put(&conn, "unrestored:csharp", &listed);
-    }
-    if named.is_empty() {
-        return;
-    }
-    let broken: i64 = conn.query_row("SELECT count(*) FROM files WHERE lang = 'csharp' AND errors > 0", [], |r| r.get(0)).unwrap_or(0);
-    let shown: Vec<&str> = named.iter().take(3).map(String::as_str).collect();
-    into.notes.push(format!(
-        "{} {UNRESTORED} (no obj/project.assets.json: {}{}) - Roslyn bound them without their packages, project assets or \
-         generators, and {broken} C# file(s) have compile errors; run `dotnet restore`",
-        named.len(), shown.join(", "), if named.len() > 3 { ", …" } else { "" }
-    ));
 }
 
 /// The SQL half: one batch, since a `.sql` file carries far fewer rows than a C# one.
