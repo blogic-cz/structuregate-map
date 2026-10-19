@@ -172,6 +172,45 @@ Test-Case 'tsrows keys: a template reading a base or an interface property rende
     Assert-NoLine $r 'demo.labb | field_binding | HostComponent'
 }
 
+Test-Case 'tsrows keys: a subtype read through its base renders only on a path through a component that builds it' {
+    # Each page builds ONE button kind and hands its list to its own table; both tables read `b.text` over `Base`. Every
+    # built subtype's key at every read of the base made each page's button render in the other page's table too - a key a
+    # role-gated page alone shows read as shown by every table.
+    $table = { param($name, $sel) "import { Component, Input } from '@angular/core';`nimport { NgFor } from '@angular/common';`n" +
+        "import { Base } from './base';`n" +
+        "@Component({ selector: '$sel', standalone: true, imports: [NgFor], template: '<b *ngFor=`"let b of items`">{{ b.text }}</b>' })`n" +
+        "export class $name {`n  @Input() items: Base[] = [];`n}`n" }
+    $page = { param($name, $sel, $tableName, $tableSel, $file, $button) "import { Component } from '@angular/core';`n" +
+        "import { $tableName } from './$file';`nimport { Base, $button } from './base';`nimport { TranslateService } from './translate.service';`n" +
+        "@Component({ selector: '$sel', standalone: true, imports: [$tableName], template: '<$tableSel [items]=`"list`"></$tableSel>' })`n" +
+        "export class $name {`n  list: Base[];`n  constructor(t: TranslateService) { this.list = [new $button(t)]; }`n}`n" }
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/translate.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class TranslateService {`n  getTranslation(key: string): string {`n    return key;`n  }`n}`n"
+        'apps/shop/src/base.ts' = "import { TranslateService } from './translate.service';`n" +
+            "export abstract class Base {`n  text = '';`n}`n" +
+            "export class PaidB extends Base {`n  constructor(t: TranslateService) { super(); this.text = t.getTranslation('demo.paid'); }`n}`n" +
+            "export class IdleB extends Base {`n  constructor(t: TranslateService) { super(); this.text = t.getTranslation('demo.idle'); }`n}`n"
+        'apps/shop/src/table-a.component.ts' = (& $table 'TableAComponent' 'demo-table-a')
+        'apps/shop/src/table-b.component.ts' = (& $table 'TableBComponent' 'demo-table-b')
+        'apps/shop/src/page-a.component.ts' = (& $page 'PageAComponent' 'demo-page-a' 'TableAComponent' 'demo-table-a' 'table-a.component' 'PaidB')
+        'apps/shop/src/page-b.component.ts' = (& $page 'PageBComponent' 'demo-page-b' 'TableBComponent' 'demo-table-b' 'table-b.component' 'IdleB')
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"paid":"a","idle":"b"}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $paths = Invoke-TsRowsQ $made.Db ("SELECT 'way ' || k.key || ' ' || group_concat(c.name, '>') AS w FROM key_reach k " +
+        "JOIN key_reach__paths p ON p.owner = '#' || k.rowid AND p.role = 'path' " +
+        "JOIN render_path__hops h ON h.owner = p.value AND h.parent = 0 JOIN components c ON c.id = h.value " +
+        "WHERE k.key IN ('demo.paid', 'demo.idle') GROUP BY k.key, p.value ORDER BY k.key")
+    Assert-Line $paths 'way demo.paid PageAComponent>TableAComponent'
+    Assert-NoLine $paths 'way demo.paid PageBComponent'
+    Assert-Line $paths 'way demo.idle PageBComponent>TableBComponent'
+    Assert-NoLine $paths 'way demo.idle PageAComponent'
+}
+
 Test-Case 'tsrows keys: a field a subscribe or a Promise.resolve(x).then callback writes from its parameter holds what is handed on' {
     $tree = New-TsRowsWorkspace @{
         # Node resolution, so the fixture's own `rxjs` typings below resolve: the default for this target is Classic.

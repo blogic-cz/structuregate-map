@@ -176,3 +176,12 @@ no `gate_values` row either. A `style` gate row carries `unit` (`[style.height.p
 whose every way passes such a gate. NOT claimed: an `[ngStyle]`
 key restricts nothing (it is no gate, as an `[ngClass]` key is none), a `[style]="{..}"` object binding, a `when = always` over a value a
 member read decides, and a `[style.height]` collapse whose partners sit on the element's classes. No other table moves.
+
+**#55 - a subtype's key read through its base renders only on a path through a component that builds it** (issue #95 follow-up,
+`key/fields/key_classes.rs::add_reads`, `Classes::builders`, `key/keyreach.rs::ways_of`; no `rows` bump - `rows/ts/` is derived): a template reading a
+base class's or an interface's property (`{{ b.text }}` over `b: Base`) took every built subtype's key, wherever the instances went - a button one
+role-gated page builds read as rendered by every table that reads `text`, and its key lost the role. Each such key now carries `via:<component>|..`, the
+components whose class runs a `new` of that subtype, and a way holds it only on a render path through one of them, as `edge:` holds an element on a
+path through one edge. A subtype built anywhere that is no component (a service, a factory, a module-level function) carries no `via` and reads as before;
+the base class itself, read directly, too. Tables that move: `key_reach` (`n_paths`, `paths`, `min_depth`, `roots`, `routes`, `modules`, and every
+`always_*`/`maybe_*` and `branch_senses` column) for keys a subtype holds and a base read renders. No other table moves.

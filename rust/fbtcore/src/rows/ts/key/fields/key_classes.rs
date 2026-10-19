@@ -52,6 +52,10 @@ pub(super) struct Classes {
     /// The tables a `new` can sit in, read once when the first receiver asks which classes are built.
     tables: Vec<Rc<Vec<Row>>>,
     built: OnceCell<HashSet<String>>,
+    /// class id -> the classes whose code runs a `new` of it; None when one such place sits in no class this can name.
+    builders: OnceCell<HashMap<String, Option<Vec<String>>>>,
+    /// `members` row id -> the class it belongs to: whose code a call row (which names its member, not its class) runs in.
+    member_class: HashMap<String, String>,
     /// The members a subclass declares again, read when the first call asks.
     overridden: OnceCell<HashSet<String>>,
 }
@@ -73,6 +77,7 @@ impl Classes {
         let mut out = Classes {
             by_tail, by_path, by_key: HashMap::default(), key_of: HashMap::default(), parent: HashMap::default(), subs: HashMap::default(), member: HashMap::default(),
             constructors: HashSet::default(), fn_parent: HashMap::default(), declared_in: HashMap::default(), inst: OnceCell::new(), tables: Vec::new(), built: OnceCell::new(),
+            builders: OnceCell::new(), member_class: HashMap::default(),
             overridden: OnceCell::new(),
         };
         let classes = store.table("classes");
@@ -99,6 +104,7 @@ impl Classes {
         }
         for m in store.table("members").iter() {
             let (Some(id), Some(class), Some(name)) = (id_of(m, "id"), id_of(m, "class"), text(m, "name")) else { continue };
+            out.member_class.insert(id.clone(), class.clone());
             match text(m, "kind").as_deref() {
                 Some("constructor") => {
                     out.constructors.insert(id);
@@ -152,6 +158,40 @@ impl Classes {
             }
             out
         })
+    }
+
+    /// WHO BUILDS EACH CLASS: the class whose code holds each `new` of it - a row's own `class`, or its member's for a call.
+    /// One `new` in no class (a module-level function, a row that names neither) makes the answer None: unknown, not empty.
+    pub(super) fn builders(&self, class: &str) -> Option<&Vec<String>> {
+        let all = self.builders.get_or_init(|| {
+            fn walk(v: &Value, me: &Classes, at: Option<&String>, out: &mut HashMap<String, Option<Vec<String>>>) {
+                match v {
+                    Value::Object(o) => {
+                        if let (Some(_), Some(t)) = (o.get("$new"), o.get("$target")) {
+                            let key = t.get("file").and_then(Value::as_str).and_then(|f| me.file_of(f)).zip(t.get("name").and_then(Value::as_str));
+                            if let Some(built) = key.and_then(|(f, n)| me.by_key.get(&(f.to_string(), n.to_string()))) {
+                                let slot = out.entry(built.clone()).or_insert_with(|| Some(Vec::new()));
+                                match (slot.as_mut(), at) {
+                                    (Some(list), Some(class)) if !list.contains(class) => list.push(class.clone()),
+                                    (Some(_), Some(_)) => {}
+                                    _ => *slot = None,
+                                }
+                            }
+                        }
+                        o.values().for_each(|x| walk(x, me, at, out));
+                    }
+                    Value::Array(xs) => xs.iter().for_each(|x| walk(x, me, at, out)),
+                    _ => {}
+                }
+            }
+            let mut out = HashMap::default();
+            for row in self.tables.iter().flat_map(|t| t.iter()) {
+                let at = id_of(row, "class").or_else(|| id_of(row, "member").and_then(|m| self.member_class.get(&m).cloned()));
+                row.get("value").into_iter().chain(row.get("args")).for_each(|v| walk(v, self, at.as_ref(), &mut out));
+            }
+            out
+        });
+        all.get(class).and_then(Option::as_ref)
     }
 
     /// The class `a` extends, transitively, is `base`.
@@ -399,11 +439,24 @@ pub(super) fn add_reads(
     // A TEMPLATE READING A PROPERTY OF A BASE OR AN INTERFACE (`{{ b.text }}` over `b: Base`) renders what every built
     // subtype holds in it, as a template's call of such a method runs every built subtype's (`answers_of`). Added once the
     // reads above are done, so a receiver typed by one subclass still reads that subclass alone.
+    // A SUBTYPE'S KEY RENDERS ONLY WHERE ITS INSTANCES CAN BE: on a path through a component that builds it (`via:`,
+    // `keyreach::ways_of`). Every built subtype's key at every read of the base lost real restrictions - a button built in
+    // one page read as rendered by each table any page shows. A builder that is no component says nothing of the path.
+    let component_of: HashMap<String, String> = store.table("components").iter().filter_map(|c| Some((id_of(c, "class")?, id_of(c, "id")?))).collect();
+    let via = |class: &str, declaring: bool| -> Vec<String> {
+        if declaring {
+            return Vec::new();
+        }
+        let comps: Option<Vec<&String>> = reader.classes.builders(class).map(|b| b.iter().map(|c| component_of.get(c)).collect()).flatten();
+        comps.filter(|c| !c.is_empty()).map(|c| vec![format!("via:{}", c.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("|"))]).unwrap_or_default()
+    };
     let type_members = store.table("type_members");
     let rows = members.iter().filter_map(|m| id_of(m, "id")).chain(type_members.iter().filter_map(|m| id_of(m, "id")));
     for row in rows {
+        let declaring = class_of.get(&row);
         for (class, member) in reader.classes.answering_row(&row) {
-            found.extend(answer_keys(&class, &member, reader, &held).into_iter().map(|k| (row.clone(), k, Vec::new())));
+            let chain = via(&class, declaring == Some(&class));
+            found.extend(answer_keys(&class, &member, reader, &held).into_iter().map(|k| (row.clone(), k, chain.clone())));
         }
     }
     for (member, key, chain) in found {
