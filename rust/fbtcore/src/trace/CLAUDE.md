@@ -75,6 +75,10 @@ over threads, so it can exceed the run), `.max_ms`, `.max_item`; every item slow
 program` (and `... ahead`), `typescript: read the carried rows`, `walk every project`, `the template pass`. A new site is
 `metric!(name, item, { body })` in rust, `CsMetrics.Start`/`Stop` in C#, `timed(name, item, fn)` in node - timing only.
 
+A metrics build also COUNTS rust's allocations (`metrics::Counting`, mimalloc underneath) and writes the bytes rust holds twice a
+second to `<trace>.rust-mem.tsv` (`<epoch ns>\t<bytes>`): lined up with the process's own memory (`map-lab/memprof.sh`), a phase
+splits into rust's share and the rest - .NET's heap, SQLite's allocations through libc, the runtime.
+
 ## `--trace-report`
 
 Per tree, every stage across every run in the file: runs, median, max, total, ordered by total. Every span
