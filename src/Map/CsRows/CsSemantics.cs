@@ -71,12 +71,29 @@ internal static class CsSemantics
         catch (ArgumentException) { return null; }
     }
 
+    /// <summary>
+    /// A TYPE WRITTEN WHERE ONLY A TYPE CAN STAND - what `new` builds, a type argument - bound on its own at its place.
+    /// Roslyn keeps no bound node for a type's syntax, so asking the member's model about one binds the whole statement
+    /// around it again: once per type named, and a field whose initializer is one long collection of `new X() { .. }` was
+    /// bound again for every type in it - quadratic, most of a minute for one file. Nothing around a type in these
+    /// places can change what it names - and the statement's binding was not even right about it: `new Request()` in a
+    /// class with a method `Request` named the METHOD, a call and a reference that were never made.
+    /// </summary>
+    private static TypeSyntax? TypeOnly(SyntaxNode node) => node is TypeSyntax type && node.Parent switch
+    {
+        ObjectCreationExpressionSyntax created => created.Type == node,
+        TypeArgumentListSyntax => true,
+        _ => false,
+    } ? type : null;
+
     public static ISymbol? Bound(SemanticModel? model, SyntaxNode node)
     {
         if (model is null) return null;
         try
         {
-            var info = model.GetSymbolInfo(node);
+            var info = TypeOnly(node) is { } type
+                ? model.GetSpeculativeSymbolInfo(type.SpanStart, type, SpeculativeBindingOption.BindAsTypeOrNamespace)
+                : model.GetSymbolInfo(node);
             if (info.Symbol is not null) return info.Symbol;
             return info.CandidateSymbols.Length == 1 ? info.CandidateSymbols[0] : null;
         }
@@ -110,7 +127,9 @@ internal static class CsSemantics
         if (model is null || node is not ExpressionSyntax expression) return "";
         try
         {
-            var info = model.GetTypeInfo(expression);
+            var info = TypeOnly(expression) is { } written
+                ? model.GetSpeculativeTypeInfo(written.SpanStart, written, SpeculativeBindingOption.BindAsTypeOrNamespace)
+                : model.GetTypeInfo(expression);
             var type = info.Type ?? info.ConvertedType;
             return type is null or IErrorTypeSymbol ? "" : type.ToDisplayString(Typed);
         }
