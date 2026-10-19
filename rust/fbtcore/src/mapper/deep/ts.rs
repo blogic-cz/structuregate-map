@@ -479,10 +479,12 @@ pub(super) fn parse_tree(into: &mut Collector, deep: &Deep, parse: &str, root: &
     // (`exit 134`) after minutes of parsing. Through the environment, since only node reads it.
     // `STRUCTUREGATE_NODE_OPTIONS` is APPENDED (a `--cpu-prof` to profile the parse: `.claude/skills/map-lab/`).
     let extra = std::env::var("STRUCTUREGATE_NODE_OPTIONS").map(|o| format!(" {o}")).unwrap_or_default();
-    let environment = [("NODE_OPTIONS".to_string(), format!("--max-old-space-size=8192{extra}"))];
+    let mut environment = vec![("NODE_OPTIONS".to_string(), format!("--max-old-space-size=8192{extra}"))];
+    environment.extend(crate::trace::host_metrics(&work.carry));
     let launch = crate::trace::stage("typescript: parse (node)");
     let ran = hosts::process(&deep.ts_host, &arguments, root, &environment);
     drop(launch);
+    crate::trace::merge_host_metrics(&work.carry);
     let ran = match ran {
         Ok(ran) => ran,
         Err(why) => {

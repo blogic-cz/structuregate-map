@@ -38,6 +38,12 @@ third of the rows runs the expensive phase in seconds. So:
    included, never by rowid or id - ids shift), and `pwsh -NoProfile -File scripts/Compare-Release.ps1 -Tree <tree>
    -OldDb <before> -NewDb <after> -Old <before dll> -New <after dll> -Out <dir>` - LOST, changed and gained all 0.
 
+## Measure inside a phase
+
+`dotnet build src/StructureGate.csproj -p:Metrics=true -p:SkipTests=true` compiles per-file, per-pass and per-compiler-question
+timing into the build (off in every release); the run's own trace (`<db>.last-run.jsonl`) then carries `metric:` spans -
+see `rust/fbtcore/src/trace/CLAUDE.md`. Reach for it before a temporary probe; rebuild without it before the suites.
+
 ## Build fast
 
 - `cargo test --profile lab` / `cargo build --profile lab`; `dotnet build` already links `lab` (only a publish

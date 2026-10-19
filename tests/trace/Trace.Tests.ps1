@@ -123,6 +123,17 @@ Test-Case 'the map traces its walk, its halves and its write' {
     }
 }
 
+Test-Case 'a build without -p:Metrics=true carries no metric: no span, no tally' {
+    # METRICS ARE COMPILED IN ONLY FOR AN INVESTIGATION (`trace/metrics.rs`, `CsMetrics.cs`, `TsMetrics.mjs`): the suites run
+    # the code that ships, and that code must time nothing a release does not.
+    $tree = Use-Tree @{ 'lib/Lib.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+        'lib/A.cs' = "namespace Lib; public class A { public int N() => new System.Collections.Generic.List<int>().Count; }`n" }
+    $trace = Join-Path $tree 'trace.jsonl'
+    Assert-Exit (Invoke-TracedGate $trace @{} @('--root', $tree, '--ext', '.cs', '--map-sqlite', (Join-Path $tree 'map.sqlite'))) 0
+    $metrics = @((Read-TraceRuns $trace)[0].Spans | Where-Object { $_.name.StartsWith('metric') })
+    Assert-Equal $metrics.Count 0 'no metric span'
+}
+
 Test-Case 'the deep map says per root how it hashed the tree: journal or walk, entries, files read' {
     $tree = Use-Tree @{ 'a.py' = "X = 1`n" }
     $trace = Join-Path $tree 'trace.jsonl'

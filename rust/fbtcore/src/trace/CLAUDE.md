@@ -60,6 +60,21 @@ The resource carries `service.version`, `structuregate.build`, `host.name`, `os.
 `OTEL_RESOURCE_ATTRIBUTES` (`team=build,deployment.environment=ci`) and `OTEL_SERVICE_NAME` are read the way
 the OpenTelemetry SDKs read them and override the exe's own values.
 
+## Metrics: finer than a span, compiled in only to investigate
+
+`dotnet build src/StructureGate.csproj -p:Metrics=true` (and `-p:SkipTests=true` - the suites run the code that ships)
+compiles the finer timing into every half: the cargo feature `metrics` (`metrics.rs`, the `metric!` macro in `mod.rs`),
+`SG_METRICS` for C# (`src/Map/Fbt/CsMetrics.cs`, every method `[Conditional]`), and node is handed an `SG_METRICS` file
+(`src/TsRows/TsSetup/TsMetrics.mjs`). Without it a release has no call, no clock and no tally - `Trace.Tests.ps1` fails on
+a metric span from a normal build. Rebuild without the property before running the suites.
+
+Each name is one `metric: <name>` span (`breakdown`) under the root: `structuregate.metric.count`, `.total_ms` (summed
+over threads, so it can exceed the run), `.max_ms`, `.max_item`; every item slower than `SG_METRICS_SLOW_MS` (50) is a
+`metric item: <name>` span with `structuregate.metric.item`, the 2000 slowest. Measured now: `csharp: rows of a file`,
+`roslyn: symbol|type of <Kind> in <ParentKind>`, `store: insert`, `store: index a node table`, `typescript: build a
+program` (and `... ahead`), `typescript: read the carried rows`, `walk every project`, `the template pass`. A new site is
+`metric!(name, item, { body })` in rust, `CsMetrics.Start`/`Stop` in C#, `timed(name, item, fn)` in node - timing only.
+
 ## `--trace-report`
 
 Per tree, every stage across every run in the file: runs, median, max, total, ordered by total. Every span

@@ -5,6 +5,7 @@
  * staged script lands in one folder.
  */
 
+import { timed } from './TsMetrics.mjs';
 import path from 'node:path';
 import { canonicalPath, relativeTo } from './TsPaths.mjs';
 import { names } from './TsConfig.mjs';
@@ -83,7 +84,8 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     let program;
     let checker;
     try {
-      ({ program, checker } = createProgram(ts, project.tsconfig, nodeModules, diag, noted));
+      ({ program, checker } = timed('typescript: build a program', project.tsconfig,
+        () => createProgram(ts, project.tsconfig, nodeModules, diag, noted)));
       checker = log.wrap(checker);
     } catch (error) {
       diag.note('program_failed');

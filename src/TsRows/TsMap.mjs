@@ -55,6 +55,7 @@ import { Diagnostics, REWRITTEN, Store } from './TsStore.mjs';
 import { createHash } from 'node:crypto';
 import { emit, parseArgs, readCarry, readJson, revisionOf, writePayload } from './TsRunIo.mjs';
 import { markReachable, runTemplatePass, walkProjects } from './TsWalk.mjs';
+import { timed } from './TsMetrics.mjs';
 import { forgetParses, prewarm } from './TsProgram.mjs';
 import { stubSent, uncarriedRead, UNREAD_WHEN_CARRIED } from './TsCarried.mjs';
 
@@ -360,7 +361,7 @@ async function main() {
     const heldProjects = [];
     let loaded = 0;
     let skipped = 0;
-    const carried = readCarry(args.carry, args.carryPart, (name, row) => {
+    const carried = timed('typescript: read the carried rows', '', () => readCarry(args.carry, args.carryPart, (name, row) => {
       // A TABLE A ROLLUP BUILDS FROM SCRATCH IS NOT PUT BACK - see `Store.rebuiltTables`. The pass
       // that owns it runs again in full, so a carried row would sit beside a fresh copy of itself.
       if (name === 'projects') { heldProjects.push(row); skipped += 1; return; }
@@ -377,7 +378,7 @@ async function main() {
       // `files` is the one INTERNED table, keyed by the absolute path - see `makeFileId`.
       store.load(name === ASIDE ? 'renders' : name, [row], name === 'files' ? (held) => held.abs : null);
       loaded += 1;
-    });
+    }));
     if (carried === false) { emit('MAP-NOCARRY', `${args.carry} was not written`); return 0; }
     if (!carried) {
       // NOT A FULL RUN INSTEAD. The caller asked for a partial one and this half was going to
@@ -409,14 +410,14 @@ async function main() {
 
   // WHICH FILES THIS RUN READS AGAIN beyond the ones that changed - see `TsSetup/TsReads.mjs`.
   const rereads = (partial && planned.cut) ? startRereads({ ts, fe, store, state, planned, now, only: affected }) : null;
-  const { inAnyProgram, registry, components } = walkProjects({
+  const { inAnyProgram, registry, components } = timed('typescript: walk every project', '', () => walkProjects({
     ts, store, fe, nodeModules: found.nodeModules, projects, diag, noted: new Set(),
     // WHICH FILES THIS RUN OPENS. Every other file in the program is still WALKED for its ids and
     // its program membership - a declaration in it is what the ones being re-extracted resolve
     // against - but nothing is extracted from it, because its rows are already loaded.
     only: affected,
     rereads,
-  });
+  }));
   if (repointLater) repointProjects(store, repointLater);
   forgetParses();
   // CARRIED-THEN-PRODUCED IS NOT A FULL RUN'S ORDER, and every pass below reads its tables in order (see `sending`).
@@ -452,12 +453,12 @@ async function main() {
   }
 
   // ---------------------------------------------------------------- PASS 2: the templates
-  const templatePass = runTemplatePass({
+  const templatePass = timed('typescript: the template pass', '', () => runTemplatePass({
     ng, store, diag, fe, registry: matching, components, config,
     // A COMPONENT THIS RUN IS NOT RE-EXTRACTING ALREADY HAS ITS TEMPLATE'S ROWS, so following the
     // render queue into it would parse the same template twice and store both copies.
     expand: !partial,
-  });
+  }));
   emit('MAP-NOTE', `the typescript half parsed ${templatePass.parsed} template(s)`);
 
   // A TEMPLATE READ BECOMES A DECLARATION. After every template is parsed, because a read can land on a

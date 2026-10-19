@@ -41,6 +41,14 @@ internal static class FbtCore
     [DllImport(Library, ExactSpelling = true)]
     private static extern IntPtr fbt_sql_parse([MarshalAs(UnmanagedType.LPUTF8Str)] string text);
 
+    // ONLY IN A METRICS BUILD: rust exports it under its `metrics` feature, and every call is in `CsMetrics`, whose
+    // callers the compiler deletes without `SG_METRICS` - so a release never resolves this entry point.
+    [DllImport(Library, ExactSpelling = true)]
+    private static extern void fbt_metric([MarshalAs(UnmanagedType.LPUTF8Str)] string json);
+
+    /// <summary>The C# half's metric tallies, to the run's trace - see `CsMetrics`.</summary>
+    internal static void Metric(string json) => fbt_metric(json);
+
     /// <summary>A PostgreSQL file's rows, parsed in rust - see `rust/fbtcore/src/sqlpg/`. JSON.</summary>
     internal static string? SqlParse(string text) => Owned(fbt_sql_parse(text));
 

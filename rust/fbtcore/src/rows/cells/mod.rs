@@ -182,12 +182,14 @@ pub fn index_values(db: &Connection) -> Result<()> {
         rows.collect::<rusqlite::Result<_>>()?
     };
     for child_table in children {
-        key_index(db, &child_table)?;
-        let t = schema::escape(&child_table);
-        db.execute_batch(&format!(
-            "CREATE INDEX IF NOT EXISTS \"ix_{t}_value\" ON \"{t}\" (value, owner, n); \
-             CREATE INDEX IF NOT EXISTS \"ix_{t}_role\" ON \"{t}\" (role, parent, owner, n)"
-        ))?;
+        crate::trace::metric!("store: index a node table", child_table, {
+            key_index(db, &child_table)?;
+            let t = schema::escape(&child_table);
+            db.execute_batch(&format!(
+                "CREATE INDEX IF NOT EXISTS \"ix_{t}_value\" ON \"{t}\" (value, owner, n); \
+                 CREATE INDEX IF NOT EXISTS \"ix_{t}_role\" ON \"{t}\" (role, parent, owner, n)"
+            ))?;
+        });
     }
     Ok(())
 }

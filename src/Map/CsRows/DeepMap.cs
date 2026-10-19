@@ -115,7 +115,10 @@ internal static class DeepMap
                 extract.Start();
                 if (rel == Environment.GetEnvironmentVariable("STRUCTUREGATE_TEST_THROW_ON"))
                     throw new NullReferenceException("thrown by STRUCTUREGATE_TEST_THROW_ON");
+                long timed = 0;
+                CsMetrics.Start(ref timed);
                 CsRows.Read(rows, rel, text, shas[rel], ready.Tree, ready.Model, ready.Project, ready.Compiled, ready.Razor, excluded.Contains(rel), ready.Declared, byPath);
+                CsMetrics.Stop("csharp: rows of a file", rel, timed);
             }
             catch (Exception e) when (e is not OutOfMemoryException)
             {
@@ -129,6 +132,7 @@ internal static class DeepMap
             }
             read.Add((rel, paths[rel]));
         }
+        CsMetrics.Flush();
         var final = taken >= rels.Count;
         var written = System.Diagnostics.Stopwatch.StartNew();
         var payload = rows.ToUtf8(input.GetProperty("all").GetBoolean(), input.GetProperty("first").GetBoolean(), final,

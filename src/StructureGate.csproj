@@ -315,8 +315,15 @@
     <_FbtCoreCargo Condition="'$(PublishAot)' == 'true'">rustc --lib --crate-type staticlib</_FbtCoreCargo>
     <_FbtCoreCargo Condition="'$(PublishAot)' != 'true'">build</_FbtCoreCargo>
   </PropertyGroup>
+  <!-- METRICS: `-p:Metrics=true` compiles the finer timing into BOTH halves - `SG_METRICS` for the C# calls
+       (`[Conditional]`, `src/Map/Fbt/CsMetrics.cs`) and the `metrics` feature for rust (`src/trace/metrics.rs`). Never
+       for a release, and never for the suites: they run the code that ships. -->
+  <PropertyGroup Condition="'$(Metrics)' == 'true'">
+    <DefineConstants>$(DefineConstants);SG_METRICS</DefineConstants>
+    <_FbtCoreFeatures>--features metrics</_FbtCoreFeatures>
+  </PropertyGroup>
   <Target Name="BuildFbtCore" BeforeTargets="BeforeCompile">
-    <Exec Command="cargo $(_FbtCoreCargo) --profile $(FbtCoreProfile) --manifest-path &quot;$(FbtCoreDir)/Cargo.toml&quot;"
+    <Exec Command="cargo $(_FbtCoreCargo) --profile $(FbtCoreProfile) $(_FbtCoreFeatures) --manifest-path &quot;$(FbtCoreDir)/Cargo.toml&quot;"
           WorkingDirectory="$(FbtCoreDir)" />
     <Error Condition="!Exists('$(FbtCoreOut)/$(FbtCoreStatic)')"
            Text="structuregate: $(FbtCoreStatic) was not produced - is the rust toolchain installed and on PATH?" />

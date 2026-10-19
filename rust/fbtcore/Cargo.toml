@@ -18,6 +18,10 @@ publish = false
 crate-type = ["staticlib", "cdylib"]
 name = "fbtcore"
 
+[features]
+# FINER TIMING, compiled in only for an investigation (`dotnet build -p:Metrics=true`): `src/trace/metrics.rs`.
+metrics = []
+
 [dependencies]
 # The tree map beside this one: it answers "has this tree changed" from the NTFS journal
 # where it can, which is what lets the gate skip a tree it has already passed.
