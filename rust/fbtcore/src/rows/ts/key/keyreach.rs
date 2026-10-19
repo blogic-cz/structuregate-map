@@ -460,6 +460,9 @@ pub fn ways_of(
             let chains: Vec<(&Vec<String>, Vec<String>)> = own.iter()
                 .filter(|c| !c.iter().any(|g| dead.contains(g)))
                 .filter(|c| c.iter().filter_map(|g| g.strip_prefix("edge:")).all(|e| p.edges.iter().any(|x| &**x == e)))
+                // A SUBTYPE'S KEY READ THROUGH ITS BASE (`via:<component>|..`, `key_classes::add_reads`) holds on a path through
+                // a component that builds it.
+                .filter(|c| c.iter().filter_map(|g| g.strip_prefix("via:")).all(|v| v.split('|').any(|b| p.hops.iter().any(|h| &**h == b))))
                 .filter_map(|c| Some((c, bind_links(bound, p, c.iter().map(String::as_str))?)))
                 .collect();
             if chains.is_empty() || p.gates.iter().any(|g| dead.contains(&**g)) {
@@ -484,11 +487,11 @@ pub fn ways_of(
                 // gate does, and folds with the key's own branches.
                 let mut one: IndexSet<String> =
                     p.gates.iter().chain(p.branches.iter()).map(|g| g.to_string()).collect();
-                one.extend(chain.iter().filter(|g| !g.starts_with("edge:")).cloned());
+                one.extend(chain.iter().filter(|g| !g.starts_with("edge:") && !g.starts_with("via:")).cloned());
                 one.extend(plinks.iter().chain(links.iter()).cloned());
                 // A CHILD'S INPUT READS AS THE PARENT'S EXPRESSION through the edge that binds it (`key_scopes`).
                 let mut named: IndexMap<String, Vec<super::key_scopes::Step>> = IndexMap::new();
-                let sites = chain.iter().filter(|g| !g.starts_with("edge:") && !g.starts_with("bind:"));
+                let sites = chain.iter().filter(|g| !g.starts_with("edge:") && !g.starts_with("via:") && !g.starts_with("bind:"));
                 let owned = p.gates.iter().filter_map(|g| Some((&**g, scopes.gate_comp.get(&**g)?.as_str())));
                 w.aliases.push(scopes.pairs(p));
                 for (id, at) in owned.chain(sites.map(|g| (g.as_str(), c.as_str()))) {
