@@ -151,16 +151,26 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
     for (const prop of props ?? []) {
       const decl = prop.declarations?.find((d) => ts.isPropertySignature(d) || ts.isPropertyDeclaration(d));
       if (!decl) continue;
+      // THE MEMBER AS THIS ALIAS HAS IT (#96): `type PayloadBox = Box<Payload>` borrows `Box`'s `Payload: TPayload`, and
+      // the declaration's own annotation names the class's TYPE PARAMETER - every template read past it stopped there.
+      // The checker's type for the alias substitutes the argument; it is taken only where it differs from the declared
+      // one, so a member nothing instantiates keeps its annotation's text.
+      let given = null;
+      try {
+        const own = checker.getTypeOfSymbolAtLocation(prop, node);
+        if (decl.type && own && own !== checker.getTypeAtLocation(decl.type)) given = own;
+      } catch { /* the declaration's own answer stands */ }
+      const typeText = given ? checker.typeToString(given, node, ts.TypeFormatFlags.NoTruncation) : decl.type ? decl.type.getText() : null;
       store.add('type_members', 'tm', {
         owner, file: fileId(decl.getSourceFile().fileName), name: prop.getName(),
         path: prop.getName(), parent: null,
-        type: decl.type ? decl.type.getText() : null,
+        type: typeText,
         optional: !!decl.questionToken,
         kind: ts.SyntaxKind[decl.kind] ?? 'unknown',
         // WHERE THE PROPERTY REALLY LIVES. A computed type borrows its members, so the row is anchored at
         // the borrowed declaration and says so: `via: 'computed'` keeps the two kinds of row apart.
         via: 'computed',
-        ...(decl.type ? typeRefAt(decl.type) : { type_ref: null }),
+        ...(decl.type ? typeRefAt(decl.type, given) : { type_ref: null }),
         ...locationOf(decl),
       });
     }
