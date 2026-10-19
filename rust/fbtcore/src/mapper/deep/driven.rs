@@ -33,7 +33,9 @@ use std::path::Path;
 // an error a generated file on disk takes part in is a `diagnostics` row of `kind = 'generated'`.
 // 26: `expressions.shape` is the WHOLE skeleton, uncapped, and a structure (node rows), no longer JSON text.
 // 28: an index initializer's entry (`["EU"] = 3`) is named by its KEY (`EU`), not by `["EU"]` spelled as text.
-pub(super) const CS_ROWS_VERSION: &str = "28";
+// 29: a type `new` builds or a type argument is bound as a type: `new Request()` beside a method `Request` is no call or
+// reference of the method.
+pub(super) const CS_ROWS_VERSION: &str = "29";
 /// The same for the SQL extractor. 7: `sql_dynamic`, an object created by dynamic SQL.
 // 8: a CTE name is the statement's own - never a `sql_refs` row, and never hiding a table in a later statement.
 // 9: `sql_statements` (a row per statement, `fingerprint` filled by `rows/sqlshape/`), its tree `sql_nodes`, and

@@ -59,3 +59,30 @@ Test-Case 'csuses: a use the compiler could not bind is still a row - unbound, b
     $unbound = (Get-CsUsesLines $db "symbol = ''") -join ' '
     Assert-Equal $unbound 'L22:y.Start:unbound' 'the unbound use'
 }
+
+Test-Case 'csuses: a type that new builds or a type argument names is never a member spelled the same' {
+    # THE TYPES DO NOT RESOLVE (a package missing), and asked through the member's model each name fell back to the member
+    # it spells: `List<Code> Code` read as a use of the property, `new Request()` as a call of the method `Request`. The
+    # asking also rebound the whole statement for every type in it - quadratic in one long initializer.
+    $tree = Use-Tree @{ 'Demo.csproj' = $script:CsUsesProject; 'Holder.cs' = @'
+using System.Collections.Generic;
+namespace Demo;
+public class Holder<T>
+{
+    public List<Code> Code { get; set; } = new List<Code>();
+}
+public class Mapper
+{
+    public Request Request() { return new Request() { N = 1 }; }
+    private int count;
+    public int Count() => count;
+}
+'@ }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    Assert-Equal ((Get-CsUsesLines $db "symbol IN ('Demo.Holder<T>.Code', 'Demo.Mapper.Request')") -join ' ') '' 'no use of the property or the method'
+    Assert-Equal ((Get-CsUsesLines $db "symbol = 'Demo.Mapper.count'") -join ' ') 'L11:count:field' 'a real use is still a row'
+    $calls = Invoke-Gate --map-query $db --sql "SELECT 'C' || line || ':' || callee || ':' || symbol AS r FROM calls WHERE callee = 'Request'"
+    Assert-Line $calls 'C9:Request:'
+    Assert-NoLine $calls 'Demo.Mapper.Request'
+}
