@@ -241,17 +241,21 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     // follows a call into its callee's returns - the gate's list and predicate readers - passed it by.
     const fnValued = initializer && (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer));
     const isSignature = ts.isMethodDeclaration(m) || ts.isConstructorDeclaration(m) || ts.isSetAccessor(m);
+    // AN ACCESSOR IS TYPED AS A PROPERTY IS (#95): its symbol IS the property's, so the checker answers the property's
+    // type, never a function's. Typed only by its annotation, `get vm() { return this.load<Outer>(); }` had none, and
+    // every template read chained off it stopped there.
+    const typedLikeProperty = kind === 'property' || kind === 'getter' || kind === 'setter';
     return store.add('members', 'm', {
       class: classId, file: fid, kind, name,
       static: mods.static, readonly: mods.readonly, visibility: mods.visibility,
       optional: !!m.questionToken,
-      type: kind === 'property' ? typeText(m, m.type) : memberType,
+      type: typedLikeProperty ? typeText(m, m.type) : memberType,
       // AN ANNOTATION IF THERE IS ONE, OTHERWISE THE PROPERTY'S OWN TYPE - but never a METHOD's. Asking the
       // checker what type a method declaration is answers with its own function type whose symbol is the
       // method: every un-annotated method resolved to itself. For a PROPERTY the same question
       // is exactly right - `items$ = new BehaviorSubject<Item[]>([])` has no annotation and a fully
       // known type, and refusing it left every RxJS-style member unresolvable.
-      ...(m.type ? typeRefAt(m.type) : kind === 'property' ? typeRefAt(m) : { type_ref: null }),
+      ...(m.type ? typeRefAt(m.type) : typedLikeProperty ? typeRefAt(m) : { type_ref: null }),
       value,
       params: isSignature ? paramsOf(m) : fnValued ? paramsOf(initializer) : undefined,
       decorators,

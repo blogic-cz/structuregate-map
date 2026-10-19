@@ -75,6 +75,9 @@ runs) are compared by that, every carried field equal, never by `c:412`.
   null and `type_refs` lists each `{name, file, line, ...}` as a `type_ref` would be, sorted by place (the checker's order
   is not a full and a partial run's). A parameter's `resolved` is likewise the one name its written union's members
   resolve to. A union an alias names (`type Id = A | B`) is the alias, as before. `locals` and `returns` resolve no type.
+- **A getter or setter is typed as a property is** (rows 63, #95, `TsDecls/TsClassRows.mjs::memberRow`): without an annotation
+  its `type` and `type_ref` are what the checker infers - an accessor's symbol is the property's, never a function type - so a
+  template read chained off `get vm() { return this.load<Outer>(); }` resolves past it. A method still takes only its annotation.
 
 ## Expression trees the gate readers need (`TsDecls/TsBody.mjs`)
 
