@@ -92,6 +92,8 @@ runs) are compared by that, every carried field equal, never by `c:412`.
   `type_ref` naming a type parameter carries `param: true` and a generic one its `args` in order (`TsDecls/TsTypeRef.mjs`). A read binds them as it
   walks: `Concrete extends Base<Payload>` binds `Base`'s `T` from `extends.type_args`, `Wrapped: Wrapper<T>` binds `Wrapper`'s parameter to
   what `T` is bound to, and `Inner: T` then reads on as `Payload`. An unbound parameter names nothing.
+- **A template write names what it writes** (rows 68, #99): `(valueChange)="f.On = $event"` - a `Write` node heads its chain like a read and carries
+  the `target` of the member written, so which element SETS a member is a join, not only which reads it.
 
 ## Expression trees the gate readers need (`TsDecls/TsBody.mjs`)
 

@@ -285,7 +285,9 @@ export function rollupTemplateReads(store) {
     // so the last name seen IS the root, and saying so needs no positional pick.
     let root = null;
     let current = node;
-    while (current && (current.k === 'Read' || current.k === 'SafeRead')) {
+    // A WRITE HEADS ITS CHAIN (#99): `(valueChange)="f.On = $event"` writes `On` through the read `f`, and the member written
+    // is resolved as a read of it would be - so a consumer can tell which element SETS a member, not only which reads it.
+    while (current && (current.k === 'Read' || current.k === 'SafeRead' || (current === node && current.k === 'Write'))) {
       const name = str(current.name);
       if (name === null) break;
       root = name;
@@ -431,7 +433,7 @@ export function rollupTemplateReads(store) {
   const walk = (node, owner, scope) => {
     if (!node || typeof node !== 'object') return;
     if (Array.isArray(node)) { for (const x of node) walk(x, owner, scope); return; }
-    if (node.k === 'Read' || node.k === 'SafeRead') {
+    if (node.k === 'Read' || node.k === 'SafeRead' || node.k === 'Write') {
       const { root, names, nodes, pipeBase } = chainOf(node);
       // A ROOT BOUND BY THE TEMPLATE IS ALREADY THE OWNER - its name is consumed, not looked up: resolving
       // `item.label` by searching for a property called `item` ON the item's own type finds nothing.

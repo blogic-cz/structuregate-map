@@ -231,9 +231,10 @@ async function main() {
   // 65: an intersection names what its parts name (#97); a template read follows `type_refs` and stops at a hop of unknown type.
   // 66: an enum member carries its `line`, and a template read of an enum a field holds (`Kinds.Alpha`) targets it.
   // 67: classes and interfaces carry `type_params`, a type_ref `param` and `args` - a read binds a generic as instantiated (#98).
+  // 68: a template `Write` (`f.On = $event`) carries the `target` of the member it writes (#99).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 67, build: args.build,
+    config: config.file, data: config.data, rows: 68, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
