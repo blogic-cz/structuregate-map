@@ -27,6 +27,8 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
         return {
           name: propName(m.name),
           value: folded !== undefined ? folded : (m.initializer ? evalNode(m.initializer) : null),
+          // WHERE THE MEMBER IS: a template read of it (`{{ Kinds.Alpha }}` over `Kinds = Kind`) targets this line.
+          line: locationOf(m).line,
         };
       }),
       ...locationOf(statement),
@@ -40,6 +42,7 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
       exported,
       ...(inModule ? { in_module: inModule } : {}),
       extends: (statement.heritageClauses ?? []).flatMap((h) => h.types.map((t) => t.getText())),
+      ...(statement.typeParameters?.length ? { type_params: statement.typeParameters.map((p) => p.name.text) } : {}),
       members: statement.members.map((m) => ({
         name: m.name ? propName(m.name) : (ts.SyntaxKind[m.kind] ?? 'unknown'),
         type: m.type ? m.type.getText() : null,
