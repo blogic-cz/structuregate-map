@@ -36,7 +36,7 @@ use std::path::Path;
 // 29: a type `new` builds or a type argument is bound as a type: `new Request()` beside a method `Request` is no call or
 // reference of the method.
 // 30: a generated file's method bodies are not bound for `diagnostics`: its syntax and declaration errors only.
-pub(super) const CS_ROWS_VERSION: &str = "30";
+pub(super) const CS_ROWS_VERSION: &str = "31";
 /// The same for the SQL extractor. 7: `sql_dynamic`, an object created by dynamic SQL.
 // 8: a CTE name is the statement's own - never a `sql_refs` row, and never hiding a table in a later statement.
 // 9: `sql_statements` (a row per statement, `fingerprint` filled by `rows/sqlshape/`), its tree `sql_nodes`, and

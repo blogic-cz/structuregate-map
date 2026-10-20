@@ -158,6 +158,12 @@ reported on every run.
 sha, like PyRows' `ROWS_VERSION`. Without a bump an upgraded gate keeps the old gate's rows wherever the source and
 references did not move: a consumer solution kept its old bound share after the fixes that raise it, until its database was deleted.
 
+`branches.condition` IS THE TEST AS NODE ROWS IN ROSLYN'S SHAPE (`CsBody/CsCondition.cs`, `branches__condition`): syntax kinds, `op`,
+`left`/`right`/`operand`/`pattern`/`condition`/`then`/`else`/`receiver`/`args`, and on a leaf the bound `symbol` and `CsFolding`'s
+`const`/`const_kind`, so `tier == Tier.Gold` is findable as the enum member and not as text. It is NOT the TypeScript evaluator:
+C# has no `condition_expr` (nothing is decided, the tree IS the column). A dotted member access is a leaf, parentheses are no node,
+no depth cap.
+
 `enums` AND `switch_cases` ARE SHARED WITH THE TYPESCRIPT HALF (`CsBody/CsRowsCases.cs`): same table,
 its shape, so a backend value joins a frontend one. Each half deletes only its own - C# by `file`, TypeScript by
 `half` (or by its own `owner_file` ids on a partial run) - and **only a FULL TypeScript run proves that**: a partial

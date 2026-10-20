@@ -107,3 +107,71 @@ Test-Case 'csfold: a template of two six-way loops keeps all thirty-six strings'
     Assert-Exit $r 0
     Assert-Line $r 'v=36'
 }
+
+# A BRANCH'S TEST AS A TREE (`branches.condition`) in Roslyn's shape, each name bound to its symbol: `tier == Tier.Gold` is findable as
+# the enum member and not as text. Its helpers (`CsCond`) are its own.
+$script:CsCondProject = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+
+# The members of the node reached from the root of the condition of the `$Kind` branch on `$Line` by the roles in `$Path`,
+# as `role=value` pairs sorted by role, one cell. A member that is itself a node has no value and is left out.
+function Get-CsCondNode([string]$Db, [int]$Line, [string]$Kind, [string[]]$Path = @()) {
+    $from = "branches b JOIN branches__condition c0 ON c0.owner = b.id AND c0.n = 0"
+    $at = 'c0'
+    for ($i = 0; $i -lt $Path.Count; $i++) {
+        $from += " JOIN branches__condition c$($i + 1) ON c$($i + 1).owner = b.id AND c$($i + 1).parent = ${at}.n AND c$($i + 1).role = '$($Path[$i])'"
+        $at = "c$($i + 1)"
+    }
+    $sql = "SELECT 'v=' || coalesce((SELECT group_concat(m.role || '=' || m.value, ';' ORDER BY m.role) FROM branches__condition m " +
+        "WHERE m.owner = b.id AND m.parent = ${at}.n AND m.value IS NOT NULL), '') AS v FROM $from WHERE b.line = $Line AND b.kind = '$Kind'"
+    $r = Invoke-Gate --map-query $Db --width 0 --sql $sql
+    Assert-Exit $r 0
+    $found = @($r.Lines | Where-Object { $_.TrimStart().StartsWith('v=') })
+    if ($found.Count -ne 1) { throw "expected one node at $Kind/$Line [$($Path -join '/')], got $($found.Count):`n$($r.Text)" }
+    return $found[0].Trim().Substring(2)
+}
+
+function Get-CsCondCount([string]$Db, [int]$Line, [string]$Kind) {
+    $r = Invoke-Gate --map-query $Db --width 0 --sql ("SELECT 'v=' || count(c.n) AS v FROM branches b " +
+        "JOIN branches__condition c ON c.owner = b.id WHERE b.line = $Line AND b.kind = '$Kind'")
+    Assert-Exit $r 0
+    return (@($r.Lines | Where-Object { $_.TrimStart().StartsWith('v=') })[0]).Trim().Substring(2)
+}
+
+Test-Case 'cscondition: a test is a tree of Roslyn kinds with what each name binds to' {
+    $nl = [string][char]10
+    $tree = Use-Tree @{
+        'Demo.csproj' = $script:CsCondProject
+        'Cond.cs' = "namespace Demo;$nl" +
+            "public enum Tier { Basic = 1, Gold = 2 }$nl" +
+            "public class Store { public bool Ready; }$nl" +
+            "public class Cond$nl{$nl" +
+            "    public int Run(Tier tier, bool a, Store b, int n)$nl    {$nl" +
+            "        if (tier == Tier.Gold) return 1;$nl" +
+            "        if (a && !b.Ready) return 2;$nl" +
+            "        if (tier is Tier.Gold or Tier.Basic) return 3;$nl" +
+            "        while (n > 0) n--;$nl" +
+            "        switch (tier) { default: break; }$nl" +
+            "        try { n++; } catch { }$nl" +
+            "        return 0;$nl" +
+            "    }$nl}$nl"
+    }
+    $db = Join-Path $tree 'cond.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    # a) the issue's repro: `tier == Tier.Gold`
+    Assert-Equal (Get-CsCondNode $db 8 'if') 'kind=EqualsExpression;op===;source=tier == Tier.Gold' 'the root of an equality'
+    Assert-Equal (Get-CsCondNode $db 8 'if' @('right')) 'const=Demo.Tier.Gold;const_kind=enum;kind=SimpleMemberAccessExpression;source=Tier.Gold;symbol=Demo.Tier.Gold' 'the enum member'
+    Assert-Equal (Get-CsCondNode $db 8 'if' @('left')) 'const_kind=symbol;kind=IdentifierName;source=tier;symbol=tier' 'the parameter'
+    # b) a negated member read under `&&`
+    Assert-Equal (Get-CsCondNode $db 9 'if') 'kind=LogicalAndExpression;op=&&;source=a && !b.Ready' 'a conjunction'
+    Assert-Equal (Get-CsCondNode $db 9 'if' @('right')) 'kind=LogicalNotExpression;op=!;source=!b.Ready' 'a negation'
+    Assert-Equal (Get-CsCondNode $db 9 'if' @('right', 'operand')) 'const_kind=symbol;kind=SimpleMemberAccessExpression;source=b.Ready;symbol=Demo.Store.Ready' 'a dotted read is one leaf'
+    # c) a pattern
+    Assert-Equal (Get-CsCondNode $db 10 'if') 'kind=IsPatternExpression;op=is;source=tier is Tier.Gold or Tier.Basic' 'an is-pattern'
+    Assert-Equal (Get-CsCondNode $db 10 'if' @('pattern')) 'kind=OrPattern;op=or;source=Tier.Gold or Tier.Basic' 'an or-pattern'
+    Assert-Equal (Get-CsCondNode $db 10 'if' @('pattern', 'left')) 'const=Demo.Tier.Gold;const_kind=enum;kind=ConstantPattern;source=Tier.Gold;symbol=Demo.Tier.Gold' 'the first constant pattern'
+    Assert-Equal (Get-CsCondNode $db 10 'if' @('pattern', 'right')) 'const=Demo.Tier.Basic;const_kind=enum;kind=ConstantPattern;source=Tier.Basic;symbol=Demo.Tier.Basic' 'the second constant pattern'
+    # d) other statements; a try tests nothing
+    Assert-Equal (Get-CsCondNode $db 11 'while') 'kind=GreaterThanExpression;op=>;source=n > 0' 'a while'
+    Assert-Equal (Get-CsCondNode $db 12 'switch') 'const_kind=symbol;kind=IdentifierName;source=tier;symbol=tier' 'a switch'
+    Assert-Equal (Get-CsCondCount $db 13 'try') '0' 'a try has no condition nodes'
+}
