@@ -275,6 +275,13 @@ pub fn restriction_of(
 
     let null = Value::Null;
     let sides = [object.get("left").unwrap_or(&null), object.get("right").unwrap_or(&null)];
+    // A COMPARISON WITH `null` OR `undefined` RESTRICTS NOTHING: neither is a member, so `x !== null` holds for every one
+    // and `x === null` names none of them. Read as `unknown`, it turned `x !== null && x !== K.None` - `not_in [None]` - into
+    // `unknown` the moment `x` resolved to its enum-typed member.
+    let nullish = |s: &Value| s.get("k").and_then(Value::as_str) == Some("Literal") && s.get("v").is_none_or(Value::is_null);
+    if !relational && sides.iter().any(|s| nullish(s)) {
+        return None;
+    }
     let con = sides.iter().find_map(|s| constant_of(s, mem, idx));
     let typed_dim = sides.iter().find_map(|s| dimension_of(s, mem));
 
@@ -489,6 +496,15 @@ mod tests {
         assert_eq!(plain["op"], json!("not_in"));
         let negated = restriction_of(&node, true, &mem_of(), &idx_of(FIVE)).expect("a restriction");
         assert_eq!(negated["op"], json!("in"));
+    }
+
+    #[test]
+    fn a_comparison_with_null_or_undefined_restricts_nothing() {
+        // A typed dimension against `null`: no member is null, so the test says nothing of which member it holds.
+        for op in ["===", "!==", "==", "!="] {
+            assert!(restriction_of(&binary(op, discriminator(), json!({"k": "Literal", "v": null})), false, &mem_of(), &idx_of(FIVE)).is_none());
+            assert!(restriction_of(&binary(op, json!({"k": "Literal"}), discriminator()), false, &mem_of(), &idx_of(FIVE)).is_none());
+        }
     }
 
     #[test]
