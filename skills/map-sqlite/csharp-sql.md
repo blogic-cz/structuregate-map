@@ -65,7 +65,7 @@ before concluding a method is dead.
   `label_symbols` what each binds to, `label_values` its constant (an enum member's number), `guard` the
   `when`, `is_default`. Every row INSIDE a section or an arm (a `returns`, a call, a literal, a nested switch's
   cases) carries `case` = that `switch_cases.id`, as a TypeScript row does: `return 1;` under `case Extra:` is
-  what the method returns for Extra, not always.
+  what the method returns for Extra, not always. `branches.condition` (the test as a node tree, no `condition_expr`): [csharp-conditions.md](csharp-conditions.md).
 * **`members`, `locals` and `comments` are shared too**, C# rows told apart by `files.lang`.
   - `members`: one row per property, field (each declarator), `const`, event and indexer, with `kind`, `symbol` (the name
     `refs.symbol` uses, so a use joins its declaration), `class_symbol`, `type` (resolved) and `type_text`,

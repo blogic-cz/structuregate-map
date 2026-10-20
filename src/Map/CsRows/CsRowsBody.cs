@@ -202,6 +202,7 @@ internal sealed partial class CsRows
             ("line", Line(node)),
             ("kind", kind),
             ("test", CsFacts.Text(tested)),
+            ("condition", CsCondition.Of(model, tested)),
             ("end_line", EndLine(node)),
             ("reads", touched.Reads),
             ("calls", touched.Calls));
@@ -222,6 +223,7 @@ internal sealed partial class CsRows
             ("line", Line(node)),
             ("kind", "try"),
             ("test", test),
+            ("condition", ""),
             ("end_line", EndLine(node)),
             ("reads", new List<string>()),
             ("calls", new List<string>()));
