@@ -185,3 +185,8 @@ components whose class runs a `new` of that subtype, and a way holds it only on 
 path through one edge. A subtype built anywhere that is no component (a service, a factory, a module-level function) carries no `via` and reads as before;
 the base class itself, read directly, too. Tables that move: `key_reach` (`n_paths`, `paths`, `min_depth`, `roots`, `routes`, `modules`, and every
 `always_*`/`maybe_*` and `branch_senses` column) for keys a subtype holds and a base read renders. No other table moves.
+
+**#56 - a comparison with `null` or `undefined` restricts nothing** (#98 follow-up, `gate/gate_values.rs::restriction_of`; no `rows` bump): neither is
+an enum member, so `x !== null` holds for every member and `x === null` names none. Once #98 typed `x` (a member read through a generic base), the
+comparison read as `unknown`, and `x !== null && x !== K.None` lost its `not_in [None]`. It is no restriction again, as while `x` was untyped. Tables
+that move: none against a map before #98; against one with #98 alone, `gate_values` and `key_reach` for keys under such a gate.
