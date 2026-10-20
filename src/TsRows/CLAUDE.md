@@ -94,6 +94,14 @@ runs) are compared by that, every carried field equal, never by `c:412`.
   what `T` is bound to, and `Inner: T` then reads on as `Payload`. An unbound parameter names nothing.
 - **A template write names what it writes** (rows 68, #99): `(valueChange)="f.On = $event"` - a `Write` node heads its chain like a read and carries
   the `target` of the member written, so which element SETS a member is a join, not only which reads it.
+- **The rows are 1:1 with the source** (rows 69, `TsDecls/TsBody.mjs::collectExpr`): code OUTSIDE a function body - a property initializer,
+  a class or member decorator's arguments, a parameter default, a top-level statement - is walked as a body: its calls, assignments and
+  locals are rows under its member (class, or none at the top level), and every callback in it - an ngrx `createEffect`/`select`
+  callback too - is a `functions` row with its own body (`state_effects` reads an effect's calls through that chain, never the callback's
+  own return). A concise body that is a function (`(a) => (b) => ..`) is its own row; a class expression is a `classes` row named by
+  its holder; `(x as T) = v` and `[a, b] = [b, a]` are assignments; a declaration without an initializer (`let t;`, a loop variable,
+  `catch (e)`) is a local. Measured against a fresh parse of a large workspace by file and line, the only differences left are the
+  contract: arrow PROPERTIES are members, implicit concise returns, top-level `const`s are `consts`.
 
 ## Expression trees the gate readers need (`TsDecls/TsBody.mjs`)
 

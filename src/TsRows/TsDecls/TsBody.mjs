@@ -16,7 +16,7 @@
 import { locationOf } from './TsNodes.mjs';
 import { catchFacts, chainOf } from './TsCatch.mjs';
 
-export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, propName }) {
+export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName }) {
   /**
    * THE BRANCH OR CASE A STATEMENT SITS IN IS PART OF WHAT THE STATEMENT MEANS.
    *
@@ -178,9 +178,20 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
    * the identifier, the call knew the feature argument, the member knew the property, and nothing joined
    * them. Nothing here knows what a "feature" is - that join belongs to the consumer.
    */
+  /** The target a written left side NAMES, through what only TYPES it: `(o.x as T) = v` writes `o.x`. */
+  const written = (left) => {
+    let at = left;
+    while (ts.isParenthesizedExpression(at) || ts.isAsExpression(at) || ts.isTypeAssertionExpression(at)
+      || ts.isNonNullExpression(at) || (ts.isSatisfiesExpression && ts.isSatisfiesExpression(at))) at = at.expression;
+    return at;
+  };
+
   function emitAssignment(node, ownerId, classId) {
     if (!ts.isBinaryExpression(node) || !isAssignmentOperator(node.operatorToken.kind)) return;
-    const lhs = targetOf(node.left);
+    const left = written(node.left);
+    // A DESTRUCTURING ASSIGNMENT (`[xs[i], xs[j]] = [xs[j], xs[i]]`) writes its pattern: one row, the pattern its target.
+    const pattern = ts.isArrayLiteralExpression(left) || ts.isObjectLiteralExpression(left);
+    const lhs = pattern ? { name: left.getText(), scope: 'destructuring' } : targetOf(left);
     if (!lhs) return;
     const rhs = node.right;
     store.add('assignments', 'as', {
@@ -189,8 +200,8 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       target: lhs.name, scope: lhs.scope, ...(lhs.holder !== undefined ? { holder: lhs.holder } : {}),
       // WHICH PROPERTY IS BEING SET, resolved. Published as text only, the write side of TypeScript had no
       // link where the read side has one.
-      target_ref: ts.isPropertyAccessExpression(node.left) ? declFileOf(node.left.name)
-        : ts.isIdentifier(node.left) ? declFileOf(node.left) : null,
+      target_ref: ts.isPropertyAccessExpression(left) ? declFileOf(left.name)
+        : ts.isIdentifier(left) ? declFileOf(left) : null,
       operator: ts.tokenToString(node.operatorToken.kind) ?? '=',
       value: evalCell(rhs), expression: treeOf(rhs),
       source: rhs.getText(),
@@ -208,7 +219,10 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
    * question is asked.
    */
   function emitLocal(node, ownerId, classId) {
-    if (!ts.isVariableDeclaration(node) || !node.initializer) return;
+    // A DECLARATION WITHOUT AN INITIALIZER IS A LOCAL TOO: `let t: string;`, a loop's `for (const x of xs)`, a `catch (e)` -
+    // each names a value a later read or call uses, and the map had none of them.
+    if (!ts.isVariableDeclaration(node)) return;
+    const init = node.initializer;
     const bindings = [];
     if (ts.isIdentifier(node.name)) bindings.push({ property: null, local: node.name.text });
     else {
@@ -230,9 +244,10 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       bindings,
       declared: declarationKindOf(node),
       type: node.type ? node.type.getText() : null,
-      value: evalCell(node.initializer), expression: treeOf(node.initializer),
-      source: node.initializer.getText(),
-      reads: identifiersIn(node.initializer), calls: calleesIn(node.initializer),
+      ...(init ? {
+        value: evalCell(init), expression: treeOf(init), source: init.getText(),
+        reads: identifiersIn(init), calls: calleesIn(init),
+      } : {}),
       ...locationOf(node),
     });
   }
@@ -381,7 +396,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
   const isConciseBody = (node) => !ts.isBlock(node) && node.parent !== undefined
     && ts.isArrowFunction(node.parent) && node.parent.body === node;
 
-  function collectBody(bodyNode, ownerId, classId) {
+  function collectBody(bodyNode, ownerId, classId, skip = null) {
     if (!bodyNode) return;
     // A CONCISE ARROW BODY IS THE RETURN VALUE, and it may itself contain functions. Without this, every
     // concise arrow returned nothing in the map. Emitted HERE, for every owner, and not only for a callback:
@@ -396,13 +411,25 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
         reads: identifiersIn(bodyNode), calls: calleesIn(bodyNode), ...locationOf(bodyNode),
       });
     }
+    // A CONCISE BODY THAT IS ITSELF A FUNCTION - `(a) => (b) => ..` - is that function: its own row and walk, never folded into
+    // the outer one's.
+    if (isConciseBody(bodyNode) && isFunctionLike(bodyNode)) {
+      const inlineId = declareInline(bodyNode, ownerId);
+      if (bodyNode.body) collectBody(bodyNode.body, inlineId, classId);
+      defaults(bodyNode, inlineId, classId);
+      return;
+    }
     const walk = (node) => {
+      if (skip !== null && node === skip) return; // walked by its own declaration
       if (node !== bodyNode && isFunctionLike(node)) {
         const inlineId = declareInline(node, ownerId);
         const fnBody = node.body;
         if (fnBody) collectBody(fnBody, inlineId, classId);
+        defaults(node, inlineId, classId);
         return; // its contents belong to IT, not to the body being walked
       }
+      // A CLASS EXPRESSION IS A CLASS: `static Inner = class { static A = 'a'; }` - its own row and members, under its holder's name.
+      if (declareClass && ts.isClassExpression(node)) { declareClass(node); return; }
       if (ts.isSwitchStatement(node)) { collectSwitch(node, ownerId, classId, walk); return; }
       if (ts.isIfStatement(node)) { collectIf(node, ownerId, classId, walk); return; }
       if (ts.isTryStatement(node)) collectTry(node, ownerId, classId);
@@ -429,5 +456,27 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
     walk(bodyNode);
   }
 
-  return { collectBody };
+  /** A parameter's default value is code like any other: `f(cond = () => true)` holds a function. */
+  function defaults(fn, ownerId, classId) {
+    for (const p of fn.parameters ?? []) if (p.initializer) collectExpr(p.initializer, ownerId, classId);
+  }
+
+  /**
+   * AN EXPRESSION NO BODY HOLDS, WALKED AS ONE (1:1 with the source): a property initializer, a decorator's argument, a top-level
+   * statement, a parameter default. Its calls, assignments and locals are rows under `ownerId`, and a function in it - the
+   * expression itself when it is one - is a `functions` row with its own body, as inside a method. They were the code a
+   * consumer asking "who calls X" could not see: a callback in `items$ = src.pipe(map((v) => ..))` and the call itself.
+   */
+  function collectExpr(node, ownerId, classId, skip = null) {
+    if (!node) return;
+    if (isFunctionLike(node)) {
+      const inlineId = declareInline(node, ownerId);
+      if (node.body) collectBody(node.body, inlineId, classId);
+      defaults(node, inlineId, classId);
+      return;
+    }
+    collectBody(node, ownerId, classId, skip);
+  }
+
+  return { collectBody, collectExpr, defaults };
 }

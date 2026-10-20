@@ -87,5 +87,9 @@ Test-Case 'tsrows: a createEffect member names the actions it listens to, whethe
     $e = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT 'e=' || name || ' | ' || $(Get-NodeRootListSql 'state_effects__actions' 'state_effects.id' ', ') || ' | ' || dispatch || ' | ' || coalesce($(Get-NodeRootListSql 'state_effects__emits' 'state_effects.id' ', '),'') AS r FROM state_effects")
     Assert-Line $e 'e=loadAlpha$ | ["demoActions.load", "demoActions.clear"] | 1 | ["demoActions.done"]'
     Assert-Line $e 'e=logAlpha$ | ["demoActions.done"] | 0 | []'
+    # The effect's callback is a function of its own (line 7), its calls under it - `state_effects` reads them through it.
+    $fx = Invoke-TsRowsQ $made.Db ("SELECT 'fx=' || group_concat(f.line || ':' || f.col, ',') AS r FROM functions f JOIN files p ON p.id = f.file " +
+        "WHERE p.path = 'apps/shop/src/fx.effects.ts' AND f.inline = 1 AND f.line = 7 AND f.col < 30")
+    Assert-Line $fx 'fx=7:'
 }
 }
