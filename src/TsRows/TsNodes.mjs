@@ -23,7 +23,11 @@ export function locationOf(node) {
   const sf = node.getSourceFile();
   const start = sf.getLineAndCharacterOfPosition(node.getStart());
   const end = sf.getLineAndCharacterOfPosition(node.getEnd());
-  const anchor = node.name && typeof node.name.getStart === 'function'
+  // AN EXPRESSION IS ANCHORED AT ITS START, never at a name inside it: a property access (`o.name`) has a `name` and an
+  // `expression`, and a concise arrow's implicit return anchored at the LAST name of its chain (a wrong column, or a
+  // bogus `decorator_line` for a chain over several lines).
+  const isExpression = node.expression !== undefined && node.name !== undefined;
+  const anchor = !isExpression && node.name && typeof node.name.getStart === 'function'
     ? sf.getLineAndCharacterOfPosition(node.name.getStart())
     : start;
   const out = { line: anchor.line + 1, col: anchor.character + 1, end_line: end.line + 1 };

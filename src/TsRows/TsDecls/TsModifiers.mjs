@@ -50,7 +50,8 @@ export function makeModifiers(ts, log = null) {
       readonly: (flags & ts.ModifierFlags.Readonly) !== 0,
       abstract: (flags & ts.ModifierFlags.Abstract) !== 0,
       exported: (flags & ts.ModifierFlags.Export) !== 0 || exportedByStatement(node),
-      visibility: (flags & ts.ModifierFlags.Private) !== 0 ? 'private'
+      // AN ES `#name` IS PRIVATE with no modifier to say so: read off the name, or it was `public`.
+      visibility: (flags & ts.ModifierFlags.Private) !== 0 || (node.name && ts.isPrivateIdentifier(node.name)) ? 'private'
         : (flags & ts.ModifierFlags.Protected) !== 0 ? 'protected' : 'public',
     };
   };

@@ -48,8 +48,15 @@ export function rollupTemplateReads(store) {
   // A property of a class and a property of a type are looked up in different tables and answer the same
   // question - keyed identically, so the walk does not care which kind of owner it is standing on.
   const propByOwner = new Map();
+  // AN ACCESSOR PAIR IS ONE PROPERTY, and a READ is answered by its GETTER, a WRITE by its SETTER - whichever is declared last
+  // used to win both, so `get value()` then `set value(v)` pointed every read at the setter. `propByOwner` keeps a getter
+  // over a setter of the name, `setterByOwner` the setter a write (`(x)="value = $event"`) lands on.
+  const setterByOwner = new Map();
   for (const row of store.table('members')) {
-    propByOwner.set(`class:${String(row.class)}#${String(row.name)}`, row);
+    const key = `class:${String(row.class)}#${String(row.name)}`;
+    if (row.kind === 'setter') setterByOwner.set(key, row);
+    if (row.kind === 'setter' && propByOwner.get(key)?.kind === 'getter') continue;
+    propByOwner.set(key, row);
   }
   // AN ENUM MEMBER IS NO ROW OF ITS OWN: it answers as the enum's row, at the member's line, its type the end of the chain.
   for (const row of store.table('enums')) {
@@ -110,7 +117,7 @@ export function rollupTemplateReads(store) {
 
   /** The row `name` answers on `owner` - walking its bases, each bound as the class before it instantiates it - and the
    *  bindings of the owner it was found on. */
-  const propWithEnv = (owner, name) => {
+  const propWithEnv = (owner, name, write = false) => {
     if (owner?.kind === 'any') {
       const row = propOf(owner, name);
       return row === undefined ? null : { row, env: null };
@@ -119,7 +126,8 @@ export function rollupTemplateReads(store) {
     const seen = new Set();
     while (current !== null && current !== undefined && !seen.has(current.id)) {
       seen.add(current.id);
-      const hit = propByOwner.get(`${current.kind}:${current.id}#${name}`);
+      const key = `${current.kind}:${current.id}#${name}`;
+      const hit = (write ? setterByOwner.get(key) : undefined) ?? propByOwner.get(key);
       if (hit !== undefined) return { row: hit, env: current.env ?? null };
       current = current.kind === 'class' ? baseTypedOf(current) : null;
     }
@@ -167,14 +175,14 @@ export function rollupTemplateReads(store) {
 
   // A HOP WHOSE TYPE IS UNKNOWN ENDS THE CHAIN. It kept the PREVIOUS owner, so `{{ x.y }}` over an untyped `x` looked
   // `y` up on the component again and named the component's own `y` - a target the read never reaches.
-  const hopOf = (owner, name) => {
-    const found = propWithEnv(owner, name);
+  const hopOf = (owner, name, write = false) => {
+    const found = propWithEnv(owner, name, write);
     if (!found) return null;
     const row = found.row;
     const file = pathById.get(row.file);
     const line = typeof row.line === 'number' ? row.line : null;
     if (file === undefined || line === null) return null;
-    return { name, file, line, row: row.id, owner: ownerOfRow(row, found.env) };
+    return { name, file, line, row: row.id, owner: ownerOfRow(row, found.env), member: row, env: found.env };
   };
 
   // Which class each template expression belongs to. EVERY template expression carries `node`; only some
@@ -185,12 +193,14 @@ export function rollupTemplateReads(store) {
 
   const templateOfNode = new Map();
   const parentOfNode = new Map();
+  const kindOfNode = new Map();
   const boundNames = new Map();
   const implicitAt = new Map();
   const aliasesAt = new Map();
   for (const n of store.table('template_nodes')) {
     templateOfNode.set(n.id, n.template);
     parentOfNode.set(n.id, n.parent ?? null);
+    kindOfNode.set(n.id, n.kind);
     const names = [];
     for (const v of Array.isArray(n.variables) ? n.variables : []) {
       if (str(v.name) !== null) names.push(v.name);
@@ -255,13 +265,18 @@ export function rollupTemplateReads(store) {
    * yields per iteration. Both are properties of declarations; neither recognises a pipe by name.
    */
   const transformRefOfPipe = new Map();
+  const transformOwnersOfPipe = new Map();
   const knownPipes = new Set();
   for (const row of store.table('pipes')) {
     const declared = str(row.pipe_name);
     if (declared !== null) knownPipes.add(declared);
     if (declared === null || row.class == null) continue;
+    // A METHOD'S TYPE IS WHAT IT RETURNS (`return_ref`): its own `type_ref` is null, so no in-tree pipe ever typed a read.
     const transform = propByOwner.get(`class:${String(row.class)}#transform`);
-    if (transform?.type_ref != null) transformRefOfPipe.set(declared, transform.type_ref);
+    const returned = transform?.return_ref ?? transform?.type_ref ?? null;
+    if (returned !== null) transformRefOfPipe.set(declared, returned);
+    // A TRANSFORM THAT RETURNS SEVERAL TYPES (`cond ? a.x : a.y` infers `X | Y`) hands on the `any` owner of them, as a member's `type_refs` do.
+    else if (Array.isArray(transform?.return_refs)) transformOwnersOfPipe.set(declared, ownerOfRow({ type_refs: transform.return_refs }));
   }
 
   /** The name of a pipe applied anywhere in an expression - which pipe produced the value being iterated. */
@@ -296,16 +311,12 @@ export function rollupTemplateReads(store) {
       const receiver = current.receiver;
       current = receiver && typeof receiver === 'object' ? receiver : null;
     }
-    // A chain bottoming on a PIPE is resolvable - through what the pipe RETURNS. Everything else that is not
-    // the component's own context (a call, a literal) is left alone rather than resolved against the wrong
-    // scope.
+    // A chain bottoming on anything but the component's own context (a pipe, a call, a keyed read, `a ?? b`) names its
+    // `base`: `resolveChain` asks what that VALUE is and reads the names off it. A literal or an unknown kind types nothing.
     // An arrow function's parameter is not the component's: `(x) => x.done` resolves no member `x`.
-    const rootedInContext = (current === null || current.k === 'Implicit' || current.k === 'This')
-      && !nodes[0]?.param;
-    const pipeBase = current !== null && current.k === 'Pipe' ? current : null;
-    if (pipeBase) return { root: null, names, nodes, pipeBase };
-    return rootedInContext ? { root, names, nodes, pipeBase: null }
-      : { root: null, names: [], nodes: [], pipeBase: null };
+    const inContext = current === null || current.k === 'Implicit' || current.k === 'This';
+    if (inContext) return nodes[0]?.param ? { root: null, names: [], nodes: [], base: null } : { root, names, nodes, base: null };
+    return { root: null, names, nodes, base: current };
   };
 
   /** The `type_ref` whatever a read chain ends on carries - used to type a loop variable from its
@@ -373,7 +384,8 @@ export function rollupTemplateReads(store) {
     const pipeName = str(at.name);
     const piped = chainEnd(at.exp, component, scope);
     if (pipeName === null || piped === null) return null;
-    return ownerOf(transformRefOfPipe.get(pipeName)) ?? (knownPipes.has(pipeName) ? null : unwrappedOwnerOf(piped.ref));
+    return ownerOf(transformRefOfPipe.get(pipeName)) ?? transformOwnersOfPipe.get(pipeName)
+      ?? (knownPipes.has(pipeName) ? null : unwrappedOwnerOf(piped.ref));
   };
 
   /**
@@ -388,8 +400,11 @@ export function rollupTemplateReads(store) {
    * OUTERMOST FIRST: an inner loop's collection can be rooted in an outer loop's variable, so resolving
    * inner-first asks about a name that has not been bound yet. An inner binding of the same name still wins,
    * being applied last, which is what shadowing means.
+   *
+   * `outer` leaves the node's OWN names out: a `Template`'s `templateAttrs` and an `@if` condition are evaluated BEFORE the names
+   * they bind exist - in `*ngIf="x$ | async as x$"` the condition's `x$` is the component's member, not the alias.
    */
-  const scopeAt = (nodeId, component) => {
+  const scopeAt = (nodeId, component, outer = false) => {
     const out = new Map();
     // `@let` names, untyped, from the template's top level down - see `letsUnder`.
     for (const name of letsUnder.get(`t:${String(templateOfNode.get(nodeId))}`) ?? []) out.set(name, null);
@@ -403,6 +418,7 @@ export function rollupTemplateReads(store) {
     }
     for (const id of ancestors) {
       if (id !== nodeId) for (const name of letsUnder.get(id) ?? []) out.set(name, null);
+      if (outer && id === nodeId) continue;
       const iterable = iterableAstOfNode.get(id);
       const condition = conditionAstOfNode.get(id);
       for (const name of boundNames.get(id) ?? []) {
@@ -430,46 +446,84 @@ export function rollupTemplateReads(store) {
   let chains = 0;
   let hops = 0;
 
+  const sameOwner = (a, b) => (a?.owner && b?.owner && a.owner.kind === b.owner.kind && a.owner.id === b.owner.id ? a : null);
+
+  /**
+   * WHAT AN EXPRESSION'S VALUE IS, as the declarations say: `{ owner, ref, row, env }` or null. A read chain is its last hop; a keyed
+   * read is the ELEMENT of what it indexes; a call is what the METHOD it calls returns (`return_ref`); a pipe is what its own
+   * `transform` returns, or - a framework pipe like `async` - what the piped value unwraps to; `a ?? b`, `a || b` and `c ? a : b`
+   * are a value only when both sides name ONE owner. The expression is a finite tree, so every walk ends.
+   */
+  const valueOf = (node, component, scope) => {
+    if (!node || typeof node !== 'object') return null;
+    const same = (x, y) => sameOwner(valueOf(x, component, scope), valueOf(y, component, scope));
+    switch (node.k) {
+      case 'Source': return valueOf(node.ast, component, scope);
+      case 'NonNull': return valueOf(node.expr, component, scope);
+      case 'Read': case 'SafeRead': return resolveChain(node, component, scope);
+      case 'KeyedRead': case 'SafeKeyedRead': {
+        const ref = valueOf(node.receiver, component, scope)?.ref?.element ?? null;
+        const owner = ref === null ? null : ownerOf(ref);
+        return owner === null ? null : { owner, ref, row: null, env: null };
+      }
+      case 'Call': case 'SafeCall': {
+        const callee = valueOf(node.receiver, component, scope);
+        const ref = callee?.row?.return_ref ?? null;
+        const owner = ref === null ? null : resolveRef(ref, callee.env);
+        return owner === null ? null : { owner, ref, row: null, env: null };
+      }
+      case 'Pipe': {
+        const name = str(node.name);
+        const declared = name === null ? undefined : transformRefOfPipe.get(name);
+        // A PIPE IN THE MAP THAT CANNOT BE TYPED MUST REFUSE, not borrow its input's type (only a pipe this map lacks unwraps).
+        const ref = declared ?? (name === null || knownPipes.has(name) ? null
+          : valueOf(node.exp, component, scope)?.ref?.unwrapped ?? null);
+        const several = ref === null && name !== null ? transformOwnersOfPipe.get(name) ?? null : null;
+        if (several !== null) return { owner: several, ref: null, row: null, env: null };
+        const owner = ref === null ? null : resolveRef(ref, null);
+        return owner === null ? null : { owner, ref, row: null, env: null };
+      }
+      case 'Binary': return node.op === '??' || node.op === '||' ? same(node.left, node.right) : null;
+      case 'Cond': return same(node.then, node.else);
+      default: return null;
+    }
+  };
+
+  /** A Read, SafeRead or Write chain: every name resolved from its root - the component, a name the template bound, or the
+   *  `base` value it hangs from - each hop stamped with its `target`. Answers the LAST hop's value, or null when a hop is lost. */
+  const resolveChain = (node, component, scope) => {
+    const { root, names, nodes, base } = chainOf(node);
+    if (!names.length || (root === null && base === null)) return null;
+    // A ROOT BOUND BY THE TEMPLATE IS ALREADY THE OWNER - its name is consumed, not looked up: resolving
+    // `item.label` by searching for a property called `item` ON the item's own type finds nothing.
+    const isBound = base === null && scope.has(root);
+    let cursor = base !== null ? valueOf(base, component, scope)?.owner ?? null
+      : isBound ? scope.get(root) ?? null : component;
+    let last = isBound && cursor !== null ? { owner: cursor, ref: null, row: null, env: null } : null;
+    let resolvedAny = false;
+    names.forEach((name, i) => {
+      if (i < (isBound ? 1 : 0) || cursor === null) return;
+      // THE MEMBER A WRITE HEADS IS ITS SETTER; every other hop is read.
+      const hop = hopOf(cursor, name, node.k === 'Write' && i === names.length - 1);
+      if (!hop) { cursor = null; last = null; return; }
+      const target = nodes[i];
+      if (target) {
+        // COUNT WHAT WAS ADDED, not what was visited: the walk re-enters a chain through its own
+        // receiver, so a per-visit counter reported far more hops than resolved nodes.
+        if (target.target === undefined) { hops += 1; resolvedAny = true; }
+        target.target = { name: hop.name, file: hop.file, line: hop.line, row: hop.row };
+      }
+      cursor = hop.owner;
+      last = { owner: hop.owner, ref: hop.member.type_ref ?? null, row: hop.member, env: hop.env };
+    });
+    if (resolvedAny) chains += 1;
+    return last;
+  };
+
   const walk = (node, owner, scope) => {
     if (!node || typeof node !== 'object') return;
     if (Array.isArray(node)) { for (const x of node) walk(x, owner, scope); return; }
-    if (node.k === 'Read' || node.k === 'SafeRead' || node.k === 'Write') {
-      const { root, names, nodes, pipeBase } = chainOf(node);
-      // A ROOT BOUND BY THE TEMPLATE IS ALREADY THE OWNER - its name is consumed, not looked up: resolving
-      // `item.label` by searching for a property called `item` ON the item's own type finds nothing.
-      //
-      // A PIPE IN THE MAP THAT CANNOT BE TYPED MUST REFUSE, not borrow its input's type. The fallback below
-      // unwraps the pipe's INPUT and uses it for its OUTPUT, which is only right when the pipe returns an
-      // element of what it was given: over half the resolved reads leaned on it and were correct by coincidence.
-      // So it is kept ONLY for a pipe this map does not contain - a framework pipe like `async`, whose whole
-      // job is to unwrap the value it is handed.
-      const pipeName = pipeBase === null ? null : str(pipeBase.name);
-      const pipedOwner = pipeName === null ? null
-        : ownerOf(transformRefOfPipe.get(pipeName))
-          ?? (knownPipes.has(pipeName) ? null
-            : unwrappedOwnerOf(ownerRefOfChain(pipeBase?.exp, owner, scope)));
-      const isBound = root !== null && scope.has(root);
-      const bound = pipeBase !== null ? pipedOwner : isBound ? scope.get(root) ?? null : owner;
-      const skip = pipeBase === null && isBound ? 1 : 0;
-      if (names.length && bound !== null && (root !== null || pipeBase !== null)) {
-        let cursor = bound;
-        let resolvedAny = false;
-        names.forEach((name, i) => {
-          if (i < skip || cursor === null) return;
-          const hop = hopOf(cursor, name);
-          if (!hop) { cursor = null; return; }
-          const target = nodes[i];
-          if (target) {
-            // COUNT WHAT WAS ADDED, not what was visited: the walk re-enters a chain through its own
-            // receiver, so a per-visit counter reported far more hops than resolved nodes.
-            if (target.target === undefined) { hops += 1; resolvedAny = true; }
-            target.target = { name: hop.name, file: hop.file, line: hop.line, row: hop.row };
-          }
-          cursor = hop.owner;
-        });
-        if (resolvedAny) chains += 1;
-      }
-    }
+    if (node.k === 'Read' || node.k === 'SafeRead' || node.k === 'Write') resolveChain(node, owner, scope);
     for (const v of Object.values(node)) walk(v, owner, scope);
   };
 
@@ -480,7 +534,8 @@ export function rollupTemplateReads(store) {
     const classId = tplId === undefined ? undefined : classOfTemplate.get(tplId);
     if (classId === undefined || nodeId == null) continue;
     const component = { kind: 'class', id: classId };
-    walk(row.ast, component, scopeAt(nodeId, component));
+    const own = kindOfNode.get(nodeId) === 'Template' || row.kind === 'block_IfBlockBranch';
+    walk(row.ast, component, scopeAt(nodeId, component, own));
   }
   return { chains, hops };
 }

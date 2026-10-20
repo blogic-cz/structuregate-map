@@ -72,11 +72,11 @@ export function makeTypeResolver(ts, checker) {
 
   /** The declaration ONE type names, or null: an anonymous type, a primitive, `null` name none. `seen` guards the walk into
    *  type arguments against a type that is its own argument. */
-  function refOfType(type, seen = new Set()) {
+  function refOfType(type, seen = new Set(), as = null) {
     // AN ALIAS IS NAMED WHERE THE AUTHOR NAMED IT. `type Foo = {...}` used at a member reaches the
     // anonymous object type unless the alias symbol is asked for first, and the alias is what a reader is
     // looking for.
-    const symbol = type.aliasSymbol ?? type.getSymbol();
+    const symbol = as ?? type.aliasSymbol ?? type.getSymbol();
     const decls = symbol?.declarations ?? [];
     if (!symbol || !decls.length) return null;
     const name = symbol.getName();
@@ -91,7 +91,7 @@ export function makeTypeResolver(ts, checker) {
     // with them (`TsTplReads.mjs`), where the declaration's own `T` named nothing.
     const param = decls.some((d) => ts.isTypeParameterDeclaration(d));
     let args = [];
-    if (!param && !seen.has(type)) {
+    if (!param && !as && !seen.has(type)) {
       seen.add(type);
       try { args = checker.getTypeArguments(type).map((a) => refOfType(a, seen)); } catch { args = []; }
     }
@@ -102,6 +102,37 @@ export function makeTypeResolver(ts, checker) {
       ...(elementOf(type) ?? {}),
       ...(unwrappedOf(type) ?? {}),
     };
+  }
+
+  /**
+   * THE ENUM A MEMBER BELONGS TO, or null for any other symbol. A single-member enum's type IS its member's literal type
+   * (`enum Kind { Alpha }`: `kind: Kind` is `Kind.Alpha`), so the checker's symbol names the MEMBER and the row said `Alpha`
+   * where the author wrote `Kind`.
+   */
+  function enumOfMember(symbol) {
+    if (!symbol || (symbol.flags & ts.SymbolFlags.EnumMember) === 0) return null;
+    const parent = symbol.declarations?.[0]?.parent;
+    return (parent && ts.isEnumDeclaration(parent) ? checker.getSymbolAtLocation(parent.name) : null) ?? null;
+  }
+
+  /**
+   * Whether the type node AS WRITTEN names an enum itself (`Kind`), never one of its members (`Kind.Alpha`). `Kind | null` and `(Kind)`
+   * name it too: with strictNullChecks OFF the checker drops `null` from the union and answers the enum's lone member, so the
+   * written node is looked through - parentheses, and the parts of a union that are not `null`/`undefined`, exactly one of which must be it.
+   */
+  function writtenNamesEnum(node) {
+    if (!node) return false;
+    if (ts.isParenthesizedTypeNode(node)) return writtenNamesEnum(node.type);
+    if (ts.isUnionTypeNode(node)) {
+      const nullish = (t) => t.kind === ts.SyntaxKind.LiteralType && t.literal.kind === ts.SyntaxKind.NullKeyword
+        || t.kind === ts.SyntaxKind.UndefinedKeyword;
+      const rest = node.types.filter((t) => !nullish(t));
+      return rest.length === 1 && writtenNamesEnum(rest[0]);
+    }
+    if (!ts.isTypeReferenceNode(node)) return false;
+    let sym = checker.getSymbolAtLocation(ts.isQualifiedName(node.typeName) ? node.typeName.right : node.typeName);
+    if (sym && (sym.flags & ts.SymbolFlags.Alias)) sym = checker.getAliasedSymbol(sym);
+    return !!sym && (sym.flags & ts.SymbolFlags.Enum) !== 0;
   }
 
   /**
@@ -128,7 +159,7 @@ export function makeTypeResolver(ts, checker) {
         continue;
       }
       const whole = (part.flags & ts.TypeFlags.EnumLiteral) !== 0 ? checker.getBaseTypeOfLiteralType(part) : part;
-      const ref = refOfType(whole);
+      const ref = refOfType(whole, new Set(), enumOfMember(whole.getSymbol()));
       if (ref) out.set(`${ref.file}\u0000${ref.line}\u0000${ref.name}`, ref);
     }
     return [...out.values()].sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line
@@ -149,7 +180,11 @@ export function makeTypeResolver(ts, checker) {
       return { type_ref: null };
     }
     if (!type) return { type_ref: null };
-    if (type.aliasSymbol || type.getSymbol() || !(type.isUnion() || type.isIntersection())) return { type_ref: refOfType(type) };
+    if (type.aliasSymbol || type.getSymbol() || !(type.isUnion() || type.isIntersection())) {
+      // WRITTEN AS THE ENUM, NAMED AS THE ENUM: `Kind.Alpha` as written still names the member.
+      const owner = type.aliasSymbol ? null : enumOfMember(type.getSymbol());
+      return { type_ref: refOfType(type, new Set(), owner && writtenNamesEnum(node) ? owner : null) };
+    }
     const refs = refsOfParts(type);
     return refs.length > 1 ? { type_ref: null, type_refs: refs } : { type_ref: refs[0] ?? null };
   };

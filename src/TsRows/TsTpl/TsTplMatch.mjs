@@ -4,6 +4,8 @@
  * Ported from the original Angular extractor. Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
 
+import { probeBindingTypes } from './TsTplEmit.mjs';
+
 export function buildMatcher(ng, directives, diag) {
   const matcher = new ng.SelectorMatcher();
   let added = 0;
@@ -20,20 +22,6 @@ export function buildMatcher(ng, directives, diag) {
     }
   }
   return { matcher, added };
-}
-
-/** Whitespace split WITHOUT a pattern - this repo bans them, and a `class` attribute may be separated by
- *  tabs or newlines, so this walks characters rather than splitting on a single space. */
-function splitWhitespace(value) {
-  const out = [];
-  let current = '';
-  for (const ch of value) {
-    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f' || ch === '\v') {
-      if (current) { out.push(current); current = ''; }
-    } else current += ch;
-  }
-  if (current) out.push(current);
-  return out;
 }
 
 /**
@@ -56,42 +44,60 @@ export function childOwnedBindings(node) {
 }
 
 /**
- * The compiler's own `createCssSelectorFromNode`, reproduced.
+ * WHAT ANGULAR MATCHES A NODE AGAINST: the compiler's OWN `createCssSelectorFromNode`, never a reproduction (rows 70).
  *
- * `instanceof ng.TmplAstTemplate`, never a name test: the bundle renames colliding classes, so a name test
- * picks the wrong branch the moment a version renames one - and then structural attributes are read off the
- * wrong field and every `*ngIf` directive match silently disappears.
+ * A desugared `*dir` wrapper is a `Template` whose `tagName` is the pre-desugar tag, and Angular matches it by its
+ * `templateAttrs` ALONE, as `ng-template`: its attributes, inputs and outputs are the child element's own objects,
+ * and the child is matched on its own. A reproduction that gave the wrapper the tag and the child's attributes made
+ * `<button ripple *ngIf="on">` instantiate `RippleDirective` on the wrapper AND the button, and a component selector
+ * match the wrapper - thousands of phantom directive cells on a real tree. An element takes only its Property and
+ * TwoWay inputs (`[class.x]`, `[attr.x]` and `[style.x]` select nothing), and no i18n attribute.
+ * `[demoIf]` on an explicit `<ng-template>` is its own input and still matches.
  */
 function cssSelectorForNode(ng, node) {
-  const isTemplate = node instanceof ng.TmplAstTemplate;
-  const name = isTemplate ? (node.tagName || 'ng-template') : (node.name || 'ng-template');
+  if (typeof ng.createCssSelectorFromNode === 'function') return ng.createCssSelectorFromNode(node);
+  // A COMPILER THAT DOES NOT EXPORT IT is matched by the same rule, written out from Angular's
+  // `getAttrsForDirectiveMatching`: `matchNode` swallows a throw, so a missing export would match NOTHING, silently.
   const attrs = {};
-  if (isTemplate) {
+  if (node instanceof ng.TmplAstTemplate && node.tagName !== 'ng-template') {
     for (const a of node.templateAttrs) attrs[a.name] = '';
-    for (const a of node.attributes) attrs[a.name] = a.value ?? '';
-    // A TEMPLATE'S OWN BINDINGS SELECT DIRECTIVES TOO, and leaving them out is not a narrower match but a
-    // MISSED one: `*directive="x"` puts the binding in `templateAttrs`, while `<ng-template [directive]="x">`
-    // - what Angular desugars that INTO - puts it in `inputs`. Built without them, such templates matched
-    // NOTHING: no directive on the node, so no render edge and no gate for a restriction that really gates
-    // its content, while the ones written with the star all resolved.
-    //
-    // ITS OWN, BY IDENTITY: a synthetic wrapper's inputs ARE the child element's objects, so matching on them
-    // attributes the CHILD's directives to the wrapper - a few real matches and hundreds of phantom render rows.
-    const shared = childOwnedBindings(node);
-    for (const i of node.inputs) if (!shared.has(i)) attrs[i.name] = '';
-    for (const o of node.outputs) if (!shared.has(o)) attrs[o.name] = '';
   } else {
-    for (const a of node.attributes) attrs[a.name] = a.value ?? '';
-    for (const i of node.inputs) attrs[i.name] = '';
+    for (const a of node.attributes) if (a.name !== 'i18n' && !a.name.startsWith('i18n-')) attrs[a.name] = a.value ?? '';
+    // `BindingType` is not exported: the property type is read off a parsed probe. A compiler this old has no
+    // TwoWay type - `[(x)]` is a property input and an output there.
+    const { propertyType } = probedOnce(ng);
+    for (const i of node.inputs) if (i.type === propertyType) attrs[i.name] = '';
     for (const o of node.outputs) attrs[o.name] = '';
   }
   const selector = new ng.CssSelector();
-  selector.setElement(name);
+  selector.setElement(withoutNamespace(node instanceof ng.TmplAstElement ? node.name : 'ng-template'));
   for (const [k, v] of Object.entries(attrs)) {
-    selector.addAttribute(k, v);
-    if (k.toLowerCase() === 'class' && v) for (const c of splitWhitespace(v)) selector.addClassName(c);
+    selector.addAttribute(withoutNamespace(k), v);
+    if (k.toLowerCase() === 'class') for (const c of words(v)) selector.addClassName(c);
   }
   return selector;
+}
+
+const probed = new WeakMap();
+/** The binding types, probed once per compiler rather than once per node. */
+function probedOnce(ng) {
+  if (!probed.has(ng)) probed.set(ng, probeBindingTypes(ng));
+  return probed.get(ng);
+}
+
+/** `:svg:rect` -> `rect`, as Angular's `splitNsName`. */
+const withoutNamespace = (name) => (name.startsWith(':') ? name.slice(name.indexOf(':', 1) + 1) : name);
+
+/** The whitespace-separated words of a class list. */
+function words(text) {
+  const out = [];
+  let word = '';
+  for (const ch of text) {
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f') { if (word) out.push(word); word = ''; } else word += ch;
+  }
+  if (word) out.push(word);
+  // Angular splits the TRIMMED text, and an empty one splits into one empty name: kept, so both build one selector.
+  return out.length ? out : [''];
 }
 
 /**

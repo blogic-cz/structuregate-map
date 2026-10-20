@@ -285,18 +285,17 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
       id: m.id, name: m.name, selector: m.selector, is_component: m.is_component,
     }));
     const nodeId = store.add('template_nodes', 'n', row);
-    if (!matched.length && isCustomElement(tag) && !isBuiltinTag(ng, tag)) {
+    // A WRAPPER IS NEVER UNMATCHED ON ITS OWN: it carries its child's pre-desugar tag, and the child element is walked
+    // and noted next - counting both reported one unmatched element twice.
+    if (!isTpl && !matched.length && isCustomElement(tag) && !isBuiltinTag(ng, tag)) {
       // No project selector matched: a third-party component, whose selector lives in node_modules and is
       // not extracted, or a real dangling element.
       diag.note('element_unmatched',
         { component: comp.name, tag, line: row.line, col: row.col, end_line: row.end_line });
     }
     for (const m of matched) {
-      // A STRUCTURAL DIRECTIVE DESUGARS INTO A SYNTHETIC WRAPPER THAT KEEPS THE PRE-DESUGAR TAG, so a
-      // component selector matches the wrapper as well as the real element inside it. The wrapper is an
-      // `<ng-template>` and not an instance of that component, so a render edge from it is a phantom:
-      // over a tenth of the render rows sat on a wrapper. Structural DIRECTIVE matches on the wrapper are
-      // real and stay - that is how NgIf and NgFor attach.
+      // A COMPONENT NEVER SITS ON A `Template`: Angular matches a wrapper by its `templateAttrs` alone (`TsTplMatch.mjs`), so
+      // only a directive reaches here - and an `<ng-template>` that a component selector names is no instance of it.
       if (isTpl && m.is_component) continue;
       emitRender(m, comp, tplId, nodeId, tag, span);
     }

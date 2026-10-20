@@ -146,11 +146,25 @@ function nameRows(ts, store, checker, statement, importId, fileId, feRoot) {
   }
 }
 
-export function importRow(ts, store, statement, fileId, symbolAt, feRoot, checker) {
+export function importRow(ts, store, statement, fileId, symbolAt, feRoot, checker, options, log = null) {
   const spec = statement.moduleSpecifier.text;
   const declarations = [...new Set((symbolAt(statement.moduleSpecifier)?.declarations ?? [])
     .map((d) => canonicalPath(d.getSourceFile().fileName)))];
-  const resolved = declarations[0] ?? null;
+  let resolved = declarations[0] ?? null;
+  // A SCRIPT HAS NO MODULE SYMBOL. `import './flags'` of a file with no import or export names nothing to the checker, so
+  // the file read as imported by nobody; the compiler's module resolution, then the joined path, find it as a dynamic import's do.
+  if (!resolved) {
+    const fromFile = statement.getSourceFile().fileName;
+    resolved = ts.resolveModuleName(spec, fromFile, options, ts.sys).resolvedModule?.resolvedFileName ?? null;
+    if (!resolved && spec.startsWith('.')) {
+      const joined = path.resolve(path.dirname(fromFile), spec);
+      if (fs.existsSync(joined)) resolved = joined;
+    }
+    if (resolved) resolved = canonicalPath(resolved);
+    // READ BY ITS PATH, not by the checker, so the wrapped checker never saw it: the row naming it would fail the reads
+    // proof (`reads::unread`), and every partial run would read every hop again.
+    if (resolved) log?.touch({ fileName: resolved });
+  }
   const also = declarations.slice(1);
   const importId = store.add('imports', 'im', {
     file: fileId,

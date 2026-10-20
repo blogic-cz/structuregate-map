@@ -70,7 +70,13 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
     // A COMPUTED TYPE HAS MEMBERS TOO. `Pick<X, 'a'|'b'>`, an intersection and every other mapped form
     // declare no syntax to walk, so an alias built that way contributed nothing and a read landing on it
     // stopped dead. The checker knows the resulting properties AND where each was originally declared.
-    else typeMemberRowsFromType(statement.type, aliasId, fid);
+    else {
+      const covered = typeMemberRowsFromType(statement.type, aliasId, fid);
+      // A TYPE LITERAL ANYWHERE IN THE ALIAS'S TYPE has its rows, as under a member: `A & { B: { C } }`, `{ [k: string]: V } | O`, `{ .. }[]`,
+      // `Dictionary<{ .. }>`. A member the checker already computed keeps that row (its id is the `parent` of the literals below it); an
+      // index signature, or a member of one branch of a union, has none, so it is written here - never twice.
+      nestedLiterals(statement.type, aliasId, fid, '', null, covered);
+    }
     return aliasId;
   }
 
@@ -103,11 +109,11 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
     }
   }
 
-  function typeMemberRows(members, owner, fid, prefix, parent) {
+  function typeMemberRows(members, owner, fid, prefix, parent, covered = null) {
     for (const m of members) {
       const name = m.name ? propName(m.name) : (ts.SyntaxKind[m.kind] ?? 'unknown');
       const path = prefix ? `${prefix}.${String(name)}` : String(name);
-      const id = store.add('type_members', 'tm', {
+      const id = covered?.get(m) ?? store.add('type_members', 'tm', {
         owner, file: fid, name, path, parent,
         type: m.type ? m.type.getText() : null,
         ...(m.type ? typeRefAt(m.type) : { type_ref: null }),
@@ -115,14 +121,29 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
         kind: ts.SyntaxKind[m.kind] ?? 'unknown',
         ...locationOf(m.name ?? m),
       });
-      // An object type nested in a property, and the element type of an array of object types, are both
-      // reachable structure - a consumer asking "what is under this property" gets the same answer either way.
-      const t = m.type;
-      if (t && ts.isTypeLiteralNode(t)) typeMemberRows(t.members, owner, fid, path, id);
-      else if (t && ts.isArrayTypeNode(t) && ts.isTypeLiteralNode(t.elementType)) {
-        typeMemberRows(t.elementType.members, owner, fid, path, id);
-      }
+      // An object type nested ANYWHERE in the member's syntax is reachable structure: directly, in an array, a union, an
+      // intersection, a type argument, a tuple, parentheses, or a signature's parameters and return type.
+      nestedLiterals(m.type, owner, fid, path, id);
+      for (const p of m.parameters ?? []) nestedLiterals(p.type, owner, fid, path, id);
     }
+  }
+
+  // `covered` (an alias's computed members: declaration node -> row id) reaches only the literals at the alias's own top.
+  function nestedLiterals(t, owner, fid, path, parent, covered = null) {
+    if (!t) return;
+    const into = (x) => nestedLiterals(x, owner, fid, path, parent, covered);
+    if (ts.isTypeLiteralNode(t)) typeMemberRows(t.members, owner, fid, path, parent, covered);
+    else if (ts.isUnionTypeNode(t) || ts.isIntersectionTypeNode(t)) t.types.forEach(into);
+    else if (ts.isTypeReferenceNode(t)) (t.typeArguments ?? []).forEach(into);
+    else if (ts.isArrayTypeNode(t)) into(t.elementType);
+    else if (ts.isTupleTypeNode(t)) t.elements.forEach(into);
+    else if (ts.isFunctionTypeNode(t) || ts.isConstructorTypeNode(t)) {
+      for (const p of t.parameters) into(p.type);
+      into(t.type);
+    } else if (ts.isConditionalTypeNode(t)) [t.checkType, t.extendsType, t.trueType, t.falseType].forEach(into);
+    else if (ts.isIndexedAccessTypeNode(t)) [t.objectType, t.indexType].forEach(into);
+    else if (ts.isMappedTypeNode(t)) [t.nameType, t.type].forEach(into);
+    else if (t.type) into(t.type); // parenthesized, operator, optional, rest, named tuple member
   }
 
   /**
@@ -132,6 +153,7 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
    */
   function typeMemberRowsFromType(node, owner, fid) {
     let props;
+    const covered = new Map(); // declaration node -> the row written for it
     try {
       const type = checker.getTypeAtLocation(node);
       // A PRIMITIVE HAS AN APPARENT TYPE, and asking it for properties answers with the built-in's members:
@@ -142,14 +164,14 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
       // EVERY CONSTITUENT, not the union itself: a union carries `TypeFlags.Union` and none of the
       // primitive flags, and `getPropertiesOfType` on a union returns what its members have in COMMON.
       const parts = type.isUnion() ? type.types : [type];
-      if (parts.some((t) => (t.flags & primitive) !== 0)) return;
+      if (parts.some((t) => (t.flags & primitive) !== 0)) return covered;
       // AN ARRAY IS NOT AN OBJECT SURFACE EITHER. `type Rows = Row[]` answered with `length`, `push` and the
       // rest of `Array`. Detected STRUCTURALLY, by the number index signature every array and tuple has, so
       // no type is recognised by name.
-      if (parts.some((t) => checker.getIndexInfoOfType(t, ts.IndexKind.Number) !== undefined)) return;
+      if (parts.some((t) => checker.getIndexInfoOfType(t, ts.IndexKind.Number) !== undefined)) return covered;
       props = checker.getPropertiesOfType(type);
     } catch {
-      return;
+      return covered;
     }
     for (const prop of props ?? []) {
       const decl = prop.declarations?.find((d) => ts.isPropertySignature(d) || ts.isPropertyDeclaration(d));
@@ -164,7 +186,7 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
         if (decl.type && own && own !== checker.getTypeAtLocation(decl.type)) given = own;
       } catch { /* the declaration's own answer stands */ }
       const typeText = given ? checker.typeToString(given, node, ts.TypeFormatFlags.NoTruncation) : decl.type ? decl.type.getText() : null;
-      store.add('type_members', 'tm', {
+      const id = store.add('type_members', 'tm', {
         owner, file: fileId(decl.getSourceFile().fileName), name: prop.getName(),
         path: prop.getName(), parent: null,
         type: typeText,
@@ -176,7 +198,9 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
         ...(decl.type ? typeRefAt(decl.type, given) : { type_ref: null }),
         ...locationOf(decl),
       });
+      for (const d of prop.declarations) covered.set(d, id);
     }
+    return covered;
   }
 
   return { enumRow, interfaceRow, typeAliasRow, moduleRows, typeMemberRows, typeMemberRowsFromType };

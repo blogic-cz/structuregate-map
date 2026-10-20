@@ -33,6 +33,18 @@ export function dottedPath(norm) {
   return parts.join('.');
 }
 
+/**
+ * WHAT A CHAIN HANGS FROM. `a.b.c` hangs from the component (nothing, `Implicit`) or `this`; `(user$ | async)?.name`,
+ * `foo().bar`, `items[0].label` and `(a || b).x` hang from a pipe, call, keyed read, binary or conditional, so `name`
+ * is a member of that value and not a name the template or code reads - recording it as a root made a tail
+ * look like a variable. The receiver subtree is still walked, so `user$` and the pipe are recorded.
+ */
+function hangsFromContext(norm) {
+  let n = throughNonNull(norm);
+  while (n && (n.k === 'Read' || n.k === 'SafeRead')) n = throughNonNull(n.receiver ?? null);
+  return !n || n.k === 'Implicit' || n.k === 'This';
+}
+
 /** The innermost read of a chain: `x` in `x.a.b`. */
 function rootRead(norm) {
   let n = throughNonNull(norm);
@@ -65,6 +77,7 @@ export function summarizeExpr(norm, acc = { identifiers: [], strings: [], pipes:
       // A CHAIN ROOTED AT AN ARROW FUNCTION'S PARAMETER reads the argument, not a member: `items.filter((x) =>
       // x.done)` reads `items`, never a `x`. Its receiver and arguments are still walked below.
       if (rootRead(norm)?.param) break;
+      if (!hangsFromContext(norm)) break;
       acc.reads.push(dottedPath(norm));
       const root = rootName(norm);
       if (root) acc.identifiers.push(root);
@@ -78,7 +91,7 @@ export function summarizeExpr(norm, acc = { identifiers: [], strings: [], pipes:
       break;
     case 'Call':
     case 'SafeCall':
-      if (norm.receiver) acc.calls.push(dottedPath(norm.receiver));
+      if (norm.receiver && hangsFromContext(norm.receiver)) acc.calls.push(dottedPath(norm.receiver));
       break;
     default: break;
   }
@@ -91,9 +104,10 @@ export function summarizeExpr(norm, acc = { identifiers: [], strings: [], pipes:
 }
 
 export function dedupeSummary(s) {
-  const uniq = (a) => [...new Set(a.filter((x) => x !== null && x !== undefined && x !== ''))];
+  const uniq = (a, empty = false) => [...new Set(a.filter((x) => x !== null && x !== undefined && (empty || x !== '')))];
+  // AN EMPTY STRING LITERAL IS A STRING (`x ?? ''`): dropping it hid that the expression carries one.
   return {
     identifiers: uniq(s.identifiers), reads: uniq(s.reads), calls: uniq(s.calls),
-    pipes: uniq(s.pipes), strings: uniq(s.strings),
+    pipes: uniq(s.pipes), strings: uniq(s.strings, true),
   };
 }
