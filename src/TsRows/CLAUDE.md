@@ -8,7 +8,7 @@ what the rust closure derives from these rows is
 ## What the half writes
 
 `--map-sqlite` over an Angular workspace writes FRAMEWORK facts no compiler produces alone: bindings, template
-nodes, render edges, input uses, routes and what each can reach - 56 tables with the four the closure derives,
+nodes, render edges, input uses, routes and what each can reach - 57 tables with the four the closure derives,
 plus `diagnostics` (what the extraction could not answer: a count with no names cannot be checked). Every row
 carries `half = "typescript"`.
 
@@ -102,7 +102,15 @@ runs) are compared by that, every carried field equal, never by `c:412`.
   its holder; `(x as T) = v` and `[a, b] = [b, a]` are assignments; a declaration without an initializer (`let t;`, a loop variable,
   `catch (e)`) is a local. Measured against a fresh parse of a large workspace by file and line, the only differences left are the
   contract: arrow PROPERTIES are members, implicit concise returns, top-level `const`s are `consts`.
-
+- **Four rows a source declares and the map missed** (rows 70): a CONSTRUCTOR PARAMETER PROPERTY (`constructor(private dep: Dep)`) is a
+  `members` row, `kind: 'property'`, `parameter: true` (`TsDecls/TsClassRows.mjs::extractClass`; no input, output or summary), so `this.dep` and a
+  template's `{{ cfg.id }}` resolve; an ES `#name` member is `visibility: 'private'` (`TsModifiers.mjs`); a single-member enum's `type_ref` names
+  the ENUM when the annotation is written as it (`Kind.Alpha` as written still names the member, `TsTypeRef.mjs::enumOfMember`); and a type literal
+  nested in a union, intersection, type argument, tuple, parentheses or a signature's parameters and return type has its `type_members`, as one
+  directly under a property does (`TsTypeRows.mjs::nestedLiterals`). Also: a concise arrow's implicit `returns` is anchored at its body START (`TsNodes.mjs::locationOf`: an expression is never anchored at a name
+  in it); the flat `reads`/`calls` hold no chain tail of a pipe, call, keyed read or binary as a root (`TsExprSummary.mjs::hangsFromContext`; `''`
+  stays in `strings`); a call of an OVERLOADED method has `target_id`, the implementation, the class's last row of that name (`TsRefs.mjs`); and a
+  side-effect `import './flags'` of a script resolves through the compiler's module resolution (`TsImports.mjs::importRow`). Four TEMPLATE rows follow Angular too (wrapper matches, accessor pairs, chains past a call, a condition's outer scope): [TsTemplateRows.md](TsTemplateRows.md). A LOOP is a `loops` row (never a `branches` row - those are conditions), the rows in its body carry `loop`, a bare expression statement is an `expressions` row and `x++` an assignment: [TsBodyRows.md](TsBodyRows.md).
 ## Expression trees the gate readers need (`TsDecls/TsBody.mjs`)
 
 `value` keeps only the last link of a call chain, so the rust readers need the TREE: `returns.expression`,

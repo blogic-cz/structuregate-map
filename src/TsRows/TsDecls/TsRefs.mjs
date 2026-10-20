@@ -46,7 +46,14 @@ export function rollupRefIds(store) {
       const accessorPair = (kind === 'getter' || kind === 'setter')
         && (kindOf.get(key) === 'getter' || kindOf.get(key) === 'setter')
         && owner.get(key) === row.class;
-      if (!declared.has(key)) {
+      // AN OVERLOAD SET IS ONE METHOD. `error(a): void; error(a, b): void; error(..) { .. }` is one `members` row per
+      // signature and one for the implementation, all of one class, and TypeScript puts the implementation LAST: a call
+      // lands on it, never on a signature and never on none (a refused key left every call of an overloaded method with no
+      // `target_id`). Two rows of DIFFERENT classes stay ambiguous.
+      const overload = table === 'members' && kind === 'method' && kindOf.get(key) === 'method'
+        && owner.get(key) === row.class && !ambiguous.has(key);
+      if (overload) declared.set(key, row.id);
+      else if (!declared.has(key)) {
         declared.set(key, row.id);
         owner.set(key, row.class);
         kindOf.set(key, kind);

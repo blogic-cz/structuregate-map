@@ -234,9 +234,22 @@ async function main() {
   // 68: a template `Write` (`f.On = $event`) carries the `target` of the member it writes (#99).
   // 69: 1:1 with the source - initializers, decorator arguments, top-level statements and parameter defaults are walked as bodies;
   //     class expressions are classes; `(x as T) = v` is an assignment; a declaration without an initializer is a local.
+  // 70: a constructor parameter property is a `members` row (`parameter`); an ES `#name` is private; a single-member enum's `type_ref`
+  //     names the enum, not its member; a type literal nested in a union, intersection, type argument, tuple or signature has `type_members`.
+  //     Also: a concise arrow's implicit `returns` is anchored at its body start, not at the last name; a chain tail (`(a | async)?.x`,
+  //     `foo().bar`) is no root in `reads`/`calls`/`identifiers` and `''` stays in `strings`; a call of an overloaded method has its
+  //     `target_id` (the implementation); a side-effect import of a script has `resolved`.
+  //     Template rows follow Angular: a `*dir` wrapper matches by its `templateAttrs` alone (the compiler's own selector); a read of an accessor
+  //     pair lands on its getter, a write on its setter; `members.return_ref` (a method's return type) lets a chain resolve past a call, keyed
+  //     read, custom pipe or `??`; a `Template`'s own condition is read in the outer scope (`*ngIf="x$ | async as x$"`).
+  //     Body rows (`TsBodyRows.md`): a loop is a `loops` row and every row of its body carries `loop`; a bare expression statement that wrote no
+  //     row is an `expressions` row (role `statement`); `x++`/`--x` is an `assignments` row (operator `++`/`--`).
+  //     Also: a JSON program file (`resolveJsonModule`) writes no statement row; `Kind | null` names the enum with strictNullChecks off; a type
+  //     literal anywhere in an alias's type (`A & {..}`, `{..}[]`, `{ [k]: V } | O`, `Dict<{..}>`) has its `type_members`; a method returning
+  //     several types carries `return_refs`, and a read past a custom pipe returning them resolves the name one of them declares.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 69, build: args.build,
+    config: config.file, data: config.data, rows: 70, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

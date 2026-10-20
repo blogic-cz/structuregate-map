@@ -224,7 +224,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
       // `namespace X { .. }` is a row like a top-level one.
       const visit = (statement) => {
         try {
-          if (ts.isImportDeclaration(statement)) importRow(ts, store, statement, fid, symbolAt, fe, checker);
+          if (ts.isImportDeclaration(statement)) importRow(ts, store, statement, fid, symbolAt, fe, checker, program.getCompilerOptions(), log);
           else if (ts.isExportDeclaration(statement) || ts.isExportAssignment(statement)) {
             exportRow(ts, store, statement, fid, symbolAt, fe);
           } else if (ts.isEnumDeclaration(statement)) typeRows.enumRow(statement, fid);
@@ -269,7 +269,9 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
             }
           }
           else if (ts.isFunctionDeclaration(statement)) declRows.functionRow(statement, fid);
-          else if (ts.isExpressionStatement(statement) || ts.isIfStatement(statement)) {
+          else if ((ts.isExpressionStatement(statement) || ts.isIfStatement(statement)) && !sf.fileName.toLowerCase().endsWith('.json')) {
+            // A JSON SOURCE FILE (`resolveJsonModule` puts one in the program) HOLDS DATA, NOT CODE: its one statement is the document
+            // itself, and walking it wrote a `statement` expressions row over the whole file.
             // A TOP-LEVEL STATEMENT IS CODE (1:1): `bootstrap().catch((e) => ..)`, `window.x = ..` - walked whole, the function a
             // `prototype` augmentation defines skipped, since it is a `functions` row of its own.
             const defined = declRows.prototypeRow(statement, fid);

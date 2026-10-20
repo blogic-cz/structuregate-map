@@ -87,10 +87,17 @@ Beside the shared tables it adds the FRAMEWORK tables:
   item through its collection's. An `@case` restricts its `@switch` in `gate_values` as `*ngSwitchCase` does, and an
   `@for` over a list of objects carries per-element key sites and `loop:` links as `*ngFor` does.
 * **A template's tables have no `file`** - a binding hangs off a template node - so join by the ids; every
-  row carries `owner_file`. A body's `calls`, `locals`, `assignments`, `returns`, `raises`, `branches`,
-  `handlers`, `switch_cases` and the literal tables carry `file` too, as every other half does. `_meta` publishes what SQLite cannot record: the 43 id prefixes, 129 joins and which
+  row carries `owner_file`. A body's `calls`, `locals`, `assignments`, `returns`, `raises`, `branches`, `loops`,
+  `handlers`, `switch_cases` and the literal tables carry `file` too, as every other half does. `_meta` publishes what SQLite cannot record: the id prefixes, the joins and which
   column anchors a row to its file (`--id` follows them). Every declared join column leads an index, and so do
   `key_reach.key`, `render_path.component` and `gate_values.gate`/`gate_features.gate`: `WHERE calls.target_id = ?` is a probe.
+* **A loop is a `loops` row** (Angular half; the plain half's loops are `branches` rows with a `kind`): `kind` (`for`, `for_of`, `for_in`,
+  `while`, `do`), `await` (1 for `for await`), `variables` (list: the names its initializer declares), `source` (the iterable of a
+  `for..of`/`for..in`, else the condition; `''` for `for (;;)`), `expr` (joins `expressions.id`, role `loop`), `incrementor_source`, `line`/`col`/`end_line`,
+  `member`/`class`, and `branch`/`case`/`choices` as a `calls` row has them. A row INSIDE a loop's body (`calls`, `assignments`, `locals`, `returns`,
+  `raises`, `handlers`, a nested `loops`) carries `loop` (joins `loops.id`, the innermost); a callback in the body is its own member and has none.
+  `branches` holds only if-arms and `try`: a statement in a loop is not conditional. A bare expression statement that is no call or write
+  (`this.a.b;`) is an `expressions` row, role `statement`; `x++`/`--x` is an `assignments` row, `operator` `++`/`--`, `value` NULL.
 * **A `value` cell is the EVALUATED expression** (`returns`, `assignments`, `locals`, `members`, `consts`, `raises`, and
   each of `calls.args`): a literal is its value (`'x'`, `1`, `true`), an expression the map cannot evaluate is
   `{$expr, $kind, $reads, ..}`. A KEYWORD literal is `{$literal, $kind}`: `undefined` anywhere (`$kind` `UndefinedKeyword`,
@@ -138,7 +145,8 @@ Beside the shared tables it adds the FRAMEWORK tables:
   converter). A dictionary call whose first argument is a string makes each locale key under `<prefix>.` reachable from
   the component the call sits in (route `ts_call`), and from every template reading the field or getter that holds the
   result (`field_binding`); a prefix built at run time is not read. `i18n_refs` carries it as a row with `prefix`
-  and `kind = 'dictionary_call'`, and no `key`. A dictionary call handed on to another function is not followed.
+  and `kind = 'dictionary_call'`, and no `key`. A dictionary call handed on to another function is not followed. `i18nCarriers` (template pipes/elements carrying a key) and the
+  other cell contracts: [typescript-refs.md](typescript-refs.md).
 
 Three outputs are options, off by default: `--ts-html <dir>` (one JSON per template, the tree in document
 order), `--map-row-fts` (`row_fts`: which row ANYWHERE mentions a word), `--map-atlas <dir>` (projects,

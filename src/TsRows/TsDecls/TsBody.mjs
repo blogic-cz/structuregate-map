@@ -15,6 +15,7 @@
  */
 import { locationOf } from './TsNodes.mjs';
 import { catchFacts, chainOf } from './TsCatch.mjs';
+import { loopFacts, loopKind } from './TsLoops.mjs';
 
 export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName }) {
   /**
@@ -26,6 +27,13 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
    */
   let currentCase = null;
   let currentBranch = null;
+  /**
+   * THE LOOP A STATEMENT SITS IN (rows 70, `TsLoops.mjs`): the id of the innermost `loops` row whose BODY holds the row, on every row
+   * that takes `branch`. Never a `branch` - those are conditions. A function in the body is its own member, so it starts outside the loop.
+   */
+  let currentLoop = null;
+  /** How many rows the emitters wrote: a bare expression statement is described only when its walk wrote none. */
+  let rowsWritten = 0;
   /**
    * THE ARM OF A CONDITIONAL EXPRESSION IS A BRANCH TOO. `c ? this.t('a') : this.t('b')` runs the
    * first call only when `c` holds, and a statement row inside an arm published with only the enclosing `if`
@@ -49,6 +57,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
     return {
       ...(currentCase === null ? {} : { case: currentCase }),
       ...(currentBranch === null ? {} : { branch: currentBranch }),
+      ...(currentLoop === null ? {} : { loop: currentLoop }),
       ...(choices.length ? { choices } : {}),
     };
   };
@@ -148,6 +157,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       if (!ts.isSpreadElement(a) || value === null || typeof value !== 'object' || Array.isArray(value)) return value;
       return { ...value, $spread: evalNode(a.expression) };
     });
+    rowsWritten += 1;
     const id = store.add('calls', 'cl', {
       ...inCase(),
       member: ownerId,
@@ -194,6 +204,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
     const lhs = pattern ? { name: left.getText(), scope: 'destructuring' } : targetOf(left);
     if (!lhs) return;
     const rhs = node.right;
+    rowsWritten += 1;
     store.add('assignments', 'as', {
       ...inCase(),
       member: ownerId, class: classId,
@@ -208,6 +219,62 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       reads: identifiersIn(rhs), calls: calleesIn(rhs),
       ...locationOf(node),
     });
+  }
+
+  /**
+   * `x++`, `--this.n` WRITE (rows 70): an assignment row with operator `++`/`--`, no value - what it leaves is not the value of any expression.
+   * Without it a counter bumped only by an update had no writer in the map.
+   */
+  function emitUpdate(node, ownerId, classId) {
+    if (!ts.isPrefixUnaryExpression(node) && !ts.isPostfixUnaryExpression(node)) return;
+    if (node.operator !== ts.SyntaxKind.PlusPlusToken && node.operator !== ts.SyntaxKind.MinusMinusToken) return;
+    const operand = written(node.operand);
+    const lhs = targetOf(operand);
+    if (!lhs) return;
+    rowsWritten += 1;
+    store.add('assignments', 'as', {
+      ...inCase(),
+      member: ownerId, class: classId,
+      target: lhs.name, scope: lhs.scope, ...(lhs.holder !== undefined ? { holder: lhs.holder } : {}),
+      target_ref: ts.isPropertyAccessExpression(operand) ? declFileOf(operand.name)
+        : ts.isIdentifier(operand) ? declFileOf(operand) : null,
+      operator: ts.tokenToString(node.operator), value: null, expression: null,
+      source: node.getText(), reads: identifiersIn(operand), calls: calleesIn(operand),
+      ...locationOf(node),
+    });
+  }
+
+  /**
+   * A LOOP IS A `loops` ROW, and its BODY's rows carry its id as `loop` (rows 70, `TsLoops.mjs`). The header - initializer, condition,
+   * incrementor, iterable - is walked in the ENCLOSING context: a call in it runs once, or per turn, but is not the body's.
+   * `expr` is the header expression's tree, the id of its `expressions` row, as an `if`'s `condition_expr` is. `source` is '' for `for (;;)`.
+   */
+  function collectLoop(node, ownerId, classId, walk) {
+    const facts = loopFacts(ts, node);
+    const id = store.add('loops', 'lp', {
+      ...inCase(),
+      member: ownerId, class: classId, kind: facts.kind, ...(facts.await ? { await: true } : {}),
+      variables: facts.variables,
+      source: facts.header ? facts.header.getText() : '',
+      expr: facts.header && describe ? describe(facts.header, 'loop').id ?? null : null,
+      ...(facts.incrementor ? { incrementor_source: facts.incrementor.getText() } : {}),
+      ...locationOf(node),
+    });
+    for (const part of [node.initializer, node.condition, node.incrementor, node.expression]) if (part) walk(part);
+    const held = currentLoop;
+    currentLoop = id;
+    try {
+      walk(node.statement);
+    } finally {
+      currentLoop = held;
+    }
+  }
+
+  /** A BARE EXPRESSION STATEMENT whose walk wrote no row (`this.a.b;`, `x;`, `a && b;`) is described, so no statement of the source is absent. */
+  function collectStatement(node, walk) {
+    const before = rowsWritten;
+    ts.forEachChild(node, walk);
+    if (rowsWritten === before && describe) describe(node.expression, 'statement');
   }
 
   /**
@@ -236,6 +303,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
         }
       }
     }
+    rowsWritten += 1;
     store.add('locals', 'lo', {
       ...inCase(),
       member: ownerId, class: classId,
@@ -267,6 +335,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
   function emitReturn(node, ownerId, classId) {
     if (!ts.isReturnStatement(node)) return;
     const value = node.expression ? evalCell(node.expression) : null;
+    rowsWritten += 1;
     store.add('returns', 'rv', {
       ...inCase(),
       member: ownerId, class: classId,
@@ -282,6 +351,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
   function emitThrow(node, ownerId, classId) {
     if (!ts.isThrowStatement(node)) return;
     const thrown = node.expression;
+    rowsWritten += 1;
     store.add('raises', 'th', {
       ...inCase(),
       member: ownerId, class: classId,
@@ -423,15 +493,30 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       if (skip !== null && node === skip) return; // walked by its own declaration
       if (node !== bodyNode && isFunctionLike(node)) {
         const inlineId = declareInline(node, ownerId);
-        const fnBody = node.body;
-        if (fnBody) collectBody(fnBody, inlineId, classId);
-        defaults(node, inlineId, classId);
+        rowsWritten += 1;
+        // A FUNCTION IS ITS OWN MEMBER: a `loop` id naming another member's loop would join nothing, so its body starts outside any.
+        const held = currentLoop;
+        currentLoop = null;
+        try {
+          const fnBody = node.body;
+          if (fnBody) collectBody(fnBody, inlineId, classId);
+          defaults(node, inlineId, classId);
+        } finally {
+          currentLoop = held;
+        }
         return; // its contents belong to IT, not to the body being walked
       }
       // A CLASS EXPRESSION IS A CLASS: `static Inner = class { static A = 'a'; }` - its own row and members, under its holder's name.
-      if (declareClass && ts.isClassExpression(node)) { declareClass(node); return; }
+      if (declareClass && ts.isClassExpression(node)) {
+        const held = currentLoop; // its members are their own bodies, outside the loop it sits in
+        currentLoop = null;
+        try { declareClass(node); } finally { currentLoop = held; }
+        return;
+      }
       if (ts.isSwitchStatement(node)) { collectSwitch(node, ownerId, classId, walk); return; }
       if (ts.isIfStatement(node)) { collectIf(node, ownerId, classId, walk); return; }
+      if (loopKind(ts, node) !== null) { collectLoop(node, ownerId, classId, walk); return; }
+      if (ts.isExpressionStatement(node)) { collectStatement(node, walk); return; }
       if (ts.isTryStatement(node)) collectTry(node, ownerId, classId);
       // The condition is walked where it stands; each arm under its side of it. Same roles as the evaluator's.
       if (ts.isConditionalExpression(node)) {
@@ -448,6 +533,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       }
       emitCall(node, ownerId);
       emitAssignment(node, ownerId, classId);
+      emitUpdate(node, ownerId, classId);
       emitLocal(node, ownerId, classId);
       emitReturn(node, ownerId, classId);
       emitThrow(node, ownerId, classId);

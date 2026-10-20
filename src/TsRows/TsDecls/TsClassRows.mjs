@@ -224,6 +224,22 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     return { name, decorators, type: memberType, value };
   }
 
+  /** `{return_ref}` (`return_refs` when it names several) - what a METHOD, or a property holding one, returns, shaped as a `type_ref` is: a method's own `type_ref` is
+   *  null (its type is its function's), so a template's `load().name` could not follow the call (rows 70). Absent when it returns
+   *  nothing declared; one signature only, as an overloaded property has no single answer. */
+  function returnRefOf(m, kind) {
+    try {
+      const sig = kind === 'method' ? checker.getSignatureFromDeclaration(m)
+        : kind === 'property' ? (([only, ...rest]) => (only && !rest.length ? only : null))(checker.getTypeAtLocation(m).getCallSignatures())
+          : null;
+      const answer = sig ? typeRefAt(m, sig.getReturnType()) : {};
+      // A RETURN THAT NAMES SEVERAL (`A | B`, an inferred `cond ? a.x : a.y`) is `return_refs`, as a member's `type_refs` is: a template
+      // read past it resolves a name only ONE of them declares.
+      if (answer.type_ref) return { return_ref: answer.type_ref };
+      return Array.isArray(answer.type_refs) && answer.type_refs.length ? { return_refs: answer.type_refs } : {};
+    } catch { return {}; }
+  }
+
   function memberRow(m, classId, fid) {
     const mods = modifiersOf(m);
     const decorators = decoratorsOf(m);
@@ -253,6 +269,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
       // known type, and refusing it left every RxJS-style member unresolvable.
       ...(m.type ? typeRefAt(m.type) : typedLikeProperty ? typeRefAt(m) : { type_ref: null }),
       value,
+      ...returnRefOf(m, kind),
       params: isSignature ? paramsOf(m) : fnValued ? paramsOf(initializer) : undefined,
       decorators,
       jsdoc: jsdocOf(m),
@@ -292,6 +309,27 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     for (const m of node.members) {
       const memberId = memberRow(m, classId, fid);
       members.push({ id: memberId, node: m });
+      // A PARAMETER PROPERTY IS A MEMBER (`constructor(private dep: Dep)`) though no member NODE declares it: without its row
+      // `this.dep` and a template's `{{ dep.id }}` had nothing to resolve to. NOT in `members`/`summaries` - it is no input,
+      // output or decorated member, only a property the class has (`parameter: true` says where it came from).
+      if (ts.isConstructorDeclaration(m)) {
+        for (const p of m.parameters) {
+          if (!ts.isParameterPropertyDeclaration(p, m)) continue;
+          const pm = modifiersOf(p);
+          store.add('members', 'm', {
+            class: classId, file: fid, kind: 'property', name: propName(p.name),
+            static: false, readonly: pm.readonly, visibility: pm.visibility,
+            optional: !!p.questionToken,
+            type: typeText(p, p.type),
+            ...(p.type ? typeRefAt(p.type) : typeRefAt(p)),
+            value: undefined,
+            decorators: decoratorsOf(p),
+            jsdoc: jsdocOf(p),
+            parameter: true,
+            ...locationOf(p),
+          });
+        }
+      }
       const mInit = ts.isPropertyDeclaration(m) && m.initializer ? m.initializer : null;
       summaries.push(memberSummary(ts, m,
         m.name ? propName(m.name) : kindOfMember(m), decoratorsOf(m),
