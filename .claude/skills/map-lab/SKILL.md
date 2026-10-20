@@ -44,6 +44,26 @@ third of the rows runs the expensive phase in seconds. So:
 timing into the build (off in every release); the run's own trace (`<db>.last-run.jsonl`) then carries `metric:` spans -
 see `rust/fbtcore/src/trace/CLAUDE.md`. Reach for it before a temporary probe; rebuild without it before the suites.
 
+## The release compare on a pattern sample
+
+`Compare-Release.ps1` on a whole large tree maps it twice. `pattern-sample.py` builds a PATTERN SAMPLE instead: the fewest
+files holding every shape of code the full map holds, with what they need to resolve as they do - every file a kept row
+points at, each component's template and the components sharing it, every directive, pipe and NgModule. Proven on a large
+workspace: `cover` found every feature of the full map in the sample's (0 missing), and replaying a real regression on the
+sample alone reported its lost key. It catches each KIND of regression, not every key a regression touches.
+
+```bash
+P=~/sg-scratch/pattern                     # outside the repo: private code
+structuregate --root <tree> --ext .ts --map-sqlite $P/full.sqlite            # deployed exe, once per sample
+python3 pattern-sample.py make  $P/full.sqlite <workspace> $P/ws [$P/cover1.txt,...]   # earlier reports keep their context
+structuregate --root $P/ws --ext .ts --map-sqlite $P/sample.sqlite
+python3 pattern-sample.py cover $P/full.sqlite $P/sample.sqlite > $P/coverN.txt   # exit 1 while a feature is missing: iterate
+pwsh scripts/Compare-Release.ps1 -Tree $P/ws -Ext .ts -OldDb $P/olddb-<deployed>.sqlite -Out <dir>    # per release
+```
+
+Rebuild the sample when the tree moves - `$P/STAMP` holds the tree's commit and a hash of its uncommitted changes - and keep
+each release's new sample map as the next `-OldDb`.
+
 ## Build fast
 
 - `cargo test --profile lab` / `cargo build --profile lab`; `dotnet build` already links `lab` (only a publish

@@ -1,6 +1,6 @@
 """A PATTERN SAMPLE of a real Angular workspace: the fewest files that still hold every kind of code the full map holds.
 
-    python3 pattern-sample.py make  <full map> <workspace> <sample dir>   # pick, close over imports, copy
+    python3 pattern-sample.py make  <full map> <workspace> <sample dir> [cover report]   # pick, close over imports, copy
     python3 pattern-sample.py cover <full map> <sample map>               # every feature of the full map in the sample's?
 
 A FEATURE is what a row says about the SHAPE of code, never its names: a low-cardinality column's value (`gates.gate_kind=
@@ -27,7 +27,14 @@ SKIPPED = {"node_modules", ".git", "dist", ".angular", ".nx"}
 CATEGORICAL = 40
 # Columns that say where a row is, never what it is.
 PLACE = {"id", "file", "owner_file", "half", "line", "col", "end_line", "decorator_line", "path", "abs", "class", "component",
-         "template", "member", "parent", "node", "binding", "expression", "content_hash", "sha", "chars", "bytes", "lines"}
+         "template", "member", "parent", "node", "binding", "expression", "content_hash", "sha", "chars", "bytes", "lines",
+         # names, not shapes: an element's tag, a path a diagnostic quotes
+         "tag", "source"}
+# A node table whose objects without a `k` use more member names than this holds DATA (an object literal's keys, a
+# `{name: count}` map, ids as keys): such a name is no shape, and is read as `*`. A `$`-prefixed key stays: it is structure.
+DATA_ROLES = 200
+# What `features` computes; a cache written by another version is read again.
+VERSION = 6
 # Leaf roles whose VALUE is the shape: an operator, a node's kind.
 VALUED = {"op", "kind", "$kind", "gate_kind", "via", "route", "sense"}
 
@@ -44,13 +51,37 @@ def ts_tables(db):
 
 
 def file_of_owner(db, t, cols, paths):
-    """`owner` of a node row -> the workspace path of the file its row came from (None when the row says no file)."""
+    """`owner` of a node row -> the workspace path of the file its row came from (None when the row says no file): its
+    `owner_file`, else its component's, else a path it quotes (`source`, `trace_file`); a `files` row is its own file."""
     out = {}
-    if "owner_file" in cols and "id" in cols:
-        for i, f in db.execute(f"SELECT id, owner_file FROM \"{t}\" WHERE half = 'typescript'"):
+    by_path = set(paths.values())
+    comp = dict(db.execute("SELECT id, owner_file FROM components WHERE half = 'typescript'"))
+    key = "id" if "id" in cols else "rowid"
+    wanted = [c for c in ("owner_file", "component", "source", "trace_file", "file") if c in cols]
+    if t == "files":
+        for i, p in paths.items():
+            out[str(i)] = p
+        return out
+    if wanted:
+        for row in db.execute(f"SELECT {key}, {', '.join(chr(34) + c + chr(34) for c in wanted)} FROM \"{t}\" WHERE half = 'typescript'"):
+            i, cells = row[0], dict(zip(wanted, row[1:]))
+            owner = str(i) if key == "id" else f"#{i}"
+            f = cells.get("owner_file")
             if f in paths:
-                out[str(i)] = paths[f]
-    elif "component" in cols:
+                out[owner] = paths[f]
+            elif comp.get(cells.get("component")) in paths:
+                out[owner] = paths[comp[cells["component"]]]
+            else:
+                for c in ("source", "trace_file", "file"):
+                    v = cells.get(c)
+                    if isinstance(v, str) and v in by_path:
+                        out[owner] = v
+                        break
+                    if v in paths:
+                        out[owner] = paths[v]
+                        break
+        return out
+    if "component" in cols:
         comp = dict(db.execute("SELECT id, owner_file FROM components WHERE half = 'typescript'"))
         key = "id" if "id" in cols else "rowid"
         for i, c in db.execute(f"SELECT {key}, component FROM \"{t}\" WHERE half = 'typescript'"):
@@ -60,32 +91,56 @@ def file_of_owner(db, t, cols, paths):
     return out
 
 
-def features_of(path):
+def is_shape(v):
+    """A column value that says what code IS: a word, a flag - never a count (`root_count=33`) or an id (`c:4021`), which say
+    how big the tree is or which row, and no smaller sample can hold."""
+    if isinstance(v, (int, float)):
+        return v in (0, 1)
+    text = str(v)
+    head, _, tail = text.partition(":")
+    return not (tail.isdigit() and head.replace("_", "").isalpha())
+
+
+def data_tables(db):
+    """The node tables whose objects without a `k` hold DATA names - decided ONCE, on the full map, and used for every map
+    compared with it: decided per map, a table a sample holds fewer of read as schema and its names as features."""
+    out = set()
+    for (t,) in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'"):
+        if "__" in t and db.execute(f'SELECT COUNT(DISTINCT role) FROM "{t}"').fetchone()[0] > DATA_ROLES:
+            out.add(t)
+    return out
+
+
+def features_of(path, data=None):
     """`features` of the map at `path`, cached beside it (`<map>.features`) while the map is unchanged - reading every node
     table of a large map is minutes."""
     import pickle
     cache = f"{path}.features"
-    stamp = os.stat(path).st_mtime_ns
+    stamp = (os.stat(path).st_mtime_ns, tuple(sorted(data)) if data is not None else None)
     try:
         with open(cache, "rb") as f:
             held, found = pickle.load(f)
-        if held == stamp:
+        if held == (stamp, VERSION):
             return found
     except (OSError, EOFError, pickle.UnpicklingError, ValueError):
         pass
-    found = features(sqlite3.connect(f"file:{path}?mode=ro", uri=True))
+    db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    found = features(db, data if data is not None else data_tables(db))
     with open(cache, "wb") as f:
-        pickle.dump((stamp, found), f)
+        pickle.dump(((stamp, VERSION), found), f)
     return found
 
 
-def features(db):
+def features(db, data):
     """feature -> the workspace paths of the files that hold it (empty when no file can be named)."""
     paths = dict(db.execute("SELECT id, path FROM files WHERE half = 'typescript'"))
     found = collections.defaultdict(set)
     comp = dict(db.execute("SELECT id, owner_file FROM components WHERE half = 'typescript'"))
     for t, cols in ts_tables(db):
         owners = file_of_owner(db, t, cols, paths)
+        # ONLY THE ANGULAR HALF'S ROWS: a plain-half row (a `.ts` outside the workspace) is no code a workspace sample holds.
+        key0 = "id" if "id" in cols else "rowid"
+        ours = {str(i) if key0 == "id" else f"#{i}" for (i,) in db.execute(f"SELECT {key0} FROM \"{t}\" WHERE half = 'typescript'")}
         # key_reach: its components' files.
         if t == "key_reach":
             for owner, c in db.execute("SELECT owner, value FROM key_reach__components WHERE parent = 0"):
@@ -99,15 +154,24 @@ def features(db):
             if not 0 < n <= CATEGORICAL:
                 continue
             for i, v in db.execute(f"SELECT {key}, \"{col}\" FROM \"{t}\" WHERE half = 'typescript' AND \"{col}\" IS NOT NULL"):
+                if not is_shape(v):
+                    continue
                 owner = str(i) if key == "id" else f"#{i}"
                 found[f"{t}.{col}={v}"].add(owners.get(owner))
         nodes = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'") if r[0].startswith(t + "__")]
         for table in nodes:
             column = table[len(t) + 2:]
+            is_data = table in data
             current, rows = None, []
             def flush():
                 kinds = {n: v for (n, p, role, node, v) in rows if role == "k"}
-                roles = {n: role for (n, p, role, node, v) in rows}
+                parents = {n: p for (n, p, role, node, v) in rows}
+                def named(n, role):
+                    # A member of an object WITHOUT a kind, in a table of data, is a data name.
+                    if role is None or not is_data or role.startswith("$") or kinds.get(parents.get(n)) is not None:
+                        return role
+                    return "*"
+                roles = {n: named(n, role) for (n, p, role, node, v) in rows}
                 label = lambda n: kinds.get(n) or (roles.get(n) if roles.get(n) is not None else "#")
                 where = owners.get(current)
                 for (n, p, role, node, v) in rows:
@@ -116,8 +180,11 @@ def features(db):
                     child = kinds.get(n) or node
                     if role in VALUED and node == "string":
                         child = f"{node}:{v}"
-                    found[f"{t}.{column}: {label(p)}.{role if role is not None else '[]'}>{child}"].add(where)
+                    shown = roles.get(n)
+                    found[f"{t}.{column}: {label(p)}.{shown if shown is not None else '[]'}>{child}"].add(where)
             for owner, n, p, role, node, v in db.execute(f'SELECT owner, n, parent, role, node, value FROM "{table}" ORDER BY owner, n'):
+                if str(owner) not in ours:
+                    continue
                 if owner != current:
                     if rows:
                         flush()
@@ -128,9 +195,9 @@ def features(db):
     return {f: {p for p in where if p is not None} for f, where in found.items()}
 
 
-def make(full, workspace, sample):
+def make(full, workspace, sample, report=None):
     db = sqlite3.connect(f"file:{full}?mode=ro", uri=True)
-    feats = features_of(full)
+    feats = features_of(full, data_tables(db))
     by_file = collections.defaultdict(set)
     for f, where in feats.items():
         for p in where:
@@ -144,6 +211,21 @@ def make(full, workspace, sample):
             break
         keep.add(best)
         todo -= gain
+    # A FEATURE A SAMPLE LOST IN ITS CONTEXT - a template two components share, an ambiguous pipe, a target its declaration
+    # resolves - is kept with EVERY file holding it, as the last `cover` report names them: the greedy pick keeps one.
+    if report:
+        # EVERY REPORT SO FAR, not the last: a feature found once in its context is lost again when the next pick drops it.
+        lost = sorted({line.split("MISSING ", 1)[1].rstrip("\n") for r in report.split(",") if os.path.exists(r)
+                       for line in open(r, encoding="utf-8") if "MISSING " in line})
+        for f in lost:
+            keep |= feats.get(f, set())
+        print(f"{len(lost)} feature(s) a sample lost: every file holding them kept")
+    # WHAT A TEMPLATE RESOLVES THROUGH IS NO IMPORT: a directive, a pipe, the NgModule declaring them reach a template by its
+    # selector and its module's scope. Every one of them is kept - a few hundred classes - or a directive's config object
+    # read in a template (`gate_values.listed_json`) resolved to nothing.
+    for table in ("directives", "pipes", "ng_modules"):
+        for (f,) in db.execute(f"SELECT DISTINCT p.path FROM {table} r JOIN files p ON p.id = r.owner_file WHERE r.half = 'typescript'"):
+            keep.add(f)
     picked = len(keep)
     # WHAT THE KEPT FILES NEED TO TYPE AS THEY DO: each component's template; every file declaring a name a kept file imports,
     # and THAT file's needs in turn; the barrels on the way and each module imported, but not what a barrel re-exports besides -
@@ -167,13 +249,34 @@ def make(full, workspace, sample):
     for owner, f in db.execute("SELECT owner_file, resolved_file FROM imports WHERE half = 'typescript' AND resolved_file IS NOT NULL"):
         if f in paths:
             beside[owner].add(paths[f])
+    # AND EVERY FILE A KEPT ROW POINTS AT - a `file` the extractor resolved anywhere in a row's structures: a type_ref, a
+    # `$target`, a `$read`'s declaring class. A member read through `this.viewModel.Input.StartDate` names classes reached
+    # through TYPES, not imports, and without them the sample resolved it to nothing.
+    by_abs = {a: p for p, a in db.execute("SELECT path, abs FROM files WHERE half = 'typescript'")}
+    points = collections.defaultdict(set)
+    for (t,) in db.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '%sqlite%'"):
+        if "__" not in t:
+            continue
+        base = t.split("__", 1)[0]
+        cols = [r[1] for r in db.execute(f'PRAGMA table_info("{base}")')]
+        if "owner_file" not in cols or "id" not in cols:
+            continue
+        for f, v in db.execute(f'SELECT b.owner_file, n.value FROM "{t}" n JOIN "{base}" b ON b.id = n.owner WHERE n.role = \'file\''):
+            p = by_abs.get(v) or (v if v in set(paths.values()) else None)
+            if p is not None:
+                points[f].add(p)
+    # A TEMPLATE TWO COMPONENTS SHARE is kept with both.
+    users = collections.defaultdict(set)
+    for owner, f in db.execute("SELECT c.owner_file, t.file FROM templates t JOIN components c ON c.id = t.component WHERE t.half = 'typescript'"):
+        if owner in paths:
+            users[f].add(paths[owner])
     ids = {p: i for i, p in paths.items()}
     stack = list(keep)
     while stack:
         f = ids.get(stack.pop())
         for p in templates.get(f, set()) | beside.get(f, set()):
             keep.add(p)
-        for p in declares.get(f, ()):
+        for p in declares.get(f, set()) | points.get(f, set()) | users.get(f, set()):
             if p not in keep:
                 keep.add(p)
                 stack.append(p)
@@ -191,19 +294,26 @@ def make(full, workspace, sample):
             shutil.copy2(os.path.join(here, name), os.path.join(sample, rel, name))
     os.symlink(os.path.join(workspace, "node_modules"), os.path.join(sample, "node_modules"))
     # A PROJECT ROOTED IN `files` (`src/main.ts`) WOULD BE EMPTY: its entry's imports no longer reach the kept files. Its `include`
-    # of declaration files is widened to every `.ts` - only kept files are left, each one the full map parsed. Text, not JSON:
-    # a tsconfig holds comments.
+    # `files` gains exactly the kept files under it that the full map PARSED - a file the full map left outside every program stays
+    # outside (a key traced into one reads `unparsed_file` in both maps). Text, not JSON: a tsconfig holds comments.
+    parsed = {p for (p,) in db.execute("SELECT path FROM files WHERE half = 'typescript' AND parsed = 1")}
     widened = []
     for here, dirs, files in os.walk(sample):
         dirs[:] = [d for d in dirs if d not in SKIPPED]
         for name in files:
-            if not (name.startswith("tsconfig") and name.endswith(".json")):
+            if not (name.startswith("tsconfig") and name.endswith(".app.json")):
                 continue
             at = os.path.join(here, name)
             text = open(at, encoding="utf-8").read()
-            if '"files"' in text and '*.d.ts"' in text:
-                open(at, "w", encoding="utf-8").write(text.replace('*.d.ts"', '*.ts"'))
-                widened.append(os.path.relpath(at, sample))
+            if '"files": [' not in text:
+                continue
+            base = os.path.relpath(here, sample).replace(os.sep, "/")
+            under = sorted(p[len(base) + 1:] for p in keep & parsed if base == "." or p.startswith(base + "/"))
+            listed = ", ".join(f'"{p}"' for p in under if p.endswith(".ts"))
+            # `files`, not `include`: the compiler turns every `include` pattern into one regular expression, and thousands of
+            # paths made one it refused - the program was never built.
+            open(at, "w", encoding="utf-8").write(text.replace('"files": [', f'"files": [{listed}, ', 1))
+            widened.append((os.path.relpath(at, sample), len(under)))
     print("widened", widened)
     print(f"{len(feats)} features; {picked} file(s) cover them, {len(keep)} with templates and dependencies, of {len(every)}")
     uncoverable = [f for f, where in feats.items() if not where]
@@ -211,8 +321,9 @@ def make(full, workspace, sample):
 
 
 def cover(full, sample):
-    a = features_of(full)
-    b = features_of(sample)
+    data = data_tables(sqlite3.connect(f"file:{full}?mode=ro", uri=True))
+    a = features_of(full, data)
+    b = features_of(sample, data)
     missing = sorted(set(a) - set(b))
     print(f"{len(a)} features in the full map, {len(b)} in the sample's; {len(missing)} missing")
     for f in missing[:200]:
@@ -221,7 +332,7 @@ def cover(full, sample):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 5 and sys.argv[1] == "make":
+    if len(sys.argv) in (5, 6) and sys.argv[1] == "make":
         make(*sys.argv[2:])
     elif len(sys.argv) == 4 and sys.argv[1] == "cover":
         sys.exit(cover(*sys.argv[2:]))
