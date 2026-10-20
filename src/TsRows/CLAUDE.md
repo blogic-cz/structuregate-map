@@ -84,8 +84,8 @@ runs) are compared by that, every carried field equal, never by `c:412`.
 - **An intersection names what its parts name** (rows 65, #97, `TsDecls/TsTypeRef.mjs::refsOfParts`): `X & { .. }` is `type_ref` X, `A & B`
   lists both in `type_refs` as a union naming several does; a part that is itself an unaliased union or intersection is walked into.
   A TEMPLATE READ follows `type_refs` (`TsTpl/TsTplReads.mjs::ownerOfRow`): the next name resolves when exactly ONE listed type declares
-  it. A hop whose type names nothing ENDS the chain - it kept the previous owner, so `{{ x.y }}` over an untyped `x` named the
-  component's own `y`.
+  it. A hop whose type names nothing ENDS the chain (never the previous owner: `{{ x.y }}` over an untyped `x` is not the component's `y`) - but
+  an anonymous type or object literal is a `shapes` row and a hop (rows 71): [TsShapeRows.md](TsShapeRows.md).
 - **An enum a field holds is read through** (rows 66, `TsTpl/TsTplReads.mjs`): `Kinds = Kind` is typed `typeof Kind`, and `{{ Kinds.Alpha }}`
   targets the member - the enum's row at the member's `line`, which each `enums.members` item now carries. A name the enum lacks ends the chain.
 - **A generic is read as it is instantiated** (rows 67, #98, `TsTpl/TsTplReads.mjs::resolveRef`): classes and interfaces carry `type_params`, a
@@ -148,7 +148,7 @@ its `params` and its `rest` parameter.
   `TsWalk.mjs::linkFunctions` - a `const` arrow's row sits at the NAME, its tree at the arrow), and a chained call
   names the call it is made on (`calls.receiver_call`).
 
-- **A shorthand property's value is its const's** (rows 46, `TsValueRefs.mjs::evalShorthand`): `{ template }` is `{ template: template }`, in every object literal. A const-held inline template's spans are placed at the const's line (`TsClassRows.mjs::argLinesOf`), same file only - an imported const keeps the decorator's line.
+- **A shorthand property's value is its const's** (rows 46, `TsValueRefs.mjs::evalShorthand`): `{ template }` is `{ template: template }`, in every object literal. A const-held inline template's spans are placed at the const's line (`TsClassRows.mjs::argPlacesOf`), same file only - an imported const keeps the decorator's line.
 - **A `createEffect` callback's body is walked** (rows 46, `TsDecls/TsClassRows.mjs`, `fromNgrx`): its `ofType`/`pipe` calls are `calls` rows and its nested arrows `functions` rows under the effect member, which `state_effects` (`TsDerive/TsNgrx.mjs`) reads.
 - **An arrow-function PROPERTY returns like a METHOD** (divergence #8): `isMain = (id: P) => [P.A].some(...)`
   keeps its `members.value` (`{"$fn": ...}`), gains `members.params` and a `returns` row keyed on the member,

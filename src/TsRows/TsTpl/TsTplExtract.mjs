@@ -190,9 +190,13 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
      */
     const lineOffset = comp.inline_template !== null && comp.inline_template !== undefined && comp.inline_line
       ? comp.inline_line - 1 : 0;
+    // THE COLUMN OF THE TEXT'S START, on the template's FIRST line only (rows 71): a span there is relative to the text, so
+    // `<div>` after `template: \`` read as col 1 where the .ts has it at the quote's column + 1. Later lines start at col 1 of the file.
+    const colOffset = lineOffset && comp.inline_col ? comp.inline_col : 0;
     const shift = (s) => {
       if (!lineOffset) return s;
       const out = { ...s };
+      if (colOffset && out.line === 1 && out.col !== undefined) out.col += colOffset;
       if (out.line !== undefined) out.line += lineOffset;
       if (out.end_line !== undefined) out.end_line += lineOffset;
       return out;

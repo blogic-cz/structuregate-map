@@ -17,7 +17,7 @@ import { locationOf } from './TsNodes.mjs';
 import { catchFacts, chainOf } from './TsCatch.mjs';
 import { loopFacts, loopKind } from './TsLoops.mjs';
 
-export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName }) {
+export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName, shapeAt }) {
   /**
    * THE BRANCH OR CASE A STATEMENT SITS IN IS PART OF WHAT THE STATEMENT MEANS.
    *
@@ -29,7 +29,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
   let currentBranch = null;
   /**
    * THE LOOP A STATEMENT SITS IN (rows 70, `TsLoops.mjs`): the id of the innermost `loops` row whose BODY holds the row, on every row
-   * that takes `branch`. Never a `branch` - those are conditions. A function in the body is its own member, so it starts outside the loop.
+   * that takes `branch`. Never a `branch` - those are conditions. LEXICAL (rows 71): a function or class expression in the body stays in the loop, as `branch` does.
    */
   let currentLoop = null;
   /** How many rows the emitters wrote: a bare expression statement is described only when its walk wrote none. */
@@ -40,8 +40,8 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
    * and `case` read as needing neither side of `c`. Each arm is a CHOICE link, the vocabulary a value already
    * uses (`key_branches`): the id of the condition's own `expressions` row, `!`-prefixed for the arm taken when
    * it is false - `&&` runs its right side under the left, `||` under its negation, `??` under nothing a gate
-   * reads. The id is minted LAZILY, by the same cached `describe` the evaluator's `$cond_expr` comes from, so a
-   * condition no row sits under writes no row, and one the evaluator already described keeps its id.
+   * reads. The id comes from the same cached `describe` the evaluator's `$cond_expr` uses, and
+   * the walk of the conditional itself mints it (rows 71), so every conditional has a row and one the evaluator already described keeps its id.
    */
   let currentChoices = [];
   const choiceLinks = () => {
@@ -494,23 +494,15 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       if (node !== bodyNode && isFunctionLike(node)) {
         const inlineId = declareInline(node, ownerId);
         rowsWritten += 1;
-        // A FUNCTION IS ITS OWN MEMBER: a `loop` id naming another member's loop would join nothing, so its body starts outside any.
-        const held = currentLoop;
-        currentLoop = null;
-        try {
-          const fnBody = node.body;
-          if (fnBody) collectBody(fnBody, inlineId, classId);
-          defaults(node, inlineId, classId);
-        } finally {
-          currentLoop = held;
-        }
+        // A `loop` IS LEXICAL, AS `branch` IS (rows 71): a callback in a loop body runs in that loop, and a call there read as outside it.
+        const fnBody = node.body;
+        if (fnBody) collectBody(fnBody, inlineId, classId);
+        defaults(node, inlineId, classId);
         return; // its contents belong to IT, not to the body being walked
       }
       // A CLASS EXPRESSION IS A CLASS: `static Inner = class { static A = 'a'; }` - its own row and members, under its holder's name.
       if (declareClass && ts.isClassExpression(node)) {
-        const held = currentLoop; // its members are their own bodies, outside the loop it sits in
-        currentLoop = null;
-        try { declareClass(node); } finally { currentLoop = held; }
+        declareClass(node); // a loop around it holds it, as a branch does
         return;
       }
       if (ts.isSwitchStatement(node)) { collectSwitch(node, ownerId, classId, walk); return; }
@@ -519,18 +511,25 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       if (ts.isExpressionStatement(node)) { collectStatement(node, walk); return; }
       if (ts.isTryStatement(node)) collectTry(node, ownerId, classId);
       // The condition is walked where it stands; each arm under its side of it. Same roles as the evaluator's.
+      // EVERY CONDITIONAL HAS ITS `expressions` ROW (rows 71), minted here by the same cached `describe` the arms' `choices` and the
+      // evaluator's `$cond_expr` use: one minted only when a row sat under an arm left 516 of 19220 with none.
       if (ts.isConditionalExpression(node)) {
+        if (describe) describe(node.condition, 'ternary');
         walk(node.condition);
         underChoice(node.condition, 'ternary', false, node.whenTrue, walk);
         underChoice(node.condition, 'ternary', true, node.whenFalse, walk);
         return;
       }
       const logic = ts.isBinaryExpression(node) ? node.operatorToken.kind : null;
+      if (describe && (logic === ts.SyntaxKind.AmpersandAmpersandToken || logic === ts.SyntaxKind.BarBarToken
+        || logic === ts.SyntaxKind.QuestionQuestionToken)) describe(node.left, 'logic');
       if (logic === ts.SyntaxKind.AmpersandAmpersandToken || logic === ts.SyntaxKind.BarBarToken) {
         walk(node.left);
         underChoice(node.left, 'logic', logic === ts.SyntaxKind.BarBarToken, node.right, walk);
         return;
       }
+      // WHERE AN OBJECT LITERAL STANDS is its `shapes` row's context (rows 71, `TsExpr/TsShapes.mjs`).
+      if (shapeAt && ts.isObjectLiteralExpression(node)) shapeAt(node, { member: ownerId, class: classId, ...inCase() });
       emitCall(node, ownerId);
       emitAssignment(node, ownerId, classId);
       emitUpdate(node, ownerId, classId);

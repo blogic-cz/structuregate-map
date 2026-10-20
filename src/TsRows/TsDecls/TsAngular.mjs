@@ -100,6 +100,8 @@ export function makeAngularRows({ store, feRoot, diag }) {
         // The line the inline template's backtick sits on: template spans are relative to the template
         // TEXT, so this is what turns a template row back into a real .ts file:line.
         const inlineLine = inline === null ? null : (d.argLines?.template ?? null);
+        // The column the template TEXT starts at (after the quote), added to a span's `col` on the template's first line.
+        const inlineCol = inline === null ? null : (d.argCols?.template ?? null);
         const id = store.add(d.name === 'Component' ? 'components' : 'directives', 'ng', {
           class: classId, file: fid, name: className,
           selector: asString(meta.selector),
@@ -109,6 +111,7 @@ export function makeAngularRows({ store, feRoot, diag }) {
           template_abs: templateAbs ? slash(templateAbs) : null,
           inline_template: inline,
           inline_template_line: inlineLine,
+          inline_template_col: inlineCol,
           // BOTH SPELLINGS. Angular 17 added the singular `styleUrl` beside `styleUrls`, and reading only
           // the plural dropped the stylesheet of every component written the new way - dozens of files, each
           // publishing an empty list while naming a real .scss one line above. The two are mutually
@@ -130,7 +133,7 @@ export function makeAngularRows({ store, feRoot, diag }) {
         });
         out.push({
           id, kind: d.name === 'Component' ? 'component' : 'directive',
-          selector: asString(meta.selector), templateAbs, inline, inlineLine, classId, className, fid,
+          selector: asString(meta.selector), templateAbs, inline, inlineLine, inlineCol, classId, className, fid,
         });
       } else if (d.name === 'Pipe') {
         store.add('pipes', 'ng', {

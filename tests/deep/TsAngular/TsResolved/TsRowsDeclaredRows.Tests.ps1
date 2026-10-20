@@ -15,12 +15,13 @@ $script:TsDeclaredFiles = @{
         "export enum Kind { Alpha = 0 }`n" +
         "export interface Box { state: { a: string; b: number } | null; tab: NTab<{ img: string }>; }`n" +
         "export interface NTab<T> { item: T; }`n" +
-        "export class Order { kind: Kind; one: Kind.Alpha; }`n" +
+        "export class Order { kind: Kind; one: Kind.Alpha; desc: Desc; }`n" +
         "@Component({ selector: 'app-decl', template: '<p>{{ cfg.id }}</p>' })`n" +
         "export class DeclComponent {`n" +
         "  #value = 1;`n" +
         "  constructor(public cfg: Cfg, private readonly dep: Cfg) {}`n" +
-        "}`n"
+        "}`n" +
+        "export type Desc = Readonly<{ a: string }>;`n"
     # Every place a type literal can sit in a type alias's or an interface's type.
     'apps/shop/src/shapes.ts' = "export interface Base { id: string; }`n" +
         "export type Model = Base & { Input: { Flag?: Base } };`n" +
@@ -81,6 +82,19 @@ Test-Case 'tsrows: a single-member enum type_ref names the enum, and a written m
         "AND t.role = 'name' WHERE m.name IN ('kind', 'one') ORDER BY m.name")
     Assert-Line $r 'ref=kind:Kind'
     Assert-Line $r 'ref=one:Alpha'
+}
+
+Test-Case 'tsrows: type_ref carries the type alias WRITTEN as alias, though it names what the checker reaches' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsDeclaredFiles)
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'alias=' || m.name || ':' || a.value || ':' || (SELECT l.value FROM members__type_ref l WHERE l.owner = al.owner AND l.parent = al.n AND l.role = 'line') AS r " +
+        "FROM members m JOIN members__type_ref al ON al.owner = m.id AND al.role = 'alias' " +
+        "JOIN members__type_ref a ON a.owner = al.owner AND a.parent = al.n AND a.role = 'name' WHERE m.name IN ('desc', 'kind')")
+    Assert-Line $r 'alias=desc:Desc:12'
+    # The control: the root is still what the checker reached, and an enum written directly has no alias.
+    Assert-Line (Invoke-TsRowsQ $made.Db ("SELECT 'root=' || t.value AS r FROM members m JOIN members__type_ref t ON t.owner = m.id AND t.parent = 0 AND t.role = 'name' " +
+        "WHERE m.name = 'desc'")) 'root=Readonly'
+    Assert-NoLine $r 'alias=kind'
 }
 
 Test-Case 'tsrows: a type literal nested in a union or a type argument has its type_members' {

@@ -56,7 +56,7 @@ Test-Case 'tsrows: every loop kind is a loops row with its header, its variables
     Assert-Equal (@($b.Lines | Where-Object { $_.Trim().StartsWith('br=') }).Count) 1 'branches rows'
 }
 
-Test-Case 'tsrows: a row in a loop body carries the innermost loop, a callback and the code after it do not' {
+Test-Case 'tsrows: a row in a loop body carries the innermost loop, a callback in it does too, the code after it does not' {
     $made = New-TsRowsDb (New-TsRowsWorkspace @{ 'apps/shop/src/walker.ts' = $script:TsLoopWalker }) -Shared
     Assert-Exit $made.Result 0
     $facts = Get-TsLoopFacts $made.Db
@@ -64,7 +64,7 @@ Test-Case 'tsrows: a row in a loop body carries the innermost loop, a callback a
     Assert-Line $facts 'c=9:this.touch:8:0'
     Assert-Line $facts "c=11:this.touch:10:0"
     Assert-Line $facts 'c=13:this.items.forEach:8:0'
-    Assert-Line $facts 'c=13:this.touch:-:0'
+    Assert-Line $facts 'c=13:this.touch:8:0'   # a callback in the body is still in the loop (rows 71: lexical, as a branch)
     Assert-Line $facts "c=15:this.touch:-:0"
     Assert-Line $facts 'c=17:this.queue.pop:17:0'
     Assert-Line $facts 'c=20:this.touch:20:1'
@@ -75,6 +75,33 @@ Test-Case 'tsrows: a row in a loop body carries the innermost loop, a callback a
     Assert-Line $facts 'a=27:count:++:-'
     # The incrementor is the header of the inner loop, in the OUTER loop's body.
     Assert-Line $facts 'a=10:i:++:8'
+}
+
+# Four conditionals no row sits under an arm of (rows 71): a callee receiver, an index, a `void` operand and a `??` receiver - each was
+# described only when something under an arm asked, so none had an `expressions` row. Line 9 is the control: a call under each arm.
+$script:TsCondFiles = @{
+    'apps/shop/src/cond.ts' = @('export class Cond {', '  list = [1, 2];', '  go(a: boolean, b: string | null): void {',
+        '    (a ? this : this).use(1);', '    this.list[a ? 0 : 1];', '    void (a || b);', '    (b ?? a).toString();', '  }',
+        '  arm(a: boolean): void { a ? this.use(1) : this.use(2); }', '  use(n: unknown): void { void n; }', '}') -join "`n"
+}
+
+Test-Case 'tsrows: every code conditional has its expressions row, and an arm row names it' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsCondFiles) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'cond=' || x.role || ':' || x.line || ':' || x.source AS r FROM expressions x JOIN files f ON f.id = x.file " +
+        "WHERE f.path LIKE '%cond.ts' AND x.role IN ('ternary', 'logic') UNION ALL SELECT 'count=' || count(*) FROM expressions x " +
+        "JOIN files f ON f.id = x.file WHERE f.path LIKE '%cond.ts' AND x.role IN ('ternary', 'logic') AND x.line BETWEEN 4 AND 7")
+    Assert-Line $r 'count=4'
+    Assert-Line $r 'cond=ternary:4:a'
+    Assert-Line $r 'cond=ternary:5:a'
+    Assert-Line $r 'cond=logic:6:a'
+    Assert-Line $r 'cond=logic:7:b'
+    # The control: each call under an arm of the line-9 ternary still names that ternary's row (`!` for the false arm).
+    $arm = Invoke-TsRowsQ $made.Db ("SELECT 'arm=' || (substr(c.value, 1, 1) = '!') || ':' || x.role || ':' || x.line AS r FROM calls k " +
+        "JOIN calls__choices c ON c.owner = k.id JOIN expressions x ON x.id = ltrim(c.value, '!') WHERE k.line = 9 AND k.callee = 'this.use'")
+    Assert-Line $arm 'arm=0:ternary:9'
+    Assert-Line $arm 'arm=1:ternary:9'
+    Assert-Equal (@($arm.Lines | Where-Object { $_.Trim().StartsWith('arm=') }).Count) 2 'calls under an arm'
 }
 
 Test-Case 'tsrows: a bare expression statement is an expressions row, a call or a write is not one' {

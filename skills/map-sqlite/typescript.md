@@ -88,7 +88,7 @@ Beside the shared tables it adds the FRAMEWORK tables:
   `@for` over a list of objects carries per-element key sites and `loop:` links as `*ngFor` does.
 * **A template's tables have no `file`** - a binding hangs off a template node - so join by the ids; every
   row carries `owner_file`. A body's `calls`, `locals`, `assignments`, `returns`, `raises`, `branches`, `loops`,
-  `handlers`, `switch_cases` and the literal tables carry `file` too, as every other half does. `_meta` publishes what SQLite cannot record: the id prefixes, the joins and which
+  `shapes`, `shape_members`, `handlers`, `switch_cases` and the literal tables carry `file` too, as every other half does. `_meta` publishes what SQLite cannot record: the id prefixes, the joins and which
   column anchors a row to its file (`--id` follows them). Every declared join column leads an index, and so do
   `key_reach.key`, `render_path.component` and `gate_values.gate`/`gate_features.gate`: `WHERE calls.target_id = ?` is a probe.
 * **A loop is a `loops` row** (Angular half; the plain half's loops are `branches` rows with a `kind`): `kind` (`for`, `for_of`, `for_in`,

@@ -36,6 +36,11 @@ $script:TsTplFiles = @{
         "}`n"
 }
 
+# An inline template written after `template: ` on the decorator line, over two lines (rows 71: its first line's `col` is the .ts column).
+$script:TsTplInlineSrc = @("@Component({ selector: 'app-inl', standalone: true, template: ``<div [title]=`"t`">a</div>", '<p>b</p>` })')
+$script:TsTplFiles['apps/shop/src/inline.component.ts'] = "import { Component } from '@angular/core';`n" + ($script:TsTplInlineSrc -join "`n") +
+    "`nexport class InlComponent { t = ''; }`n"
+
 function Get-TsTplDb {
     $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsTplFiles)
     Assert-Exit $made.Result 0
@@ -115,6 +120,18 @@ Test-Case 'tsrows: a read resolves past an in-tree pipe whose transform returns 
     # `transform` infers `Item | Other` (`return_refs`); `code` is declared by `Other` alone, so it lands there.
     Assert-Line (Get-TsTplTargets $db '{{ (name | demoUnion).code }}') ':name=property'
     Assert-Line (Get-TsTplTargets $db '{{ (name | demoUnion).code }}') ':code=type'
+}
+
+Test-Case 'tsrows: an inline template starting on the decorator line has the .ts column on its first line' {
+    $db = Get-TsTplDb
+    $first = $script:TsTplInlineSrc[0]
+    $r = Invoke-TsRowsQ $db ("SELECT 'n=' || n.tag || ':' || n.line || ':' || n.col AS r FROM template_nodes n JOIN templates t ON t.id = n.template " +
+        "JOIN classes c ON c.id = t.class WHERE c.name = 'InlComponent' UNION ALL SELECT 'b=' || b.name || ':' || b.line || ':' || b.col " +
+        "FROM bindings b JOIN templates t ON t.id = b.template JOIN classes c ON c.id = t.class WHERE c.name = 'InlComponent'")
+    Assert-Line $r ("n=div:2:" + ($first.IndexOf('<div') + 1))
+    Assert-Line $r ("b=title:2:" + ($first.IndexOf('[title]') + 1))
+    # The control: a later line of the template starts at column 1 of the file's line, unshifted.
+    Assert-Line $r 'n=p:3:1'
 }
 
 Test-Case 'tsrows: a read resolves past a ?? whose sides name one owner' {

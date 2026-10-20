@@ -34,7 +34,7 @@ export const HALF = 'typescript';
  *  other half answers, found no TypeScript row at all. Not every table: a template's rows sit in its `.html`,
  *  and `expressions.file` is empty for a template expression on purpose (see `add`). */
 const SOURCE_FILE_TABLES = new Set([
-  'calls', 'assignments', 'locals', 'returns', 'raises', 'branches', 'loops', 'handlers', 'switch_cases',
+  'calls', 'assignments', 'locals', 'returns', 'raises', 'branches', 'loops', 'shapes', 'shape_members', 'handlers', 'switch_cases',
   'string_literals', 'number_literals', 'template_literals', 'regexes',
 ]);
 

@@ -37,12 +37,18 @@ export function rollupTemplateReads(store) {
     if (row.half !== 'typescript') continue;
     ownerByFileName.set(`${String(row.file)}#${String(row.name)}`, { kind: 'enum', id: row.id });
   }
+  // AN ANONYMOUS OBJECT TYPE IS AN OWNER TOO (rows 71): a type literal or object literal is a `shapes` row, reached by the file, line and
+  // column of its `{` - what a shape ref (`{shape: true, file, line, col}`) carries - and answers its members by name like any owner.
+  const shapeByPlace = new Map();
+  for (const row of store.table('shapes')) shapeByPlace.set(`${String(row.file)}#${String(row.line)}#${String(row.col)}`, { kind: 'shape', id: row.id });
   const ownerOf = (ref) => {
     const file = str(ref?.file);
-    const name = str(ref?.name);
-    if (file === null || name === null) return null;
+    if (file === null) return null;
     const fid = idByPath.get(file);
-    return fid === undefined ? null : ownerByFileName.get(`${fid}#${name}`) ?? null;
+    if (fid === undefined) return null;
+    if (ref.shape === true) return shapeByPlace.get(`${fid}#${String(ref.line)}#${String(ref.col)}`) ?? null;
+    const name = str(ref?.name);
+    return name === null ? null : ownerByFileName.get(`${fid}#${name}`) ?? null;
   };
 
   // A property of a class and a property of a type are looked up in different tables and answer the same
@@ -65,6 +71,17 @@ export function rollupTemplateReads(store) {
       if (str(m?.name) === null || typeof m.line !== 'number') continue;
       propByOwner.set(`enum:${String(row.id)}#${m.name}`, { id: row.id, file: row.file, line: m.line, type_ref: null });
     }
+  }
+  // A SHAPE'S MEMBERS answer by name as a class's do (getter over setter, a write the setter); a spread, an index, a call and a
+  // construct signature have no name a read can spell. An INDEX answers a keyed read instead (`indexByShape`).
+  const indexByShape = new Map();
+  for (const row of store.table('shape_members')) {
+    if (row.kind === 'index') { indexByShape.set(row.shape, row); continue; }
+    if (row.kind === 'spread' || row.kind === 'call' || row.kind === 'construct') continue;
+    const key = `shape:${String(row.shape)}#${String(row.name)}`;
+    if (row.kind === 'setter') setterByOwner.set(key, row);
+    if (row.kind === 'setter' && propByOwner.get(key)?.kind === 'getter') continue;
+    propByOwner.set(key, row);
   }
   for (const row of store.table('type_members')) {
     // `path` is the dotted route; the direct children of an owner are the ones with no dot in it.
@@ -462,7 +479,11 @@ export function rollupTemplateReads(store) {
       case 'NonNull': return valueOf(node.expr, component, scope);
       case 'Read': case 'SafeRead': return resolveChain(node, component, scope);
       case 'KeyedRead': case 'SafeKeyedRead': {
-        const ref = valueOf(node.receiver, component, scope)?.ref?.element ?? null;
+        // A KEYED READ IS THE ELEMENT of an array, else what an INDEX SIGNATURE holds (rows 71): `items[k]` over `{ [k: string]: Item }`,
+        // a `Record<string, Item>` or an interface with one - on the ref (`index`), else the index member of the shape it reached.
+        const held = valueOf(node.receiver, component, scope);
+        const ref = held?.ref?.element ?? held?.ref?.index
+          ?? (held?.owner?.kind === 'shape' ? indexByShape.get(held.owner.id)?.type_ref : null) ?? null;
         const owner = ref === null ? null : ownerOf(ref);
         return owner === null ? null : { owner, ref, row: null, env: null };
       }
