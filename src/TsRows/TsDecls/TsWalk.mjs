@@ -21,6 +21,7 @@ import { makeExprDescriber } from './TsExprDescribe.mjs';
 import { makeReadRefs } from './TsReadRefs.mjs';
 import { makeWriteResolver } from './TsWriteRefs.mjs';
 import { makeModifiers } from './TsModifiers.mjs';
+import { makeShapeRows } from './TsShapes.mjs';
 import { makeEvaluator } from './TsValue.mjs';
 import { makeTypeResolver } from './TsTypeRef.mjs';
 import { makeTypeRows } from './TsTypeRows.mjs';
@@ -187,8 +188,13 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
         || ts.isPropertyAssignment(node.parent)) && node.parent.name ? node.parent.name.getText() : null;
       classRows.extractClass(node, fileId(node.getSourceFile().fileName), holder);
     };
+    // EVERY TYPE LITERAL AND OBJECT LITERAL (rows 71, `TsExpr/TsShapes.mjs`): the body walk tells it where each object literal stands.
+    const shapes = makeShapeRows({
+      ts, store, typeRefAt, typeText: classRows.typeText, propName, returnRefOf: classRows.returnRefOf,
+    });
     const rows = makeBodyRows({
       ts, store, evalNode, evalCell, describe, declFileOf: classRows.declFileOf, declareInline, declareClass, propName,
+      shapeAt: shapes.remember,
     });
     bodies.collect = rows.collectBody;
     bodies.expr = rows.collectExpr;
@@ -262,7 +268,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
               components.push({
                 id: r.id, class: r.classId, name: r.className, file: fid,
                 file_path: relativeTo(fe, sf.fileName),
-                template_abs: r.templateAbs, inline_template: r.inline, inline_line: r.inlineLine,
+                template_abs: r.templateAbs, inline_template: r.inline, inline_line: r.inlineLine, inline_col: r.inlineCol,
                 template_file: r.templateAbs ? store.lookup('files', canonicalPath(r.templateAbs)) : null,
                 is_component: r.kind === 'component',
               });
@@ -302,6 +308,11 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
         collectStrings(ts, store, sf, { file: fid }, propName, evalNode);
       } catch {
         diag.note('string_scan_failed');
+      }
+      try {
+        shapes.scan(sf);
+      } catch {
+        diag.note('shape_scan_failed');
       }
       try {
         store.patch(fid, propReads(ts, sf));

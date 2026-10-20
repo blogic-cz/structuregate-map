@@ -79,10 +79,11 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
    *  A VALUE HELD IN A CONST (`template: tpl`, or the shorthand `template`) IS PLACED AT THE CONST'S INITIALIZER when
    *  that sits in this file: its text is there, and the decorator's line put every span of it on the wrong line. An
    *  IMPORTED const keeps the decorator's line - its text is in another file, which a span here cannot point into. */
-  const argLinesOf = (arg) => {
-    if (!arg || !ts.isObjectLiteralExpression(arg)) return undefined;
+  const argPlacesOf = (arg) => {
+    if (!arg || !ts.isObjectLiteralExpression(arg)) return {};
     const sf = arg.getSourceFile();
     const out = {};
+    const cols = {};
     for (const p of arg.properties) {
       const at = ts.isPropertyAssignment(p) ? p.initializer : ts.isShorthandPropertyAssignment(p) ? p.name : null;
       if (!at) continue;
@@ -90,9 +91,13 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
         : ts.isIdentifier(at) ? checker.getSymbolAtLocation(at) : undefined;
       const decl = (sym?.declarations ?? []).find((d) => ts.isVariableDeclaration(d) && d.initializer);
       const node = decl && decl.getSourceFile() === sf ? decl.initializer : at;
-      out[propName(p.name)] = sf.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+      const where = sf.getLineAndCharacterOfPosition(node.getStart());
+      out[propName(p.name)] = where.line + 1;
+      // THE COLUMN OF THE TEXT AFTER THE OPENING QUOTE, for a string or backtick literal only (rows 71): a template's first line starts
+      // there, and its spans are relative to the text. A non-literal (`a + b`, an imported const) has no such place, so it gets none.
+      if (ts.isStringLiteralLike(node)) cols[propName(p.name)] = where.character + 1;
     }
-    return Object.keys(out).length ? out : undefined;
+    return { argLines: Object.keys(out).length ? out : undefined, argCols: Object.keys(cols).length ? cols : undefined };
   };
 
   const decoratorsOf = (node) => {
@@ -103,7 +108,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
         return {
           name: expr.expression.getText(),
           args: expr.arguments.map((a) => evalNode(a)),
-          argLines: argLinesOf(expr.arguments[0]),
+          ...argPlacesOf(expr.arguments[0]),
           fromAngular: fromAngularCore(expr.expression),
         };
       }
@@ -410,5 +415,5 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     return { classId, decorators, members, name: className, io, angularRows, injectsTemplateRef };
   }
 
-  return { extractClass, paramsOf, typeText, declFileOf, decoratorsOf };
+  return { extractClass, paramsOf, typeText, declFileOf, decoratorsOf, returnRefOf };
 }

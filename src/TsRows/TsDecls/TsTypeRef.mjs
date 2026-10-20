@@ -24,6 +24,18 @@ function declSite(d) {
   return { file: canonicalPath(sf.fileName), line: sf.getLineAndCharacterOfPosition(pos).line + 1 };
 }
 
+/** Whether a declaration is a type literal (`{ a: string }` in a type) or an object literal (`{ a: 1 }` in code): the two anonymous types a ref can reach. */
+export function isShapeNode(ts, d) {
+  return !!d && (ts.isTypeLiteralNode(d) || ts.isObjectLiteralExpression(d));
+}
+
+/** Where a literal's `{` is, in the spelling every ref uses (absolute canonical file) - the key a `shapes` row and a shape ref share. */
+export function shapeSite(d) {
+  const sf = d.getSourceFile();
+  const at = sf.getLineAndCharacterOfPosition(d.getStart());
+  return { file: canonicalPath(sf.fileName), line: at.line + 1, col: at.character + 1 };
+}
+
 /** A type node -> `{type_ref, type_refs?}`: the declaration(s) it names, `type_ref: null` when the checker names none. */
 export function makeTypeResolver(ts, checker) {
   /**
@@ -43,10 +55,8 @@ export function makeTypeResolver(ts, checker) {
       const args = checker.getTypeArguments(current);
       const [only] = args.length === 1 ? args : [];
       if (!only) break;
-      const symbol = only.aliasSymbol ?? only.getSymbol();
-      const [where] = (symbol?.declarations ?? []).map(declSite);
-      const name = symbol?.getName();
-      if (symbol && where && name !== undefined && !name.startsWith('__')) found = { name, ...where };
+      const site = siteOf(only.aliasSymbol ?? only.getSymbol());
+      if (site) found = site;
       current = only;
     }
     return found ? { unwrapped: found } : null;
@@ -63,44 +73,72 @@ export function makeTypeResolver(ts, checker) {
     const args = checker.getTypeArguments(type);
     const [only] = args.length === 1 ? args : [];
     if (!only) return null;
-    const symbol = only.aliasSymbol ?? only.getSymbol();
-    const [where] = (symbol?.declarations ?? []).map(declSite);
-    const name = symbol?.getName();
-    if (!symbol || !where || name === undefined || name.startsWith('__')) return null;
-    return { element: { name, ...where } };
+    const site = siteOf(only.aliasSymbol ?? only.getSymbol());
+    return site ? { element: site } : null;
   }
 
-  /** The declaration ONE type names, or null: an anonymous type, a primitive, `null` name none. `seen` guards the walk into
-   *  type arguments against a type that is its own argument. */
-  function refOfType(type, seen = new Set(), as = null) {
+  /**
+   * THE ELEMENT A STRING OR NUMBER INDEX SIGNATURE HOLDS (rows 71), as a ref, or null: `items: { [k: string]: Item }`, `interface Bag { [k: string]: Item }`
+   * and `Record<string, Item>` read `items[key]` as an `Item`. An array's number index is its `element`, already published, so a type with
+   * one has no `index`; a type with neither names nothing.
+   */
+  function indexOf(type, seen) {
+    if (!ts.IndexKind) return null;
+    for (const kind of [ts.IndexKind.String, ts.IndexKind.Number]) {
+      let held;
+      try { held = checker.getIndexTypeOfType(type, kind); } catch { held = null; }
+      const ref = held ? refOfType(held, seen, null, true) : null;
+      if (ref) return { index: ref };
+    }
+    return null;
+  }
+
+  /**
+   * WHAT A SYMBOL IS DECLARED AS, as a ref's head: `{name, file, line}`, or - the compiler's `__type` of a type literal and `__object` of an
+   * object literal, which name nothing - `{shape: true, file, line, col}`, the place of the `{` that a `shapes` row (`TsExpr/TsShapes.mjs`)
+   * is keyed by. Any other anonymous type (a function type, a mapped type, a class expression) names nothing, as before.
+   */
+  function siteOf(symbol) {
+    const decls = symbol?.declarations ?? [];
+    const name = symbol?.getName();
+    if (!decls.length || name === undefined) return null;
+    if (!name.startsWith('__')) return { name, ...declSite(decls[0]) };
+    return isShapeNode(ts, decls[0]) ? { shape: true, ...shapeSite(decls[0]) } : null;
+  }
+
+  /** The declaration ONE type names, or null: a primitive, `null` and an anonymous type that is no literal name none; a type or object
+   *  literal is a SHAPE ref (`siteOf`). `seen` guards the walk into type arguments and index signatures against a type that is its own argument. */
+  function refOfType(type, seen = new Set(), as = null, noIndex = false) {
     // AN ALIAS IS NAMED WHERE THE AUTHOR NAMED IT. `type Foo = {...}` used at a member reaches the
     // anonymous object type unless the alias symbol is asked for first, and the alias is what a reader is
     // looking for.
     const symbol = as ?? type.aliasSymbol ?? type.getSymbol();
     const decls = symbol?.declarations ?? [];
     if (!symbol || !decls.length) return null;
-    const name = symbol.getName();
-    // An anonymous type's symbol is called `__type` / `__object` by the compiler - a placeholder, not a
-    // name a consumer can do anything with. Publishing it would claim a declaration that has no identity.
-    if (name.startsWith('__')) return null;
+    // An anonymous type's symbol is called `__type` / `__object` by the compiler - a placeholder, not a name. A literal is reached by
+    // WHERE its `{` is (rows 71); any other anonymous type would claim a declaration that has no identity.
+    const head = siteOf(symbol);
+    if (head === null) return null;
     // The checker's order is kept - see the note in `TsMap`'s describer.
-    const places = decls.map(declSite);
-    const [first, ...rest] = places;
+    const rest = head.shape ? [] : decls.slice(1).map(declSite);
     // A TYPE PARAMETER IS NAMED AS ONE (#98), and a generic reference keeps its ARGUMENTS in order, each the declaration it
     // names or null: a template read past `Wrapped: Wrapper<T>` on `Concrete extends Base<Payload>` binds `T` to `Payload`
     // with them (`TsTplReads.mjs`), where the declaration's own `T` named nothing.
     const param = decls.some((d) => ts.isTypeParameterDeclaration(d));
+    const fresh = !seen.has(type);
     let args = [];
-    if (!param && !as && !seen.has(type)) {
+    if (!param && !as && fresh) {
       seen.add(type);
       try { args = checker.getTypeArguments(type).map((a) => refOfType(a, seen)); } catch { args = []; }
     }
+    const element = elementOf(type) ?? {};
     return {
-      name, ...first, ...(rest.length ? { also: rest } : {}),
+      ...head, ...(rest.length ? { also: rest } : {}),
       ...(param ? { param: true } : {}),
       ...(args.some((a) => a !== null) ? { args } : {}),
-      ...(elementOf(type) ?? {}),
+      ...element,
       ...(unwrappedOf(type) ?? {}),
+      ...(noIndex || param || as || !fresh || element.element ? {} : indexOf(type, seen) ?? {}),
     };
   }
 
@@ -160,10 +198,29 @@ export function makeTypeResolver(ts, checker) {
       }
       const whole = (part.flags & ts.TypeFlags.EnumLiteral) !== 0 ? checker.getBaseTypeOfLiteralType(part) : part;
       const ref = refOfType(whole, new Set(), enumOfMember(whole.getSymbol()));
-      if (ref) out.set(`${ref.file}\u0000${ref.line}\u0000${ref.name}`, ref);
+      if (ref) out.set(`${ref.file}\u0000${ref.line}\u0000${ref.name ?? ref.col}`, ref);
     }
-    return [...out.values()].sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line
-      || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)));
+    // A LITERAL PART NAMES A DECLARATION ONLY WHEN NOTHING ELSE DOES (rows 71): `X & { .. }` and `X | { .. }` are `X`, as they were, and only
+    // parts that are all literals (`{ a } | { b }`) are listed as shapes.
+    const all = [...out.values()];
+    const named = all.filter((r) => !r.shape);
+    const order = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+    return (named.length ? named : all).sort((a, b) => order(a.file, b.file) || a.line - b.line
+      || order(a.name ?? '', b.name ?? '') || (a.col ?? 0) - (b.col ?? 0));
+  }
+
+  /**
+   * THE TYPE ALIAS A TYPE NODE WRITES (rows 71), `{name, file, line}`, or null: `type Desc = Readonly<{..}>` as `kind: Desc` names `Desc`, though
+   * the checker's type is `Readonly<..>` (an alias to a generic instantiation carries the OUTER alias) and `type_ref` follows it there. The
+   * written name's symbol is asked, an import followed, so the alias the author wrote is reachable whatever `type_ref` reached. A class, an
+   * interface or an enum written directly is no alias and needs none.
+   */
+  function aliasWritten(node) {
+    if (!node || !ts.isTypeReferenceNode(node)) return null;
+    let sym = checker.getSymbolAtLocation(ts.isQualifiedName(node.typeName) ? node.typeName.right : node.typeName);
+    if (sym && (sym.flags & ts.SymbolFlags.Alias)) sym = checker.getAliasedSymbol(sym);
+    const decl = (sym?.declarations ?? []).find((d) => ts.isTypeAliasDeclaration(d));
+    return decl ? { name: sym.getName(), ...declSite(decl) } : null;
   }
 
   /**
@@ -183,7 +240,9 @@ export function makeTypeResolver(ts, checker) {
     if (type.aliasSymbol || type.getSymbol() || !(type.isUnion() || type.isIntersection())) {
       // WRITTEN AS THE ENUM, NAMED AS THE ENUM: `Kind.Alpha` as written still names the member.
       const owner = type.aliasSymbol ? null : enumOfMember(type.getSymbol());
-      return { type_ref: refOfType(type, new Set(), owner && writtenNamesEnum(node) ? owner : null) };
+      const ref = refOfType(type, new Set(), owner && writtenNamesEnum(node) ? owner : null);
+      const alias = ref ? aliasWritten(node) : null;
+      return { type_ref: alias ? { ...ref, alias } : ref };
     }
     const refs = refsOfParts(type);
     return refs.length > 1 ? { type_ref: null, type_refs: refs } : { type_ref: refs[0] ?? null };

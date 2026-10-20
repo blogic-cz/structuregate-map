@@ -11,8 +11,8 @@ Loops, bare expression statements and `++`/`--` had no row of their own. The cas
   the outer one as its own `loop`. The header's initializer, condition, incrementor and iterable are walked in the ENCLOSING context, so a call in
   them is a `calls` row outside the loop's body.
 - **A row in a loop's BODY carries `loop`**, the innermost loop's id, on every table that takes `branch` (`calls`, `assignments`, `locals`, `returns`,
-  `raises`, `handlers`, `loops`). A function or class expression inside the body starts outside any loop - it is its own member, and a `loop` naming
-  another member's loop would join nothing. (A `branch` is still inherited by such a function; that is older behaviour, unchanged.)
+  `raises`, `handlers`, `loops`). `loop` is LEXICAL like `branch` (rows 71): a function or class expression inside the body keeps the enclosing loop's id,
+  so `for (x of xs) { xs.forEach((y) => this.f(y)); }` puts the call under the loop. The id then names a loop of another member, as a `branch` does.
 - **A LOOP IS NEVER A `branches` ROW HERE.** The plain half and C# record one with a `kind`; this half's `branches` rows are if-arms (`sense`) that the
   rust closure reads as CONDITIONS (`rust/fbtcore/src/rows/ts/key/key_branches.rs`, the gate readers). A key assigned inside a loop written as a
   branch would turn conditional and the release compare would report a lost restriction. Nothing in rust reads `loop` yet; `deriveJoins` declares it
