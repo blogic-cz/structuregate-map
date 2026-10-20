@@ -21,7 +21,6 @@ export const UNREAD_WHEN_CARRIED = {
   assignments: { calls: true, reads: true, value: true },
   branches: { condition: true },
   class_decorators: { args: true },
-  enums: { members: true },
   expressions: {
     ast: ['lang', 'ts'], calls: true, identifiers: true, pipes: ['lang', 'ts'], reads: true, strings: true, write_refs: true,
     writes: true,

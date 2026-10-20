@@ -278,6 +278,8 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
       content_hash: createHash('sha256').update(node.getText(), 'utf8').digest('hex'),
       abstract: mods.abstract, exported: mods.exported,
       extends: extendsInfo, implements: implementsInfo,
+      // ITS TYPE PARAMETERS, in order: what a subclass's `extends Base<Payload>` binds them to (#98, `TsTplReads.mjs`).
+      ...(node.typeParameters?.length ? { type_params: node.typeParameters.map((p) => p.name.text) } : {}),
       decorators: decorators.map((d) => d.name),
       angular: decorators.filter((d) => d.fromAngular).map((d) => d.name),
       jsdoc: jsdocOf(node),

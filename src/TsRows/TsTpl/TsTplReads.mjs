@@ -31,6 +31,12 @@ export function rollupTemplateReads(store) {
   for (const row of store.table('classes')) {
     ownerByFileName.set(`${String(row.file)}#${String(row.name)}`, { kind: 'class', id: row.id });
   }
+  // AN ENUM IS AN OWNER TOO: a component holding one (`Kinds = Kind`, typed `typeof Kind`) is read `Kinds.Alpha`, and the
+  // chain stopped at the field - the largest share of every stop on a real workspace. Its members answer by name.
+  for (const row of store.table('enums')) {
+    if (row.half !== 'typescript') continue;
+    ownerByFileName.set(`${String(row.file)}#${String(row.name)}`, { kind: 'enum', id: row.id });
+  }
   const ownerOf = (ref) => {
     const file = str(ref?.file);
     const name = str(ref?.name);
@@ -45,6 +51,14 @@ export function rollupTemplateReads(store) {
   for (const row of store.table('members')) {
     propByOwner.set(`class:${String(row.class)}#${String(row.name)}`, row);
   }
+  // AN ENUM MEMBER IS NO ROW OF ITS OWN: it answers as the enum's row, at the member's line, its type the end of the chain.
+  for (const row of store.table('enums')) {
+    if (row.half !== 'typescript') continue;
+    for (const m of Array.isArray(row.members) ? row.members : []) {
+      if (str(m?.name) === null || typeof m.line !== 'number') continue;
+      propByOwner.set(`enum:${String(row.id)}#${m.name}`, { id: row.id, file: row.file, line: m.line, type_ref: null });
+    }
+  }
   for (const row of store.table('type_members')) {
     // `path` is the dotted route; the direct children of an owner are the ones with no dot in it.
     const p = str(row.path);
@@ -58,6 +72,59 @@ export function rollupTemplateReads(store) {
   // stops on a visited set because `extends` is data and data can name a loop.
   const baseOfClass = new Map();
   for (const row of store.table('classes')) baseOfClass.set(row.id, ownerOf(row.extends));
+
+  // A GENERIC IS READ AS IT IS INSTANTIATED (#98): `Concrete extends Base<Payload>` binds `Base`'s `T` to `Payload`, and
+  // `Wrapped: Wrapper<T>` binds `Wrapper`'s own parameter to whatever `T` is bound to. An owner carries those bindings as
+  // `env` (parameter name -> owner); a member typed by a parameter (`type_ref.param`) takes its binding, an unbound one
+  // names nothing. The arguments are finite terms of a declaration, so the walk into them ends.
+  const paramsOf = new Map();
+  const extendsOf = new Map();
+  for (const row of store.table('classes')) {
+    if (Array.isArray(row.type_params)) paramsOf.set(`class:${String(row.id)}`, row.type_params);
+    extendsOf.set(row.id, row.extends ?? null);
+  }
+  for (const row of store.table('interfaces')) {
+    if (Array.isArray(row.type_params)) paramsOf.set(`type:${String(row.id)}`, row.type_params);
+  }
+  const resolveRef = (ref, env) => {
+    if (ref === null || typeof ref !== 'object') return null;
+    const name = str(ref.name) ?? str(ref.text);
+    const owner = ownerOf(ref);
+    // A heritage argument names a parameter only by its text (`extends Base<T>`); a type_ref says so (`param`).
+    if (ref.param === true || (owner === null && name !== null && env?.has(name))) return env?.get(name) ?? null;
+    return owner === null ? null : bound(owner, ref.args ?? ref.type_args, env);
+  };
+  const bound = (owner, args, env) => {
+    const params = paramsOf.get(`${owner.kind}:${owner.id}`) ?? [];
+    const out = new Map();
+    params.forEach((p, i) => {
+      const r = resolveRef(Array.isArray(args) ? args[i] : null, env);
+      if (r !== null) out.set(p, r);
+    });
+    return out.size ? { ...owner, env: out } : owner;
+  };
+  const baseTypedOf = (cls) => {
+    const base = baseOfClass.get(cls.id) ?? null;
+    return base === null ? null : bound(base, extendsOf.get(cls.id)?.type_args, cls.env ?? null);
+  };
+
+  /** The row `name` answers on `owner` - walking its bases, each bound as the class before it instantiates it - and the
+   *  bindings of the owner it was found on. */
+  const propWithEnv = (owner, name) => {
+    if (owner?.kind === 'any') {
+      const row = propOf(owner, name);
+      return row === undefined ? null : { row, env: null };
+    }
+    let current = owner;
+    const seen = new Set();
+    while (current !== null && current !== undefined && !seen.has(current.id)) {
+      seen.add(current.id);
+      const hit = propByOwner.get(`${current.kind}:${current.id}#${name}`);
+      if (hit !== undefined) return { row: hit, env: current.env ?? null };
+      current = current.kind === 'class' ? baseTypedOf(current) : null;
+    }
+    return null;
+  };
 
   const propOf = (owner, name) => {
     // SEVERAL TYPES AT ONCE - a member whose `type_refs` lists several (`A | B`, `A & B`, #97): the name is the ONE row
@@ -88,8 +155,8 @@ export function rollupTemplateReads(store) {
 
   /** The owner a member's type names: its `type_ref`, or every owner its `type_refs` list names (#97) - one alone, or
    *  several as one `any` owner `propOf` asks together. Null when it names none: the chain stops there. */
-  const ownerOfRow = (row) => {
-    if (row.type_ref != null) return ownerOf(row.type_ref);
+  const ownerOfRow = (row, env = null) => {
+    if (row.type_ref != null) return resolveRef(row.type_ref, env);
     const all = new Map();
     for (const ref of Array.isArray(row.type_refs) ? row.type_refs : []) {
       const one = ownerOf(ref);
@@ -101,12 +168,13 @@ export function rollupTemplateReads(store) {
   // A HOP WHOSE TYPE IS UNKNOWN ENDS THE CHAIN. It kept the PREVIOUS owner, so `{{ x.y }}` over an untyped `x` looked
   // `y` up on the component again and named the component's own `y` - a target the read never reaches.
   const hopOf = (owner, name) => {
-    const row = propOf(owner, name);
-    if (!row) return null;
+    const found = propWithEnv(owner, name);
+    if (!found) return null;
+    const row = found.row;
     const file = pathById.get(row.file);
     const line = typeof row.line === 'number' ? row.line : null;
     if (file === undefined || line === null) return null;
-    return { name, file, line, row: row.id, owner: ownerOfRow(row) };
+    return { name, file, line, row: row.id, owner: ownerOfRow(row, found.env) };
   };
 
   // Which class each template expression belongs to. EVERY template expression carries `node`; only some
@@ -255,10 +323,10 @@ export function rollupTemplateReads(store) {
           let last;
           for (const name of isBound ? names.slice(1) : names) {
             if (cursor === null) break;
-            const row = propOf(cursor, name);
-            if (!row) { cursor = null; break; }
-            last = row;
-            cursor = ownerOfRow(row);
+            const found = propWithEnv(cursor, name);
+            if (!found) { cursor = null; break; }
+            last = found.row;
+            cursor = ownerOfRow(found.row, found.env);
           }
           if (last) { found = last.type_ref; return; }
         }
@@ -290,10 +358,10 @@ export function rollupTemplateReads(store) {
     let owner = isBound ? scope.get(root) ?? null : component;
     let ref = null;
     for (const name of isBound ? names.slice(1) : names) {
-      const row = owner === null ? undefined : propOf(owner, name);
-      if (!row) return null;
-      ref = row.type_ref ?? null;
-      owner = ownerOfRow(row);
+      const found = owner === null ? null : propWithEnv(owner, name);
+      if (!found) return null;
+      ref = found.row.type_ref ?? null;
+      owner = ownerOfRow(found.row, found.env);
     }
     return { owner, ref };
   };

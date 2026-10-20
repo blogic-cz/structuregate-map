@@ -86,6 +86,12 @@ runs) are compared by that, every carried field equal, never by `c:412`.
   A TEMPLATE READ follows `type_refs` (`TsTpl/TsTplReads.mjs::ownerOfRow`): the next name resolves when exactly ONE listed type declares
   it. A hop whose type names nothing ENDS the chain - it kept the previous owner, so `{{ x.y }}` over an untyped `x` named the
   component's own `y`.
+- **An enum a field holds is read through** (rows 66, `TsTpl/TsTplReads.mjs`): `Kinds = Kind` is typed `typeof Kind`, and `{{ Kinds.Alpha }}`
+  targets the member - the enum's row at the member's `line`, which each `enums.members` item now carries. A name the enum lacks ends the chain.
+- **A generic is read as it is instantiated** (rows 67, #98, `TsTpl/TsTplReads.mjs::resolveRef`): classes and interfaces carry `type_params`, a
+  `type_ref` naming a type parameter carries `param: true` and a generic one its `args` in order (`TsDecls/TsTypeRef.mjs`). A read binds them as it
+  walks: `Concrete extends Base<Payload>` binds `Base`'s `T` from `extends.type_args`, `Wrapped: Wrapper<T>` binds `Wrapper`'s parameter to
+  what `T` is bound to, and `Inner: T` then reads on as `Payload`. An unbound parameter names nothing.
 
 ## Expression trees the gate readers need (`TsDecls/TsBody.mjs`)
 

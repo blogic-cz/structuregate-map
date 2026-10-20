@@ -70,8 +70,9 @@ export function makeTypeResolver(ts, checker) {
     return { element: { name, ...where } };
   }
 
-  /** The declaration ONE type names, or null: an anonymous type, a primitive, `null` name none. */
-  function refOfType(type) {
+  /** The declaration ONE type names, or null: an anonymous type, a primitive, `null` name none. `seen` guards the walk into
+   *  type arguments against a type that is its own argument. */
+  function refOfType(type, seen = new Set()) {
     // AN ALIAS IS NAMED WHERE THE AUTHOR NAMED IT. `type Foo = {...}` used at a member reaches the
     // anonymous object type unless the alias symbol is asked for first, and the alias is what a reader is
     // looking for.
@@ -85,8 +86,19 @@ export function makeTypeResolver(ts, checker) {
     // The checker's order is kept - see the note in `TsMap`'s describer.
     const places = decls.map(declSite);
     const [first, ...rest] = places;
+    // A TYPE PARAMETER IS NAMED AS ONE (#98), and a generic reference keeps its ARGUMENTS in order, each the declaration it
+    // names or null: a template read past `Wrapped: Wrapper<T>` on `Concrete extends Base<Payload>` binds `T` to `Payload`
+    // with them (`TsTplReads.mjs`), where the declaration's own `T` named nothing.
+    const param = decls.some((d) => ts.isTypeParameterDeclaration(d));
+    let args = [];
+    if (!param && !seen.has(type)) {
+      seen.add(type);
+      try { args = checker.getTypeArguments(type).map((a) => refOfType(a, seen)); } catch { args = []; }
+    }
     return {
       name, ...first, ...(rest.length ? { also: rest } : {}),
+      ...(param ? { param: true } : {}),
+      ...(args.some((a) => a !== null) ? { args } : {}),
       ...(elementOf(type) ?? {}),
       ...(unwrappedOf(type) ?? {}),
     };
