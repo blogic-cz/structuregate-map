@@ -159,13 +159,14 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     // either.
     const bodies = { collect: () => {} };
     const collectBody = (node, ownerId, classId) => bodies.collect(node, ownerId, classId);
+    const collectExpr = (node, ownerId, classId, skip = null) => bodies.expr(node, ownerId, classId, skip);
     const angular = makeAngularRows({ store, feRoot: fe, diag });
     const classRows = makeClassRows({
       ts, checker, store, feRoot: fe, modifiersOf, typeRefAt, symbolAt, evalNode, evalCell, propName,
-      jsdocOf: (node) => jsdocOf(ts, node), collectBody, angular,
+      jsdocOf: (node) => jsdocOf(ts, node), collectBody, collectExpr, angular,
     });
     const declRows = makeDeclRows({
-      ts, store, modifiersOf, localExports, evalCell, collectBody,
+      ts, store, modifiersOf, localExports, evalCell, collectBody, collectExpr,
       paramsOf: classRows.paramsOf, typeText: classRows.typeText,
       jsdocOf: (node) => jsdocOf(ts, node), resolveRead: readRefs.resolveRead, resolveMember: readRefs.resolveMember,
     });
@@ -180,9 +181,17 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
       params: classRows.paramsOf(node), returns: node.type ? node.type.getText() : null,
       ...nodeLocation(node),
     });
-    bodies.collect = makeBodyRows({
-      ts, store, evalNode, evalCell, describe, declFileOf: classRows.declFileOf, declareInline, propName,
-    }).collectBody;
+    // A CLASS EXPRESSION is named by what holds it - `static Inner = class {..}`, `const Inner = class {..}` - or stays anonymous.
+    const declareClass = (node) => {
+      const holder = node.parent && (ts.isPropertyDeclaration(node.parent) || ts.isVariableDeclaration(node.parent)
+        || ts.isPropertyAssignment(node.parent)) && node.parent.name ? node.parent.name.getText() : null;
+      classRows.extractClass(node, fileId(node.getSourceFile().fileName), holder);
+    };
+    const rows = makeBodyRows({
+      ts, store, evalNode, evalCell, describe, declFileOf: classRows.declFileOf, declareInline, declareClass, propName,
+    });
+    bodies.collect = rows.collectBody;
+    bodies.expr = rows.collectExpr;
     for (const sf of files) {
       const abs = canonicalPath(sf.fileName);
       if (extracted.has(abs)) continue;
@@ -260,7 +269,12 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
             }
           }
           else if (ts.isFunctionDeclaration(statement)) declRows.functionRow(statement, fid);
-          else if (ts.isExpressionStatement(statement) || ts.isIfStatement(statement)) declRows.prototypeRow(statement, fid);
+          else if (ts.isExpressionStatement(statement) || ts.isIfStatement(statement)) {
+            // A TOP-LEVEL STATEMENT IS CODE (1:1): `bootstrap().catch((e) => ..)`, `window.x = ..` - walked whole, the function a
+            // `prototype` augmentation defines skipped, since it is a `functions` row of its own.
+            const defined = declRows.prototypeRow(statement, fid);
+            collectExpr(statement, null, null, defined ?? null);
+          }
         } catch {
           diag.note('ts_statement_failed');
         }

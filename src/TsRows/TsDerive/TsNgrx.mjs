@@ -249,15 +249,26 @@ export function rollupStateGraph(store) {
   // `ofType` call was only `$fn` text and the table could not be written.
   let effects = 0;
   const parentOf = new Map(store.table('functions').map((f) => [f.id, f.parent ?? null]));
+  // AN EFFECT'S CALLS SIT IN ITS CALLBACK, a `functions` row under the member: each call is filed under its owner and every
+  // enclosing function up to the member, cycle-guarded, as a return is below.
   const callsOf = new Map();
   for (const c of store.table('calls')) {
     if (c.member === undefined || c.member === null) continue;
-    if (!callsOf.has(c.member)) callsOf.set(c.member, []);
-    callsOf.get(c.member).push(c);
+    const seen = new Set();
+    let at = c.member;
+    while (at !== null && at !== undefined && !seen.has(at)) {
+      seen.add(at);
+      if (!callsOf.has(at)) callsOf.set(at, []);
+      callsOf.get(at).push(c);
+      at = parentOf.get(at) ?? null;
+    }
   }
   const returnsOf = new Map();
+  // THE EFFECT'S OWN CALLBACK RETURNS ITS STREAM, not an action: a function directly under a member is that callback, and only
+  // what the functions inside it return is emitted (`map(() => done())`).
+  const memberIds = new Set(store.table('members').map((m) => m.id));
   for (const r of store.table('returns')) {
-    if (!parentOf.has(r.member)) continue;
+    if (!parentOf.has(r.member) || memberIds.has(parentOf.get(r.member))) continue;
     // The chain of enclosing functions, cycle-guarded, ends at the member that holds them: each link owns the return.
     const seen = new Set();
     let at = parentOf.get(r.member);

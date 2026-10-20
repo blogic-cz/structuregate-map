@@ -18,7 +18,7 @@ import { makeLibPipes } from './TsLibPipes.mjs';
 const ANGULAR_CORE = '@angular/core';
 
 export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRefAt, symbolAt,
-  evalNode, evalCell, propName, jsdocOf, collectBody, angular }) {
+  evalNode, evalCell, propName, jsdocOf, collectBody, collectExpr, angular }) {
   /** A type as TEXT: the annotation if there is one, otherwise what the checker computed.
    *
    *  NoTruncation, and then no truncation of our own either: a 400-character union type is what the member's
@@ -71,10 +71,6 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     return decls.some((d) => slash(d.getSourceFile().fileName).includes(`node_modules/${ANGULAR_CORE}/`));
   };
 
-  /** Does this identifier RESOLVE into @ngrx? By SYMBOL, as `fromAngularCore` is, so a same-named local helper is never
-   *  mistaken for the library's `createEffect`. */
-  const fromNgrx = (node) => (symbolAt(node)?.declarations ?? [])
-    .some((d) => slash(d.getSourceFile().fileName).includes('/node_modules/@ngrx/'));
 
   /** The 1-based line of each property VALUE in a decorator's object-literal argument. Evaluation throws
    *  positions away, and an inline `template:` string needs its line so its spans can be placed in the .ts
@@ -264,12 +260,12 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     });
   }
 
-  function extractClass(node, fid) {
+  function extractClass(node, fid, holder = null) {
     let injectsTemplateRef = false;
     const mods = modifiersOf(node);
     const decorators = decoratorsOf(node);
     const { extendsInfo, implementsInfo } = heritageOf(node);
-    const className = node.name?.getText() ?? '(anonymous)';
+    const className = node.name?.getText() ?? holder ?? '(anonymous)';
     const classId = store.add('classes', 'c', {
       file: fid, name: className,
       // WHAT THIS ROW DESCRIBES, HASHED. The file's digest changes when anything in the file changes; a
@@ -288,6 +284,8 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     for (const d of decorators) {
       store.add('class_decorators', 'cd', { class: classId, file: fid, name: d.name, args: d.args });
     }
+    // A CLASS DECORATOR'S ARGUMENTS ARE CODE (1:1): `@NgModule({ providers: [{ useFactory: () => .. }] })` - calls and callbacks.
+    for (const d of (ts.canHaveDecorators(node) ? ts.getDecorators(node) : undefined) ?? []) collectExpr(d.expression, null, classId);
 
     const members = [];
     const summaries = [];
@@ -308,13 +306,16 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
         ? initializer.body : undefined;
       const body = m.body ?? propertyFn;
       if (body) collectBody(body, memberId, classId);
-      // AN NGRX EFFECT'S CALLBACK IS WALKED: `loadX$ = createEffect(() => actions$.pipe(ofType(a, b), ...))` holds
-      // its whole logic in the arrow handed to the library, and a property walks only when it IS the function -
-      // so the `ofType` calls existed as `$fn` text and `state_effects` could not name the actions an effect hears.
-      const effectFn = initializer && ts.isCallExpression(initializer) && fromNgrx(initializer.expression)
-        ? initializer.arguments[0] : undefined;
-      if (effectFn && (ts.isArrowFunction(effectFn) || ts.isFunctionExpression(effectFn))) {
-        collectBody(effectFn.body, memberId, classId);
+      // THE REST OF A MEMBER IS CODE TOO (1:1 with the source): an initializer that is not itself the function - its calls and
+      // every callback in it, an ngrx `createEffect(() => ..)` or `store.select((s) => ..)` among them, each a `functions` row
+      // under the member (`state_effects` reads an effect's calls through that chain) - the member's decorators' arguments
+      // and its parameters' defaults.
+      if (initializer && !propertyFn) collectExpr(initializer, memberId, classId);
+      if (propertyFn) for (const p of initializer.parameters ?? []) if (p.initializer) collectExpr(p.initializer, memberId, classId);
+      for (const d of (ts.canHaveDecorators(m) ? ts.getDecorators(m) : undefined) ?? []) collectExpr(d.expression, memberId, classId);
+      for (const p of m.parameters ?? []) {
+        if (p.initializer) collectExpr(p.initializer, memberId, classId);
+        for (const d of (ts.canHaveDecorators(p) ? ts.getDecorators(p) : undefined) ?? []) collectExpr(d.expression, memberId, classId);
       }
       if (ts.isConstructorDeclaration(m)) {
         const paramNodes = [...(m.parameters ?? [])];

@@ -6,7 +6,7 @@
 import { locationOf } from './TsNodes.mjs';
 
 export function makeDeclRows({ ts, store, modifiersOf, localExports, evalCell, paramsOf, typeText,
-  jsdocOf, collectBody, resolveRead, resolveMember }) {
+  jsdocOf, collectBody, collectExpr, resolveRead, resolveMember }) {
   /**
    * One row per declared name - `const a = 1, b = 2` is two consts, not one statement.
    *
@@ -40,7 +40,8 @@ export function makeDeclRows({ ts, store, modifiersOf, localExports, evalCell, p
           jsdoc: jsdocOf(d), ...locationOf(d),
         });
         if (init.body) collectBody(init.body, fnId, null);
-      } else if (init) collectBody(init, null, null);
+        for (const p of init.parameters ?? []) if (p.initializer) collectExpr(p.initializer, fnId, null);
+      } else if (init) collectExpr(init, null, null);
     }
   }
 
@@ -54,6 +55,7 @@ export function makeDeclRows({ ts, store, modifiersOf, localExports, evalCell, p
       jsdoc: jsdocOf(statement), ...locationOf(statement),
     });
     if (statement.body) collectBody(statement.body, fnId, null);
+    for (const p of statement.parameters ?? []) if (p.initializer) collectExpr(p.initializer, fnId, null);
     return fnId;
   }
 
@@ -76,6 +78,7 @@ export function makeDeclRows({ ts, store, modifiersOf, localExports, evalCell, p
       ...(target ? { target } : {}), ...locationOf(inner),
     });
     if (fn.body) collectBody(fn.body, fnId, null);
+    return fn;
   }
 
   const isPrototype = (n) => ts.isPropertyAccessExpression(n) && n.name.text === 'prototype';
