@@ -17,10 +17,11 @@ pub(crate) fn name(n: &Value) -> Option<&str> {
     n.get("name").and_then(|v| v.as_str())
 }
 
-/// A bare name nothing resolved: a local, a parameter, a callback's element.
+/// A bare name nothing resolved: a local, a parameter, a callback's element - or a class, which has a target no row answers.
 pub(crate) fn bare(n: &Value) -> Option<&str> {
     let implicit = n.get("receiver").and_then(k) == Some("Implicit");
-    (k(n) == Some("Read") && implicit && n.get("target").is_none()).then(|| name(n))?
+    let targetless = n.get("target").is_none_or(|t| t.get("kind").and_then(|k| k.as_str()) == Some("class"));
+    (k(n) == Some("Read") && implicit && targetless).then(|| name(n))?
 }
 
 /// A membership of a template expression in a list of one enum's constants.

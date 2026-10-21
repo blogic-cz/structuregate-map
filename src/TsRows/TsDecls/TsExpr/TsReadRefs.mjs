@@ -46,12 +46,25 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     return { name, ...first, ...(rest.length ? { also: rest } : {}) };
   }
 
-  /** A declaration a module makes: a top-level `const`, a function, an enum. Never a local or a parameter. */
+  /** A declaration a module makes: a top-level `const`, a function, an enum, a CLASS. Never a local or a parameter. */
   const moduleLevel = (d) => {
-    if (ts.isFunctionDeclaration(d) || ts.isEnumDeclaration(d)) return ts.isSourceFile(d.parent);
+    if (ts.isFunctionDeclaration(d) || ts.isEnumDeclaration(d) || ts.isClassDeclaration(d)) return ts.isSourceFile(d.parent);
     if (!ts.isVariableDeclaration(d)) return false;
     const statement = d.parent?.parent;
     return statement !== undefined && ts.isVariableStatement(statement) && ts.isSourceFile(statement.parent);
+  };
+
+  /**
+   * THE SYMBOL A BARE NAME READS. A SHORTHAND PROPERTY (`{ client }`) IS A READ OF THE VARIABLE IT NAMES, and `getSymbolAtLocation` on its name answers
+   * with the PROPERTY's own symbol - so the read bound to nothing, or, when the checker could type the literal, to a property declared elsewhere. The
+   * value symbol is the local, parameter or module declaration the shorthand stands for.
+   */
+  const symbolOf = (node) => {
+    const parent = node.parent;
+    if (parent !== undefined && ts.isShorthandPropertyAssignment(parent) && parent.name === node) {
+      return checker.getShorthandAssignmentValueSymbol(parent);
+    }
+    return checker.getSymbolAtLocation(node);
   };
 
   /**
@@ -59,16 +72,22 @@ export function makeReadRefs(ts, checker, canonicalPath) {
    *
    * An imported name is an ALIAS, and its own declaration is the import line in the file that reads it -
    * which is where nothing is declared. The aliased symbol is where the value lives.
+   *
+   * A CLASS IS ONE (`JsonSerializer.parse(x)`, `new Foo()`, `Foo.Member`): it gets a target marked `kind: 'class'`, anchored at its NAME line - the
+   * `classes` row's own line - never the decorator's. The mark is what keeps the closure's readers from taking a class for a constant, a member or a
+   * local: they look a target up by line in tables a class is not in, and treat a bare name with no target as a name nothing declares.
    */
   function resolveName(node) {
-    let symbol = checker.getSymbolAtLocation(node);
+    let symbol = symbolOf(node);
     if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
       symbol = checker.getAliasedSymbol(symbol);
     }
     const decls = (symbol?.declarations ?? []).filter(moduleLevel);
-    const [first, ...rest] = decls.map(at);
+    const place = (d) => at(ts.isClassDeclaration(d) && d.name ? d.name : d);
+    const [first, ...rest] = decls.map(place);
     if (first === undefined) return null;
-    return { name: node.text, ...first, ...(rest.length ? { also: rest } : {}) };
+    const klass = ts.isClassDeclaration(decls[0]);
+    return { name: node.text, ...first, ...(klass ? { kind: 'class' } : {}), ...(rest.length ? { also: rest } : {}) };
   }
 
   /**
@@ -77,14 +96,38 @@ export function makeReadRefs(ts, checker, canonicalPath) {
    * local - and only for a declaration that HAS a `locals` row (a named one with an initializer).
    */
   function resolveLocal(node) {
-    const decls = checker.getSymbolAtLocation(node)?.declarations ?? [];
+    const decls = symbolOf(node)?.declarations ?? [];
     if (decls.length !== 1) return null;
     const [d] = decls;
     if (!ts.isVariableDeclaration(d) || !ts.isIdentifier(d.name) || !d.initializer || moduleLevel(d)) return null;
-    const sf = d.getSourceFile();
-    const pos = sf.getLineAndCharacterOfPosition(d.name.getStart());
+    return placeOf(d.name);
+  }
+
+  /**
+   * A BARE NAME THAT IS A PARAMETER, as where the parameter's name sits: `{file, line, col}` - the `line` and `col` its `params` item carries when the name is the
+   * whole parameter, and one of the item's `bindings` when it is destructured (`({ a, b: c }) =>`, `([x]) =>`, the binding element's name). Only for a function
+   * that has a body - a declaration, method, accessor, constructor, arrow or function expression - and each of those has a row.
+   */
+  function resolveParam(node) {
+    const decls = symbolOf(node)?.declarations ?? [];
+    if (decls.length !== 1) return null;
+    const [d] = decls;
+    if (!ts.isParameter(d) && !ts.isBindingElement(d)) return null;
+    if (!ts.isIdentifier(d.name)) return null;
+    let holder = d;
+    while (holder !== undefined && ts.isBindingElement(holder)) holder = holder.parent?.parent;
+    if (holder === undefined || !ts.isParameter(holder)) return null;
+    const fn = holder.parent;
+    if (fn === undefined || !ts.isFunctionLike(fn) || fn.body === undefined) return null;
+    return placeOf(d.name);
+  }
+
+  /** `{file, line, col}` of a name node: the place a row is keyed by. */
+  function placeOf(name) {
+    const sf = name.getSourceFile();
+    const pos = sf.getLineAndCharacterOfPosition(name.getStart());
     return { file: canonicalPath(sf.fileName), line: pos.line + 1, col: pos.character + 1 };
   }
 
-  return { resolveRead, resolveName, resolveLocal, resolveMember };
+  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember };
 }

@@ -13,7 +13,24 @@
  * Imports are flat: see `TsTypeRef.mjs`.
  */
 
-export function makeTsExprNormalizer(ts, resolveRead, resolveName = null, resolveLocal = null) {
+export function makeTsExprNormalizer(ts, resolveRead, resolveName = null, resolveLocal = null, resolveParam = null) {
+  /**
+   * A BARE NAME AS A READ, bound by what it is: a module's declaration (`target`), a local (`local`) or a parameter (`param`) - one of the three, never
+   * two. A SHORTHAND PROPERTY (`{ client }`) is one too: its value is the name, so the object a call is handed names what the call hands it.
+   */
+  const bareRead = (node) => {
+    // A BARE NAME THAT IS A MODULE'S DECLARATION IS RESOLVED LIKE A MEMBER. `isSpecial(id)` and
+    // `SPECIAL_IDS.includes(id)` call a function and read a const that no `this.` reaches, so without
+    // a target the condition they sit in names nothing a consumer can join. A local or a parameter gets
+    // none: `resolveName` answers for module-level declarations only.
+    const target = resolveName ? resolveName(node) : null;
+    // A LOCAL names where its `locals` row is declared (`local`), so a `returns` row joins it exactly.
+    const local = !target && resolveLocal ? resolveLocal(node) : null;
+    // A PARAMETER names where its `params` item is declared (`param`), as a local does: a name that is neither is a name nothing in the tree declares.
+    const param = !target && !local && resolveParam ? resolveParam(node) : null;
+    return { k: 'Read', name: node.text, receiver: { k: 'Implicit' }, ...(target ? { target } : {}),
+      ...(local ? { local } : {}), ...(param ? { param } : {}) };
+  };
   const norm = (node) => {
     if (node === undefined) return null;
     // Parentheses carry no meaning once the tree is explicit.
@@ -24,17 +41,7 @@ export function makeTsExprNormalizer(ts, resolveRead, resolveName = null, resolv
     // expression. Left on the `Other` leaf they hid their operand from the summary.
     if (ts.isTypeAssertionExpression(node)) return norm(node.expression);
     if (ts.isExpressionWithTypeArguments(node)) return norm(node.expression);
-    if (ts.isIdentifier(node)) {
-      // A BARE NAME THAT IS A MODULE'S DECLARATION IS RESOLVED LIKE A MEMBER. `isSpecial(id)` and
-      // `SPECIAL_IDS.includes(id)` call a function and read a const that no `this.` reaches, so without
-      // a target the condition they sit in names nothing a consumer can join. A local or a parameter gets
-      // none: `resolveName` answers for module-level declarations only.
-      const target = resolveName ? resolveName(node) : null;
-      // A LOCAL names where its `locals` row is declared (`local`), so a `returns` row joins it exactly.
-      const local = !target && resolveLocal ? resolveLocal(node) : null;
-      return { k: 'Read', name: node.text, receiver: { k: 'Implicit' }, ...(target ? { target } : {}),
-        ...(local ? { local } : {}) };
-    }
+    if (ts.isIdentifier(node)) return bareRead(node);
     if (node.kind === ts.SyntaxKind.ThisKeyword) return { k: 'This' };
     if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
       return { k: 'Literal', v: node.text };
@@ -122,7 +129,7 @@ export function makeTsExprNormalizer(ts, resolveRead, resolveName = null, resolv
         values.push(norm(p.initializer));
       } else if (ts.isShorthandPropertyAssignment(p)) {
         keys.push({ key: p.name.getText(), quoted: false });
-        values.push({ k: 'Read', name: p.name.getText(), receiver: { k: 'Implicit' } });
+        values.push(bareRead(p.name));
       } else if (ts.isSpreadAssignment(p)) {
         keys.push({ key: '...', quoted: false });
         values.push(norm(p.expression));

@@ -25,7 +25,7 @@ On `members`, `type_members`, params (`members__params`, `functions__params`), `
   `and` for an intersection (listed in written order, its literals among them) and `or` for a union (sorted by place); `return_refs_of` beside `return_refs`. A property
   both parts of an intersection declare is the FIRST part's. A mapped type (`Pick<Dto, 'a'>`) has `props`, `{name, file, line}` of the declaration of each member it holds. An
   `element`, `unwrapped` or type parameter `constraint` naming several is `{type_refs, type_refs_of}`.
-* A method row also has `return_ref` (the same shape, its return type; `return_refs` when it returns several, as `type_refs`). `type_ref` follows the TYPE the checker reaches, not the alias
+* A method row also has `return_ref` (the same shape, its return type; `return_refs` when it returns several, as `type_refs`); a static `ngTemplateContextGuard` has `guard_ref` (rows 74), the `type_ref` of its predicate's type (`ctx is Ctx<T>`). `type_ref` follows the TYPE the checker reaches, not the alias
   written: `type Desc = Readonly<{..}>` gives `Readonly`. `alias` (rows 71; one node `{name, file, line}`, as `type_ref`'s own) is the type alias WRITTEN, an import followed:
   `Desc` here. Every `file` inside a `type_ref` is the ABSOLUTE path the compiler read, never a `files` id: join `type_aliases a`
   `JOIN files f ON f.id = a.file` on `a.name = alias.name AND a.line = alias.line`, and match the path by its suffix `f.path`. Absent when the written name is a class, interface or enum, and for a union's `type_refs`.
@@ -91,6 +91,22 @@ A name the template binds keeps its type (rows 73): a loop inside a loop over `X
 component (`#c` then `c.prop` targets the member), and `#r="name"` as the directive - or component - whose `exportAs` lists `name`; a ref on a plain element or an `<ng-template>` has no row and its reads
 have no `target` (the ref's own read never has one: it is no member).
 
+What the directive on an element types (rows 74): the `let-x` / `*dir="let x"` variables of a template a STRUCTURAL directive in the tree receives are the properties of the context it declares - its
+`ngTemplateContextGuard`'s predicate (`guard_ref`), else the `TemplateRef<Ctx>` it injects - `let-x="prop"` is `Ctx.prop`, a bare `let-x` (or `let x`) `$implicit`, `*dir="v as x"` the property `dir`; the directive's
+type parameters are bound from the inputs on the element (`T` from an input typed `T`, `T[]` or `Box<T>`). A library directive (`ngFor`, `ngIf`) has no rows and keeps its own reading. A `#ref` to a GENERIC
+component binds its parameters the same way (`<demo-table #t [rows]="items">` makes `t.selected` an `Item`), else by their `default`, else their `constraint`. A loop over an `as` alias of a framework
+pipe (`*ngIf="items$ | async as list"` then `*ngFor="let i of list"`) takes the element of the list the observable emits. The parts of an intersection or union read with the bindings of the declaration they were reached in.
+
 A CODE expression's tree (`returns`/`locals`/`assignments`/`calls` through their `expressions` row, `branches.condition_expr`, `switch_cases`) is read the same way: EVERY link of a property chain carries its own `target`
 (`{name, file, line}`, the declaration that name lands on, rows 73), not only the outermost - `this.holder.Inner.Id` targets `holder`, `Inner` and `Id` each, `SafeRead` links too. A link whose
 type the checker cannot follow (an `any`) has none.
+
+A bare NAME in a code tree is bound by what it is (rows 74), one of three - `target`, `local` or `param`, never two - and a name none of them applies to (a loop variable, a `catch` binding, a global such as `Math`)
+has none. A `target` is a top-level `const`, function, enum or CLASS (`JsonSerializer.parse(x)`, `new Foo()`, `Foo.Member`, an import alias followed); a class target also has `kind: 'class'` and its line is the
+class NAME's - the `classes` row's own `line`, never the first decorator's. A `local` is `{file, line, col}` of a `locals` row. A `param` is `{file, line, col}` of the PARAMETER'S NAME - of the binding element's
+name when it is destructured (`({ a, b: c }) =>`, `([x]) =>`) - for every function-like with a body: a declaration, method, accessor, constructor, arrow, function expression and a nested function. Join it to
+the parameter by place: each item of `members__params` and `functions__params` carries `line` and `col` of its name (of its pattern when destructured), and a destructured one `bindings`, one
+`{name, line, col}` per name it binds, nested patterns included - `JOIN` the item (or binding) whose `line`/`col` equal the read's `param` over the same file, through the owner row (`members.file` or
+`functions.file`; `param.file` is the absolute path, `files.abs`). A shorthand property (`{ client }`) is a read of the variable it names and is bound as that name is (its property key is not a link).
+An ALIAS OF AN INTERSECTION among the parts of a written intersection is one named part (rows 74): `Item & ViewDto` with `type ViewDto = Dto & { .. }` has `type_refs` `Item`, `ViewDto` - the checker
+flattens it - and the alias row has `type_ref`/`type_refs` of its own parts (`type_aliases__type_ref`, `type_aliases__type_refs`), which a template read walks in its place.

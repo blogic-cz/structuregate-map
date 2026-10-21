@@ -166,9 +166,22 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     return named.size === 1 ? [...named.values()][0] : null;
   };
 
+  /** `{line, col}` of a node's first token. */
+  const startOf = (n) => {
+    const pos = n.getSourceFile().getLineAndCharacterOfPosition(n.getStart());
+    return { line: pos.line + 1, col: pos.character + 1 };
+  };
+  /** EVERY NAME A DESTRUCTURED PARAMETER BINDS, each with its place (`({ a, b: c }, [d])` is `a`, `c`, `d`): what a code read's `param` joins when the name is no
+   *  parameter of its own, nested patterns included. An omitted element (`[, d]`) binds nothing. */
+  const bindingsOf = (name) => (ts.isIdentifier(name) ? [{ name: name.text, ...startOf(name) }]
+    : name.elements.flatMap((e) => (ts.isOmittedExpression(e) ? [] : bindingsOf(e.name))));
+
   function paramsOf(node) {
     return [...(node.parameters ?? [])].map((p) => ({
       name: p.name.getText(),
+      // WHERE THE PARAMETER IS (rows 74): the place of its name - or of its pattern - which a read of it names as `param`; a destructured one lists the names it binds.
+      ...startOf(p.name),
+      ...(ts.isIdentifier(p.name) ? {} : { bindings: bindingsOf(p.name) }),
       type: typeText(p, p.type),
       optional: !!p.questionToken || !!p.initializer,
       rest: !!p.dotDotDotToken,
@@ -275,6 +288,9 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
       ...(m.type ? typeRefAt(m.type) : typedLikeProperty ? typeRefAt(m) : { type_ref: null }),
       value,
       ...returnRefOf(m, kind),
+      // THE CONTEXT A STRUCTURAL DIRECTIVE'S TEMPLATE IS TYPED BY (rows 74): `static ngTemplateContextGuard<T>(dir: X<T>, ctx: unknown): ctx is Ctx<T>` -
+      // the compiler narrows the `let-` variables to the predicate's type, so a method's predicate is its `guard_ref`, shaped as a `type_ref` is.
+      ...(kind === 'method' && m.type && ts.isTypePredicateNode(m.type) && m.type.type ? { guard_ref: typeRefAt(m.type.type).type_ref ?? null } : {}),
       params: isSignature ? paramsOf(m) : fnValued ? paramsOf(initializer) : undefined,
       decorators,
       jsdoc: jsdocOf(m),

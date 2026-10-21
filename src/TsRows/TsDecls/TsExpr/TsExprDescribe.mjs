@@ -38,8 +38,8 @@ function writtenPaths(node, prefix, out) {
   });
 }
 
-export function makeExprDescriber(ts, addRow, resolveRead, resolveName = null, log = null, resolveLocal = null) {
-  const norm = makeTsExprNormalizer(ts, resolveRead, resolveName, resolveLocal);
+export function makeExprDescriber(ts, addRow, resolveRead, resolveName = null, log = null, resolveLocal = null, resolveParam = null) {
+  const norm = makeTsExprNormalizer(ts, resolveRead, resolveName, resolveLocal, resolveParam);
   // Keyed by node AND role - see the note in the returned function.
   const cache = new Map();
 

@@ -80,11 +80,18 @@ fn decision(ast: &Value) -> bool {
     }
 }
 
-/// A bare name that resolved to nothing: a local, a parameter, a callback's element.
+/// A target that names a CLASS (`target.kind == "class"`): `JsonSerializer.parse(x)` reads one. A class is no row this closure
+/// reads - not a constant, a member or a local - so a bare name that names one is read as it was before it had a target.
+pub(crate) fn names_class(target: &Value) -> bool {
+    target.get("kind").and_then(Value::as_str) == Some("class")
+}
+
+/// A bare name that resolved to nothing: a local, a parameter, a callback's element - or a class.
 pub(crate) fn bare(o: &Map<String, Value>) -> Option<&str> {
     let implicit = o.get("receiver").and_then(|r| r.get("k")).and_then(|k| k.as_str()) == Some("Implicit");
     let read = o.get("k").and_then(|k| k.as_str()) == Some("Read");
-    (read && implicit && !o.contains_key("target")).then(|| o.get("name").and_then(|n| n.as_str()))?
+    let targetless = o.get("target").is_none_or(|t| names_class(t));
+    (read && implicit && targetless).then(|| o.get("name").and_then(|n| n.as_str()))?
 }
 
 impl TsRows {
@@ -305,8 +312,9 @@ impl TsRows {
         if bare(object).is_some_and(|name| bound.contains(name)) {
             object.insert("lambda".into(), Value::Bool(true));
         }
+        // A CLASS'S TARGET NAMES NO ROW: its line is the one a member or a const of a one-line class may share.
         let row = match object.get("target") {
-            Some(Value::Object(t)) if !t.contains_key("row") => self.row_of(t),
+            Some(t @ Value::Object(m)) if !m.contains_key("row") => if names_class(t) { None } else { self.row_of(m) },
             Some(Value::Object(_)) => None,
             _ => return,
         };
@@ -468,5 +476,22 @@ mod tests {
         let out = TsRows::new(&store).resolve(&ast, &bound, &idx(&store));
         assert_eq!(out["left"]["lambda"], json!(true));
         assert!(out["right"].get("lambda").is_none());
+    }
+
+    #[test]
+    fn a_class_target_is_a_bare_name_and_names_no_row() {
+        // A one-line class shares its line with its member `tierID`: the class's target must not resolve to it, nor a constant's lookup take it.
+        let store = store_of(tables());
+        let class = json!({"k": "Read", "name": "Holder", "receiver": {"k": "Implicit"},
+                           "target": {"name": "Holder", "file": "C:/fe/app/cmp.ts", "line": 10, "kind": "class"}});
+        let out = TsRows::new(&store).resolve(&class, &IndexSet::new(), &idx(&store));
+        assert!(out["target"].get("row").is_none(), "{out}");
+        assert_eq!(bare(class.as_object().unwrap()), Some("Holder"));
+        // The control: the same target without the mark is the member at that line, and no longer a bare name.
+        let mut plain = class.clone();
+        plain["target"].as_object_mut().unwrap().remove("kind");
+        let out = TsRows::new(&store).resolve(&plain, &IndexSet::new(), &idx(&store));
+        assert_eq!(out["target"]["row"], json!("m:1"));
+        assert_eq!(bare(plain.as_object().unwrap()), None);
     }
 }

@@ -242,6 +242,10 @@ pub fn declaration_index(store: &Store<'_>) -> impl Fn(Option<&Value>) -> Option
         {
             return Some(row.clone());
         }
+        // A CLASS'S TARGET (`kind: "class"`) is no member: its line is one a member of a one-line class may share.
+        if target.get("kind").and_then(Value::as_str) == Some("class") {
+            return None;
+        }
         let Some(Value::String(file_name)) = target.get("file") else { return None };
         // `typeof t.line !== 'number'` — a bool is not a number there and must not pass
         // here either.

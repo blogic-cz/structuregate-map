@@ -270,9 +270,14 @@ async function main() {
   //     Also (#102): every link of a property chain in a CODE expression tree carries its `target` (`TsDecls/TsExpr/TsExprNorm.mjs`), not only the outermost.
   //     A mapped type a DECLARED alias names (`type T = Pick<Slot<unknown>, 'k'>`) is that alias's computed members, not its `props` (`TsTpl/TsTplOwners.mjs::ownerOf`), so
   //     a parameter left to its default still applies through it; a keyed read over an `as` alias of an `async` pipe takes the element of the list the observable emits.
+  // 74: a template's types follow the directive it meets. A `let-x` / `*dir="let x"` variable takes the context its structural directive declares (`TsTpl/TsTplContext.mjs`):
+  //     a static method `ngTemplateContextGuard` has `guard_ref` on its `members` row (the `type_ref` of its predicate's type, `TsDecls/TsClassRows.mjs::memberRow`), else the
+  //     `TemplateRef<Ctx>` it injects; the directive's generic is bound from the input that feeds it. A loop over an `as` alias of a framework pipe takes the element of `wrapped`
+  //     (the list the observable emits). A `#ref` to a generic component binds its type parameters from the inputs on its element (default, else constraint, where none feeds
+  //     one), and the parts of an intersection or a union take the bindings of the hop that reached them (`TsTplOwners.mjs::ownerOfRow`). Also, in CODE trees: a bare name that is a CLASS has a `target` (`kind: 'class'`, the name's line, `TsExpr/TsReadRefs.mjs::resolveName`), a parameter's read has `param` (`{file, line, col}` of its name; each `params` item has `line`/`col` and a destructured one `bindings`), a shorthand property `{ x }` is bound as the name `x` is (`getShorthandAssignmentValueSymbol`), and an alias of an intersection among the parts of a written intersection is one named part of `type_refs` (`TsTypeRef.mjs::writtenParts`), its own parts on the `type_aliases` row (`type_ref`/`type_refs`) which a template read walks in its place (`TsTplOwners.mjs::expandAlias`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 73, build: args.build,
+    config: config.file, data: config.data, rows: 74, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

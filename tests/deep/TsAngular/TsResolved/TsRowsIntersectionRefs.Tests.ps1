@@ -109,6 +109,23 @@ Test-Case 'tsrows: a member both parts of an intersection declare is the first p
     Assert-Line (Get-TsAndTargets $made.Db '{{ u.id }}') 'read=id=none'
 }
 
+# C5 (audit): an ALIAS among the parts of a written intersection stays one named part (rows 74, `TsDecls/TsTypeRef.mjs::writtenParts`): `Item & ViewDto` names `Item` and
+# `ViewDto`, never `ViewDto`'s own parts - the checker flattened them. The reads above still resolve, through the alias's parts at READ time.
+Test-Case 'tsrows: an alias of an intersection among the parts of one is named by the alias' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsAndFiles) -Shared
+    Assert-Exit $made.Result 0
+    $refs = { param($member) "SELECT 'refs=' || group_concat(nm.value, ',') AS r FROM (SELECT it.owner, it.n FROM members__type_refs it " +
+        "JOIN members m ON m.id = it.owner WHERE m.name = '$member' AND it.parent = 0 ORDER BY it.ord) t " +
+        "JOIN members__type_refs nm ON nm.owner = t.owner AND nm.parent = t.n AND nm.role = 'name'" }
+    Assert-Line (Invoke-TsRowsQ $made.Db (& $refs 'q')) 'refs=Item,ViewDto'
+    # The controls: parts that are no alias of an intersection are listed as before.
+    Assert-Line (Invoke-TsRowsQ $made.Db (& $refs 'w')) 'refs=Gamma,Alpha'
+    $alias = Invoke-TsRowsQ $made.Db ("SELECT 'alias=' || a.name || ':' || (EXISTS (SELECT 1 FROM type_aliases__type_ref p WHERE p.owner = a.id)) AS r FROM type_aliases a " +
+        "WHERE a.name IN ('ViewDto', 'InstrDto')")
+    Assert-Line $alias 'alias=ViewDto:1'
+    Assert-Line $alias 'alias=InstrDto:0'
+}
+
 Test-Case 'tsrows: a hop of unknown type ends the read chain, never naming the previous owner''s member' {
     $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsIntersectionFiles)
     Assert-Exit $made.Result 0
