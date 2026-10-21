@@ -86,3 +86,11 @@ argument of a call never types the loop. A member typed by a type parameter read
 else the parameter's `default` where nothing was passed (`Slot` is `Slot<Dto>`), else its `constraint`; an argument that names nothing stays nothing.
 A literal answers the names of what it spreads (`shape_members` kind `spread`, last first) and a `type_ref` whose declaration is a library type reads through its `alias`. A class reads the members of its bases, an INTERFACE too (`interfaces.extends_refs`, one `type_ref` per base, null for a library type). Several declarations
 at once (`A | B`, `A & B`, `X` with `shapes`) answer a name only when ONE of them declares it.
+
+A name the template binds keeps its type (rows 73): a loop inside a loop over `X[][]` (any depth, `*ngFor` or `@for`) reads the inner variable as `X`. A `#ref` on a component's element reads as that
+component (`#c` then `c.prop` targets the member), and `#r="name"` as the directive - or component - whose `exportAs` lists `name`; a ref on a plain element or an `<ng-template>` has no row and its reads
+have no `target` (the ref's own read never has one: it is no member).
+
+A CODE expression's tree (`returns`/`locals`/`assignments`/`calls` through their `expressions` row, `branches.condition_expr`, `switch_cases`) is read the same way: EVERY link of a property chain carries its own `target`
+(`{name, file, line}`, the declaration that name lands on, rows 73), not only the outermost - `this.holder.Inner.Id` targets `holder`, `Inner` and `Id` each, `SafeRead` links too. A link whose
+type the checker cannot follow (an `any`) has none.

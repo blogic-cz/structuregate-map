@@ -37,5 +37,11 @@ Four template rows said more, or less, than the compiler does. Each is read off 
   alias rows that each carry the generic's own member (`HolderA | HolderB`, both `Holder<..>.Input`) are one place, so one. Where an arm's type is unknown the chain ends.
 - **What names no declaration still has members** (rows 72): a mapped type is a ref with `props`, the declarations its kept members come from, so `Pick<Dto, 'a'>` reaches `a` and no
   other name; a literal in a generic class takes the class's bindings (`Items: { Row: TItem }[]`); `this['a'][0]['b']` is its constraint; `T extends A | B` is the `any` of both.
-  Not read: a nested list (`X[][]`) - the loop variable of the outer loop keeps an owner, not the ref whose `element` the inner loop would take.
+- **A name the template binds is a VALUE** (rows 73, `TsTplReads.mjs::scopeAt`, `elementRefOf`): a loop variable, an `as` alias and a `#ref` keep the `{owner, ref, env}` `valueOf` answers, so a loop over `X[][]`'s
+  variable takes ITS element, to any depth (the element of an array of arrays is the first of the ref's `args`, whole). A `#ref` is the instance of the COMPONENT matched on its element, or - `#r="name"` - of the
+  matched directive whose `exportAs` lists `name` (a comma list); a plain element (the DOM node) and `<ng-template>` (`TemplateRef`) type nothing, yet shadow the member. It is visible in its whole scope - siblings
+  and earlier nodes too - up to the nearest enclosing `ng-template` or block.
 
+- **A mapped type a declared alias names is that alias** (rows 73, `TsTplOwners.mjs::ownerOf`): `type T = Pick<Slot<unknown>, 'k'>` reads through the alias's own computed members, which carry the types the
+  checker instantiated (a parameter left to its default included); a ref's `props` answer an anonymous mapping only, being the source's declared rows with no bindings. A keyed read over an `as` alias of a
+  framework pipe takes the element of the list the observable emits (`wrapped`, one level in), not of its innermost type. Case: `TsValues/TsRowsScopeValues.Tests.ps1`.

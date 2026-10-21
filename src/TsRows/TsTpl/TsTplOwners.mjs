@@ -43,6 +43,11 @@ export function makeOwners(store) {
   const propsOwners = new Map();
   const rowByPlace = new Map();
   const ownerOf = (ref) => {
+    // A MAPPED TYPE A DECLARED ALIAS NAMES (`type T = Pick<Slot<unknown>, 'Result'>`, rows 73) is that alias: its own computed members carry the types the checker
+    // instantiated - `Result: Base` - where `props` hold the source's DECLARED rows, a type parameter with no binding. `props` answer an anonymous mapping only.
+    const declared = Array.isArray(ref?.props) && str(ref?.file) !== null && str(ref?.name) !== null && idByPath.has(ref.file)
+      ? ownerByFileName.get(`${String(idByPath.get(ref.file))}#${String(ref.name)}`) ?? null : null;
+    if (declared !== null && declared.kind === 'type') return declared;
     if (Array.isArray(ref?.props)) {
       if (!propsOwners.has(ref)) propsOwners.set(ref, { kind: 'props', id: propsOwners.size, by: new Map(ref.props.map((p) => [p.name, p])) });
       return propsOwners.get(ref);
@@ -248,7 +253,19 @@ export function makeOwners(store) {
   };
 
   /** The owner a type_ref's ELEMENT names - what an array holds, which is what a loop variable is. A parameter element (`T[]`) reads as `resolveRef` does. */
-  const elementOwnerOf = (ref, env = null) => (ref?.element === undefined ? null : resolveRef(ref.element, env));
+  const elementOwnerOf = (ref, env = null) => {
+    const element = elementRefOf(ref);
+    return element === null ? null : resolveRef(element, env);
+  };
+  /** The ref of what an array holds, or null. AN ARRAY OF ARRAYS (rows 73): `Item[][]`'s `element` names the library `Array` and no more - the element's own
+   *  `element` is on the ref's first `args`, which is the ref of that element whole - so the one a loop inside a loop takes is read from there. */
+  const elementRefOf = (ref) => {
+    const element = ref?.element;
+    if (element === undefined || element === null) return null;
+    const whole = Array.isArray(ref.args) ? ref.args[0] : null;
+    const same = whole && typeof whole === 'object' && whole.name === element.name && whole.file === element.file && whole.line === element.line;
+    return element.element === undefined && same ? whole : element;
+  };
 
   /** The owner a member's type names: its `type_ref`, or every owner its `type_refs` list names (#97) - one alone, or
    *  several as one `any` owner `propWithEnv` asks together. Null when it names none: the chain stops there. */
@@ -281,5 +298,5 @@ export function makeOwners(store) {
     return { name, file, line, row: row.id, owner: next, member: row, env: found.env };
   };
 
-  return { ownerOf, propByOwner, indexByShape, resolveRef, elementOwnerOf, ownerOfRow, hopOf };
+  return { ownerOf, propByOwner, indexByShape, resolveRef, elementOwnerOf, elementRefOf, ownerOfRow, hopOf };
 }

@@ -30,6 +30,17 @@ $script:TsChainFiles = @{
         "  run() { this.log.error('a'); this.log.plain(); return foo().bar; }`n" +
         "}`n"
     'apps/shop/src/flags.ts' = "(globalThis as any).alphaFlag = true;`n"
+    'apps/shop/src/links.ts' = "export class Inner { Id: number = 0; }`n" +
+        "export class Holder { Inner: Inner = new Inner(); }`n" +
+        "export interface Tail { c: number }`n" +
+        "export interface Mid { b?: Tail }`n" +
+        "export class Widget {`n" +
+        "  holder: Holder = new Holder();`n" +
+        "  a?: Mid;`n" +
+        "  check() { return this.holder.Inner.Id === 1; }`n" +
+        "  safe() { return this.a?.b?.c === 1; }`n" +
+        "  call(f: (n: number) => number) { return f(this.holder.Inner.Id) === 1; }`n" +
+        "}`n"
 }
 
 function Get-TsChainDb {
@@ -72,6 +83,37 @@ Test-Case 'tsrows: a side-effect import of a script resolves to its file' {
     Assert-Line $r 'imp=./flags:apps/shop/src/flags.ts:1:1'
     # Resolved by its PATH, so it is recorded as a read: a row naming a file its owner did not read fails the reads proof.
     Assert-Line (Invoke-TsRowsQ $db "SELECT 'reads=' || value AS r FROM _meta WHERE key = 'reads:typescript'") 'reads=proven'
+}
+
+# Every Read and SafeRead of the CODE expression whose source is `$Source`: `link=<name>@<line of the declaration its target names, or none>`.
+function Get-TsChainLinks([string]$Db, [string]$Source) {
+    return Invoke-TsRowsQ $Db ("SELECT 'link=' || nm.value || '@' || ifnull(tl.value, 'none') AS r " +
+        "FROM expressions x JOIN expressions__ast k ON k.owner = x.id AND k.role = 'k' AND k.value IN ('Read', 'SafeRead') " +
+        "JOIN expressions__ast nm ON nm.owner = x.id AND nm.parent = k.parent AND nm.role = 'name' " +
+        "LEFT JOIN expressions__ast t ON t.owner = x.id AND t.parent = k.parent AND t.role = 'target' " +
+        "LEFT JOIN expressions__ast tl ON tl.owner = x.id AND tl.parent = t.n AND tl.role = 'line' " +
+        "WHERE x.source = '$Source' ORDER BY nm.n")
+}
+
+# EVERY LINK OF A PROPERTY CHAIN IN CODE IS RESOLVED (rows 73, #102, `TsExpr/TsExprNorm.mjs`): `this.holder.Inner.Id` bound only `Id`.
+Test-Case 'tsrows: every link of a property chain in a code expression names its declaration' {
+    $db = Get-TsChainDb
+    $r = Get-TsChainLinks $db 'this.holder.Inner.Id === 1'
+    Assert-Line $r 'link=holder@6'
+    Assert-Line $r 'link=Inner@2'
+    Assert-Line $r 'link=Id@1'
+}
+
+Test-Case 'tsrows: a safe chain and a chain under a call argument name every link too' {
+    $db = Get-TsChainDb
+    $s = Get-TsChainLinks $db 'this.a?.b?.c === 1'
+    Assert-Line $s 'link=a@7'
+    Assert-Line $s 'link=b@4'
+    Assert-Line $s 'link=c@3'
+    $c = Get-TsChainLinks $db 'f(this.holder.Inner.Id) === 1'
+    Assert-Line $c 'link=holder@6'
+    Assert-Line $c 'link=Inner@2'
+    Assert-Line $c 'link=Id@1'
 }
 
 }

@@ -14,7 +14,7 @@ import { makeOwners } from './TsTplOwners.mjs';
 const str = (v) => (typeof v === 'string' ? v : null);
 
 export function rollupTemplateReads(store) {
-  const { ownerOf, propByOwner, indexByShape, resolveRef, elementOwnerOf, ownerOfRow, hopOf } = makeOwners(store);
+  const { ownerOf, propByOwner, indexByShape, resolveRef, elementRefOf, ownerOfRow, hopOf } = makeOwners(store);
 
   // Which class each template expression belongs to. EVERY template expression carries `node`; only some
   // carry `binding` - an interpolation, an `@if` condition and an `@for` iterable have none - so joining
@@ -28,6 +28,7 @@ export function rollupTemplateReads(store) {
   const boundNames = new Map();
   const implicitAt = new Map();
   const aliasesAt = new Map();
+  const refsAt = new Map();
   for (const n of store.table('template_nodes')) {
     templateOfNode.set(n.id, n.template);
     parentOfNode.set(n.id, n.parent ?? null);
@@ -45,7 +46,10 @@ export function rollupTemplateReads(store) {
       }
     }
     for (const r of Array.isArray(n.references) ? n.references : []) {
-      if (str(r.name) !== null) names.push(r.name);
+      if (str(r.name) === null) continue;
+      names.push(r.name);
+      if (!refsAt.has(n.id)) refsAt.set(n.id, new Map());
+      refsAt.get(n.id).set(r.name, { value: str(r.value) ?? '', kind: n.kind, directives: Array.isArray(n.directives) ? n.directives : [] });
     }
     if (names.length) boundNames.set(n.id, names);
   }
@@ -58,6 +62,21 @@ export function rollupTemplateReads(store) {
     const at = n.parent ?? `t:${String(n.template)}`;
     if (!letsUnder.has(at)) letsUnder.set(at, []);
     letsUnder.get(at).push(n.name);
+  }
+
+  // A `#ref` IS VISIBLE IN THE WHOLE SCOPE IT IS DECLARED IN, siblings and earlier nodes too (rows 73), not only under its element: the scope is the nearest
+  // enclosing node that is no element - an `ng-template`, a block branch - or the template itself. An `ng-template`'s own `#ref` is in the scope AROUND it.
+  const scopeKeyOf = (id) => {
+    let at = parentOfNode.get(id) ?? null;
+    const seen = new Set();
+    while (at !== null && !seen.has(at) && kindOfNode.get(at) === 'Element') { seen.add(at); at = parentOfNode.get(at) ?? null; }
+    return at ?? `t:${String(templateOfNode.get(id))}`;
+  };
+  const refsUnder = new Map();
+  for (const [id, refs] of refsAt) {
+    const key = scopeKeyOf(id);
+    if (!refsUnder.has(key)) refsUnder.set(key, []);
+    for (const [name, ref] of refs) refsUnder.get(key).push([name, ref]);
   }
 
   // THE LINK RUNS FROM THE EXPRESSION TO THE BINDING, not the other way: a `bindings` row carries no
@@ -110,6 +129,28 @@ export function rollupTemplateReads(store) {
     else if (Array.isArray(transform?.return_refs)) transformOwnersOfPipe.set(declared, ownerOfRow({ type_refs: transform.return_refs, type_refs_of: transform.return_refs_of }));
   }
 
+  /**
+   * WHAT A `#ref` IS, as Angular types it (rows 73): on an element whose matched directives include a COMPONENT, with no value, the component's instance;
+   * `#r="name"`, the matched directive (a component too) whose `exportAs` lists that name - a comma list, as the decorator spells it. A plain element is
+   * the DOM node and `<ng-template>` a `TemplateRef`: no row declares either, so they type nothing (and still shadow the member of their name).
+   */
+  const declaredBy = new Map();
+  for (const t of ['components', 'directives']) {
+    for (const row of store.table(t)) {
+      const names = typeof row.export_as === 'string' ? row.export_as.split(',').map((x) => x.trim()) : [];
+      declaredBy.set(row.id, { class: row.class, exportAs: names });
+    }
+  }
+  const refValueOf = (ref) => {
+    if (ref.kind === 'Template') return null;
+    const asked = ref.value.trim();
+    const hit = ref.directives.find((d) => {
+      const one = declaredBy.get(d.id);
+      return one !== undefined && one.class != null && (asked === '' ? d.is_component === true || d.is_component === 1 : one.exportAs.includes(asked));
+    });
+    return hit === undefined ? null : { owner: { kind: 'class', id: declaredBy.get(hit.id).class }, ref: null, row: null, env: null };
+  };
+
   /** The names of a Read chain, root first - `a.b.c` reads as Read(c) over Read(b) over Read(a). */
   const chainOf = (node) => {
     const names = [];
@@ -148,17 +189,18 @@ export function rollupTemplateReads(store) {
     while (at && (at.k === 'Source' || at.k === 'NonNull')) at = at.k === 'Source' ? at.ast : at.expr;
     return at ?? null;
   };
-  const aliasOwnerOf = (ast, component, scope) => valueOf(conditionOf(ast), component, scope)?.owner ?? null;
-  /** A LOOP VARIABLE is the ELEMENT of the collection. A pipe hands on its own: an in-tree one's `transform` return, whose element it is; a framework
+  const aliasValueOf = (ast, component, scope) => valueOf(conditionOf(ast), component, scope);
+  /** A LOOP VARIABLE is the ELEMENT of the collection - a VALUE (rows 73), its `ref` kept, so a loop over a list of lists takes the element of that. A pipe hands on its own: an in-tree one's `transform` return, whose element it is; a framework
    *  one's (`async`, `slice`) UNWRAPPED innermost type, which already IS the element (`Observable<Foo[]>` -> `Foo`); one the map cannot type, none. */
-  const loopOwnerOf = (ast, component, scope) => {
+  const loopValueOf = (ast, component, scope) => {
     const at = conditionOf(ast);
     const held = at ? valueOf(at, component, scope) : null;
     if (held === null) return null;
-    if (at.k !== 'Pipe') return elementOwnerOf(held.ref, held.env);
-    const name = str(at.name);
-    if (name !== null && transformRefOfPipe.has(name)) return elementOwnerOf(held.ref, held.env);
-    return name === null || knownPipes.has(name) ? null : held.owner;
+    const name = at.k === 'Pipe' ? str(at.name) : null;
+    const element = at.k !== 'Pipe' || (name !== null && transformRefOfPipe.has(name));
+    if (!element) return name === null || knownPipes.has(name) ? null : { owner: held.owner, ref: held.ref, row: null, env: held.env ?? null };
+    const ref = elementRefOf(held.ref);
+    return ref === null ? null : { owner: resolveRef(ref, held.env), ref, row: null, env: held.env ?? null };
   };
 
   /**
@@ -189,6 +231,10 @@ export function rollupTemplateReads(store) {
       ancestors.unshift(current);
       current = parentOfNode.get(current) ?? null;
     }
+    // THE REFS OF EVERY SCOPE THE NODE SITS IN, outermost first (a scope's own node is never inside itself: `ancestors` ends at the node).
+    for (const key of [`t:${String(templateOfNode.get(nodeId))}`, ...ancestors.filter((id) => id !== nodeId)]) {
+      for (const [name, ref] of refsUnder.get(key) ?? []) out.set(name, refValueOf(ref));
+    }
     for (const id of ancestors) {
       if (id !== nodeId) for (const name of letsUnder.get(id) ?? []) out.set(name, null);
       if (outer && id === nodeId) continue;
@@ -196,12 +242,15 @@ export function rollupTemplateReads(store) {
       const condition = conditionAstOfNode.get(id);
       for (const name of boundNames.get(id) ?? []) {
         if (condition !== undefined && aliasesAt.get(id)?.has(name)) {
-          out.set(name, aliasOwnerOf(condition, component, out));
+          out.set(name, aliasValueOf(condition, component, out));
           continue;
         }
         // A LOOP VARIABLE is the element of its collection (`loopOwnerOf`). Anything else the template binds (an alias is above) is a name this
         // rollup cannot type, and it shadows the component either way.
-        const bound = implicitAt.get(id) !== name || iterable === undefined ? null : loopOwnerOf(iterable, component, out);
+        // A `#ref` is typed by the element it sits on (`refValueOf`); it shadows the component's member of that name either way.
+        const ref = refsAt.get(id)?.get(name);
+        if (ref !== undefined) { out.set(name, refValueOf(ref)); continue; }
+        const bound = implicitAt.get(id) !== name || iterable === undefined ? null : loopValueOf(iterable, component, out);
         out.set(name, bound);
       }
     }
@@ -231,7 +280,8 @@ export function rollupTemplateReads(store) {
         // A KEYED READ IS THE ELEMENT of an array, else what an INDEX SIGNATURE holds (rows 71): `items[k]` over `{ [k: string]: Item }`,
         // a `Record<string, Item>` or an interface with one - on the ref (`index`), else the index member of the shape it reached.
         const held = valueOf(node.receiver, component, scope);
-        const ref = held?.ref?.element ?? held?.ref?.index
+        const listed = held?.wrapped ?? held?.ref;
+        const ref = elementRefOf(listed) ?? listed?.index
           ?? (held?.owner?.kind === 'shape' ? indexByShape.get(held.owner.id)?.type_ref : null) ?? null;
         // A VALUE KEEPS ITS REF WITH NO OWNER (rows 72): an array's owner is `Array`, which no row declares, but its `element` is what a loop over
         // `list()[0].items` takes - a value with a ref and no owner ends a chain and still types a loop.
@@ -252,7 +302,10 @@ export function rollupTemplateReads(store) {
         const ref = declared ?? exp?.ref?.unwrapped ?? null;
         const several = ref === null && name !== null ? transformOwnersOfPipe.get(name) ?? null : null;
         if (several !== null) return { owner: several, ref: null, row: null, env: null };
-        return ref === null ? null : { owner: resolveRef(ref, declared ? null : exp?.env ?? null), ref, row: null, env: null };
+        // `wrapped` (rows 73) is what the framework pipe UNWRAPPED ONE LEVEL: `Observable<{..}[]>` emits the list, though `unwrapped` is its innermost element
+        // (which is what a loop over the pipe takes) - so a keyed read over an `as` alias of the pipe takes the element of THAT list.
+        const wrapped = declared === undefined && Array.isArray(exp?.ref?.args) && exp.ref.args.length === 1 ? exp.ref.args[0] : undefined;
+        return ref === null ? null : { owner: resolveRef(ref, declared ? null : exp?.env ?? null), ref, row: null, env: null, ...(wrapped ? { wrapped } : {}) };
       }
       case 'Binary': return node.op === '??' || node.op === '||' ? same(node.left, node.right) : null;
       case 'Cond': return same(node.then, node.else);
@@ -268,12 +321,16 @@ export function rollupTemplateReads(store) {
     // A ROOT BOUND BY THE TEMPLATE IS ALREADY THE OWNER - its name is consumed, not looked up: resolving
     // `item.label` by searching for a property called `item` ON the item's own type finds nothing.
     const isBound = base === null && scope.has(root);
+    // A NAME THE TEMPLATE BOUND IS A VALUE (rows 73): its owner starts the walk, and its `ref` - an array's, which has no owner - is what a loop over it takes.
+    const held = isBound ? scope.get(root) ?? null : null;
     let cursor = base !== null ? valueOf(base, component, scope)?.owner ?? null
-      : isBound ? scope.get(root) ?? null : component;
-    let last = isBound && cursor !== null ? { owner: cursor, ref: null, row: null, env: null } : null;
+      : isBound ? held?.owner ?? null : component;
+    let last = held !== null && (names.length === 1 || cursor !== null) ? held : null;
     let resolvedAny = false;
     names.forEach((name, i) => {
-      if (i < (isBound ? 1 : 0) || cursor === null) return;
+      if (i < (isBound ? 1 : 0)) return;
+      // A HOP PAST A VALUE WITH NO OWNER IS LOST: `last` must not stay the previous hop's.
+      if (cursor === null) { last = null; return; }
       // THE MEMBER A WRITE HEADS IS ITS SETTER; every other hop is read.
       const hop = hopOf(cursor, name, node.k === 'Write' && i === names.length - 1);
       if (!hop) { cursor = null; last = null; return; }
