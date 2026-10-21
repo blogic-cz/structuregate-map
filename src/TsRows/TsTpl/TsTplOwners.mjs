@@ -104,7 +104,12 @@ export function makeOwners(store) {
   for (const row of store.table('type_members')) {
     // `path` is the dotted route; the direct children of an owner are the ones with no dot in it.
     const p = str(row.path);
-    if (p !== null && !p.includes('.')) propByOwner.set(`type:${String(row.owner)}#${String(row.name)}`, row);
+    if (p === null || p.includes('.')) continue;
+    const key = `type:${String(row.owner)}#${String(row.name)}`;
+    // A NAME SEVERAL OPERANDS DECLARE IS TWO ROWS (rows 75): the checker's COMPUTED row, typed as every declaration together types it, and the literal's own. The
+    // computed one answers a read - the literal's alone would lose what the other operand says of the property.
+    if (propByOwner.get(key)?.via === 'computed' && row.via !== 'computed') continue;
+    propByOwner.set(key, row);
   }
 
   for (const table of ['members', 'type_members', 'shape_members']) {
@@ -321,5 +326,5 @@ export function makeOwners(store) {
     return { name, file, line, row: row.id, owner: next, member: row, env: found.env };
   };
 
-  return { ownerOf, propByOwner, indexByShape, resolveRef, elementOwnerOf, elementRefOf, ownerOfRow, hopOf, instance, paramNames };
+  return { ownerOf, propByOwner, indexByShape, resolveRef, elementOwnerOf, elementRefOf, ownerOfRow, hopOf, instance, paramNames, baseTypedOf };
 }

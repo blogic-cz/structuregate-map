@@ -77,6 +77,48 @@ export class TypesComponent {
   box!: Box<Item>;
 }
 '@
+    'apps/shop/src/types.coded.ts' = @'
+import { Component, Directive, Input, TemplateRef, ViewContainerRef, inject } from '@angular/core';
+import { Item, Row } from './types.models';
+
+@Directive({ selector: '[demoCoded]', standalone: true })
+export class CodedDirective {
+  @Input() demoCoded = '';
+  rule: Item | null = null;
+  private tpl = inject(TemplateRef);
+  private vcr = inject(ViewContainerRef);
+  render(): void { this.vcr.createEmbeddedView(this.tpl, { rule: this.rule }); }
+}
+
+@Directive({ selector: '[demoTyped]', standalone: true })
+export class TypedDirective {
+  constructor(private tpl: TemplateRef<any>, private vcr: ViewContainerRef) {}
+  render(): void {
+    const ctx: { $implicit: Row } = { $implicit: new Row() };
+    this.vcr.createEmbeddedView(this.tpl, ctx);
+  }
+}
+
+export class ContextBase { constructor(public tpl: TemplateRef<{ $implicit: Item }>) {} }
+@Directive({ selector: '[demoChild]', standalone: true })
+export class ChildDirective extends ContextBase {}
+
+@Directive({ selector: '[demoSilent]', standalone: true })
+export class SilentDirective { constructor(private tpl: TemplateRef<any>) {} }
+
+@Component({
+  selector: 'app-coded',
+  standalone: true,
+  imports: [CodedDirective, TypedDirective, ChildDirective, SilentDirective],
+  template: `
+<p *demoCoded="'k'; let r = rule">{{ r.Name }}</p>
+<p *demoTyped="let row">{{ row.Id }}</p>
+<p *demoChild="let base">{{ base.Name }}</p>
+<p *demoSilent="let none">{{ none.Name }}</p>
+`,
+})
+export class CodedComponent {}
+'@
 }
 
 # ONE MAP PER SUITE PROCESS (`-Shared`): every case reads the same tree.
@@ -136,6 +178,20 @@ Test-Case 'tsrows types: a reference to a generic component binds its parameters
 # T5 (G4): A LITERAL IN AN INTERSECTION READS WITH THE BINDINGS OF THE INSTANTIATION IT WAS REACHED IN.
 Test-Case 'tsrows types: a literal that is a part of an intersection in a generic takes the binding of the hop that reached it' {
     Assert-Line (Get-TsTypesTargets '{{ box.pair.item.Name }}') 'read={{ box.pair.item.Name }}|Name=m@apps/shop/src/types.models.ts:1'
+}
+
+
+# (rows 75) A CONTEXT BUILT IN CODE TYPES THE VARIABLES WHEN THE TEMPLATE REF DECLARES NONE (`TsTpl/TsTplContext.mjs`): `inject(TemplateRef)` and `TemplateRef<any>` say nothing, so the
+# type of the object the directive hands `createEmbeddedView(this.tpl, ctx)` is the context - an object literal, or a local typed by a literal. A BASE class's context is the
+# directive's when it declares none. The control: a `TemplateRef<any>` nothing renders with a context types nothing.
+Test-Case 'tsrows types: a variable of a directive that builds its context in code takes the type of the object it hands the view' {
+    Assert-Line (Get-TsTypesTargets '{{ r.Name }}') 'read={{ r.Name }}|Name=m@apps/shop/src/types.models.ts:1'
+    Assert-Line (Get-TsTypesTargets '{{ row.Id }}') 'read={{ row.Id }}|Id=m@apps/shop/src/types.models.ts:2'
+}
+
+Test-Case 'tsrows types: a directive with no context of its own takes the one of its base class' {
+    Assert-Line (Get-TsTypesTargets '{{ base.Name }}') 'read={{ base.Name }}|Name=m@apps/shop/src/types.models.ts:1'
+    Assert-Line (Get-TsTypesTargets '{{ none.Name }}') 'read={{ none.Name }}|Name=none'
 }
 
 }
