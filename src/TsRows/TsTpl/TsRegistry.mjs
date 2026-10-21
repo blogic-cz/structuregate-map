@@ -52,6 +52,7 @@ function ioByClass(store) {
  * The extraction computes this while it walks the constructor and keeps it nowhere - `injectsTemplateRef`
  * lives on an in-memory object and is not a column. It IS recoverable, because the parameter it is read
  * from is a `di` row: in a real workspace every such class is findable this way.
+ * A `di` row of `inject(TemplateRef)` in a property initializer carries the same `type_ref` (rows 77), so the two spellings are one test.
  */
 function injectsTemplateRef(store) {
   const out = new Set();

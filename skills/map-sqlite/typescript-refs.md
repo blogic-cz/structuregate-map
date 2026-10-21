@@ -87,7 +87,7 @@ else the parameter's `default` where nothing was passed (`Slot` is `Slot<Dto>`),
 A literal answers the names of what it spreads (`shape_members` kind `spread`, last first) and a `type_ref` whose declaration is a library type reads through its `alias`. A class reads the members of its bases, an INTERFACE too (`interfaces.extends_refs`, one `type_ref` per base, null for a library type). Several declarations
 at once (`A | B`, `A & B`, `X` with `shapes`) answer a name only when ONE of them declares it.
 
-A name the template binds keeps its type (rows 73): a loop inside a loop over `X[][]` (any depth, `*ngFor` or `@for`) reads the inner variable as `X`. A `#ref` on a component's element reads as that
+A name the template binds keeps its type (rows 73): a loop inside a loop over `X[][]` (any depth, `*ngFor` or `@for`) reads the inner variable as `X`. A loop over a framework pipe itself (rows 77, `*ngFor="let row of (grid$ | async)"`) takes the element of the list the observable EMITS, one level in: over `Observable<X[][]>` `row` is `X[]` and a loop over `row` takes `X`. A `#ref` on a component's element reads as that
 component (`#c` then `c.prop` targets the member), and `#r="name"` as the directive - or component - whose `exportAs` lists `name`; a ref on a plain element or an `<ng-template>` has no row and its reads
 have no `target` (the ref's own read never has one: it is no member).
 
@@ -96,7 +96,7 @@ What the directive on an element types (rows 74): the `let-x` / `*dir="let x"` v
 type parameters are bound from the inputs on the element (`T` from an input typed `T`, `T[]` or `Box<T>`). A library directive (`ngFor`, `ngIf`) has no rows and keeps its own reading. A `#ref` to a GENERIC
 component binds its parameters the same way (`<demo-table #t [rows]="items">` makes `t.selected` an `Item`), else by their `default`, else their `constraint`. A loop over an `as` alias of a framework
 pipe (`*ngIf="items$ | async as list"` then `*ngFor="let i of list"`) takes the element of the list the observable emits. The parts of an intersection or union read with the bindings of the declaration they were reached in.
-Where the `TemplateRef` declares no context (`inject(TemplateRef)`, `TemplateRef<any>`, `<unknown>`) the context is the object the directive's CODE hands the view (rows 75): the `di` row of that `TemplateRef` has
+A directive taking its template through `inject(TemplateRef)` in a property initializer is structural as one with the constructor parameter is (rows 77): the `di` row of an `inject(X)` carries `type_ref`, the declaration its type names. Where the `TemplateRef` declares no context (`inject(TemplateRef)`, `TemplateRef<any>`, `<unknown>`) the context is the object the directive's CODE hands the view (rows 75): the `di` row of that `TemplateRef` has
 `context_ref` (`di__context_ref`, a `type_ref` node), the type of the second argument of `createEmbeddedView(this.tpl, { rule: this.rule })` - an object literal or a local typed by a literal is a shape ref - when every such call
 of the class hands one type. A directive that declares no context takes its BASE class's, the base's parameters bound by the `extends` arguments.
 
@@ -112,7 +112,7 @@ declaration - `import { cloneDeep } from 'lodash'` is the method of the interfac
 as the link `_.cloneDeep` always had. A `local` is `{file, line, col}` of a `locals` row - a `const`/`let` with a value or without, a loop variable, a `catch` binding, and a name a destructuring binds (the place of its pattern, rows 75). A `param` is `{file, line, col}` of the PARAMETER'S NAME - of the binding element's
 name when it is destructured (`({ a, b: c }) =>`, `([x]) =>`) - for every function-like with a body: a declaration, method, accessor, constructor, arrow, function expression and a nested function. Join it to
 the parameter by place: each item of `members__params` and `functions__params` carries `line` and `col` of its name (of its pattern when destructured), and a destructured one `bindings`, one
-`{name, line, col}` per name it binds, nested patterns included - `JOIN` the item (or binding) whose `line`/`col` equal the read's `param` over the same file, through the owner row (`members.file` or
+`{name, line, col}` per name it binds (nested patterns included; rows 77: also `default`, the evaluated `= 1`, `type`, the checker's text for the name, and `index`, its position in an ARRAY pattern with holes counted - the same three on a `locals` row's `bindings` and on the per-name `consts` rows of a destructuring `const`) - `JOIN` the item (or binding) whose `line`/`col` equal the read's `param` over the same file, through the owner row (`members.file` or
 `functions.file`; `param.file` is the absolute path, `files.abs`). A shorthand property (`{ client }`) is a read of the variable it names and is bound as that name is (its property key is not a link).
 An ALIAS OF AN INTERSECTION among the parts of a written intersection is one named part (rows 74): `Item & ViewDto` with `type ViewDto = Dto & { .. }` has `type_refs` `Item`, `ViewDto` - the checker
 flattens it - and the alias row has `type_ref`/`type_refs` of its own parts (`type_aliases__type_ref`, `type_aliases__type_refs`), which a template read walks in its place.

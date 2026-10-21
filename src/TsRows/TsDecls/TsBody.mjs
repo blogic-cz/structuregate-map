@@ -17,7 +17,7 @@ import { locationOf } from './TsNodes.mjs';
 import { catchFacts, chainOf } from './TsCatch.mjs';
 import { loopFacts, loopKind } from './TsLoops.mjs';
 
-export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName, shapeAt }) {
+export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName, shapeAt, bindingFacts }) {
   /**
    * THE BRANCH OR CASE A STATEMENT SITS IN IS PART OF WHAT THE STATEMENT MEANS.
    *
@@ -293,15 +293,18 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
     const bindings = [];
     if (ts.isIdentifier(node.name)) bindings.push({ property: null, local: node.name.text });
     else {
-      for (const el of node.name.elements) {
+      // EACH BINDING KEEPS ITS DEFAULT, ITS TYPE AND - in an array pattern - ITS POSITION (rows 77, `TsExpr/TsBindings.mjs`): a hole (`[, x]`) is no binding, yet `x` is the second element.
+      const array = ts.isArrayBindingPattern(node.name);
+      node.name.elements.forEach((el, at) => {
         if (ts.isBindingElement(el)) {
           bindings.push({
             property: el.propertyName ? propName(el.propertyName)
               : (ts.isIdentifier(el.name) ? el.name.text : null),
             local: el.name.getText(),
+            ...bindingFacts(el, array ? at : null),
           });
         }
-      }
+      });
     }
     rowsWritten += 1;
     store.add('locals', 'lo', {

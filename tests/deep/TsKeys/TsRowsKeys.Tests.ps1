@@ -399,7 +399,6 @@ Test-Case 'tsrows keys: a service key reaches its caller through a callback and 
     Assert-NoLine $r 'demo.two.main.other |'
     Assert-NoLine $r 'demo.unused.x |'
 }
-}
 
 # A CONSTANT JOINED IN FRONT WITH `+` IS PART OF THE KEY A TEMPLATE SPELLS: `BASE + (child ? `.${name}.tipChild` :
 # `.${name}.tip`)` recorded only `.` and `.tip`, so no reference row named the keys' prefix. The constant now leads
@@ -420,4 +419,6 @@ Test-Case 'tsrows keys: a constant joined in front of a template literal leads i
     Assert-Line $r '["demo.section.", ".tip"]'
     Assert-Line $r '["plain.", ".label"]'
     Assert-Line $r '[".", ".loose"]'
+}
+
 }

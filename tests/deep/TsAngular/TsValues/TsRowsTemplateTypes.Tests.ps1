@@ -119,6 +119,47 @@ export class SilentDirective { constructor(private tpl: TemplateRef<any>) {} }
 })
 export class CodedComponent {}
 '@
+    # (rows 77) A directive that takes its template through `inject(TemplateRef)`, a base class that renders with a context, and an observable of lists of lists.
+    'apps/shop/src/types.inject.ts' = @'
+import { Component, Directive, TemplateRef, ViewContainerRef, inject } from '@angular/core';
+import { Observable, of } from 'rxjs';
+import { Item, Row } from './types.models';
+
+@Directive({ selector: '[demoInject]', standalone: true })
+export class InjectDirective { private tpl = inject(TemplateRef); }
+
+@Directive({ selector: '[demoOther]', standalone: true })
+export class OtherDirective { private vcr = inject(ViewContainerRef); }
+
+export class RenderBase<T> {
+  constructor(protected tpl: TemplateRef<any>, protected vcr: ViewContainerRef) {}
+  protected render(item: T): void { this.vcr.createEmbeddedView(this.tpl, { $implicit: item, extra: new Row() }); }
+}
+@Directive({ selector: '[demoRendered]', standalone: true })
+export class RenderedDirective extends RenderBase<Item> {
+  constructor(tpl: TemplateRef<any>, vcr: ViewContainerRef) { super(tpl, vcr); }
+}
+
+@Component({
+  selector: 'app-inject',
+  standalone: true,
+  imports: [InjectDirective, OtherDirective, RenderedDirective],
+  template: `
+<ng-template [demoInject]="injectedOn"></ng-template>
+<ng-template [demoOther]="plainOn"></ng-template>
+<p *demoRendered="let made; extra as more">{{ made.Name }}{{ more.Id }}</p>
+<div *ngFor="let line of (grid$ | async)"><b>{{ line[0].Name }}</b><i *ngFor="let square of line">{{ square.Name }}</i></div>
+<div *ngFor="let flat of (flat$ | async)">{{ flat.Name }}</div>
+<p>{{ (grid$ | async)![0][0].Name }}</p>
+`,
+})
+export class InjectComponent {
+  injectedOn = true;
+  plainOn = true;
+  grid$: Observable<Item[][]> = of([[new Item()]]);
+  flat$: Observable<Item[]> = of([new Item()]);
+}
+'@
 }
 
 # ONE MAP PER SUITE PROCESS (`-Shared`): every case reads the same tree.
@@ -192,6 +233,37 @@ Test-Case 'tsrows types: a variable of a directive that builds its context in co
 Test-Case 'tsrows types: a directive with no context of its own takes the one of its base class' {
     Assert-Line (Get-TsTypesTargets '{{ base.Name }}') 'read={{ base.Name }}|Name=m@apps/shop/src/types.models.ts:1'
     Assert-Line (Get-TsTypesTargets '{{ none.Name }}') 'read={{ none.Name }}|Name=none'
+}
+
+
+# (rows 77) A DIRECTIVE THAT TAKES ITS TEMPLATE THROUGH `inject(TemplateRef)` IS STRUCTURAL as one with the constructor parameter is: `[demoInject]="x"` on an `<ng-template>` is a gate of the
+# `structural` kind. The control: a directive that `inject()`s anything else is an attribute directive, and its binding is no gate.
+Test-Case 'tsrows types: a directive that injects TemplateRef with inject() is structural' {
+    $r = Invoke-TsRowsQ (Get-TsTypesDb) "SELECT 'gate=' || name || '|' || source || '|' || gate_kind AS r FROM gates WHERE source IN ('injectedOn', 'plainOn')"
+    Assert-Line $r 'gate=demoInject|injectedOn|structural'
+    Assert-NoLine $r 'plainOn'
+    # ITS `di` ROW NAMES THE DECLARATION `inject()` HANDS BACK, as a constructor parameter's does: the class in Angular's package (`file` ends there), each by its own class.
+    $d = Invoke-TsRowsQ (Get-TsTypesDb) ("SELECT 'di=' || c.name || '|' || ifnull(n.value, 'none') || '|' || (CASE WHEN f.value LIKE '%@angular/core/%' THEN 'core' ELSE 'other' END) AS r " +
+        "FROM di d JOIN classes c ON c.id = d.class JOIN di__type_ref n ON n.owner = d.id AND n.role = 'name' JOIN di__type_ref f ON f.owner = d.id AND f.parent = n.parent AND f.role = 'file' " +
+        "WHERE c.name IN ('InjectDirective', 'OtherDirective') AND d.inject = 1")
+    Assert-Line $d 'di=InjectDirective|TemplateRef|core'
+    Assert-Line $d 'di=OtherDirective|ViewContainerRef|core'
+}
+
+# (rows 77) A context built by a BASE class's `createEmbeddedView(this.tpl, ctx)` types the `let-` variables of the directive that extends it, the base's `T` bound from `extends RenderBase<Item>`.
+Test-Case 'tsrows types: a variable of a directive whose base class renders with a context takes the type the base hands the view' {
+    $r = Get-TsTypesTargets '{{ made.Name }}{{ more.Id }}'
+    Assert-Line $r 'read={{ made.Name }}{{ more.Id }}|Name=m@apps/shop/src/types.models.ts:1'
+    Assert-Line $r 'read={{ made.Name }}{{ more.Id }}|Id=m@apps/shop/src/types.models.ts:2'
+}
+
+# (rows 77) A LOOP OVER `async` TAKES THE ELEMENT OF THE LIST THE OBSERVABLE EMITS: `Observable<Item[][]>` emits `Item[][]`, so `let line of (grid$ | async)` is an `Item[]` (a keyed read of it
+# is an `Item`) and the loop inside it over `line` an `Item`. The controls: a list of items takes `Item`, and a keyed read of the alias chain itself.
+Test-Case 'tsrows types: a loop over an async observable of lists of lists takes the list, and a loop in it the element' {
+    Assert-Line (Get-TsTypesTargets '{{ line[0].Name }}') 'read={{ line[0].Name }}|Name=m@apps/shop/src/types.models.ts:1'
+    Assert-Line (Get-TsTypesTargets '{{ square.Name }}') 'read={{ square.Name }}|Name=m@apps/shop/src/types.models.ts:1'
+    Assert-Line (Get-TsTypesTargets '{{ flat.Name }}') 'read={{ flat.Name }}|Name=m@apps/shop/src/types.models.ts:1'
+    Assert-Line (Get-TsTypesTargets '{{ (grid$ | async)![0][0].Name }}') 'read={{ (grid$ | async)![0][0].Name }}|Name=m@apps/shop/src/types.models.ts:1'
 }
 
 }
