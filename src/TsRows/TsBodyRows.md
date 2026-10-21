@@ -26,7 +26,8 @@ Loops, bare expression statements and `++`/`--` had no row of their own. The cas
 
 `TsDecls/TsExpr/TsReadRefs.mjs` answers it, `TsExprNorm.mjs::bareRead` writes it; the cases are `tests/deep/TsAngular/TsResolved/TsRowsChainRows.Tests.ps1`.
 
-- **`target`** for a top-level `const`, function, enum or CLASS (an import alias followed). A class target has `kind: 'class'` and the class NAME's line (its `classes` row's `line`,
+- **`target`** for a top-level `const`, function, enum or CLASS (an import alias followed). A top-level DESTRUCTURING `const` counts (rows 76): `export const { DemoActions } = makeSlice()`, nested patterns too, targets the bound NAME's line, where `consts` has one value-less
+  `destructured` row per bound name (the initializer is not the name's value, so no reader takes it for one). A class target has `kind: 'class'` and the class NAME's line (its `classes` row's `line`,
   never the decorator's). `rust/fbtcore/src/rows/ts/gate/ts/gate_tsrows.rs::names_class` makes every closure reader take it as the bare name it was: no row, never a constant or a member.
 - **`local`** for a `const`/`let` with an initializer; **`param`** for a parameter of a function-like with a body, `{file, line, col}` of the parameter's name (a destructured
   parameter: the binding element's name). `members__params`/`functions__params` items carry `line`/`col`, and `bindings` when destructured, so the join is exact. `param` on a CODE tree is that place,

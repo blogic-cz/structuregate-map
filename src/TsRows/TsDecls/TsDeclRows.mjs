@@ -18,6 +18,28 @@ export function makeDeclRows({ ts, store, modifiersOf, localExports, evalCell, p
     const exported = modifiersOf(statement).exported;
     const named = localExports(statement.getSourceFile());
     for (const d of statement.declarationList.declarations) {
+      // A DESTRUCTURING DECLARES EACH NAME IT BINDS (rows 76), not the pattern text: `export const { DemoActions, DemoSelectors } = makeSlice()` is one value-less row per bound name, at
+      // the NAME's line and column, which is what a read's `target` anchors at (`TsReadRefs.mjs::at`). A row named by the pattern joined no read, and carrying the initializer's value
+      // would let a gate reader take the whole initializer for the name's value. The initializer is walked once, below.
+      if (!ts.isIdentifier(d.name)) {
+        const names = [];
+        const bound = (pattern) => {
+          for (const el of pattern.elements) {
+            if (ts.isOmittedExpression(el)) continue;
+            if (ts.isIdentifier(el.name)) names.push(el); else bound(el.name);
+          }
+        };
+        bound(d.name);
+        for (const el of names) {
+          const text = el.name.text;
+          store.add('consts', 'k', {
+            file: fid, name: text, exported: exported || named.has(text), destructured: true,
+            type: null, value: undefined, ...locationOf(el),
+          });
+        }
+        if (d.initializer) collectExpr(d.initializer, null, null);
+        continue;
+      }
       const name = d.name.getText();
       store.add('consts', 'k', {
         file: fid,

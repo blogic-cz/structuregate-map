@@ -131,9 +131,14 @@ export interface Resp { client: string; }
 export class Api { client = 'x'; post(b: Req): Resp { return { client: b.client }; } }
 export function project(f: () => { currencyID: string }): string { return f().currencyID; }
 export const MODE = 1;
+export function makeSlice() { return { DemoActions: { load: () => 1 }, DemoSelectors: { pick: () => 2 } }; }
+export const { DemoActions, DemoSelectors } = makeSlice();
+export const {
+  a: { deep },
+} = { a: { deep: { x: 1 } } };
 '@
     'apps/shop/src/bind.use.ts' = @'
-import { Alpha, Alpha as Aliased, Api, Beta, MODE, project } from './bind.kinds';
+import { Alpha, Alpha as Aliased, Api, Beta, DemoActions, DemoSelectors, MODE, deep, project } from './bind.kinds';
 export class Eff {
   client = 1;
   api = new Api();
@@ -154,6 +159,7 @@ export const arrow = (s: string) => s.length;
 export const obj = { m(n: number) { return n + 1; } };
 export function outer(k: number) { function inner(j: number) { return j + k; } return inner(k); }
 export class Holder { constructor(private dep: Api, id: number) { void id; } }
+export const demoUse = () => DemoActions.load() + DemoSelectors.pick() + deep.x;
 '@
     'apps/shop/src/bind.loops.ts' = @'
 import { Component, Input } from '@angular/core';
@@ -338,4 +344,20 @@ Test-Case 'tsrows: a bare name a library declares as an interface method has a t
         "WHERE x.source = 'cloneDeep(v)'")
     Assert-Line $f 'file=node_modules/demo-lib/index.d.ts'
 }
+}
+
+# (rows 76) a bare name a TOP-LEVEL DESTRUCTURING `const` binds (`export const { DemoActions } = makeSlice()`, a nested `{ a: { deep } }`) is a module declaration as a plain
+# `const` is: its read has a `target` at the BOUND NAME's line, and a `consts` row sits there for that name, value-less (the initializer is not the name's value). Control: `MODE`.
+Test-Case 'tsrows: a bare name a top-level destructuring const binds has a target that joins a consts row' {
+    $db = Get-TsBindDb
+    $r = Get-TsBindLinks $db 'DemoActions.load() + DemoSelectors.pick() + deep.x'
+    Assert-Line $r 'bind=DemoActions=target@11'
+    Assert-Line $r 'bind=DemoSelectors=target@11'
+    Assert-Line $r 'bind=deep=target@13'
+    Assert-Line (Get-TsBindLinks $db 'Beta.Parse(s) + MODE') 'bind=MODE=target@9'
+    $k = Invoke-TsRowsQ $db "SELECT 'const=' || name || '@' || line || '/' || ifnull(destructured, 0) || '/' || ifnull(value, 'none') AS r FROM consts WHERE name IN ('DemoActions', 'DemoSelectors', 'deep', 'MODE')"
+    Assert-Line $k 'const=DemoActions@11/1/none'
+    Assert-Line $k 'const=DemoSelectors@11/1/none'
+    Assert-Line $k 'const=deep@13/1/none'
+    Assert-Line $k 'const=MODE@9/0/1'
 }

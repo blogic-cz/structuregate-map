@@ -282,9 +282,12 @@ async function main() {
   //     both arms of a union) has its own `type_members` row, and the members below it hang from it (`TsDecls/TsTypeRows.mjs::typeMemberRowsFromType`). A directive that renders `createEmbeddedView(this.tpl, ctx)`
   //     has `di.context_ref`, the `type_ref` of `ctx`, on its `TemplateRef`'s row (`TsExpr/TsViewContext.mjs`), which types the template's `let-` variables when the `TemplateRef` declares no context
   //     (`TsTpl/TsTplContext.mjs`); a directive with no context of its own takes its base class's.
+  // 76: a name a TOP-LEVEL destructuring `const` binds (`export const { DemoActions } = makeSlice()`, nested patterns to any depth) is a module declaration: a code read of it has a `target`
+  //     at the bound name's line (`TsExpr/TsReadRefs.mjs::moduleLevel`), and the `consts` table has one value-less row per bound name, `destructured`, at the name's line and column
+  //     (`TsDecls/TsDeclRows.mjs::constRows`) instead of one row named by the pattern text.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 75, build: args.build,
+    config: config.file, data: config.data, rows: 76, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
