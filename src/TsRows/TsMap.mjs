@@ -264,9 +264,15 @@ async function main() {
   //     (`{name, file, line}` of each member's declaration); a type parameter's `constraint` may be a union (a bag); `this['a'][0]['b']` names its constraint; a
   //     literal in a generic class reads with the class's bindings; a spread of an intersection, and one union reached through several aliases of one
   //     generic, resolve. `return_refs_of` beside `return_refs`.
+  // 73: a name a template binds holds a VALUE, not only an owner (`TsTpl/TsTplReads.mjs::scopeAt`): a loop variable over a list of lists keeps its `ref`, so
+  //     the loop inside it takes that element, to any depth (`*ngFor` and `@for`); a `#ref` is the component of the element it sits on, or the directive
+  //     (or component) whose `exportAs` lists the name it is given (`refValueOf`), so `#c` then `c.prop` reaches the member. No row shape changes.
+  //     Also (#102): every link of a property chain in a CODE expression tree carries its `target` (`TsDecls/TsExpr/TsExprNorm.mjs`), not only the outermost.
+  //     A mapped type a DECLARED alias names (`type T = Pick<Slot<unknown>, 'k'>`) is that alias's computed members, not its `props` (`TsTpl/TsTplOwners.mjs::ownerOf`), so
+  //     a parameter left to its default still applies through it; a keyed read over an `as` alias of an `async` pipe takes the element of the list the observable emits.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 72, build: args.build,
+    config: config.file, data: config.data, rows: 73, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

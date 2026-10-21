@@ -14,14 +14,6 @@
  */
 
 export function makeTsExprNormalizer(ts, resolveRead, resolveName = null, resolveLocal = null) {
-  const outermost = (node) => !(node.parent !== undefined && ts.isPropertyAccessExpression(node.parent)
-    && node.parent.expression === node);
-  // A FIELD A METHOD IS CALLED ON (`this.allowed.includes(v)`) is resolved too: the list a membership test reads
-  // is that field, and with no target the test named nothing a gate could read its members from.
-  const calledOn = (node) => ts.isPropertyAccessExpression(node) && node.expression.kind === ts.SyntaxKind.ThisKeyword
-    && !outermost(node) && node.parent.parent !== undefined && ts.isCallExpression(node.parent.parent)
-    && node.parent.parent.expression === node.parent;
-
   const norm = (node) => {
     if (node === undefined) return null;
     // Parentheses carry no meaning once the tree is explicit.
@@ -55,7 +47,10 @@ export function makeTsExprNormalizer(ts, resolveRead, resolveName = null, resolv
       // `a?.b` is a distinct kind on the template side too - keep the distinction rather than flattening
       // it, because a safe read says something real about what the author expected to be absent.
       const safe = node.questionDotToken !== undefined;
-      const target = resolveRead && (outermost(node) || calledOn(node)) ? resolveRead(node.name) : null;
+      // EVERY LINK OF A CHAIN IS RESOLVED, not only the outermost: `this.holder.Inner.Id` carries a target on `holder`,
+      // `Inner` and `Id`, each the declaration its own name lands on. Resolving the last link alone left a field read
+      // as the receiver of another read (most `this.<member>.x`) with no declaration a gate or a join could follow.
+      const target = resolveRead ? resolveRead(node.name) : null;
       return {
         k: safe ? 'SafeRead' : 'Read', name: node.name.getText(), receiver: norm(node.expression),
         ...(target ? { target } : {}),
