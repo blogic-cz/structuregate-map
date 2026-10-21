@@ -185,6 +185,16 @@ export class Deco {
   both(v: string[]): number { return demo.cloneDeep(v).length; }
 }
 '@
+    'apps/shop/src/bind.defaults.ts' = @'
+export class Cell { name = ''; }
+export const { alpha = 1, beta: gamma = 'x' } = { alpha: 2, beta: 'y' } as { alpha?: number; beta?: string };
+export const [, second = new Cell()] = [new Cell()] as Cell[];
+export function useArgs({ one = 1, two: dos = new Cell(), plain }: { one?: number; two?: Cell; plain: string }, [, third = 5]: number[]): number {
+  const { p = 3, q: qq = 'z', zz } = { p: 1, q: 'w', zz: true } as { p?: number; q?: string; zz: boolean };
+  const [, r = 2] = [1, 2] as number[];
+  return one + p + third + r + dos.name.length + qq.length + plain.length + (zz ? 1 : 0);
+}
+'@
     'node_modules/demo-lib/package.json' = '{"name":"demo-lib","version":"1.0.0","types":"index.d.ts"}'
     'node_modules/demo-lib/index.d.ts' = @'
 declare const _: _.DemoStatic;
@@ -344,7 +354,6 @@ Test-Case 'tsrows: a bare name a library declares as an interface method has a t
         "WHERE x.source = 'cloneDeep(v)'")
     Assert-Line $f 'file=node_modules/demo-lib/index.d.ts'
 }
-}
 
 # (rows 76) a bare name a TOP-LEVEL DESTRUCTURING `const` binds (`export const { DemoActions } = makeSlice()`, a nested `{ a: { deep } }`) is a module declaration as a plain
 # `const` is: its read has a `target` at the BOUND NAME's line, and a `consts` row sits there for that name, value-less (the initializer is not the name's value). Control: `MODE`.
@@ -360,4 +369,46 @@ Test-Case 'tsrows: a bare name a top-level destructuring const binds has a targe
     Assert-Line $k 'const=DemoSelectors@11/1/none'
     Assert-Line $k 'const=deep@13/1/none'
     Assert-Line $k 'const=MODE@9/0/1'
+}
+
+# (rows 77) A NAME A DESTRUCTURING BINDS has its `default` (the evaluated `= 1`), its `type` (the checker's text for the name) and, in an ARRAY pattern, its `index` - a hole (`[, x]`)
+# is skipped yet counts - on a `locals` row's `bindings`, a parameter's `bindings` items and the per-name `consts` rows of a top-level `const`. Control: a name with no default has none.
+# One line per binding: `<name>|default=..|type=..|index=..`, `none` where the row has no such member.
+function Get-TsBindingFacts([string]$Table, [string]$Owner, [string]$Where, [string]$Name, [string]$Chain) {
+    $leaf = { param($key) "LEFT JOIN $Table k_$key ON k_$key.owner = it.owner AND k_$key.parent = it.n AND k_$key.role = '$key' " }
+    return Invoke-TsRowsQ (Get-TsBindDb) ("SELECT nm.value || '|default=' || ifnull(k_default.value, 'none') || '|type=' || ifnull(k_type.value, 'none') || '|index=' || ifnull(k_index.value, 'none') AS r " +
+        "FROM $Owner o JOIN files f ON f.id = o.file $Chain JOIN $Table nm ON nm.owner = it.owner AND nm.parent = it.n AND nm.role = '$Name' " +
+        (& $leaf 'default') + (& $leaf 'type') + (& $leaf 'index') + "WHERE f.path LIKE '%bind.defaults.ts' AND $Where")
+}
+
+Test-Case 'tsrows: a name a local destructuring binds has its default, its type and its index in an array pattern' {
+    $r = Get-TsBindingFacts 'locals__bindings' 'locals' 'o.destructured = 1' 'local' 'JOIN locals__bindings it ON it.owner = o.id AND it.parent = 0'
+    Assert-Line $r 'p|default=3|type=number|index=none'
+    Assert-Line $r 'qq|default=z|type=string|index=none'
+    # THE CONTROL: no default, no `default` - the name still has its type.
+    Assert-Line $r 'zz|default=none|type=boolean|index=none'
+    # THE HOLE: `[, r = 2]` binds one name, and it is the SECOND element.
+    Assert-Line $r 'r|default=2|type=number|index=1'
+}
+
+Test-Case 'tsrows: a name a destructured parameter binds has its default, its type and its index in an array pattern' {
+    $r = Get-TsBindingFacts 'functions__params' 'functions' "o.name = 'useArgs'" 'name' ("JOIN functions__params pi ON pi.owner = o.id AND pi.parent = 0 " +
+        "JOIN functions__params bl ON bl.owner = pi.owner AND bl.parent = pi.n AND bl.role = 'bindings' JOIN functions__params it ON it.owner = bl.owner AND it.parent = bl.n")
+    Assert-Line $r 'one|default=1|type=number|index=none'
+    Assert-Line $r 'dos|default=none|type=Cell|index=none'
+    Assert-Line $r 'plain|default=none|type=string|index=none'
+    Assert-Line $r 'third|default=5|type=number|index=1'
+}
+
+Test-Case 'tsrows: the per-name consts rows of a top-level destructuring have their default, their type and their index in an array pattern' {
+    $r = Invoke-TsRowsQ (Get-TsBindDb) ("SELECT c.name || '|default=' || ifnull(c.""default"", 'none') || '|type=' || ifnull(c.type, 'none') || '|index=' || ifnull(c.""index"", 'none') AS r " +
+        "FROM consts c JOIN files f ON f.id = c.file WHERE f.path LIKE '%bind.defaults.ts' AND c.destructured = 1")
+    Assert-Line $r 'alpha|default=1|type=number|index=none'
+    Assert-Line $r 'gamma|default=x|type=string|index=none'
+    Assert-Line $r 'second|default=none|type=Cell|index=1'
+    # The object default is a structure: `consts__default` holds its nodes, and the name's own `value` stays none.
+    $d = Invoke-TsRowsQ (Get-TsBindDb) "SELECT 'default nodes=' || (count(*) > 0) AS r FROM consts c JOIN consts__default d ON d.owner = c.id WHERE c.name = 'second'"
+    Assert-Line $d 'default nodes=1'
+}
+
 }

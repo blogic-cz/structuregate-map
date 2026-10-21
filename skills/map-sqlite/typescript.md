@@ -125,7 +125,7 @@ Beside the shared tables it adds the FRAMEWORK tables:
 * **`classes.extends`** is `{text, name, file, external, line, id, type_args}`: `text` as written, `name`/`file`/`line` the
   declaration the checker reached (alias and barrel followed), `id` its `classes` row (none for a library class), and
   `type_args` each type argument the same way (`extends Base<Order>`: Order's `id`), nested arguments under their own.
-* **`di`** is a constructor parameter, or a field initialised by `inject()` (`inject = 1`, `param` the field). `token`,
+* **`di`** is a constructor parameter, or a field initialised by `inject()` (`inject = 1`, `param` the field; its `type_ref` is the declaration the call's type names, rows 77). `token`,
   `token_ref` and `token_id` name the injection token - an `@Inject(TOKEN)` or `inject()`'s argument - where `resolved`
   stays the declared TYPE; a token that is a property of a const object (`Tokens.X`)
   joins that const in `token_id`. An `export { A as B }` alias resolves to `A` (`routes.component_id`, the `id` on each

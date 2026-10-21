@@ -19,7 +19,7 @@ import { makeViewContexts } from './TsViewContext.mjs';
 const ANGULAR_CORE = '@angular/core';
 
 export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRefAt, symbolAt,
-  evalNode, evalCell, propName, jsdocOf, collectBody, collectExpr, angular }) {
+  evalNode, evalCell, propName, jsdocOf, collectBody, collectExpr, angular, bindingFacts }) {
   /** A type as TEXT: the annotation if there is one, otherwise what the checker computed.
    *
    *  NoTruncation, and then no truncation of our own either: a 400-character union type is what the member's
@@ -175,7 +175,9 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
   /** EVERY NAME A DESTRUCTURED PARAMETER BINDS, each with its place (`({ a, b: c }, [d])` is `a`, `c`, `d`): what a code read's `param` joins when the name is no
    *  parameter of its own, nested patterns included. An omitted element (`[, d]`) binds nothing. */
   const bindingsOf = (name) => (ts.isIdentifier(name) ? [{ name: name.text, ...startOf(name) }]
-    : name.elements.flatMap((e) => (ts.isOmittedExpression(e) ? [] : bindingsOf(e.name))));
+    : name.elements.flatMap((e, at) => (ts.isOmittedExpression(e) ? []
+      : ts.isIdentifier(e.name) ? [{ name: e.name.text, ...startOf(e.name), ...bindingFacts(e, ts.isArrayBindingPattern(name) ? at : null) }]
+        : bindingsOf(e.name))));
 
   function paramsOf(node) {
     return [...(node.parameters ?? [])].map((p) => ({
@@ -301,6 +303,9 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
 
   const viewContextsOf = makeViewContexts(ts, checker, typeRefAt);
 
+  /** Is a `type_ref` Angular's own `TemplateRef`? By the DECLARATION it resolved to (`TsTpl/TsRegistry.mjs` asks the same of the stored `di` row), never by the name written. */
+  const isAngularTemplateRef = (ref) => !!ref && ref.name === 'TemplateRef' && String(ref.file || '').includes('@angular/core');
+
   function extractClass(node, fid, holder = null) {
     let injectsTemplateRef = false;
     const mods = modifiersOf(node);
@@ -390,10 +395,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
           // convention: `TemplateRef` resolved to Angular's own `.d.ts`. It is what separates a desugared
           // `<ng-template [demoIf]>` - a real gate - from an attribute directive that happens to
           // be bound there.
-          const ref = p.type_ref;
-          if (ref && ref.name === 'TemplateRef' && String(ref.file || '').includes('@angular/core')) {
-            injectsTemplateRef = true;
-          }
+          if (isAngularTemplateRef(p.type_ref)) injectsTemplateRef = true;
           store.add('di', 'd', {
             class: classId, file: fid, param: p.name, type: p.type,
             resolved: p.resolved, type_ref: p.type_ref,
@@ -415,10 +417,15 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
             ts.isPropertyAssignment(pr) && propName(pr.name) === 'optional'
             && pr.initializer.kind === ts.SyntaxKind.TrueKeyword);
           const tokenArg = call.arguments[0];
+          // WHAT `inject(X)` HANDS BACK IS TYPED AS A CONSTRUCTOR PARAMETER IS (rows 77): the declaration its type names, so `inject(TemplateRef)` is the `@angular/core`
+          // class - and a directive taking its template THAT way is structural too. A null here read such a directive as an attribute directive: the `[dir]="x"` it is bound with
+          // on an `<ng-template>` was no gate, and the `let-` variables of its context were typed from nothing.
+          const injected = typeRefAt(call).type_ref ?? null;
+          if (isAngularTemplateRef(injected)) injectsTemplateRef = true;
           store.add('di', 'd', {
             class: classId, file: fid, param: propName(m.name), member: memberId, inject: true,
             type: typeText(call, null), resolved: declFileOfSymbol(t.aliasSymbol ?? t.getSymbol()),
-            type_ref: null, decorators: [], optional,
+            type_ref: injected, decorators: [], optional,
             ...contextOf(m),
             ...(tokenArg ? { token: tokenArg.getText(), token_ref: declFileOf(tokenArg) } : {}),
           });

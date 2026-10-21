@@ -225,7 +225,14 @@ export function rollupTemplateReads(store) {
     if (held === null) return null;
     const name = at.k === 'Pipe' ? str(at.name) : null;
     const element = at.k !== 'Pipe' || (name !== null && transformRefOfPipe.has(name));
-    if (!element) return name === null || knownPipes.has(name) ? null : { owner: held.owner, ref: held.ref, row: null, env: held.env ?? null };
+    if (!element) {
+      if (name === null || knownPipes.has(name)) return null;
+      // A LOOP OVER A FRAMEWORK PIPE TAKES THE ELEMENT OF THE LIST IT EMITS (rows 77): `Observable<Item[][]> | async` emits `Item[][]`, so the variable is `Item[]` - `held.ref` is the
+      // INNERMOST `Item` (`unwrapped`), right for one level only. A value that emits no list (`wrapped` absent, or no element) keeps the innermost, as before.
+      const emitted = held.wrapped === undefined ? null : elementRefOf(held.wrapped);
+      if (emitted !== null) return { owner: resolveRef(emitted, held.env ?? null), ref: emitted, row: null, env: held.env ?? null };
+      return { owner: held.owner, ref: held.ref, row: null, env: held.env ?? null };
+    }
     // AN `as` ALIAS OF A FRAMEWORK PIPE holds `wrapped`, the list the observable emits, where its `ref` is the innermost element (rows 74): the loop takes the element of THAT.
     const ref = elementRefOf(held.wrapped ?? held.ref);
     return ref === null ? null : { owner: resolveRef(ref, held.env), ref, row: null, env: held.env ?? null };

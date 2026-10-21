@@ -285,9 +285,14 @@ async function main() {
   // 76: a name a TOP-LEVEL destructuring `const` binds (`export const { DemoActions } = makeSlice()`, nested patterns to any depth) is a module declaration: a code read of it has a `target`
   //     at the bound name's line (`TsExpr/TsReadRefs.mjs::moduleLevel`), and the `consts` table has one value-less row per bound name, `destructured`, at the name's line and column
   //     (`TsDecls/TsDeclRows.mjs::constRows`) instead of one row named by the pattern text.
+  // 77: four gaps closed. `inject(TemplateRef)` in a property initializer is a TemplateRef like a constructor parameter: its `di` row has the `type_ref` the call's type names (any `inject(X)` has
+  //     one now), and a directive taking its template that way is STRUCTURAL (`TsDecls/TsClassRows.mjs::isAngularTemplateRef`) - its `[dir]="x"` on an `<ng-template>` is a gate. A name a
+  //     destructuring binds has `default` (the evaluated default of `{ a = 1 }`), `type` (the checker's text for the name) and, in an array pattern, `index` (holes counted) on a `locals` row's
+  //     `bindings`, a parameter's `bindings` items and the per-name `consts` rows of a top-level destructuring (`TsDecls/TsExpr/TsBindings.mjs`). A loop over a framework pipe (`async`) takes the
+  //     element of the list it EMITS, not the innermost type: `Observable<Item[][]>` gives `Item[]`, and a loop inside it `Item` (`TsTpl/TsTplReads.mjs::loopValueOf`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 76, build: args.build,
+    config: config.file, data: config.data, rows: 77, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

@@ -56,7 +56,7 @@ pub const TSROWS: Set = set!("tsrows-node":
     "TsRows/TsDecls/TsExpr/TsExprSummary.mjs", "TsRows/TsDecls/TsExpr/TsReadRefs.mjs", "TsRows/TsDecls/TsI18nCalls.mjs",
     "TsRows/TsDecls/TsModifiers.mjs", "TsRows/TsDecls/TsPropReads.mjs", "TsRows/TsDecls/TsLibPipes.mjs", "TsRows/TsDecls/TsRefs.mjs", "TsRows/TsDecls/TsTypeRef.mjs",
     "TsRows/TsDecls/TsTypeRows.mjs", "TsRows/TsDecls/TsExpr/TsValue.mjs", "TsRows/TsDecls/TsExpr/TsValueRefs.mjs",
-    "TsRows/TsDecls/TsExpr/TsWriteRefs.mjs", "TsRows/TsDecls/TsExpr/TsViewContext.mjs",
+    "TsRows/TsDecls/TsExpr/TsWriteRefs.mjs", "TsRows/TsDecls/TsExpr/TsViewContext.mjs", "TsRows/TsDecls/TsExpr/TsBindings.mjs",
     "TsRows/TsTpl/TsGateChain.mjs", "TsRows/TsTpl/TsRegistry.mjs", "TsRows/TsDerive/TsDynRender.mjs",
     "TsRows/TsDerive/TsIndexes.mjs", "TsRows/TsDerive/TsInputUsage.mjs", "TsRows/TsDerive/TsModuleScope.mjs",
     "TsRows/TsDerive/TsNgrx.mjs", "TsRows/TsDerive/TsReach.mjs", "TsRows/TsDerive/TsRouteFold.mjs",

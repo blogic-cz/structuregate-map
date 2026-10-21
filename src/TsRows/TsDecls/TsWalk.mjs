@@ -15,6 +15,7 @@ import { dynamicImportRow, importRow } from './TsImports.mjs';
 import { jsdocOf, locationOf as nodeLocation, makeSymbolAt } from './TsNodes.mjs';
 import { makeAngularRows } from './TsAngular.mjs';
 import { makeBodyRows } from './TsBody.mjs';
+import { makeBindingFacts } from './TsBindings.mjs';
 import { makeClassRows } from './TsClassRows.mjs';
 import { makeDeclRows } from './TsDeclRows.mjs';
 import { makeExprDescriber } from './TsExprDescribe.mjs';
@@ -151,6 +152,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
       });
     }, readRefs.resolveRead, readRefs.resolveName, log, readRefs.resolveLocal, readRefs.resolveParam);
     const { evalNode, evalCell, propName } = makeEvaluator(ts, checker, symbolAt, describe);
+    const bindingFacts = makeBindingFacts(ts, checker, evalCell);
     const typeRows = makeTypeRows({
       ts, checker, store, modifiersOf, typeRefAt, evalNode, propName, fileId,
     });
@@ -164,10 +166,10 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     const angular = makeAngularRows({ store, feRoot: fe, diag });
     const classRows = makeClassRows({
       ts, checker, store, feRoot: fe, modifiersOf, typeRefAt, symbolAt, evalNode, evalCell, propName,
-      jsdocOf: (node) => jsdocOf(ts, node), collectBody, collectExpr, angular,
+      jsdocOf: (node) => jsdocOf(ts, node), collectBody, collectExpr, angular, bindingFacts,
     });
     const declRows = makeDeclRows({
-      ts, store, modifiersOf, localExports, evalCell, collectBody, collectExpr,
+      ts, store, modifiersOf, localExports, evalCell, collectBody, collectExpr, bindingFacts,
       paramsOf: classRows.paramsOf, typeText: classRows.typeText,
       jsdocOf: (node) => jsdocOf(ts, node), resolveRead: readRefs.resolveRead, resolveMember: readRefs.resolveMember,
     });
@@ -194,7 +196,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     });
     const rows = makeBodyRows({
       ts, store, evalNode, evalCell, describe, declFileOf: classRows.declFileOf, declareInline, declareClass, propName,
-      shapeAt: shapes.remember,
+      shapeAt: shapes.remember, bindingFacts,
     });
     bodies.collect = rows.collectBody;
     bodies.expr = rows.collectExpr;

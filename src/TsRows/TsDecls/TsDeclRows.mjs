@@ -6,7 +6,7 @@
 import { locationOf } from './TsNodes.mjs';
 
 export function makeDeclRows({ ts, store, modifiersOf, localExports, evalCell, paramsOf, typeText,
-  jsdocOf, collectBody, collectExpr, resolveRead, resolveMember }) {
+  jsdocOf, collectBody, collectExpr, resolveRead, resolveMember, bindingFacts }) {
   /**
    * One row per declared name - `const a = 1, b = 2` is two consts, not one statement.
    *
@@ -24,17 +24,18 @@ export function makeDeclRows({ ts, store, modifiersOf, localExports, evalCell, p
       if (!ts.isIdentifier(d.name)) {
         const names = [];
         const bound = (pattern) => {
-          for (const el of pattern.elements) {
-            if (ts.isOmittedExpression(el)) continue;
-            if (ts.isIdentifier(el.name)) names.push(el); else bound(el.name);
-          }
+          pattern.elements.forEach((el, at) => {
+            if (ts.isOmittedExpression(el)) return;
+            if (ts.isIdentifier(el.name)) names.push({ el, at: ts.isArrayBindingPattern(pattern) ? at : null }); else bound(el.name);
+          });
         };
         bound(d.name);
-        for (const el of names) {
+        // `type`, `default` and `index` (rows 77, `TsExpr/TsBindings.mjs`) are what the NAME is - the pattern's initializer is still no value of it.
+        for (const { el, at } of names) {
           const text = el.name.text;
           store.add('consts', 'k', {
             file: fid, name: text, exported: exported || named.has(text), destructured: true,
-            type: null, value: undefined, ...locationOf(el),
+            value: undefined, ...bindingFacts(el, at), ...locationOf(el),
           });
         }
         if (d.initializer) collectExpr(d.initializer, null, null);
