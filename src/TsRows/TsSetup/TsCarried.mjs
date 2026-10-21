@@ -31,7 +31,6 @@ export const UNREAD_WHEN_CARRIED = {
   returns: { calls: true, reads: true },
   switch_cases: { discriminant: true, label_exprs: true, labels: true },
   template_literals: { holes: true, parts: true },
-  template_nodes: { directives: true },
 };
 
 /** What `storedForm` holds for a stub: one value, the same before and after, never a structure's text. */

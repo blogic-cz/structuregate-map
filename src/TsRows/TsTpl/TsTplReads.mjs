@@ -10,11 +10,13 @@
  */
 
 import { makeOwners } from './TsTplOwners.mjs';
+import { makeContexts } from './TsTplContext.mjs';
 
 const str = (v) => (typeof v === 'string' ? v : null);
 
 export function rollupTemplateReads(store) {
-  const { ownerOf, propByOwner, indexByShape, resolveRef, elementRefOf, ownerOfRow, hopOf } = makeOwners(store);
+  const owners = makeOwners(store);
+  const { ownerOf, propByOwner, indexByShape, resolveRef, elementRefOf, ownerOfRow, hopOf } = owners;
 
   // Which class each template expression belongs to. EVERY template expression carries `node`; only some
   // carry `binding` - an interpolation, an `@if` condition and an `@for` iterable have none - so joining
@@ -29,13 +31,23 @@ export function rollupTemplateReads(store) {
   const implicitAt = new Map();
   const aliasesAt = new Map();
   const refsAt = new Map();
+  // THE DIRECTIVES MATCHED ON A NODE, the value each of its variables takes from its context (`let-x="prop"`) and the inputs bound on it (`inputsAt`, below) - what
+  // `TsTplContext.mjs` types a context and a generic component's instance from.
+  const directivesAt = new Map();
+  const variableValuesAt = new Map();
+  const inputsAt = new Map();
   for (const n of store.table('template_nodes')) {
     templateOfNode.set(n.id, n.template);
     parentOfNode.set(n.id, n.parent ?? null);
     kindOfNode.set(n.id, n.kind);
     const names = [];
+    if (Array.isArray(n.directives) && n.directives.length) directivesAt.set(n.id, n.directives);
     for (const v of Array.isArray(n.variables) ? n.variables : []) {
       if (str(v.name) !== null) names.push(v.name);
+      if (str(v.name) !== null) {
+        if (!variableValuesAt.has(n.id)) variableValuesAt.set(n.id, new Map());
+        variableValuesAt.get(n.id).set(v.name, str(v.value) ?? '');
+      }
       if (v.value === '$implicit' && typeof v.name === 'string') implicitAt.set(n.id, v.name);
       // AN `as` ALIAS HOLDS THE CONDITION'S VALUE: every name an `@if` branch binds, and an `*ngIf` wrapper's
       // `as u` (`ngIf`) or `let u` (`$implicit`) - the latter two only where an `ngIf` condition sits (below).
@@ -49,7 +61,7 @@ export function rollupTemplateReads(store) {
       if (str(r.name) === null) continue;
       names.push(r.name);
       if (!refsAt.has(n.id)) refsAt.set(n.id, new Map());
-      refsAt.get(n.id).set(r.name, { value: str(r.value) ?? '', kind: n.kind, directives: Array.isArray(n.directives) ? n.directives : [] });
+      refsAt.get(n.id).set(r.name, { value: str(r.value) ?? '', kind: n.kind, node: n.id, name: r.name, directives: Array.isArray(n.directives) ? n.directives : [] });
     }
     if (names.length) boundNames.set(n.id, names);
   }
@@ -93,6 +105,11 @@ export function rollupTemplateReads(store) {
   // THE CONDITION AN ALIAS IS BOUND TO, by node: an `@if` branch's own expression, an `*ngIf` wrapper's `ngIf` binding.
   const conditionAstOfNode = new Map();
   for (const e of store.table('expressions')) {
+    // THE INPUTS BOUND ON A NODE, by the name a template spells them (`[rows]`, `*dir="let x of rows"` is `dirOf`).
+    if (e.lang !== 'ts' && e.node != null && e.binding != null && str(e.name) !== null && (e.kind === 'input' || e.kind === 'template_attr')) {
+      if (!inputsAt.has(e.node)) inputsAt.set(e.node, new Map());
+      if (!inputsAt.get(e.node).has(e.name)) inputsAt.get(e.node).set(e.name, e.ast);
+    }
     if (e.kind === 'block_IfBlockBranch' && e.node != null) { conditionAstOfNode.set(e.node, e.ast); continue; }
     if (e.lang !== 'ts' && e.binding != null && conditionBindings.has(e.binding)) {
       const nodeId = nodeOfBinding.get(e.binding);
@@ -141,14 +158,24 @@ export function rollupTemplateReads(store) {
       declaredBy.set(row.id, { class: row.class, exportAs: names });
     }
   }
-  const refValueOf = (ref) => {
+  const contexts = makeContexts(store, owners, directivesAt, inputsAt);
+  // A GENERIC COMPONENT'S REF IS ITS INSTANCE AS THE ELEMENT INSTANTIATES IT (rows 74): `<demo-table #t [rows]="items">` over `DemoTable<T>` binds `T` from what `items` holds, so `t.selected`
+  // reads as the item. The inputs are read once per ref, in the element's scope with no ref typed (a ref read inside another's input is not asked: they could ask each other for ever).
+  const instanceOfRef = new Map();
+  const refValueOf = (ref, component) => {
     if (ref.kind === 'Template') return null;
     const asked = ref.value.trim();
     const hit = ref.directives.find((d) => {
       const one = declaredBy.get(d.id);
       return one !== undefined && one.class != null && (asked === '' ? d.is_component === true || d.is_component === 1 : one.exportAs.includes(asked));
     });
-    return hit === undefined ? null : { owner: { kind: 'class', id: declaredBy.get(hit.id).class }, ref: null, row: null, env: null };
+    if (hit === undefined) return null;
+    const key = `${String(ref.node)}#${ref.name}`;
+    if (!instanceOfRef.has(key)) {
+      const classId = declaredBy.get(hit.id).class;
+      instanceOfRef.set(key, contexts.instanceOf(classId, ref.node, component, scopeAt(ref.node, component, false, true), valueOf));
+    }
+    return { owner: instanceOfRef.get(key), ref: null, row: null, env: null };
   };
 
   /** The names of a Read chain, root first - `a.b.c` reads as Read(c) over Read(b) over Read(a). */
@@ -199,7 +226,8 @@ export function rollupTemplateReads(store) {
     const name = at.k === 'Pipe' ? str(at.name) : null;
     const element = at.k !== 'Pipe' || (name !== null && transformRefOfPipe.has(name));
     if (!element) return name === null || knownPipes.has(name) ? null : { owner: held.owner, ref: held.ref, row: null, env: held.env ?? null };
-    const ref = elementRefOf(held.ref);
+    // AN `as` ALIAS OF A FRAMEWORK PIPE holds `wrapped`, the list the observable emits, where its `ref` is the innermost element (rows 74): the loop takes the element of THAT.
+    const ref = elementRefOf(held.wrapped ?? held.ref);
     return ref === null ? null : { owner: resolveRef(ref, held.env), ref, row: null, env: held.env ?? null };
   };
 
@@ -219,7 +247,7 @@ export function rollupTemplateReads(store) {
    * `outer` leaves the node's OWN names out: a `Template`'s `templateAttrs` and an `@if` condition are evaluated BEFORE the names
    * they bind exist - in `*ngIf="x$ | async as x$"` the condition's `x$` is the component's member, not the alias.
    */
-  const scopeAt = (nodeId, component, outer = false) => {
+  const scopeAt = (nodeId, component, outer = false, noRefs = false) => {
     const out = new Map();
     // `@let` names, untyped, from the template's top level down - see `letsUnder`.
     for (const name of letsUnder.get(`t:${String(templateOfNode.get(nodeId))}`) ?? []) out.set(name, null);
@@ -233,13 +261,15 @@ export function rollupTemplateReads(store) {
     }
     // THE REFS OF EVERY SCOPE THE NODE SITS IN, outermost first (a scope's own node is never inside itself: `ancestors` ends at the node).
     for (const key of [`t:${String(templateOfNode.get(nodeId))}`, ...ancestors.filter((id) => id !== nodeId)]) {
-      for (const [name, ref] of refsUnder.get(key) ?? []) out.set(name, refValueOf(ref));
+      for (const [name, ref] of refsUnder.get(key) ?? []) out.set(name, noRefs ? null : refValueOf(ref, component));
     }
     for (const id of ancestors) {
       if (id !== nodeId) for (const name of letsUnder.get(id) ?? []) out.set(name, null);
       if (outer && id === nodeId) continue;
       const iterable = iterableAstOfNode.get(id);
       const condition = conditionAstOfNode.get(id);
+      // THE CONTEXT A DIRECTIVE ON THE NODE HANDS ITS VIEW (rows 74), read in the scope before the node's own names exist; `undefined` when none declares one.
+      const context = boundNames.has(id) && kindOfNode.get(id) === 'Template' ? contexts.contextAt(id, component, out, valueOf) : undefined;
       for (const name of boundNames.get(id) ?? []) {
         if (condition !== undefined && aliasesAt.get(id)?.has(name)) {
           out.set(name, aliasValueOf(condition, component, out));
@@ -249,7 +279,9 @@ export function rollupTemplateReads(store) {
         // rollup cannot type, and it shadows the component either way.
         // A `#ref` is typed by the element it sits on (`refValueOf`); it shadows the component's member of that name either way.
         const ref = refsAt.get(id)?.get(name);
-        if (ref !== undefined) { out.set(name, refValueOf(ref)); continue; }
+        if (ref !== undefined) { out.set(name, noRefs ? null : refValueOf(ref, component)); continue; }
+        // A VARIABLE OF THAT CONTEXT is its property's value: `let-x="prop"` is `prop`, a bare `let-x` is `$implicit` (`*dir="let x of list"` too).
+        if (context !== undefined) { out.set(name, contexts.variableOf(context, variableValuesAt.get(id)?.get(name) ?? '')); continue; }
         const bound = implicitAt.get(id) !== name || iterable === undefined ? null : loopValueOf(iterable, component, out);
         out.set(name, bound);
       }

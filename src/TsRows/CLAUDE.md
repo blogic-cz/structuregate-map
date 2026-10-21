@@ -115,9 +115,9 @@ runs) are compared by that, every carried field equal, never by `c:412`.
 
 `value` keeps only the last link of a call chain, so the rust readers need the TREE: `returns.expression`,
 `locals.expression`, `assignments.expression`, `branches.condition_expr`, `switch_cases.discriminant_expr` and
-`label_exprs`, always written, plus a `target` on a bare name that is a module-level const, function or enum, and
-a `local` (`{file, line, col}`, its `locals` row's own place) on a bare name a body declares. An `Fn` tree names
-its `params` and its `rest` parameter.
+`label_exprs`, always written, plus on a bare name a `target` (module-level const, function, enum or CLASS), a `local`
+(`{file, line, col}`, its `locals` row's place) or a `param` (the place of a parameter's name): [TsBodyRows.md](TsBodyRows.md).
+An `Fn` tree names its `params` and its `rest` parameter.
 
 - **A keyword literal is `{$literal, $kind}`** (rows 58, #85, `TsExpr/TsValue.mjs::cell`, `TsValueRefs.mjs::undefinedLiteral`):
   the global `undefined` (the checker's symbol has no declaration - a shadowing local is followed) and `void 0` are

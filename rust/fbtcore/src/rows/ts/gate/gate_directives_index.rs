@@ -112,6 +112,10 @@ pub(super) fn member_at(idx: &MemberIdx, target: Option<&Value>) -> Option<Strin
     if let Some(row) = str_of(t.get("row")) {
         return Some(row);
     }
+    // A CLASS'S TARGET (`kind: "class"`) is no member: a member of the same name may sit on its line.
+    if str_of(t.get("kind")).as_deref() == Some("class") {
+        return None;
+    }
     let file_name = slash(t.get("file"));
     let line = t.get("line").map(|v| v.to_string()).unwrap_or_else(|| "null".into());
     let name = str_of(t.get("name")).unwrap_or_default();

@@ -67,6 +67,9 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
       type: statement.type.getText(),
       // A GENERIC ALIAS'S PARAMETERS, as an interface's are (rows 72): `Tip<{ .. }>` binds `data: TData` through them.
       ...(statement.typeParameters?.length ? { type_params: statement.typeParameters.map((p) => p.name.text) } : {}),
+      // AN ALIAS OF AN INTERSECTION LISTS ITS PARTS (rows 74), as a member's `type_ref`/`type_refs` does: where it is a part of another intersection (`A & Vm`) a
+      // template read walks them in its place, since a written intersection names the alias and no longer the parts the checker flattened it to.
+      ...(typeRefAt.partsOf?.(statement.type) ?? {}),
       ...locationOf(statement),
     });
     // An alias of an object type declares members exactly as an interface does; a consumer asking what a

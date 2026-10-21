@@ -45,3 +45,10 @@ Four template rows said more, or less, than the compiler does. Each is read off 
 - **A mapped type a declared alias names is that alias** (rows 73, `TsTplOwners.mjs::ownerOf`): `type T = Pick<Slot<unknown>, 'k'>` reads through the alias's own computed members, which carry the types the
   checker instantiated (a parameter left to its default included); a ref's `props` answer an anonymous mapping only, being the source's declared rows with no bindings. A keyed read over an `as` alias of a
   framework pipe takes the element of the list the observable emits (`wrapped`, one level in), not of its innermost type. Case: `TsValues/TsRowsScopeValues.Tests.ps1`.
+
+- **A template is typed by the directive it meets** (rows 74, `TsTpl/TsTplContext.mjs`): the variables of an `<ng-template>` or a `*dir` wrapper are the properties of the context the matched in-tree directive declares - `members.guard_ref` of its static
+  `ngTemplateContextGuard<U>(dir: X<U>, ..): ctx is Ctx<U>` (`TsDecls/TsClassRows.mjs::memberRow`), else the `TemplateRef<Ctx>` it injects (`di`) - a bare `let-x` or `let x` being `$implicit`, `let-x="p"` the property `p`, `*dir="v as x"` the property `dir`.
+  The directive's type parameters are bound from the inputs on the node (`io` names the member, `feedOf`): `T`, `T[]` (the element of `wrapped` first) or `Box<T>`; `dir`'s own arguments say which of the guard's parameters is which. An `ngFor`/`ngIf` has no
+  rows and keeps the special reading. A `#ref` to a generic COMPONENT is its instance with the same binding (`refValueOf`, memoised per ref, the inputs read in the element's scope with no ref typed, so two refs never ask each other); a parameter nothing feeds
+  is its `default`, else its `constraint`. A loop over an `as` alias of a framework pipe takes the element of `wrapped` (`loopValueOf`). `ownerOfRow` resolves each part of an intersection or union with the env it was reached in, so a literal part reads `T` as the
+  instantiation does. Case: `tests/deep/TsAngular/TsValues/TsRowsTemplateTypes.Tests.ps1`. `template_nodes.directives` is read by it, so a partial run is no longer handed it back as a stub (`TsSetup/TsCarried.mjs`).

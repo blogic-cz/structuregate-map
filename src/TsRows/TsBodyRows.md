@@ -21,3 +21,15 @@ Loops, bare expression statements and `++`/`--` had no row of their own. The cas
   decided by what the walk wrote (a call, a write, a local, a function), never by the expression's kind.
 - **`x++`, `--this.n` are `assignments` rows**: `operator` `++`/`--`, `value` and `expression` null, `source` the whole update, `target`/`scope`
   as for `=`. A counter written only by an update had no writer in the map.
+
+# What a bare name in a code tree is bound to (rows 74)
+
+`TsDecls/TsExpr/TsReadRefs.mjs` answers it, `TsExprNorm.mjs::bareRead` writes it; the cases are `tests/deep/TsAngular/TsResolved/TsRowsChainRows.Tests.ps1`.
+
+- **`target`** for a top-level `const`, function, enum or CLASS (an import alias followed). A class target has `kind: 'class'` and the class NAME's line (its `classes` row's `line`,
+  never the decorator's). `rust/fbtcore/src/rows/ts/gate/ts/gate_tsrows.rs::names_class` makes every closure reader take it as the bare name it was: no row, never a constant or a member.
+- **`local`** for a `const`/`let` with an initializer; **`param`** for a parameter of a function-like with a body, `{file, line, col}` of the parameter's name (a destructured
+  parameter: the binding element's name). `members__params`/`functions__params` items carry `line`/`col`, and `bindings` when destructured, so the join is exact. `param` on a CODE tree is that place,
+  `param: true` on a template tree the mark `TsExprSummary.mjs` reads - which is why the summary tests `=== true`.
+- **A shorthand property (`{ client }`) is a read of the variable**, bound by `getShorthandAssignmentValueSymbol`: `getSymbolAtLocation` on its name answers with the property's own symbol.
+- **Not bound**: a loop variable and a `catch` binding (a `locals` row without an initializer, `resolveLocal`), a global, a type parameter.

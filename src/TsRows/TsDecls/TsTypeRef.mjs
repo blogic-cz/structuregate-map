@@ -250,11 +250,11 @@ export function makeTypeResolver(ts, checker) {
    * itself an unaliased union or intersection (`(A & {..}) | null`) is walked into - the parts are finite and the
    * checker builds no cycle of them.
    */
-  function refsOfParts(type) {
+  function refsOfParts(type, written = null) {
     const out = new Map();
     // IN WRITTEN ORDER: an intersection's first declaration of a name is its first part's (`refsOfParts`'s `and`), so the parts are taken from the
     // front and a nested one is put back in its place - a stack read from the back reversed them.
-    const parts = [...type.types];
+    const parts = [...(written ?? type.types)];
     while (parts.length) {
       const part = parts.shift();
       if (!part.aliasSymbol && !part.getSymbol() && (part.isUnion() || part.isIntersection())) {
@@ -283,6 +283,24 @@ export function makeTypeResolver(ts, checker) {
     const at = named.length === 1 ? all.indexOf(named[0]) : -1;
     const dropped = and && at >= 0 ? all.map((r, i) => (r.shape ? { ...r, ...(i < at ? { before: true } : {}) } : null)).filter((r) => r !== null) : [];
     return { refs: dropped.length ? [{ ...sorted[0], shapes: dropped }] : sorted, and };
+  }
+
+  /**
+   * THE PARTS OF A WRITTEN INTERSECTION, when one of them is an ALIAS of an intersection or a union (rows 74): `A & Vm` with `type Vm = B & { .. }` is
+   * `A & B & { .. }` to the checker, which flattens it and keeps no trace of `Vm` - so `type_refs` named `B` and the literal, and never the alias the
+   * author wrote. The parts are taken from the NODE, each as the type it is written as, and an aliased part stays one (`refOfType` names the alias, with its
+   * arguments); the alias's own `type_members` answer its names when a read walks into it. Null when no part is such an alias: the checker's list is used.
+   */
+  function writtenParts(node, type) {
+    if (!type.isIntersection()) return null;
+    let n = node;
+    while (n && ts.isParenthesizedTypeNode(n)) n = n.type;
+    if (!n || !ts.isIntersectionTypeNode(n)) return null;
+    const flat = (t) => (ts.isParenthesizedTypeNode(t) ? flat(t.type) : ts.isIntersectionTypeNode(t) ? t.types.flatMap(flat) : [t]);
+    let types;
+    try { types = flat(n).map((t) => checker.getTypeFromTypeNode(t)); } catch { return null; }
+    const composite = (t) => t.aliasSymbol && (t.isIntersection() || t.isUnion());
+    return types.some(composite) ? types : null;
   }
 
   /**
@@ -322,9 +340,21 @@ export function makeTypeResolver(ts, checker) {
       const alias = ref ? aliasWritten(node) : null;
       return { type_ref: alias ? { ...ref, alias } : ref };
     }
-    const { refs, and } = refsOfParts(type);
+    const { refs, and } = refsOfParts(type, given === null ? writtenParts(node, type) : null);
     // `type_refs_of` says how the listed types combine: `and` for an intersection (a name is the first part's that declares it), `or` for a union.
     return refs.length > 1 ? { type_ref: null, type_refs: refs, type_refs_of: and ? 'and' : 'or' } : { type_ref: refs[0] ?? null };
+  };
+  /**
+   * THE PARTS AN ALIAS OF AN INTERSECTION IS MADE OF (rows 74), as a member's `type_ref` / `type_refs` lists them, or null for any other alias. `resolve` over the alias's own
+   * type node would name the alias itself (its type carries the alias as its symbol), so the parts are asked directly. A template read that meets this alias as a part of
+   * ANOTHER intersection (`A & Vm`, `writtenParts`) walks them in its place - the members each part declares, as when the checker had flattened it.
+   */
+  resolve.partsOf = (node) => {
+    let type;
+    try { type = checker.getTypeFromTypeNode(node); } catch { return null; }
+    if (!type.isIntersection()) return null;
+    const { refs } = refsOfParts(type, writtenParts(node, type));
+    return refs.length > 1 ? { type_ref: null, type_refs: refs, type_refs_of: 'and' } : refs.length === 1 ? { type_ref: refs[0] } : null;
   };
   return resolve;
 }

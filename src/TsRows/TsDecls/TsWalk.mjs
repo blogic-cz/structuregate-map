@@ -149,7 +149,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
         // it points at.
         ...(refs && refs.size ? { write_refs: Object.fromEntries(refs) } : {}),
       });
-    }, readRefs.resolveRead, readRefs.resolveName, log, readRefs.resolveLocal);
+    }, readRefs.resolveRead, readRefs.resolveName, log, readRefs.resolveLocal, readRefs.resolveParam);
     const { evalNode, evalCell, propName } = makeEvaluator(ts, checker, symbolAt, describe);
     const typeRows = makeTypeRows({
       ts, checker, store, modifiersOf, typeRefAt, evalNode, propName, fileId,

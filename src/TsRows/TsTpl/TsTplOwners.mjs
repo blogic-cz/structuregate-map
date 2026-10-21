@@ -169,7 +169,8 @@ export function makeOwners(store) {
   const paramOwner = (ref, name, env) => {
     if (name !== null && env?.has(name)) {
       const held = env.get(name);
-      return held === NOT_PASSED ? resolveRef(ref.default ?? null, env) : held;
+      // NOTHING PASSED reads as the default, else the constraint (rows 74): an element's inputs feed a generic component's parameters (`instance`) and one nothing feeds has no argument either.
+      return held === NOT_PASSED ? resolveRef(ref.default ?? ref.constraint ?? null, env) : held;
     }
     return resolveRef(ref.constraint ?? null, env);
   };
@@ -181,6 +182,13 @@ export function makeOwners(store) {
     // are typed by the parameters of that class, never its own.
     if (!out.size && owner.kind === 'shape' && env?.size) return { ...owner, env };
     return out.size ? { ...owner, env: out } : owner;
+  };
+  /** A GENERIC DECLARATION AS AN ELEMENT INSTANTIATES IT (rows 74): `fed` maps a type parameter's name to what the input bound on the element fed it (an owner, or null for
+   *  a value that names nothing); a parameter nothing fed is `NOT_PASSED`, read as its default, else its constraint. A declaration with no parameters is itself. */
+  const paramNames = (owner) => paramsOf.get(`${owner.kind}:${owner.id}`) ?? [];
+  const instance = (owner, fed) => {
+    const names = paramNames(owner);
+    return names.length ? { ...owner, env: new Map(names.map((p) => [p, fed.has(p) ? fed.get(p) : NOT_PASSED])) } : owner;
   };
   const baseTypedOf = (cls) => {
     const base = baseOfClass.get(cls.id) ?? null;
@@ -252,6 +260,16 @@ export function makeOwners(store) {
     return null;
   };
 
+  /** An alias of an intersection as the parts it is made of (`type_aliases.type_refs`), bound by the alias's own arguments; any other owner is itself. */
+  const aliasParts = new Map();
+  for (const row of store.table('type_aliases')) {
+    if (row.type_ref != null || Array.isArray(row.type_refs)) aliasParts.set(row.id, row);
+  }
+  const expandAlias = (owner) => {
+    const row = owner?.kind === 'type' ? aliasParts.get(owner.id) : undefined;
+    return row === undefined ? owner : ownerOfRow(row, owner.env ?? null) ?? owner;
+  };
+
   /** The owner a type_ref's ELEMENT names - what an array holds, which is what a loop variable is. A parameter element (`T[]`) reads as `resolveRef` does. */
   const elementOwnerOf = (ref, env = null) => {
     const element = elementRefOf(ref);
@@ -273,8 +291,13 @@ export function makeOwners(store) {
     if (row.type_ref != null) return resolveRef(row.type_ref, env);
     const all = new Map();
     for (const ref of Array.isArray(row.type_refs) ? row.type_refs : []) {
-      const one = ownerOf(ref);
-      if (one !== null) all.set(`${one.kind}:${one.id}`, one);
+      // EACH PART IS BOUND BY THE ENV IT WAS REACHED IN (rows 74): `{ item: T } & { more: number }` in `Box<Item>` answers `item` as `Item`; an anonymous part
+      // (a shape) takes the enclosing declaration's parameters as it does when it is the member's whole type.
+      const part = resolveRef(ref, env);
+      // AN ALIAS OF AN INTERSECTION AMONG THE PARTS OF ONE (`A & Vm`, `type Vm = B & { .. }`, rows 74) IS ITS OWN PARTS: the type refs name the alias the author wrote, and the
+      // alias's members are the ones each of them declares - read through the declarations, never the alias's computed copies of them.
+      const one = row.type_refs_of === 'and' ? expandAlias(part) : part;
+      if (one !== null) all.set(one.kind === 'any' ? `any:${all.size}` : `${one.kind}:${one.id}`, one);
     }
     return all.size === 0 ? null : all.size === 1 ? [...all.values()][0] : { kind: 'any', op: row.type_refs_of === 'and' ? 'and' : 'or', of: [...all.values()] };
   };
@@ -298,5 +321,5 @@ export function makeOwners(store) {
     return { name, file, line, row: row.id, owner: next, member: row, env: found.env };
   };
 
-  return { ownerOf, propByOwner, indexByShape, resolveRef, elementOwnerOf, elementRefOf, ownerOfRow, hopOf };
+  return { ownerOf, propByOwner, indexByShape, resolveRef, elementOwnerOf, elementRefOf, ownerOfRow, hopOf, instance, paramNames };
 }

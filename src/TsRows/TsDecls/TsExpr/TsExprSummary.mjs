@@ -75,8 +75,9 @@ export function summarizeExpr(norm, acc = { identifiers: [], strings: [], pipes:
     case 'Read':
     case 'SafeRead': {
       // A CHAIN ROOTED AT AN ARROW FUNCTION'S PARAMETER reads the argument, not a member: `items.filter((x) =>
-      // x.done)` reads `items`, never a `x`. Its receiver and arguments are still walked below.
-      if (rootRead(norm)?.param) break;
+      // x.done)` reads `items`, never a `x`. Its receiver and arguments are still walked below. ONLY THE TEMPLATE'S MARK (`param: true`): a CODE
+      // read carries `param` as the place its parameter is declared (rows 74), and a function's own parameters stay in the flat `reads`.
+      if (rootRead(norm)?.param === true) break;
       if (!hangsFromContext(norm)) break;
       acc.reads.push(dottedPath(norm));
       const root = rootName(norm);
