@@ -55,7 +55,7 @@ export function makeTypeResolver(ts, checker) {
       const args = checker.getTypeArguments(current);
       const [only] = args.length === 1 ? args : [];
       if (!only) break;
-      const site = siteOf(only.aliasSymbol ?? only.getSymbol());
+      const site = holdOf(only);
       if (site) found = site;
       current = only;
     }
@@ -73,8 +73,28 @@ export function makeTypeResolver(ts, checker) {
     const args = checker.getTypeArguments(type);
     const [only] = args.length === 1 ? args : [];
     if (!only) return null;
-    const site = siteOf(only.aliasSymbol ?? only.getSymbol());
+    const site = holdOf(only);
     return site ? { element: site } : null;
+  }
+
+  /**
+   * WHAT AN ELEMENT OR AN UNWRAPPED TYPE IS, as a ref head: its declaration's site, or - when it is a TYPE PARAMETER (`visible: T[]`) - the whole
+   * `param` ref with the constraint and default it carries (rows 72). A bare site named a parameter as a class of that name, which nothing
+   * declares, so a loop over `T[]` typed its variable with nothing and the constraint (`T extends Row`) was never reached. An element that is
+   * an unnamed intersection or union is the ONE ref its parts name, or the list of them (below).
+   */
+  function holdOf(type) {
+    const symbol = type.aliasSymbol ?? type.getSymbol();
+    const isParam = (symbol?.declarations ?? []).some((d) => ts.isTypeParameterDeclaration(d));
+    if (isParam) return refOfType(type, new Set());
+    // AN ELEMENT THAT IS AN UNNAMED INTERSECTION OR UNION (`(Row & { open: boolean })[]`, `(Row | null)[]`) names what its parts name, as a member's
+    // type does (`refsOfParts`); the symbol it has none of named nothing, so a loop over such a list typed its variable with nothing.
+    if (!symbol && (type.isUnion() || type.isIntersection())) {
+      const { refs, and } = refsOfParts(type);
+      // SEVERAL (`Observable<A & B>`, `(A | B)[]`) are the list a member's `type_refs` is: a bag of refs, which a read takes as the one owner they make.
+      return refs.length === 1 ? refs[0] : refs.length > 1 ? { type_refs: refs, type_refs_of: and ? 'and' : 'or' } : null;
+    }
+    return siteOf(symbol);
   }
 
   /**
@@ -108,17 +128,35 @@ export function makeTypeResolver(ts, checker) {
 
   /** The declaration ONE type names, or null: a primitive, `null` and an anonymous type that is no literal name none; a type or object
    *  literal is a SHAPE ref (`siteOf`). `seen` guards the walk into type arguments and index signatures against a type that is its own argument. */
+  /**
+   * THE PROPERTIES OF A MAPPED TYPE (rows 72): `Pick<Dto, 'a'>`, `Omit<Dto, 'b'>` and `Partial<Dto>` are no declaration - the checker's symbol is the
+   * library's alias or an anonymous `__type` - yet each property they hold is declared where the original is. `props` lists `{name, file, line}` of
+   * that declaration, so a read past the type reaches the member, and only the members the mapping kept. Null for any other type, and for a mapped
+   * type whose properties no declaration backs (`Record<'a' | 'b', X>`).
+   */
+  function propsOf(type) {
+    if (!(type.flags & ts.TypeFlags.Object) || !((type.objectFlags ?? 0) & ts.ObjectFlags.Mapped)) return null;
+    let list;
+    try { list = checker.getPropertiesOfType(type); } catch { return null; }
+    const props = [];
+    for (const p of list) {
+      const d = p.declarations?.[0];
+      if (d) props.push({ name: p.getName(), ...declSite(d) });
+    }
+    return props.length ? { props } : null;
+  }
+
   function refOfType(type, seen = new Set(), as = null, noIndex = false) {
     // AN ALIAS IS NAMED WHERE THE AUTHOR NAMED IT. `type Foo = {...}` used at a member reaches the
     // anonymous object type unless the alias symbol is asked for first, and the alias is what a reader is
     // looking for.
     const symbol = as ?? type.aliasSymbol ?? type.getSymbol();
     const decls = symbol?.declarations ?? [];
-    if (!symbol || !decls.length) return null;
+    if (!symbol || !decls.length) return propsOf(type);
     // An anonymous type's symbol is called `__type` / `__object` by the compiler - a placeholder, not a name. A literal is reached by
     // WHERE its `{` is (rows 71); any other anonymous type would claim a declaration that has no identity.
     const head = siteOf(symbol);
-    if (head === null) return null;
+    if (head === null) return propsOf(type);
     // The checker's order is kept - see the note in `TsMap`'s describer.
     const rest = head.shape ? [] : decls.slice(1).map(declSite);
     // A TYPE PARAMETER IS NAMED AS ONE (#98), and a generic reference keeps its ARGUMENTS in order, each the declaration it
@@ -129,17 +167,42 @@ export function makeTypeResolver(ts, checker) {
     let args = [];
     if (!param && !as && fresh) {
       seen.add(type);
-      try { args = checker.getTypeArguments(type).map((a) => refOfType(a, seen)); } catch { args = []; }
+      // THE ARGUMENTS OF THE NAME THE REF HEADS (rows 72): an alias (`type Tip<T> = { data: T }`) keeps them as `aliasTypeArguments`, and a type literal it
+      // instantiates is no type reference, so `getTypeArguments` threw and `Tip<{..}>` named its argument nowhere - `T` stayed unbound.
+      const own = type.aliasSymbol ? type.aliasTypeArguments : undefined;
+      try { args = (own ?? checker.getTypeArguments(type)).map((a) => refOfType(a, seen)); } catch { args = []; }
     }
+    // A PARAMETER'S BOUNDS (rows 72): what it is constrained to (`T extends Row`) and what it is when nothing is passed (`T = Dto`). A read past a
+    // member typed `T` binds it from the arguments; with none it takes the default of an instantiation that passed nothing, else the constraint.
+    const bounds = param ? boundsOf(decls.find((d) => ts.isTypeParameterDeclaration(d))) : {};
     const element = elementOf(type) ?? {};
     return {
       ...head, ...(rest.length ? { also: rest } : {}),
-      ...(param ? { param: true } : {}),
+      ...(param ? { param: true, ...bounds } : {}),
       ...(args.some((a) => a !== null) ? { args } : {}),
       ...element,
+      ...(propsOf(type) ?? {}),
       ...(unwrappedOf(type) ?? {}),
       ...(noIndex || param || as || !fresh || element.element ? {} : indexOf(type, seen) ?? {}),
     };
+  }
+
+  /** The declarations a type parameter is bounded by, `{constraint?, default?}`, each a ref. `open` holds the parameters being asked, so `T extends Node<T>`
+   *  stops where it began - a parameter met again inside its own bound has none. */
+  const open = new Set();
+  function boundsOf(decl) {
+    if (!decl || open.has(decl)) return {};
+    open.add(decl);
+    try {
+      // A CONSTRAINT THAT IS A UNION (`T extends A | B`) is the list of what its members name, as a member's type is.
+      const one = (node) => {
+        const answer = node ? resolve(node) : null;
+        return answer?.type_ref ?? (answer?.type_refs ? { type_refs: answer.type_refs, type_refs_of: answer.type_refs_of } : null);
+      };
+      const constraint = one(decl.constraint);
+      const fallback = one(decl.default);
+      return { ...(constraint ? { constraint } : {}), ...(fallback ? { default: fallback } : {}) };
+    } finally { open.delete(decl); }
   }
 
   /**
@@ -189,24 +252,37 @@ export function makeTypeResolver(ts, checker) {
    */
   function refsOfParts(type) {
     const out = new Map();
+    // IN WRITTEN ORDER: an intersection's first declaration of a name is its first part's (`refsOfParts`'s `and`), so the parts are taken from the
+    // front and a nested one is put back in its place - a stack read from the back reversed them.
     const parts = [...type.types];
     while (parts.length) {
-      const part = parts.pop();
+      const part = parts.shift();
       if (!part.aliasSymbol && !part.getSymbol() && (part.isUnion() || part.isIntersection())) {
-        parts.push(...part.types);
+        parts.unshift(...part.types);
         continue;
       }
       const whole = (part.flags & ts.TypeFlags.EnumLiteral) !== 0 ? checker.getBaseTypeOfLiteralType(part) : part;
       const ref = refOfType(whole, new Set(), enumOfMember(whole.getSymbol()));
-      if (ref) out.set(`${ref.file}\u0000${ref.line}\u0000${ref.name ?? ref.col}`, ref);
+      if (ref) out.set(ref.props ? `props${ref.props.map((q) => `${q.name}@${q.file}:${q.line}`).join(',')}` : `${ref.file}\u0000${ref.line}\u0000${ref.name ?? ref.col}`, ref);
     }
     // A LITERAL PART NAMES A DECLARATION ONLY WHEN NOTHING ELSE DOES (rows 71): `X & { .. }` and `X | { .. }` are `X`, as they were, and only
     // parts that are all literals (`{ a } | { b }`) are listed as shapes.
     const all = [...out.values()];
     const named = all.filter((r) => !r.shape);
     const order = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
-    return (named.length ? named : all).sort((a, b) => order(a.file, b.file) || a.line - b.line
+    // A UNION'S refs are sorted by place (the checker's order is not a full and a partial run's); an INTERSECTION'S stay as written, since the part
+    // written first answers a name two parts declare (`and`, rows 72).
+    const and = type.isIntersection();
+    // AN INTERSECTION THAT NAMES SEVERAL (`A & B & { .. }`) LISTS ITS LITERALS TOO, in place: each is a part that declares names, and none is `X` to hang from.
+    const base = named.length && !(and && named.length > 1) ? named : all;
+    const sorted = and ? base : base.sort((a, b) => order(a.file, b.file) || a.line - b.line
       || order(a.name ?? '', b.name ?? '') || (a.col ?? 0) - (b.col ?? 0));
+    // THE LITERALS AN INTERSECTION DROPS ARE ITS MEMBERS TOO (rows 72): `X & { Extra?: E }` is `X`, and `Extra` is declared by the literal alone -
+    // the ref lists them as `shapes`, which a template read walks beside `X` (`TsTplOwners.mjs::resolveRef`), each `before` when written ahead of `X`.
+    // A union's literal is not listed: its members are no member of the union.
+    const at = named.length === 1 ? all.indexOf(named[0]) : -1;
+    const dropped = and && at >= 0 ? all.map((r, i) => (r.shape ? { ...r, ...(i < at ? { before: true } : {}) } : null)).filter((r) => r !== null) : [];
+    return { refs: dropped.length ? [{ ...sorted[0], shapes: dropped }] : sorted, and };
   }
 
   /**
@@ -229,7 +305,7 @@ export function makeTypeResolver(ts, checker) {
    * the other is not accepted. `type_refs` is absent otherwise, so the two never repeat each other. `given` is a type the
    * caller already holds - a borrowed member's type INSTANTIATED for the alias that borrows it (#96) - asked instead.
    */
-  return (node, given = null) => {
+  const resolve = (node, given = null) => {
     let type = given;
     try {
       type ??= checker.getTypeAtLocation(node);
@@ -237,6 +313,8 @@ export function makeTypeResolver(ts, checker) {
       return { type_ref: null };
     }
     if (!type) return { type_ref: null };
+    // `this['items'][0]['name']` and every other type the checker keeps unresolved names what it is constrained to: the property's own type.
+    if ((type.flags & ts.TypeFlags.IndexedAccess) !== 0) type = checker.getBaseConstraintOfType(type) ?? type;
     if (type.aliasSymbol || type.getSymbol() || !(type.isUnion() || type.isIntersection())) {
       // WRITTEN AS THE ENUM, NAMED AS THE ENUM: `Kind.Alpha` as written still names the member.
       const owner = type.aliasSymbol ? null : enumOfMember(type.getSymbol());
@@ -244,7 +322,9 @@ export function makeTypeResolver(ts, checker) {
       const alias = ref ? aliasWritten(node) : null;
       return { type_ref: alias ? { ...ref, alias } : ref };
     }
-    const refs = refsOfParts(type);
-    return refs.length > 1 ? { type_ref: null, type_refs: refs } : { type_ref: refs[0] ?? null };
+    const { refs, and } = refsOfParts(type);
+    // `type_refs_of` says how the listed types combine: `and` for an intersection (a name is the first part's that declares it), `or` for a union.
+    return refs.length > 1 ? { type_ref: null, type_refs: refs, type_refs_of: and ? 'and' : 'or' } : { type_ref: refs[0] ?? null };
   };
+  return resolve;
 }

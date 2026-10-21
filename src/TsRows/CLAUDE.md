@@ -83,15 +83,15 @@ runs) are compared by that, every carried field equal, never by `c:412`.
   alias, wherever it differs from the declared one - a member nothing instantiates keeps its annotation's text.
 - **An intersection names what its parts name** (rows 65, #97, `TsDecls/TsTypeRef.mjs::refsOfParts`): `X & { .. }` is `type_ref` X, `A & B`
   lists both in `type_refs` as a union naming several does; a part that is itself an unaliased union or intersection is walked into.
-  A TEMPLATE READ follows `type_refs` (`TsTpl/TsTplReads.mjs::ownerOfRow`): the next name resolves when exactly ONE listed type declares
-  it. A hop whose type names nothing ENDS the chain (never the previous owner: `{{ x.y }}` over an untyped `x` is not the component's `y`) - but
-  an anonymous type or object literal is a `shapes` row and a hop (rows 71): [TsShapeRows.md](TsShapeRows.md).
+  A TEMPLATE READ follows `type_refs` as `type_refs_of` says they combine (rows 72, `TsTpl/TsTplOwners.mjs::propWithEnv`, [TsTemplateRows.md](TsTemplateRows.md)): a union (`or`) answers when ONE
+  declaration does, an intersection (`and`) with the FIRST part written that declares the name. A hop whose type names nothing ENDS the chain (never the previous owner:
+  `{{ x.y }}` over an untyped `x` is not the component's `y`) - but an anonymous type or object literal is a `shapes` row and a hop (rows 71): [TsShapeRows.md](TsShapeRows.md).
 - **An enum a field holds is read through** (rows 66, `TsTpl/TsTplReads.mjs`): `Kinds = Kind` is typed `typeof Kind`, and `{{ Kinds.Alpha }}`
   targets the member - the enum's row at the member's `line`, which each `enums.members` item now carries. A name the enum lacks ends the chain.
 - **A generic is read as it is instantiated** (rows 67, #98, `TsTpl/TsTplReads.mjs::resolveRef`): classes and interfaces carry `type_params`, a
   `type_ref` naming a type parameter carries `param: true` and a generic one its `args` in order (`TsDecls/TsTypeRef.mjs`). A read binds them as it
   walks: `Concrete extends Base<Payload>` binds `Base`'s `T` from `extends.type_args`, `Wrapped: Wrapper<T>` binds `Wrapper`'s parameter to
-  what `T` is bound to, and `Inner: T` then reads on as `Payload`. An unbound parameter names nothing.
+  what `T` is bound to, and `Inner: T` then reads on as `Payload`. A parameter nothing passed reads as its `default`, else its `constraint` (rows 72).
 - **A template write names what it writes** (rows 68, #99): `(valueChange)="f.On = $event"` - a `Write` node heads its chain like a read and carries
   the `target` of the member written, so which element SETS a member is a join, not only which reads it.
 - **The rows are 1:1 with the source** (rows 69, `TsDecls/TsBody.mjs::collectExpr`): code OUTSIDE a function body - a property initializer,

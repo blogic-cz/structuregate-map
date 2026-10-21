@@ -241,7 +241,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
       // A RETURN THAT NAMES SEVERAL (`A | B`, an inferred `cond ? a.x : a.y`) is `return_refs`, as a member's `type_refs` is: a template
       // read past it resolves a name only ONE of them declares.
       if (answer.type_ref) return { return_ref: answer.type_ref };
-      return Array.isArray(answer.type_refs) && answer.type_refs.length ? { return_refs: answer.type_refs } : {};
+      return Array.isArray(answer.type_refs) && answer.type_refs.length ? { return_refs: answer.type_refs, return_refs_of: answer.type_refs_of } : {};
     } catch { return {}; }
   }
 

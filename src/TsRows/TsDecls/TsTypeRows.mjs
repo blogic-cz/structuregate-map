@@ -42,6 +42,9 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
       exported,
       ...(inModule ? { in_module: inModule } : {}),
       extends: (statement.heritageClauses ?? []).flatMap((h) => h.types.map((t) => t.getText())),
+      // WHERE EACH BASE IS (rows 72), as a member's `type_ref` is, arguments included: a template read of a member the base declares
+      // (`SavedDoc extends Doc`, then `doc.Code`) walks them; `extends` stays the text.
+      ...(statement.heritageClauses?.length ? { extends_refs: statement.heritageClauses.flatMap((h) => h.types.map((t) => typeRefAt(t).type_ref ?? null)) } : {}),
       ...(statement.typeParameters?.length ? { type_params: statement.typeParameters.map((p) => p.name.text) } : {}),
       members: statement.members.map((m) => ({
         name: m.name ? propName(m.name) : (ts.SyntaxKind[m.kind] ?? 'unknown'),
@@ -62,6 +65,8 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
       exported: modifiersOf(statement).exported,
       ...(inModule ? { in_module: inModule } : {}),
       type: statement.type.getText(),
+      // A GENERIC ALIAS'S PARAMETERS, as an interface's are (rows 72): `Tip<{ .. }>` binds `data: TData` through them.
+      ...(statement.typeParameters?.length ? { type_params: statement.typeParameters.map((p) => p.name.text) } : {}),
       ...locationOf(statement),
     });
     // An alias of an object type declares members exactly as an interface does; a consumer asking what a

@@ -252,9 +252,21 @@ async function main() {
   //     is the type alias WRITTEN when `type_ref` followed the checker past it. Also: every type literal and object literal is a `shapes` row with
   //     its `shape_members` (`TsDecls/TsExpr/TsShapes.mjs`), a `type_ref` to one is `{shape: true, file, line, col}` (its `element`, `unwrapped`
   //     and `type_refs` too), a type with an index signature has `type_ref.index`, and a template read follows both (`TsTpl/TsTplReads.mjs`).
+  // 72: a template read reaches what a loop variable, an `as` alias and a chain name through the same value as a chain does (`TsTpl/TsTplReads.mjs::
+  //     valueOf`): a call of an un-annotated method, a keyed read, a pipe. A type parameter's `type_ref` carries its `constraint` and `default`, a
+  //     generic alias has `type_params` and its `args` (`aliasTypeArguments`), an `element`/`unwrapped` that is a parameter is the whole `param` ref.
+  //     An interface carries `extends_refs` (one ref per base) and a ref `X & { .. }` its dropped literals as `shapes`; a read walks an interface's bases, a
+  //     literal's spreads and the alias WRITTEN (`type_ref.alias`) where the checker's type is a library one; an `element` that is an unnamed intersection
+  //     or union is the one ref its parts name, or - several - the bag `{type_refs, type_refs_of}`.
+  //     `type_refs_of` (`and` | `or`) says how the listed types combine; an intersection's `type_refs` are in WRITTEN order (a union's by place), with the literals
+  //     of `A & B & { .. }` in them and each dropped literal of `X & { .. }` marked `before` when written ahead of `X`; a read resolves a name two parts of an
+  //     intersection declare as the FIRST part's (`TsTplOwners.mjs::propWithEnv`). A mapped type (`Pick<Dto, 'a'>`, `Partial<Dto>`) is a ref with `props`
+  //     (`{name, file, line}` of each member's declaration); a type parameter's `constraint` may be a union (a bag); `this['a'][0]['b']` names its constraint; a
+  //     literal in a generic class reads with the class's bindings; a spread of an intersection, and one union reached through several aliases of one
+  //     generic, resolve. `return_refs_of` beside `return_refs`.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 71, build: args.build,
+    config: config.file, data: config.data, rows: 72, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

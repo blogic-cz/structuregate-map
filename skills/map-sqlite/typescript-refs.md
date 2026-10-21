@@ -9,7 +9,9 @@ On `members`, `type_members`, params (`members__params`, `functions__params`), `
 `element` is itself a node with `name`/`file`/`line` children).
 
 * The root is the declaration the CHECKER names: `name`, `file`, `line`, `also` (the other declarations of a merged one); `param: true` is a
-  type parameter (`T`).
+  type parameter (`T`) and carries `constraint` (`T extends Row`) and `default` (`T = Dto`), each a `type_ref` node when it names a declaration (rows 72).
+  An `element` or `unwrapped` that is a type parameter (`T[]`) is that whole `param` node; one that is an unnamed intersection or union (`(Row & { .. })[]`,
+  `(Row | null)[]`) is the ONE declaration its parts name. `args` of a generic ALIAS are its `aliasTypeArguments` (`Frame<{ .. }>`; rows 72).
 * `args`: one node per type argument, in order - a `type_ref` or null. `element`: an array's or one-argument generic's declared element
   (`Item[]`, `Array<Item>`, `readonly Item[]` -> `Item`). `unwrapped`: the innermost declared type through one-argument wrappers
   (`Observable<Item[]>` -> `Item`). A primitive has none of them (`number[]` has no `element`): read the `type` text.
@@ -17,8 +19,12 @@ On `members`, `type_members`, params (`members__params`, `functions__params`), `
   `{ [k: string]: Item }`; an array's number index is its `element`, so a type with one has no `index`.
 * An ANONYMOUS object type - a type literal or an object literal, whose declaration has no name - is `{shape: true, file, line, col}` and no `name`
   (rows 71): the place of its `{`, and `element`, `unwrapped`, `type_refs` and `args` hold such a node too. It names a `shapes` row (below). In a
-  union or intersection it is dropped when another part names a declaration (`X & { .. }` is `X`) and listed in `type_refs` when no part does.
-* `type_refs` exists only when a union or intersection names SEVERAL declarations (then `type_ref` is null); it never repeats `type_ref`.
+  union or intersection it is dropped when another part names a declaration (`X & { .. }` is `X`; `A & B & { .. }` lists it) and listed in `type_refs` when no part does. An
+  INTERSECTION's dropped literals are kept as `shapes` on the `X` node (rows 72): shape refs, the members of `X & { Extra?: E }` the literal alone declares.
+* `type_refs` exists only when a union or intersection names SEVERAL declarations (then `type_ref` is null); it never repeats `type_ref`. `type_refs_of` (rows 72) is
+  `and` for an intersection (listed in written order, its literals among them) and `or` for a union (sorted by place); `return_refs_of` beside `return_refs`. A property
+  both parts of an intersection declare is the FIRST part's. A mapped type (`Pick<Dto, 'a'>`) has `props`, `{name, file, line}` of the declaration of each member it holds. An
+  `element`, `unwrapped` or type parameter `constraint` naming several is `{type_refs, type_refs_of}`.
 * A method row also has `return_ref` (the same shape, its return type; `return_refs` when it returns several, as `type_refs`). `type_ref` follows the TYPE the checker reaches, not the alias
   written: `type Desc = Readonly<{..}>` gives `Readonly`. `alias` (rows 71; one node `{name, file, line}`, as `type_ref`'s own) is the type alias WRITTEN, an import followed:
   `Desc` here. Every `file` inside a `type_ref` is the ABSOLUTE path the compiler read, never a `files` id: join `type_aliases a`
@@ -69,3 +75,14 @@ JOIN shape_members sm ON sm.shape = s.id WHERE f.abs = :file AND s.line = :line 
 
 A template read chained through one resolves each hop's `target` to its `shape_members` row (`row` is its `sm:` id, `line` its line):
 `{{ labels.nested.deep }}`, `{{ result?.error?.message }}`, and a keyed read `{{ items[key].label }}` through an index.
+
+## What a template read follows (rows 72)
+
+A template read's `target` (`expressions__ast`, a `Read` node) is resolved from the declarations above; a hop whose type names nothing ends the chain. It
+follows: a read chain; a CALL (`svc.list().x`, the method's `return_ref`, inferred when un-annotated); a keyed read (`element`, else `index`); a pipe (an
+in-tree `transform`'s return, else the piped value's `unwrapped`); `a ?? b`, `a || b` and `c ? a : b` when both name one declaration. A loop variable
+(`*ngFor`, `@for`) is the ELEMENT of that value and an `as` alias is the value itself - not the type of the first name met in the expression, so an
+argument of a call never types the loop. A member typed by a type parameter reads as what the instantiation passed (`Frame<{ .. }>`, `Base<Payload>`),
+else the parameter's `default` where nothing was passed (`Slot` is `Slot<Dto>`), else its `constraint`; an argument that names nothing stays nothing.
+A literal answers the names of what it spreads (`shape_members` kind `spread`, last first) and a `type_ref` whose declaration is a library type reads through its `alias`. A class reads the members of its bases, an INTERFACE too (`interfaces.extends_refs`, one `type_ref` per base, null for a library type). Several declarations
+at once (`A | B`, `A & B`, `X` with `shapes`) answer a name only when ONE of them declares it.
