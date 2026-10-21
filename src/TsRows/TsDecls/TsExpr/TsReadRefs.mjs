@@ -55,7 +55,11 @@ export function makeReadRefs(ts, checker, canonicalPath) {
   /** A declaration a module makes: a top-level `const`, a function, an enum, a CLASS. Never a local or a parameter. */
   const moduleLevel = (d) => {
     if (ts.isFunctionDeclaration(d) || ts.isEnumDeclaration(d) || ts.isClassDeclaration(d)) return ts.isSourceFile(d.parent);
-    if (!ts.isVariableDeclaration(d)) return false;
+    // A NAME A TOP-LEVEL DESTRUCTURING BINDS IS A MODULE DECLARATION TOO (rows 76): `export const { DemoActions } = makeSlice()` declares `DemoActions` as a BINDING ELEMENT, inside
+    // patterns nested to any depth, whose top VariableDeclaration is the top-level one. Admitting only the VariableDeclaration left every read of such a name (an action
+    // creator, a selector set) with no `target`, `local` or `param`. `constRows` writes the row each target joins, one per bound name.
+    while (ts.isBindingElement(d)) d = d.parent?.parent;
+    if (d === undefined || !ts.isVariableDeclaration(d)) return false;
     const statement = d.parent?.parent;
     return statement !== undefined && ts.isVariableStatement(statement) && ts.isSourceFile(statement.parent);
   };
