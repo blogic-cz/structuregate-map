@@ -8,7 +8,7 @@
 const str = (v) => (typeof v === 'string' ? v : null);
 
 export function makeContexts(store, owners, directivesAt, inputsAt) {
-  const { propByOwner, resolveRef, elementRefOf, hopOf, instance, paramNames } = owners;
+  const { propByOwner, resolveRef, elementRefOf, hopOf, instance, paramNames, baseTypedOf } = owners;
 
   const classOfDirective = new Map();
   for (const table of ['components', 'directives']) {
@@ -32,6 +32,11 @@ export function makeContexts(store, owners, directivesAt, inputsAt) {
     const ref = d.type_ref;
     if (d.class != null && ref?.name === 'TemplateRef' && String(ref.file ?? '').includes('@angular/core') && Array.isArray(ref.args) && ref.args[0]) injectedOf.set(d.class, ref.args[0]);
   }
+
+  // THE CONTEXT CODE BUILDS (rows 75, `TsDecls/TsExpr/TsViewContext.mjs`): the `type_ref` of the object a directive hands `createEmbeddedView(this.tpl, ctx)`, on the `di` row of
+  // that `TemplateRef`. It stands in only where the `TemplateRef` declares none - `inject(TemplateRef)`, `TemplateRef<any>`, `<unknown>` - so a declared context stays first.
+  const builtOf = new Map();
+  for (const d of store.table('di')) if (d.class != null && d.context_ref != null && typeof d.context_ref === 'object') builtOf.set(d.class, d.context_ref);
 
   const sameDeclaration = (a, b) => a?.name === b?.name && a?.file === b?.file && a?.line === b?.line;
 
@@ -71,19 +76,28 @@ export function makeContexts(store, owners, directivesAt, inputsAt) {
   };
 
   /** The owner of the context the directives matched on a node hand their view, `undefined` when none of them declares one (the node's variables are then read as before), null
-   *  when it is declared and names no owner. `scope` is the node's OUTER scope: its inputs are evaluated before the names it binds exist. */
+   *  when it is declared and names no owner. `scope` is the node's OUTER scope: its inputs are evaluated before the names it binds exist. A directive that declares none
+   *  takes its BASE class's (rows 75), the base's own parameters bound from what the directive extends it with, nearest base first over a visited set. */
   const contextAt = (nodeId, component, scope, valueOf) => {
     for (const d of directivesAt.get(nodeId) ?? []) {
-      const classId = classOfDirective.get(d.id);
-      if (classId === undefined || (!guardOf.has(classId) && !injectedOf.has(classId))) continue;
-      const owner = { kind: 'class', id: classId };
-      const env = instance(owner, feedOf(classId, nodeId, component, scope, valueOf)).env ?? new Map();
-      const guard = guardOf.get(classId);
-      if (guard === undefined) return resolveRef(injectedOf.get(classId), env);
-      // THE GUARD NAMES ITS OWN PARAMETERS (`<U>(dir: X<U>, ..)`): `dir`'s arguments say which of the class's each is, in order.
-      const named = guard.params?.[0]?.type_ref?.args ?? [];
-      const bound = new Map([...env].map(([p, v], i) => [named[i]?.param === true ? named[i].name : p, v]));
-      return resolveRef(guard.guard_ref, bound);
+      const directive = classOfDirective.get(d.id);
+      if (directive === undefined) continue;
+      let cur = instance({ kind: 'class', id: directive }, feedOf(directive, nodeId, component, scope, valueOf));
+      const seen = new Set();
+      while (cur !== null && !seen.has(cur.id)) {
+        seen.add(cur.id);
+        const classId = cur.id;
+        if (guardOf.has(classId) || injectedOf.has(classId) || builtOf.has(classId)) {
+          const env = cur.env ?? new Map();
+          const guard = guardOf.get(classId);
+          if (guard === undefined) return resolveRef(injectedOf.get(classId) ?? builtOf.get(classId), env);
+          // THE GUARD NAMES ITS OWN PARAMETERS (`<U>(dir: X<U>, ..)`): `dir`'s arguments say which of the class's each is, in order.
+          const named = guard.params?.[0]?.type_ref?.args ?? [];
+          const bound = new Map([...env].map(([p, v], i) => [named[i]?.param === true ? named[i].name : p, v]));
+          return resolveRef(guard.guard_ref, bound);
+        }
+        cur = baseTypedOf(cur);
+      }
     }
     return undefined;
   };

@@ -275,9 +275,16 @@ async function main() {
   //     `TemplateRef<Ctx>` it injects; the directive's generic is bound from the input that feeds it. A loop over an `as` alias of a framework pipe takes the element of `wrapped`
   //     (the list the observable emits). A `#ref` to a generic component binds its type parameters from the inputs on its element (default, else constraint, where none feeds
   //     one), and the parts of an intersection or a union take the bindings of the hop that reached them (`TsTplOwners.mjs::ownerOfRow`). Also, in CODE trees: a bare name that is a CLASS has a `target` (`kind: 'class'`, the name's line, `TsExpr/TsReadRefs.mjs::resolveName`), a parameter's read has `param` (`{file, line, col}` of its name; each `params` item has `line`/`col` and a destructured one `bindings`), a shorthand property `{ x }` is bound as the name `x` is (`getShorthandAssignmentValueSymbol`), and an alias of an intersection among the parts of a written intersection is one named part of `type_refs` (`TsTypeRef.mjs::writtenParts`), its own parts on the `type_aliases` row (`type_ref`/`type_refs`) which a template read walks in its place (`TsTplOwners.mjs::expandAlias`).
+  // 75: a read's declaration is found where the row is. A code read of a loop variable, a `catch` binding or a name a destructuring binds has `local` (the place of its `locals` row, with a
+  //     value or without, `TsExpr/TsReadRefs.mjs::resolveLocal`); every `target` of a read is anchored at the declaration's NAME, so a decorated member (`@Input()` above `label`) targets the
+  //     line of its `members` row and not its decorator's (`at`); a bare name a library declares as anything but a top-level declaration - the method of an interface (`import { cloneDeep }
+  //     from 'lodash'`), a namespace's member - has a `target` in the library's file (`resolveName`). A type literal member another operand also declares (`Base<T> & { Input: { .. } }`, `Opt & { Text }`,
+  //     both arms of a union) has its own `type_members` row, and the members below it hang from it (`TsDecls/TsTypeRows.mjs::typeMemberRowsFromType`). A directive that renders `createEmbeddedView(this.tpl, ctx)`
+  //     has `di.context_ref`, the `type_ref` of `ctx`, on its `TemplateRef`'s row (`TsExpr/TsViewContext.mjs`), which types the template's `let-` variables when the `TemplateRef` declares no context
+  //     (`TsTpl/TsTplContext.mjs`); a directive with no context of its own takes its base class's.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 74, build: args.build,
+    config: config.file, data: config.data, rows: 75, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

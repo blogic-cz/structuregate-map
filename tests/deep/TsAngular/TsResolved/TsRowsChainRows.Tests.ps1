@@ -155,6 +155,40 @@ export const obj = { m(n: number) { return n + 1; } };
 export function outer(k: number) { function inner(j: number) { return j + k; } return inner(k); }
 export class Holder { constructor(private dep: Api, id: number) { void id; } }
 '@
+    'apps/shop/src/bind.loops.ts' = @'
+import { Component, Input } from '@angular/core';
+import { cloneDeep } from 'demo-lib';
+import * as demo from 'demo-lib';
+export class Looper {
+  total(keys: string[], result: Record<string, number>): number {
+    let sum = 0;
+    for (const key of keys) { sum += result[key]; }
+    for (const [name, qty] of Object.entries(result)) { sum += qty + name.length; }
+    for (const idx in result) { sum += result[idx]; }
+    try { sum += 1; } catch (err) { sum += String(err).length; }
+    return sum;
+  }
+}
+@Component({ selector: 'app-deco', template: '' })
+export class Deco {
+  @Input()
+  label = 'x';
+  @Input() other = 1;
+  read(): string { return this.label + this.other; }
+  copy(v: string[]): string[] { return cloneDeep(v); }
+  both(v: string[]): number { return demo.cloneDeep(v).length; }
+}
+'@
+    'node_modules/demo-lib/package.json' = '{"name":"demo-lib","version":"1.0.0","types":"index.d.ts"}'
+    'node_modules/demo-lib/index.d.ts' = @'
+declare const _: _.DemoStatic;
+declare namespace _ {
+  interface DemoStatic {
+    cloneDeep<T>(value: T): T;
+  }
+}
+export = _;
+'@
 }
 
 function Get-TsBindDb { return (New-TsRowsDb (New-TsRowsWorkspace $script:TsBindFiles) -Shared).Db }
@@ -257,4 +291,51 @@ Test-Case 'tsrows: a shorthand property in an object binds the local it reads' {
     Assert-Line (Get-TsBindLinks $db 'project(() => ({ currencyID }))') 'bind=currencyID=local@13/11'
 }
 
+
+# (rows 75) a loop variable (`for..of`, `for..in`, destructured too) and a `catch` binding are `locals` rows with no initializer, and a read of one is that local - the place
+# of its row - as a read of a `const` with a value is. The controls: a parameter stays a `param`, and a name written beside it stays what it was.
+Test-Case 'tsrows: a read of a loop variable or a catch binding carries local, the place of its row' {
+    $db = Get-TsBindDb
+    Assert-Line (Get-TsBindLinks $db 'result[key]') 'bind=key=local@7/16'
+    Assert-Line (Get-TsBindLinks $db 'result[idx]') 'bind=idx=local@9/16'
+    $d = Get-TsBindLinks $db 'qty + name.length'
+    Assert-Line $d 'bind=qty=local@8/16'
+    Assert-Line $d 'bind=name=local@8/16'
+    Assert-Line (Get-TsBindLinks $db 'String(err).length') 'bind=err=local@10/30'
+    Assert-Line (Get-TsBindLinks $db 'result[key]') 'bind=result=param@5/25'
+    $row = Invoke-TsRowsQ $db "SELECT 'row=' || l.name || '@' || l.line || '/' || l.col AS r FROM locals l JOIN files f ON f.id = l.file WHERE f.path LIKE '%bind.loops.ts' AND l.name IN ('key', 'err')"
+    Assert-Line $row 'row=key@7/16'
+    Assert-Line $row 'row=err@10/30'
+}
+
+# (rows 75) a decorated member's target is its NAME's line - the line of its `members` row - not the decorator's, as a class's target already is.
+Test-Case 'tsrows: a read of a decorated member targets its name line, not its decorator' {
+    $db = Get-TsBindDb
+    $r = Get-TsBindLinks $db 'this.label + this.other'
+    Assert-Line $r 'bind=label=target@17'
+    Assert-Line $r 'bind=other=target@18'
+    Assert-Line (Invoke-TsRowsQ $db "SELECT 'member=' || m.name || '@' || m.line AS r FROM members m JOIN files f ON f.id = m.file WHERE f.path LIKE '%bind.loops.ts' AND m.name = 'label'") 'member=label@17'
+    # Every target of that file's code is a place some row sits at: a `members` row or a `classes` row.
+    $sql = "SELECT 'orphans=' || count(*) AS r FROM expressions x JOIN files xf ON xf.id = x.file JOIN expressions__ast t ON t.owner = x.id AND t.role = 'target' " +
+        "JOIN expressions__ast tf ON tf.owner = x.id AND tf.parent = t.n AND tf.role = 'file' JOIN expressions__ast tl ON tl.owner = x.id AND tl.parent = t.n AND tl.role = 'line' " +
+        "JOIN files df ON df.abs = tf.value WHERE xf.path LIKE '%bind.loops.ts' AND df.path LIKE '%bind.loops.ts' " +
+        "AND NOT EXISTS (SELECT 1 FROM members m WHERE m.file = df.id AND m.line = tl.value) AND NOT EXISTS (SELECT 1 FROM classes c WHERE c.file = df.id AND c.line = tl.value)"
+    Assert-Line (Invoke-TsRowsQ $db $sql) 'orphans=0'
+}
+
+# (rows 75) a bare name a LIBRARY declares as anything but a top-level function - here a method of an interface (`import { cloneDeep } from 'lodash'`) - targets that
+# declaration in the library's file, as the property link `demo.cloneDeep` always did. Controls: the same method through its namespace import, and the namespace import itself.
+Test-Case 'tsrows: a bare name a library declares as an interface method has a target in the library' {
+    $db = Get-TsBindDb
+    Assert-Line (Get-TsBindLinks $db 'cloneDeep(v)') 'bind=cloneDeep=target@4'
+    $c = Get-TsBindLinks $db 'demo.cloneDeep(v).length'
+    Assert-Line $c 'bind=cloneDeep=target@4'
+    Assert-Line $c 'bind=demo=target@1'
+    # The file is the library's, not the tree's.
+    $f = Invoke-TsRowsQ $db ("SELECT 'file=' || substr(tf.value, instr(tf.value, 'node_modules')) AS r FROM expressions x JOIN expressions__ast k ON k.owner = x.id AND k.role = 'k' " +
+        "JOIN expressions__ast nm ON nm.owner = x.id AND nm.parent = k.parent AND nm.role = 'name' AND nm.value = 'cloneDeep' " +
+        "JOIN expressions__ast t ON t.owner = x.id AND t.parent = k.parent AND t.role = 'target' JOIN expressions__ast tf ON tf.owner = x.id AND tf.parent = t.n AND tf.role = 'file' " +
+        "WHERE x.source = 'cloneDeep(v)'")
+    Assert-Line $f 'file=node_modules/demo-lib/index.d.ts'
+}
 }

@@ -96,14 +96,20 @@ What the directive on an element types (rows 74): the `let-x` / `*dir="let x"` v
 type parameters are bound from the inputs on the element (`T` from an input typed `T`, `T[]` or `Box<T>`). A library directive (`ngFor`, `ngIf`) has no rows and keeps its own reading. A `#ref` to a GENERIC
 component binds its parameters the same way (`<demo-table #t [rows]="items">` makes `t.selected` an `Item`), else by their `default`, else their `constraint`. A loop over an `as` alias of a framework
 pipe (`*ngIf="items$ | async as list"` then `*ngFor="let i of list"`) takes the element of the list the observable emits. The parts of an intersection or union read with the bindings of the declaration they were reached in.
+Where the `TemplateRef` declares no context (`inject(TemplateRef)`, `TemplateRef<any>`, `<unknown>`) the context is the object the directive's CODE hands the view (rows 75): the `di` row of that `TemplateRef` has
+`context_ref` (`di__context_ref`, a `type_ref` node), the type of the second argument of `createEmbeddedView(this.tpl, { rule: this.rule })` - an object literal or a local typed by a literal is a shape ref - when every such call
+of the class hands one type. A directive that declares no context takes its BASE class's, the base's parameters bound by the `extends` arguments.
 
 A CODE expression's tree (`returns`/`locals`/`assignments`/`calls` through their `expressions` row, `branches.condition_expr`, `switch_cases`) is read the same way: EVERY link of a property chain carries its own `target`
 (`{name, file, line}`, the declaration that name lands on, rows 73), not only the outermost - `this.holder.Inner.Id` targets `holder`, `Inner` and `Id` each, `SafeRead` links too. A link whose
 type the checker cannot follow (an `any`) has none.
 
-A bare NAME in a code tree is bound by what it is (rows 74), one of three - `target`, `local` or `param`, never two - and a name none of them applies to (a loop variable, a `catch` binding, a global such as `Math`)
+A bare NAME in a code tree is bound by what it is (rows 74), one of three - `target`, `local` or `param`, never two - and a name none of them applies to (`undefined`, a type parameter)
 has none. A `target` is a top-level `const`, function, enum or CLASS (`JsonSerializer.parse(x)`, `new Foo()`, `Foo.Member`, an import alias followed); a class target also has `kind: 'class'` and its line is the
-class NAME's - the `classes` row's own `line`, never the first decorator's. A `local` is `{file, line, col}` of a `locals` row. A `param` is `{file, line, col}` of the PARAMETER'S NAME - of the binding element's
+class NAME's - the `classes` row's own `line`, never the first decorator's. EVERY `target` of a read, a link of a chain included, is anchored at the declaration's NAME (rows 75): a decorated member
+(`@Input()` above `label`) targets the line of its `members` row, so `JOIN members m ON m.file = <target file> AND m.line = <target line>` finds it. A bare name a LIBRARY declares as anything but a top-level
+declaration - `import { cloneDeep } from 'lodash'` is the method of the interface the package types its export with, a namespace's member a module - has a `target` in the library's file under `node_modules` (rows 75),
+as the link `_.cloneDeep` always had. A `local` is `{file, line, col}` of a `locals` row - a `const`/`let` with a value or without, a loop variable, a `catch` binding, and a name a destructuring binds (the place of its pattern, rows 75). A `param` is `{file, line, col}` of the PARAMETER'S NAME - of the binding element's
 name when it is destructured (`({ a, b: c }) =>`, `([x]) =>`) - for every function-like with a body: a declaration, method, accessor, constructor, arrow, function expression and a nested function. Join it to
 the parameter by place: each item of `members__params` and `functions__params` carries `line` and `col` of its name (of its pattern when destructured), and a destructured one `bindings`, one
 `{name, line, col}` per name it binds, nested patterns included - `JOIN` the item (or binding) whose `line`/`col` equal the read's `param` over the same file, through the owner row (`members.file` or

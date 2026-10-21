@@ -206,7 +206,10 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
         ...(decl.type ? typeRefAt(decl.type, given) : { type_ref: null }),
         ...locationOf(decl),
       });
-      for (const d of prop.declarations) covered.set(d, id);
+      // ONLY THE DECLARATION THE ROW IS ANCHORED AT IS COVERED (rows 75). A name two operands declare (`Base<T> & { Input: { .. } }` over a class with its own `Input`,
+      // `Opt & { Text: string }`, both arms of a union) is ONE property to the checker, every declaration of it listed - and marking them all covered left the
+      // literal's own member with no row at its own line, nor a parent for the members below it. The literal's is written by `nestedLiterals`, as any other.
+      covered.set(decl, id);
     }
     return covered;
   }

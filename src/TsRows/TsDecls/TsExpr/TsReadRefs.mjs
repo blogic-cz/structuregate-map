@@ -6,11 +6,17 @@
  */
 
 export function makeReadRefs(ts, checker, canonicalPath) {
+  /**
+   * WHERE A DECLARATION IS: its NAME's line, as a row's own `line` is (`TsNodes.mjs::locationOf`). `getStart()` of a decorated member is its FIRST DECORATOR (`@Input()`
+   * above `label = 'x'`), so a target anchored there named a line no `members` row sits at, and every reader that finds a row by (file, line) missed
+   * the member (rows 75). A declaration with no name (a call signature, a constructor) starts where it starts.
+   */
   const at = (d) => {
     const sf = d.getSourceFile();
+    const pos = d.name && typeof d.name.getStart === 'function' ? d.name.getStart() : d.getStart();
     return {
       file: canonicalPath(sf.fileName),
-      line: sf.getLineAndCharacterOfPosition(d.getStart()).line + 1,
+      line: sf.getLineAndCharacterOfPosition(pos).line + 1,
     };
   };
 
@@ -82,25 +88,37 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
       symbol = checker.getAliasedSymbol(symbol);
     }
-    const decls = (symbol?.declarations ?? []).filter(moduleLevel);
-    const place = (d) => at(ts.isClassDeclaration(d) && d.name ? d.name : d);
-    const [first, ...rest] = decls.map(place);
+    const all = symbol?.declarations ?? [];
+    // A LIBRARY NAME THAT IS NOT A TOP-LEVEL DECLARATION is still declared (rows 75): `import { cloneDeep } from 'lodash'` binds the METHOD of an interface the package
+    // types its export with (a `MethodSignature`), a namespace's member, a module. Those keep their place in the library's file, as the link `_.cloneDeep` always did -
+    // never a name nothing declares. ONLY when every declaration is in a declaration file under `node_modules`: an in-tree declaration stays what it was.
+    const inLibrary = (d) => d.getSourceFile().isDeclarationFile && d.getSourceFile().fileName.includes('/node_modules/');
+    const top = all.filter(moduleLevel);
+    const decls = top.length ? top : (all.length && all.every(inLibrary) ? all : []);
+    const [first, ...rest] = decls.map(at);
     if (first === undefined) return null;
     const klass = ts.isClassDeclaration(decls[0]);
     return { name: node.text, ...first, ...(klass ? { kind: 'class' } : {}), ...(rest.length ? { also: rest } : {}) };
   }
 
   /**
-   * A BARE NAME DECLARED IN A BODY, as where its `locals` row sits: `{file, line, col}` of the declared
-   * name, the row's own `line` and `col`. Not a `target` - every reader takes a `Read` without one for a
-   * local - and only for a declaration that HAS a `locals` row (a named one with an initializer).
+   * A BARE NAME DECLARED IN A BODY, as where its `locals` row sits: `{file, line, col}` of the declaration's name, the row's own `line` and `col`.
+   * Not a `target` - every reader takes a `Read` without one for a local.
+   *
+   * EVERY DECLARATION HAS A ROW, WITH A VALUE OR WITHOUT (rows 75): a loop's `for (const key of keys)`, a `catch (e)` and `let t;` are `locals` rows the body walk
+   * writes (`TsBody.mjs::emitLocal`), and a name a destructuring binds (`const { a } = f()`, `for (const [k, v] of m)`) is its DECLARATION's row, so the place is the
+   * pattern's. Requiring an initializer left every read of a loop variable and of a destructured name bound to nothing - the largest share of the reads with no
+   * `target`, `local` or `param`. A declaration file has no body walk, so a library's own local has no row.
    */
   function resolveLocal(node) {
     const decls = symbolOf(node)?.declarations ?? [];
     if (decls.length !== 1) return null;
     const [d] = decls;
-    if (!ts.isVariableDeclaration(d) || !ts.isIdentifier(d.name) || !d.initializer || moduleLevel(d)) return null;
-    return placeOf(d.name);
+    if (!ts.isIdentifier(d.name ?? node)) return null;
+    let holder = d;
+    while (holder !== undefined && ts.isBindingElement(holder)) holder = holder.parent?.parent;
+    if (holder === undefined || !ts.isVariableDeclaration(holder) || moduleLevel(holder) || holder.getSourceFile().isDeclarationFile) return null;
+    return placeOf(holder.name);
   }
 
   /**

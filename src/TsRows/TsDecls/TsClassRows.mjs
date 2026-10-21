@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto';
 import { canonicalPath, relativeTo, slash } from './TsPaths.mjs';
 import { locationOf } from './TsNodes.mjs';
 import { makeLibPipes } from './TsLibPipes.mjs';
+import { makeViewContexts } from './TsViewContext.mjs';
 
 /** The package a decorator must come FROM to be an Angular one. ONE identity resolved through the type
  *  checker, instead of a list of the five names - which says nothing about origin and would count a
@@ -298,6 +299,8 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     });
   }
 
+  const viewContextsOf = makeViewContexts(ts, checker, typeRefAt);
+
   function extractClass(node, fid, holder = null) {
     let injectsTemplateRef = false;
     const mods = modifiersOf(node);
@@ -325,6 +328,9 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     // A CLASS DECORATOR'S ARGUMENTS ARE CODE (1:1): `@NgModule({ providers: [{ useFactory: () => .. }] })` - calls and callbacks.
     for (const d of (ts.canHaveDecorators(node) ? ts.getDecorators(node) : undefined) ?? []) collectExpr(d.expression, null, classId);
 
+    // THE CONTEXT EACH INJECTED `TemplateRef` IS RENDERED WITH, where code builds it (rows 75, `TsExpr/TsViewContext.mjs`): `di.context_ref`.
+    const viewContexts = viewContextsOf(node);
+    const contextOf = (declaration) => (viewContexts.has(declaration) ? { context_ref: viewContexts.get(declaration) } : {});
     const members = [];
     const summaries = [];
     for (const m of node.members) {
@@ -392,6 +398,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
             class: classId, file: fid, param: p.name, type: p.type,
             resolved: p.resolved, type_ref: p.type_ref,
             decorators: p.decorators.map((x) => x.name), optional: p.optional,
+            ...contextOf(paramNodes[pi]),
             // THE TOKEN `@Inject(TOKEN)` NAMES - the parameter's type is the interface, and the interface
             // says nothing about which provider answers.
             ...(tokenArg ? { token: tokenArg.getText(), token_ref: declFileOf(tokenArg) } : {}),
@@ -412,6 +419,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
             class: classId, file: fid, param: propName(m.name), member: memberId, inject: true,
             type: typeText(call, null), resolved: declFileOfSymbol(t.aliasSymbol ?? t.getSymbol()),
             type_ref: null, decorators: [], optional,
+            ...contextOf(m),
             ...(tokenArg ? { token: tokenArg.getText(), token_ref: declFileOf(tokenArg) } : {}),
           });
         }

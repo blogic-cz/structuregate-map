@@ -32,4 +32,10 @@ Loops, bare expression statements and `++`/`--` had no row of their own. The cas
   parameter: the binding element's name). `members__params`/`functions__params` items carry `line`/`col`, and `bindings` when destructured, so the join is exact. `param` on a CODE tree is that place,
   `param: true` on a template tree the mark `TsExprSummary.mjs` reads - which is why the summary tests `=== true`.
 - **A shorthand property (`{ client }`) is a read of the variable**, bound by `getShorthandAssignmentValueSymbol`: `getSymbolAtLocation` on its name answers with the property's own symbol.
-- **Not bound**: a loop variable and a `catch` binding (a `locals` row without an initializer, `resolveLocal`), a global, a type parameter.
+- **A library name is a `target` wherever it is declared** (rows 75, `resolveName`): `import { cloneDeep } from 'lodash'` binds a METHOD of an interface (`MethodSignature`), a namespace's member or a module, not a top-level
+  function - most of the bare names that had no `target` in a workspace using lodash. When EVERY declaration is in a declaration file under `node_modules` it is the target, in that file, as the link `_.cloneDeep` always was; an in-tree
+  declaration that is not top-level stays unbound.
+- **`local` is every `locals` row** (rows 75, `resolveLocal`): a loop variable (`for (const key of keys)`, `for..in`), a `catch (e)` binding, `let t;` and a name a destructuring binds (`for (const [k, v] of m)`, `const { a } = f()`) -
+  the place of its declaration's row, with a value or without; the largest share of the reads with no binding was these. Nothing in rust reads `local` on a tree: the closure's `const` locals are found by (member, name).
+- **A `target` is anchored at the declaration's NAME** (rows 75, `at`): `@Input()` above `label` made a read target the decorator's line, where no `members` row sits - and rust's line-keyed `row_of` found no row for it.
+- **Not bound**: `undefined`, a type parameter, a name of a library no `node_modules` declaration file backs.
