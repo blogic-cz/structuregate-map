@@ -436,8 +436,7 @@ Test-Case 'tsrows: the per-name consts rows of a top-level destructuring have th
 Test-Case 'tsrows: a nested local destructuring has one binding per bound name, with the path to it' {
     $r = Invoke-TsRowsQ (Get-TsBindDb) ("SELECT nm.value || '|property=' || ifnull(pr.value, 'none') || '|default=' || ifnull(df.value, 'none') || '|index=' || ifnull(ix.value, 'none') AS r " +
         "FROM locals o JOIN files f ON f.id = o.file JOIN locals__bindings it ON it.owner = o.id AND it.parent = 0 " +
-        "JOIN locals__bindings nm ON nm.owner = it.owner AND nm.parent = it.n AND nm.role = 'local' " +
-        "LEFT JOIN locals__bindings pr ON pr.owner = it.owner AND pr.parent = it.n AND pr.role = 'property' " +
+        "JOIN locals__bindings nm ON nm.owner = it.owner AND nm.parent = it.n AND nm.role = 'local' LEFT JOIN locals__bindings pr ON pr.owner = it.owner AND pr.parent = it.n AND pr.role = 'property' " +
         "LEFT JOIN locals__bindings df ON df.owner = it.owner AND df.parent = it.n AND df.role = 'default' " +
         "LEFT JOIN locals__bindings ix ON ix.owner = it.owner AND ix.parent = it.n AND ix.role = 'index' " +
         "WHERE f.path LIKE '%bind.defaults.ts' AND o.destructured = 1 AND o.line = 11")
@@ -449,6 +448,12 @@ Test-Case 'tsrows: a nested local destructuring has one binding per bound name, 
     # THE CONTROL: a pattern with no nesting keeps its names and keys.
     $c = Get-TsBindingFacts 'locals__bindings' 'locals' 'o.destructured = 1' 'local' 'JOIN locals__bindings it ON it.owner = o.id AND it.parent = 0'
     Assert-Line $c 'p|default=3|type=number|index=none'
+}
+
+# (rows 80) A TOP-LEVEL ARRAY ELEMENT ADDS NOTHING TO THE PATH (`TsBody.mjs::emitLocal`): `const [, r = 2] = ..` binds `r` at `index` 1 and `property` NULL - rows 78 kept the name it binds, against their own contract. Controls: the
+# object pattern's names keep their key (`p`, and `q` for `q: qq`), and the nested array in a path keeps the path (`list`, above).
+Test-Case 'tsrows: a top-level array element of a local destructuring has no property, only its index' {
+    $r = Invoke-TsRowsQ (Get-TsBindDb) ("SELECT nm.value || '|property=' || ifnull(pr.value, 'none') AS r FROM locals o JOIN files f ON f.id = o.file JOIN locals__bindings it ON it.owner = o.id AND it.parent = 0 JOIN locals__bindings nm ON nm.owner = it.owner AND nm.parent = it.n AND nm.role = 'local' LEFT JOIN locals__bindings pr ON pr.owner = it.owner AND pr.parent = it.n AND pr.role = 'property' WHERE f.path LIKE '%bind.defaults.ts' AND o.destructured = 1"); Assert-Line $r 'r|property=none'; Assert-Line $r 'p|property=p'; Assert-Line $r 'first|property=list'
 }
 
 # (rows 79, #103) A CALL ARGUMENT THAT NAMES A VARIABLE KEEPS ITS DECLARATION: `calls.args` holds the const's evaluated value, `arg_refs` one item per such argument - its `position`, the

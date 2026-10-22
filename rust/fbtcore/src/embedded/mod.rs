@@ -64,7 +64,7 @@ pub const TSROWS: Set = set!("tsrows-node":
     "TsRows/TsDerive/TsSpecJoins.mjs", "TsRows/TsTpl/TsTplEmit.mjs", "TsRows/TsTpl/TsTplExpr.mjs",
     "TsRows/TsTpl/TsTplExtract.mjs", "TsRows/TsTpl/TsTplKeys.mjs", "TsRows/TsTpl/TsTplMatch.mjs",
     "TsRows/TsTpl/TsTplReads.mjs", "TsRows/TsTpl/TsPipeRefs.mjs",
-    "TsRows/TsTpl/TsTplOwners.mjs", "TsRows/TsTpl/TsTplContext.mjs");
+    "TsRows/TsTpl/TsTplOwners.mjs", "TsRows/TsTpl/TsTplContext.mjs", "TsRows/TsTpl/TsTplHops.mjs", "TsRows/TsTpl/TsTplEvents.mjs");
 
 /// The plain TypeScript half. `TsGate.Map.mjs` is the file map's: sharing it keeps its fingerprints the ones
 /// buildmap.json groups by.

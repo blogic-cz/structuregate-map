@@ -229,20 +229,45 @@ export function makeScopes(store, diag) {
   };
 }
 
-export function rollupModuleScope(store, diag, scopes = makeScopes(store, diag)) {
-  const { scopeOf, standaloneScope, moduleOfClass, standaloneByClass } = scopes;
-  /**
-   * Is this render's TARGET in that scope - BY IDENTITY first, by name only if nothing resolved.
-   *
-   * The name path is what this rollup used to do alone, and it decided about a third of the edges wrongly: both
-   * `TooltipComponent`s are named `TooltipComponent`, so a module importing only one copy stamped the other
-   * `imported` too - the field could not disambiguate in exactly the case it exists for.
-   */
-  const reach = (scope, r) => {
-    if (scope.ids.has(r.to_class)) return 'id';
-    return scope.names.has(String(r.to_name)) ? 'name' : null;
-  };
+/**
+ * Is this render's TARGET in that scope - BY IDENTITY first, by name only if nothing resolved.
+ *
+ * The name path is what this rollup used to do alone, and it decided about a third of the edges wrongly: both
+ * `TooltipComponent`s are named `TooltipComponent`, so a module importing only one copy stamped the other
+ * `imported` too - the field could not disambiguate in exactly the case it exists for.
+ */
+const reach = (scope, r) => {
+  if (scope.ids.has(r.to_class)) return 'id';
+  return scope.names.has(String(r.to_name)) ? 'name' : null;
+};
 
+/**
+ * THE SCOPE ONE CANDIDATE IS IN, for the host `from_class` (rows 80): `{ scope, standalone?, module?, byName? }` - the one rule `rollupModuleScope` stamps on every `renders`
+ * row, asked of any (host, candidate) pair, so a pass that runs BEFORE that rollup (a template `#ref`'s type, `TsTpl/TsTplReads.mjs`) chooses the candidate `renders` does.
+ */
+export function judgeScope(scopes, r) {
+  const { scopeOf, standaloneScope, moduleOfClass, standaloneByClass } = scopes;
+  // A STANDALONE COMPONENT IS ASKED FIRST: no NgModule may declare it, and the module lookup below is keyed
+  // by FILE - so one sharing a file with an NgModule took that module's scope, and a tag it never imports
+  // read as `declared`.
+  const standalone = standaloneByClass.get(r.from_class);
+  if (standalone) {
+    // Its own `imports` array IS the scope - the rule the compiler applies to a standalone component.
+    const hit = reach(standaloneScope(standalone), r);
+    return { scope: hit === null ? 'out_of_scope' : 'imported', standalone: true, byName: hit === 'name' };
+  }
+  const mod = moduleOfClass(r.from_class);
+  const scope = scopeOf(mod);
+  if (!scope || !mod) return { scope: 'unknown' };
+  const declaredHit = reach(scope.declared, r);
+  const importedHit = declaredHit === null ? reach(scope.imported, r) : null;
+  return {
+    scope: declaredHit !== null ? 'declared' : importedHit !== null ? 'imported' : 'out_of_scope',
+    module: mod.id, byName: declaredHit === 'name' || importedHit === 'name',
+  };
+}
+
+export function rollupModuleScope(store, diag, scopes = makeScopes(store, diag)) {
   const counts = { declared: 0, imported: 0, out_of_scope: 0, unknown: 0 };
   for (const r of store.table('renders')) {
     // NGMODULE SCOPE IS A RULE ABOUT SELECTOR MATCHING, and an edge the compiler never matched is not
@@ -254,32 +279,11 @@ export function rollupModuleScope(store, diag, scopes = makeScopes(store, diag))
       counts.direct_reference = (counts.direct_reference ?? 0) + 1;
       continue;
     }
-    // A STANDALONE COMPONENT IS ASKED FIRST: no NgModule may declare it, and the module lookup below is keyed
-    // by FILE - so one sharing a file with an NgModule took that module's scope, and a tag it never imports
-    // read as `declared`.
-    const standalone = standaloneByClass.get(r.from_class);
-    if (standalone) {
-      // Its own `imports` array IS the scope - the rule the compiler applies to a standalone component.
-      const hit = reach(standaloneScope(standalone), r);
-      const scopeName = hit === null ? 'out_of_scope' : 'imported';
-      r.standalone = true;
-      r.scope = scopeName;
-      if (hit === 'name') r.scope_by_name = true;
-      counts[scopeName] = (counts[scopeName] ?? 0) + 1;
-      continue;
-    }
-    const mod = moduleOfClass(r.from_class);
-    const scope = scopeOf(mod);
-    if (!scope || !mod) {
-      r.scope = 'unknown';
-      counts.unknown += 1;
-      continue;
-    }
-    r.module = mod.id;
-    const declaredHit = reach(scope.declared, r);
-    const importedHit = declaredHit === null ? reach(scope.imported, r) : null;
-    r.scope = declaredHit !== null ? 'declared' : importedHit !== null ? 'imported' : 'out_of_scope';
-    if (declaredHit === 'name' || importedHit === 'name') r.scope_by_name = true;
+    const judged = judgeScope(scopes, r);
+    if (judged.standalone) r.standalone = true;
+    if (judged.module !== undefined) r.module = judged.module;
+    r.scope = judged.scope;
+    if (judged.byName) r.scope_by_name = true;
     counts[r.scope] = (counts[r.scope] ?? 0) + 1;
   }
 

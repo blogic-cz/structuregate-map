@@ -144,4 +144,27 @@ Test-Case 'tsrows: a partial run keeps every loop id valid and writes the loops 
     Assert-Equal ((Get-TsLoopFacts $partial.Db).Lines -join "`n") ((Get-TsLoopFacts $full.Db).Lines -join "`n") 'the loops after a partial run'
 }
 
+
+# (rows 80) THE BODY OF A PROTOTYPE METHOD UNDER `if (!X.prototype.m)` CARRIES THE ARM'S `branch` as any function's body does (`branch` is lexical, `TsDecls/TsDeclRows.mjs::prototypeRow` walks the body from the statement's walk): its calls, locals and
+# returns were NULL. The method's row stays detached on purpose (the row is the method). Control: the same assignment with no guard has no branch, and `note(this)` is a call on both lines.
+# Lines: the guard on 3, its body on 5 to 7, the unguarded method on 10 to 12; `g` (an ordinary `if`, line 16) gives `calls`, `locals` and `returns` their `branch` column on any build.
+Test-Case 'tsrows: a prototype method defined under an if arm has the arm on its body rows' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/ext.ts' = "declare global { interface Array<T> { demoLast(): T | undefined; demoFirst(): T | undefined; } }`nfunction note(x: unknown): void {}`n" +
+            "if (!Array.prototype.demoLast) {`n  Array.prototype.demoLast = function () {`n    note(this);`n    const n = this.length;`n    return this[n - 1];`n  };`n}`n" +
+            "Array.prototype.demoFirst = function () {`n  note(this);`n  return this[0];`n};`nexport {};`nexport function g(a: boolean) {`n  if (a) { const z = 1; note(z); return z; }`n  return 0;`n}`n"
+    }
+    $made = New-TsRowsDb $tree -Shared
+    Assert-Exit $made.Result 0
+    $in = "FROM {0} t JOIN files f ON f.id = t.file WHERE f.path LIKE '%ext.ts'"
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'call=' || t.line || ':' || (t.branch IS NOT NULL) AS r " + ($in -f 'calls') + " AND t.callee = 'note' UNION ALL " +
+        "SELECT 'local=' || t.line || ':' || (t.branch IS NOT NULL) " + ($in -f 'locals') + " UNION ALL SELECT 'ret=' || t.line || ':' || (t.branch IS NOT NULL) " + ($in -f 'returns'))
+    Assert-Line $r 'call=5:1'
+    Assert-Line $r 'local=6:1'
+    Assert-Line $r 'ret=7:1'
+    Assert-Line $r 'call=11:0'
+    Assert-Line $r 'ret=12:0'
+    # The method rows stay detached: no parent, no branch on the row itself.
+    Assert-Line (Invoke-TsRowsQ $made.Db ("SELECT 'fn=' || t.name || ':' || t.form || ':' || (t.parent IS NULL) AS r " + ($in -f 'functions') + " AND t.form = 'prototype-method' ORDER BY t.line")) 'fn=Array.prototype.demoLast:prototype-method:1'
+}
 }

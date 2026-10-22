@@ -306,9 +306,20 @@ async function main() {
   //     `gate_index.component_count` skips an orphan template's null component.
   //     Third audit, same number (#103): a `calls` row carries `arg_refs`, one `{position, name, $ref, file, line, col, kind}` per argument that is a bare name of a `const`/`let`/`var` or a top-level destructured binding
   //     (through import aliases; `args` keeps the evaluated value), so a passed table joins `consts` or `locals` by file and line (`TsExpr/TsReadRefs.mjs::resolveArg`, `TsDecls/TsBody.mjs::emitCall`).
+  // 80: seven gaps from a real-tree recount. `comments` holds a comment inside an EMPTY block, object, array or class body (`TsText.mjs::collectComments`: a childless node with punctuation scans its whole span; rows 78 scanned only the
+  //     trivia before `{`). A constructor body's `inject()` is a `di` row of the class, `member` the constructor (`TsExpr/TsInjects.mjs`). A call's `target` carries `line` when the checker's declaration is a member of an OBJECT
+  //     LITERAL (a method, an accessor, a property whose value is not a bare name) or a signature of an interface or type literal, and `target_id` is then the `shape_members`/`type_members` row AT that place, never a same-named
+  //     declaration of the file (`TsExpr/TsReadRefs.mjs::targetLine`, `TsRefs.mjs::rollupRefIds`). A `prototype` method's body is walked from the statement's own walk, so its rows carry the enclosing `if` arm's `branch`
+  //     (`TsDeclRows.mjs::prototypeRow`). A top-level ARRAY pattern element of a `locals` row's `bindings` has `property` null, as the contract says (`TsBody.mjs::emitLocal`). A class EXPRESSION's `classes` row has `expression`
+  //     (`duplicate_types` skips it, `rows/dups.rs`). An `unresolved_import` of a non-relative specifier has `case_insensitive_match` when a case-insensitive host resolves it through `paths` (`TsSetup/TsProgram.mjs`).
+  //     Template reads (`TsTpl/TsTplReads.mjs`, `TsTplHops.mjs`, `TsTplEvents.mjs`): a `#ref` is the component its element renders IN SCOPE (`TsModuleScope.mjs::judgeScope`, the rule `renders.scope` is stamped by); a loop over the framework's `keyvalue`
+  //     (`@angular/common`'s `KeyValuePipe`, found in the host's scope) is a `{ key, value }` pair over `Record`, `Map` and an index signature; `$event` of an output binding is the first type argument of the bound output's own emitter; a ternary
+  //     with an empty arm (`[]`, `null`, `undefined`) is the other arm, and two lists of one element are one value; the `as` alias of `a && b` is `b`; a chain goes on past a union step whose arms all declare it as ONE type (the step keeps no `target`).
+  //     `routes.also_loaded_by` lists every other route loading a root (a remote's `loadRemoteModule`, a second in-app loader), `parent_route` staying the one in-app loader (`TsDerive/TsRouteTree.mjs`). An `inject(TemplateRef)` in a CONSTRUCTOR body
+  //     makes the directive structural (`TsExpr/TsInjects.mjs`). The plain half (`ROWS_VERSION` 8): a class EXPRESSION's `classes` row has `expression`, and a `RegExp` construction over a literal (`/x/g`) is a call row with the literal's pattern and flags.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 79, build: args.build,
+    config: config.file, data: config.data, rows: 80, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

@@ -142,6 +142,52 @@ fn target_key(t: &Value) -> Option<String> {
     Some(format!("{} {} {}", t.get("name")?.as_str()?, t.get("file")?.as_str()?.replace('\\', "/"), t.get("line")?.as_i64()?))
 }
 
+/// The branch row that is each `prototype-method`'s OWN definition guard, by function id: `if (!X.prototype.m) { X.prototype.m = function ..; }`. The extractor walks the
+/// method's body inside that `then` arm (rows 80), so its returns carry the arm as `branch`; that arm conditions whether the method EXISTS, never what it returns. It is
+/// the method's guard only when it is a top-level `then` that SPANS the method's own row in the same file AND its condition is `!` over a read whose declaration (`target`)
+/// is the very member the method defines - a guard naming another member (`if (!X.prototype.other)`) conditions this method's return like any condition does.
+fn definition_guards(store: &Store<'_>, found: &IndexMap<String, (String, Option<String>)>) -> IndexMap<String, String> {
+    let mut places: Vec<(String, String, i64, i64)> = Vec::new();
+    let functions = store.table("functions");
+    for f in functions.iter() {
+        let Some(id) = f.get("id").and_then(Value::as_str).filter(|i| found.contains_key(*i)) else { continue };
+        let (Some(file), Some(line), Some(end)) = (f.get("file").and_then(Value::as_str), f.get("line").and_then(Value::as_i64), f.get("end_line").and_then(Value::as_i64)) else { continue };
+        places.push((id.to_string(), file.to_string(), line, end));
+    }
+    // (function id, branch id, condition expression id)
+    let mut spans: Vec<(String, String, String)> = Vec::new();
+    for b in store.table("branches").iter() {
+        if b.get("sense").and_then(Value::as_str) != Some("then")
+            || ["parent", "member"].iter().any(|k| b.get(k).is_some_and(|v| !v.is_null())) {
+            continue;
+        }
+        let (Some(id), Some(cond), Some(file), Some(line), Some(end)) = (
+            b.get("id").and_then(Value::as_str), b.get("condition_expr").and_then(Value::as_str), b.get("file").and_then(Value::as_str),
+            b.get("line").and_then(Value::as_i64), b.get("end_line").and_then(Value::as_i64)) else { continue };
+        for (fid, ffile, fline, fend) in &places {
+            if ffile == file && line <= *fline && *fend <= end {
+                spans.push((fid.clone(), id.to_string(), cond.to_string()));
+            }
+        }
+    }
+    let mut out = IndexMap::new();
+    if spans.is_empty() {
+        return out;
+    }
+    for e in store.table("expressions").iter() {
+        let Some(x) = e.get("id").and_then(Value::as_str) else { continue };
+        let Some(ast) = e.get("ast").map(unwrap) else { continue };
+        for (fid, bid, _) in spans.iter().filter(|(_, _, c)| c == x) {
+            let read = ast.get("expr").map(unwrap).filter(|r| is_read(r));
+            let defines = read.and_then(|r| r.get("target")).and_then(target_key);
+            if kind(ast) == Some("Not") && defines.is_some() && defines.as_ref() == found.get(fid).map(|(k, _)| k) {
+                out.insert(fid.clone(), bid.clone());
+            }
+        }
+    }
+    out
+}
+
 /// The `target` of every `prototype-method` whose body PROVES "some element of `this` is in my one parameter" -
 /// `this.some((x) => P.includes(x))`, or `P.some((x) => this.includes(x))`, the same test turned round. A `this`
 /// parameter is a type, never an argument. A method two definitions give two bodies is read only when EVERY
@@ -164,9 +210,13 @@ fn some_methods(store: &Store<'_>) -> IndexSet<String> {
     }
     let mut returns: IndexMap<&str, Vec<Option<String>>> = IndexMap::new();
     let all = store.table("returns");
+    let guards = definition_guards(store, &found);
     for r in all.iter() {
         let Some(member) = r.get("member").and_then(Value::as_str).filter(|m| found.contains_key(*m)) else { continue };
-        let plain = ["branch", "case"].iter().all(|f| r.get(f).is_none_or(Value::is_null));
+        // PLAIN: under no branch, or under the one `if` that DEFINES the method (`definition_guards`) - which conditions the DEFINITION, not what the body returns.
+        let defining = |b: &Value| b.as_str().is_some_and(|b| guards.get(member).is_some_and(|g| g == b));
+        let plain = r.get("case").is_none_or(Value::is_null)
+            && r.get("branch").is_none_or(|b| b.is_null() || defining(b));
         returns.entry(member).or_default().push(r.get("expression").and_then(Value::as_str).filter(|_| plain).map(str::to_string));
     }
     let one: IndexMap<String, &str> = returns.iter()

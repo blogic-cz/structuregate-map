@@ -21,31 +21,42 @@ export function rollupRouteTree(store, moduleRoots, diag) {
   // COLLECTED BEFORE ANYTHING IS WRITTEN: a root claimed by two lazy parents is only visible once every
   // parent has been read, and writing the first and skipping the second would publish whichever came out of
   // the table first - the positional answer this codebase refuses everywhere else.
+  // TWO KINDS OF LOADER (rows 80): an IN-APP `loadChildren: () => import(..)` (`load_children_module`) and a federated REMOTE (`load_children_remote`, `TsFederation.mjs`) - both
+  // mount the module's roots under their route. A remote one is another application's route, so it never makes the root's one `parent_route`.
   const claims = new Map();
+  const claim = (root, kind, id) => {
+    const held = claims.get(root) ?? { app: [], remote: [] };
+    held[kind].push(id);
+    claims.set(root, held);
+  };
   for (const route of routes) {
-    const target = route.load_children_module;
-    if (target === undefined) continue;
-    const module = moduleByClass.get(target);
-    if (module === undefined) { diag.note('lazy_target_not_an_ng_module'); continue; }
-    const roots = moduleRoots.get(module);
-    if (roots === undefined) { diag.note('lazy_module_configures_no_routes'); continue; }
-    for (const root of roots) {
-      const claimed = claims.get(root);
-      if (claimed) claimed.push(route.id);
-      else claims.set(root, [route.id]);
+    for (const [field, kind] of [['load_children_module', 'app'], ['load_children_remote', 'remote']]) {
+      const target = route[field];
+      if (target === undefined) continue;
+      const module = moduleByClass.get(target);
+      if (module === undefined) { if (kind === 'app') diag.note('lazy_target_not_an_ng_module'); continue; }
+      const roots = moduleRoots.get(module);
+      if (roots === undefined) { if (kind === 'app') diag.note('lazy_module_configures_no_routes'); continue; }
+      for (const root of roots) claim(root, kind, route.id);
     }
   }
 
   let lazy = 0;
-  for (const [root, parents] of claims) {
+  for (const [root, { app, remote }] of claims) {
     const row = byId.get(root);
     if (row === undefined) continue;
-    if (parents.length > 1) { diag.note('route_claimed_by_several_lazy_parents'); continue; }
+    if (app.length > 1) diag.note('route_claimed_by_several_lazy_parents');
     // A ROOT OF A LAZILY LOADED MODULE HAS NO IN-FILE PARENT, by construction - it is the top of its own
     // array. One that already carries a parent is a shape this join did not predict, so it is left alone and
     // reported rather than overwritten.
     if (row.parent_route !== undefined) { diag.note('lazy_root_already_nested'); continue; }
-    row.parent_route = parents[0];
+    // THE IN-APP LOADER IS THE PARENT (`absolute_path` composes through it), as before; EVERY OTHER LOADER - a remote's, or a second in-app one - is listed in `also_loaded_by`, so a
+    // consumer sees every place the root is mounted. Several in-app loaders make no one parent (the rule above), and are all listed.
+    const parent = app.length === 1 ? app[0] : undefined;
+    const others = [...new Set([...app, ...remote])].filter((id) => id !== parent).sort((x, y) => x.localeCompare(y, 'en', { numeric: true }));
+    if (others.length) row.also_loaded_by = others;
+    if (parent === undefined) continue;
+    row.parent_route = parent;
     lazy += 1;
   }
 

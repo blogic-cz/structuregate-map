@@ -97,8 +97,27 @@ export function rollupRefIds(store) {
     const id = idOf(asRef(row.resolved));
     if (id !== null) row.resolved_id = id;
   }
+  // A MEMBER OF AN OBJECT LITERAL OR A TYPE IS FOUND BY ITS PLACE, never by its name (rows 80): a call's `target.line` is the declaration the checker named, and the row at that
+  // file, line and name is the `shape_members` or `type_members` row. The name key above has no such row - it bound `Alpha.getAge(..)`, a property, to a `function getAge` of the file.
+  // A place with no row has NO id: falling back to the name was the bug.
+  const placed = new Map();
+  for (const table of ['type_members', 'shape_members']) { // a NAMED type's member (interface, alias) first: an anonymous literal has only the shape's
+    for (const row of store.table(table)) {
+      const name = str(row.name);
+      if (name === null || typeof row.line !== 'number') continue;
+      const key = `${String(row.file)}#${row.line}#${name}`;
+      if (!placed.has(key)) placed.set(key, row.id);
+    }
+  }
   for (const row of store.table('calls')) {
-    const id = idOf(asRef(row.target));
+    const ref = asRef(row.target);
+    if (typeof ref?.line === 'number') {
+      const fid = idByPath.get(str(ref.file) ?? '');
+      const hit = fid === undefined ? undefined : placed.get(`${String(fid)}#${ref.line}#${String(ref.name)}`);
+      if (hit !== undefined) row.target_id = hit;
+      continue;
+    }
+    const id = idOf(ref);
     if (id !== null) row.target_id = id;
   }
   // `external` IS THE SPELLING (a specifier not starting with `.`); whether the import lands IN THE TREE is

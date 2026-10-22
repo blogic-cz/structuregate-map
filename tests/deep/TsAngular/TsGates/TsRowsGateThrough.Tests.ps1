@@ -307,14 +307,15 @@ Test-Case 'tsrows: a prototype method a factory predicate calls is read however 
         'apps/shop/src/kind-ids.ts' = "export enum Kind { Alpha = 1, Beta = 2, Gamma = 3 }`n"
         'apps/shop/src/array.extensions.ts' = "export {};`n" +
             "declare global { interface Array<T> { withThis(o: T[]): boolean; turned(o: T[]): boolean; guarded(o: T[]): boolean;`n" +
-            "  misguarded(o: T[]): boolean; defined(o: T[]): boolean; twice(o: T[]): boolean; } }`n" +
+            "  misguarded(o: T[]): boolean; defined(o: T[]): boolean; twice(o: T[]): boolean; cond(o: T[]): boolean; } }`n" +
             "Array.prototype.withThis = function <T>(this: T[], o: T[]): boolean { return this.some((x) => o.includes(x)); };`n" +
             "Array.prototype.turned = function <T>(o: T[]): boolean { return o.some((x) => this.includes(x)); };`n" +
             "if (!Array.prototype.guarded) {`n  Array.prototype.guarded = function <T>(o: T[]): boolean {`n    return this.some((x) => o.includes(x));`n  };`n}`n" +
             "if (!Array.prototype.twice) {`n  Array.prototype.misguarded = function <T>(o: T[]): boolean { return this.some((x) => o.includes(x)); };`n}`n" +
             "Object.defineProperty(Array.prototype, 'defined', { value: function <T>(this: T[], o: T[]): boolean { return this.some((x) => o.includes(x)); } });`n" +
             "Array.prototype.twice = function <T>(o: T[]): boolean { return this.some((x) => o.includes(x)); };`n" +
-            "Array.prototype.twice = function <T>(o: T[]): boolean { return false; };`n"
+            "Array.prototype.twice = function <T>(o: T[]): boolean { return false; };`n" +
+            "if (!Array.prototype.cond) {`n  Array.prototype.cond = function <T>(o: T[]): boolean {`n    if (o.length > 1) { return this.some((x) => o.includes(x)); }`n    return false;`n  };`n}`n"
         'apps/shop/src/preds.ts' = "import { Kind } from './kind-ids';`n" +
             "const make = (ids: Kind[]) => (...rest: Kind[]) => rest.withThis(ids);`n" +
             "export const isW = make([Kind.Alpha]);`n" +
@@ -322,14 +323,15 @@ Test-Case 'tsrows: a prototype method a factory predicate calls is read however 
             "const makeG = (ids: Kind[]) => (...rest: Kind[]) => rest.guarded(ids);`nexport const isG = makeG([Kind.Gamma]);`n" +
             "const makeM = (ids: Kind[]) => (...rest: Kind[]) => rest.misguarded(ids);`nexport const isM = makeM([Kind.Alpha]);`n" +
             "const makeD = (ids: Kind[]) => (...rest: Kind[]) => rest.defined(ids);`nexport const isD = makeD([Kind.Beta]);`n" +
-            "const makeTw = (ids: Kind[]) => (...rest: Kind[]) => rest.twice(ids);`nexport const isTw = makeTw([Kind.Gamma]);`n"
+            "const makeTw = (ids: Kind[]) => (...rest: Kind[]) => rest.twice(ids);`nexport const isTw = makeTw([Kind.Gamma]);`n" +
+            "const makeC = (ids: Kind[]) => (...rest: Kind[]) => rest.cond(ids);`nexport const isC = makeC([Kind.Alpha]);`n"
         'apps/shop/src/ext.component.ts' = "import { Component } from '@angular/core';`n" +
             "import { Kind } from './kind-ids';`n" +
-            "import { isW, isT, isG, isM, isD, isTw } from './preds';`n" +
+            "import { isW, isT, isG, isM, isD, isTw, isC } from './preds';`n" +
             "@Component({ selector: 'demo-ext', standalone: true, template: '<p *ngIf=`"isW(item.kind)`">w</p>" +
             "<p *ngIf=`"isT(item.kind)`">t</p><p *ngIf=`"isG(item.kind)`">g</p><p *ngIf=`"isM(item.kind)`">m</p>" +
-            "<p *ngIf=`"isD(item.kind)`">d</p><p *ngIf=`"isTw(item.kind)`">tw</p>' })`n" +
-            "export class ExtComponent { isW = isW; isT = isT; isG = isG; isM = isM; isD = isD; isTw = isTw;`n" +
+            "<p *ngIf=`"isD(item.kind)`">d</p><p *ngIf=`"isTw(item.kind)`">tw</p><p *ngIf=`"isC(item.kind)`">c</p>' })`n" +
+            "export class ExtComponent { isW = isW; isT = isT; isG = isG; isM = isM; isD = isD; isTw = isTw; isC = isC;`n" +
             "  item: { kind: Kind } = { kind: Kind.Alpha }; }`n"
     }
     $made = New-TsRowsDb $tree
@@ -341,6 +343,8 @@ Test-Case 'tsrows: a prototype method a factory predicate calls is read however 
     Assert-Line $r 'isD(item.kind) => Kind item.kind in ["Beta"]'
     Assert-NoLine $r 'isM(item.kind) =>'
     Assert-NoLine $r 'isTw(item.kind) =>'
+    # A REAL condition around the method's one return keeps it conditional: only the definition guard is plain.
+    Assert-NoLine $r 'isC(item.kind) =>'
 }
 
 

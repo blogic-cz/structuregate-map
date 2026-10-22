@@ -131,6 +131,12 @@ export class InjectDirective { private tpl = inject(TemplateRef); }
 @Directive({ selector: '[demoOther]', standalone: true })
 export class OtherDirective { private vcr = inject(ViewContainerRef); }
 
+@Directive({ selector: '[demoCtor]', standalone: true })
+export class CtorDirective { private tpl: TemplateRef<unknown>; constructor() { this.tpl = inject(TemplateRef); } }
+
+@Directive({ selector: '[demoCtorPlain]', standalone: true })
+export class CtorPlainDirective { private vcr: ViewContainerRef; constructor() { this.vcr = inject(ViewContainerRef); } }
+
 export class RenderBase<T> {
   constructor(protected tpl: TemplateRef<any>, protected vcr: ViewContainerRef) {}
   protected render(item: T): void { this.vcr.createEmbeddedView(this.tpl, { $implicit: item, extra: new Row() }); }
@@ -143,10 +149,12 @@ export class RenderedDirective extends RenderBase<Item> {
 @Component({
   selector: 'app-inject',
   standalone: true,
-  imports: [InjectDirective, OtherDirective, RenderedDirective],
+  imports: [InjectDirective, OtherDirective, CtorDirective, CtorPlainDirective, RenderedDirective],
   template: `
 <ng-template [demoInject]="injectedOn"></ng-template>
 <ng-template [demoOther]="plainOn"></ng-template>
+<ng-template [demoCtor]="ctorOn"></ng-template>
+<ng-template [demoCtorPlain]="ctorPlainOn"></ng-template>
 <p *demoRendered="let made; extra as more">{{ made.Name }}{{ more.Id }}</p>
 <div *ngFor="let line of (grid$ | async)"><b>{{ line[0].Name }}</b><i *ngFor="let square of line">{{ square.Name }}</i></div>
 <div *ngFor="let flat of (flat$ | async)">{{ flat.Name }}</div>
@@ -156,6 +164,8 @@ export class RenderedDirective extends RenderBase<Item> {
 export class InjectComponent {
   injectedOn = true;
   plainOn = true;
+  ctorOn = true;
+  ctorPlainOn = true;
   grid$: Observable<Item[][]> = of([[new Item()]]);
   flat$: Observable<Item[]> = of([new Item()]);
 }
@@ -242,6 +252,10 @@ Test-Case 'tsrows types: a directive that injects TemplateRef with inject() is s
     $r = Invoke-TsRowsQ (Get-TsTypesDb) "SELECT 'gate=' || name || '|' || source || '|' || gate_kind AS r FROM gates WHERE source IN ('injectedOn', 'plainOn')"
     Assert-Line $r 'gate=demoInject|injectedOn|structural'
     Assert-NoLine $r 'plainOn'
+    # AN `inject(TemplateRef)` IN THE CONSTRUCTOR'S BODY makes it structural as a field's does (rows 80); the control injects another token there.
+    $c = Invoke-TsRowsQ (Get-TsTypesDb) "SELECT 'gate=' || name || '|' || source || '|' || gate_kind AS r FROM gates WHERE source IN ('ctorOn', 'ctorPlainOn')"
+    Assert-Line $c 'gate=demoCtor|ctorOn|structural'
+    Assert-NoLine $c 'ctorPlainOn'
     # ITS `di` ROW NAMES THE DECLARATION `inject()` HANDS BACK, as a constructor parameter's does: the class in Angular's package (`file` ends there), each by its own class.
     $d = Invoke-TsRowsQ (Get-TsTypesDb) ("SELECT 'di=' || c.name || '|' || ifnull(n.value, 'none') || '|' || (CASE WHEN f.value LIKE '%@angular/core/%' THEN 'core' ELSE 'other' END) AS r " +
         "FROM di d JOIN classes c ON c.id = d.class JOIN di__type_ref n ON n.owner = d.id AND n.role = 'name' JOIN di__type_ref f ON f.owner = d.id AND f.parent = n.parent AND f.role = 'file' " +

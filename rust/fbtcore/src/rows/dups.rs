@@ -62,8 +62,11 @@ pub fn write(conn: &Connection) -> rusqlite::Result<usize> {
         let kind_sql = if has_columns(conn, table, &["kind"]) { "c.kind" } else { "''" };
         let symbol = if has_columns(conn, table, &["symbol"]) { "c.symbol" } else { "''" };
         let project = if has_columns(conn, "files", &["project"]) { "f.project" } else { "''" };
+        // A CLASS EXPRESSION IS NOT A DECLARATION OF A TYPE (`static Inner = class { .. }` is a `classes` row named by its holder, `expression` set): skipped,
+        // or a holder named like a class elsewhere read as a duplicate of it.
+        let declared = if table == "classes" && has_columns(conn, table, &["expression"]) { " WHERE coalesce(c.expression, 0) = 0" } else { "" };
         let sql = format!(
-            "SELECT c.name, {kind_sql}, {symbol}, f.path, c.line, f.lang, {project}, c.file FROM {table} c JOIN files f ON f.id = c.file"
+            "SELECT c.name, {kind_sql}, {symbol}, f.path, c.line, f.lang, {project}, c.file FROM {table} c JOIN files f ON f.id = c.file{declared}"
         );
         let mut stmt = conn.prepare(&sql)?;
         for row in stmt.query_map([], |r| {

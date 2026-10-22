@@ -75,4 +75,28 @@ Test-Case 'tsrows: a type literal member another operand also declares has its o
     Assert-Line (Invoke-TsRowsQ $made.Db "SELECT 'left=' || count(*) AS r FROM type_members m JOIN type_aliases a ON a.id = m.owner WHERE a.name = 'Either' AND m.path = 'Left'") 'left=1'
 }
 
+
+# (rows 80) A CALL'S `target_id` IS THE DECLARATION THE CHECKER NAMED, found by its PLACE (`TsRefs.mjs::rollupRefIds`, `TsExpr/TsReadRefs.mjs::targetLine`): `Ident.getAge(..)` is the property of an object literal -
+# its `shape_members` row - though `function getAge` sits in the same file, and `this.mask.writeValue(..)` is the member of a type literal (`type_members`), not the class's own `writeValue`. Controls: a property
+# that only names a function (`getAge: getAge`, `{ getAge }`) still follows the declaration it names.
+Test-Case 'tsrows: a call of an object literal or type member has the row at the checker declaration, not a same-named one' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/target.ts' = "export function getAge(d: string): number { return d.length; }`n" +
+            "export const normalize = (s: string) => s.trim();`n" +
+            "export const Ident = {`n  getAge: (d: string) => d.length + 1,`n  normalize(s: string) { return s; },`n};`n" +
+            "export const Same = { getAge: getAge };`nexport const Short = { getAge };`n" +
+            "type MaskType = { writeValue: (v: string) => void };`n" +
+            "export class Field {`n  mask!: MaskType;`n  writeValue(v: string) { this.mask.writeValue(v); }`n" +
+            "  run() { Ident.getAge('a'); Ident.normalize('b'); Same.getAge('c'); Short.getAge('d'); }`n}`n"
+    }
+    $made = New-TsRowsDb $tree -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'tg=' || c.callee || '|' || coalesce((SELECT 'sm@' || line FROM shape_members WHERE id = c.target_id), (SELECT 'tm@' || line FROM type_members WHERE id = c.target_id), " +
+        "(SELECT 'fn@' || line FROM functions WHERE id = c.target_id), (SELECT 'm@' || line FROM members WHERE id = c.target_id), 'none') AS r FROM calls c JOIN files f ON f.id = c.file WHERE f.path LIKE '%target.ts'")
+    Assert-Line $r 'tg=Ident.getAge|sm@4'
+    Assert-Line $r 'tg=Ident.normalize|sm@5'
+    Assert-Line $r 'tg=this.mask.writeValue|tm@9'
+    Assert-Line $r 'tg=Same.getAge|fn@1'
+    Assert-Line $r 'tg=Short.getAge|fn@1'
+}
 }

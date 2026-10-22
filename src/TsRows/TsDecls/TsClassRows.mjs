@@ -302,6 +302,8 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     const className = node.name?.getText() ?? holder ?? '(anonymous)';
     const classId = store.add('classes', 'c', {
       file: fid, name: className,
+      // A CLASS EXPRESSION SAYS SO (rows 80): `static Inner = class { .. }` is a row named by its holder, no declaration of a type of that name - `duplicate_types` skips it.
+      ...(ts.isClassExpression(node) ? { expression: true } : {}),
       // WHAT THIS ROW DESCRIBES, HASHED. The file's digest changes when anything in the file changes; a
       // class's changes only when THIS declaration does. `getText()` starts at the node's own start - its
       // first DECORATOR - so `@Component({...})` metadata is inside the hash exactly as it is in the row.
@@ -364,6 +366,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
         && (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer))
         ? initializer.body : undefined;
       const body = m.body ?? propertyFn;
+      if (ts.isConstructorDeclaration(m)) injectRows.markConstructor(memberId);
       if (body) collectBody(body, memberId, classId);
       // THE REST OF A MEMBER IS CODE TOO (1:1 with the source): an initializer that is not itself the function - its calls and
       // every callback in it, an ngrx `createEffect(() => ..)` or `store.select((s) => ..)` among them, each a `functions` row
