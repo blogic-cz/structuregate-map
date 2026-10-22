@@ -385,6 +385,7 @@ fn apply_with(db_path: &Path, root: &str, build: &str, mut payload: TsPayload, d
         // put the exe at several GB on a large consumer, much of it rows already written.
         super::remember::remember_graph(&mut receipt, db_path, &digest.borrow(), Some(payload.affected.as_slice()));
         payload.tables = Map::new();
+        crate::give_back();
         // THE HTTP PASS'S INPUTS: their token stays when the rows it reads came back as they went (`http::inputs`).
         if let Some(h) = &http_before { h.settle(&Connection::open(db_path)?, LANG, &rewrites(&ids, &payload.affected, &node_whole))?; }
 
@@ -444,6 +445,7 @@ fn apply_with(db_path: &Path, root: &str, build: &str, mut payload: TsPayload, d
         super::http::inputs::fresh(&Connection::open(db_path)?)?;
         let freeing = std::time::Instant::now();
         payload.tables = Map::new();
+        crate::give_back();
         receipt.phases.insert("free the payload".to_string(), freeing.elapsed().as_millis() as u64);
 
         // THE STYLESHEETS BEFORE THE CLOSURE: `class_hides` says which class gates hide their element, and the

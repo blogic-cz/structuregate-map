@@ -156,6 +156,38 @@ macro_rules! metric {
 }
 pub(crate) use metric;
 
+/// `$body`, and in a `metrics` build what the structure it builds KEEPS, under `$name` (`metrics::Before`) - `$body` alone
+/// without the feature.
+macro_rules! retained {
+    ($name:expr, $body:expr) => {{
+        #[cfg(feature = "metrics")]
+        let before = $crate::trace::metrics::Before::now();
+        let value = $body;
+        #[cfg(feature = "metrics")]
+        before.built($name);
+        value
+    }};
+}
+pub(crate) use retained;
+
+/// What is alive at the end of a step (`metrics::mark`) - nothing without the `metrics` feature.
+macro_rules! metrics_mark {
+    ($step:expr) => {{
+        #[cfg(feature = "metrics")]
+        $crate::trace::metrics::mark($step);
+    }};
+}
+pub(crate) use metrics_mark;
+
+/// Structures no later `metrics_mark` lists: dropped, or moved into one recorded under another name.
+macro_rules! metrics_gone {
+    ($($name:expr),+) => {{
+        #[cfg(feature = "metrics")]
+        { $($crate::trace::metrics::gone($name);)+ }
+    }};
+}
+pub(crate) use metrics_gone;
+
 /// WHAT A HOST IS HANDED TO TALLY ITS OWN METRICS: `SG_METRICS=<file>` - `metrics.json` beside `beside`, a file of the
 /// host's work folder - in a `metrics` build (node, `TsMetrics.mjs`), nothing otherwise: a release's host times nothing.
 pub fn host_metrics(beside: &std::path::Path) -> Option<(String, String)> {

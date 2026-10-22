@@ -179,6 +179,8 @@ impl<'a> Store<'a> {
     /// went in as the payload listed them. An `ORDER BY id` would sort `r:1000` before
     /// `r:2` and quietly reorder the DAG.
     pub fn table(&self, name: &str) -> Rc<Vec<Row>> {
+        #[cfg(feature = "metrics")]
+        crate::trace::metrics::asked_table(name);
         if let Some(hit) = self.cache.borrow().get(name) {
             return Rc::clone(hit);
         }
@@ -190,7 +192,12 @@ impl<'a> Store<'a> {
         } else {
             // A TABLE THAT WOULD NOT READ is answered empty, and is UNSCOPED in `reads`: nothing may be concluded
             // from what the closure saw of it.
-            self.read(name).unwrap_or_else(|_| {
+            #[cfg(feature = "metrics")]
+            let before = crate::trace::metrics::Before::now();
+            let read = self.read(name);
+            #[cfg(feature = "metrics")]
+            before.stored(name);
+            read.unwrap_or_else(|_| {
                 self.asked.borrow_mut().push((name.to_string(), Some((Vec::new(), Rc::from(Vec::new()), false))));
                 Vec::new()
             })
@@ -223,6 +230,24 @@ impl<'a> Store<'a> {
             self.cache.get_mut().clear();
         }
         self.memo.get_mut().clear();
+        #[cfg(feature = "metrics")]
+        crate::trace::metrics::store_released();
+    }
+
+    /// FORGET THE STRUCTURES DECODED SO FAR IN `columns` (table, column), keeping the rows: a cell read again is rebuilt
+    /// from the same nodes, so this changes what is held, never what is answered. For a step boundary after which the
+    /// passes read FEW of the trees the passes before them read EVERY one of (`keyreach::build_closure`) - held, they were
+    /// a large share of the closure's peak. A table a pass still holds (`Rc`) keeps its trees.
+    pub fn forget_decoded(&mut self, columns: &[(&str, &str)]) {
+        #[cfg(feature = "metrics")]
+        let before = crate::trace::metrics::Before::now();
+        let cache = self.cache.get_mut();
+        for (table, column) in columns {
+            let Some(rows) = cache.get_mut(*table).and_then(Rc::get_mut) else { continue };
+            rows.iter_mut().for_each(|row| row.forget_decoded(column));
+        }
+        #[cfg(feature = "metrics")]
+        before.stored("(decoded, forgotten)");
     }
 
     /// WHAT SEVERAL PASSES BUILD FROM THE SAME ROWS, built by the first to ask and handed to the rest. The rows do
@@ -232,7 +257,7 @@ impl<'a> Store<'a> {
         if let Some(held) = self.memo.borrow().get(key).cloned().and_then(|h| h.downcast::<T>().ok()) {
             return held;
         }
-        let made = Rc::new(make(self));
+        let made = Rc::new(crate::trace::retained!(&format!("shared: {key}"), make(self)));
         self.memo.borrow_mut().insert(key, made.clone());
         made
     }
@@ -285,7 +310,14 @@ impl<'a> Store<'a> {
             sources[at] = Some(source);
             node_at.push(at);
         }
-        let schema = Rc::new(Schema::with(names, sources, id_at));
+        #[cfg_attr(not(feature = "metrics"), allow(unused_mut))]
+        let mut schema = Schema::with(names, sources, id_at);
+        #[cfg(feature = "metrics")]
+        {
+            schema.table = name.to_string();
+            schema.register();
+        }
+        let schema = Rc::new(schema);
         let (names, flags) = schema.reads();
         self.asked.borrow_mut().push((name.to_string(), Some((names, flags, has_half))));
         let decode: Vec<bool> = keep.iter().map(|c| structured.is_some_and(|cols| cols.contains(c.as_str()))).collect();
@@ -294,6 +326,7 @@ impl<'a> Store<'a> {
         let booleans = self.bool_columns.get(name);
         let truth: Vec<bool> = keep.iter().map(|c| booleans.is_some_and(|cols| cols.contains(c.as_str()))).collect();
         let mut stmt = db.prepare(&sql)?;
+        let interned = RefCell::new(row::Interned::default());
         let map_row = |record: &rusqlite::Row<'_>| -> rusqlite::Result<Row> {
             let mut cells = Vec::with_capacity(decode.len());
             for (index, structured) in decode.iter().enumerate() {
@@ -311,20 +344,20 @@ impl<'a> Store<'a> {
                     cells.push(Some(Cell::json(std::mem::take(text_of_mut(&mut value)))));
                     continue;
                 }
-                cells.push(Some(Cell::Value(value)));
+                cells.push(Some(interned.borrow_mut().cell(value)));
             }
             if !node_at.is_empty() {
                 cells.resize(schema.names.len(), None);
                 for at in &node_at {
                     // A column that held a scalar in this row keeps it; only a NULL one is a structure's.
-                    if matches!(&cells[*at], Some(Cell::Value(v)) if !v.is_null()) {
+                    if matches!(&cells[*at], Some(Cell::Value(_))) {
                         continue;
                     }
                     cells[*at] = Some(Cell::Nodes(std::cell::OnceCell::new()));
                 }
             }
             let rowid = record.get::<_, i64>(width)?;
-            Ok(Row::Held { schema: Rc::clone(&schema), cells: cells.into_boxed_slice(), rowid })
+            Ok(Row::Held { schema: Rc::clone(&schema), cells: Rc::from(cells), rowid })
         };
         let rows: Vec<Row> = if has_half {
             stmt.query_map([&self.half], map_row)?

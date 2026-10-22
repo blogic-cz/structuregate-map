@@ -44,7 +44,17 @@ both put the exe at many GB. `Store::from_payload` is a test fixture's door only
 rebuilt from its node rows when a pass first reads it** (`Cell::Nodes`, `cells::load`); one never read stays rows and is never rebuilt. A pass
 must not collect every `ast` into a map up front: map ids to ROWS and read on lookup; a scan that asks something of
 EVERY row's tree reads it with `Row::peek`, which keeps nothing decoded, and checks the id before it asks. The store
-is RELEASED before `key_reach` (`Store::release`): nothing after reads the rows, and holding them was most of the peak. `rows/ts/gate/` (with
+is RELEASED before `key_reach` (`Store::release`): nothing after reads the rows, and holding them was most of the peak.
+**WHAT THE CLOSURE HOLDS IS MEASURED, NOT GUESSED** (a metrics build: `trace/CLAUDE.md`, "Memory by structure"). Measured on a
+large workspace, the peak was the store, and most of the store was the WIDTH of its cells: so a held cell is 16 bytes, a
+scalar shared down its table (`row::Interned`), a NULL no value; a held row's cells are shared by its clones (a pass that
+groups rows by cloning them copied every decoded tree); a scan of every row's tree PEEKS (`Branches::new`); the resolved
+branch conditions are held as text between the two passes that walk them (`gate_features::Conds`); and the arguments and
+return values the routes decode in every row are forgotten after them (`Store::forget_decoded`), since the passes after read
+few. After a release, mimalloc's freed pages go back to the system (`crate::give_back`, `mi_collect`) - kept, the process
+held the released store to the end. Together they took about two fifths off the closure's peak on a large workspace,
+rows identical. What stays at the peak: the store (most of it decoded trees the restrictions read in every row), then the
+render paths. `rows/ts/gate/` (with
 `gate/ts/`, the readers of a class's own TypeScript) and `rows/ts/key/` are folders by `#[path]`, not modules -
 every `super::` there still means `rows::ts`.
 

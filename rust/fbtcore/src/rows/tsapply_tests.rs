@@ -179,6 +179,8 @@ fn lab() {
     };
     eprintln!("LAB derive the closure {} ms", t.elapsed().as_millis());
     eprintln!("{}", crate::rows::cells::probe::report());
+    #[cfg(feature = "metrics")]
+    eprintln!("{}", crate::trace::metrics::memory_report());
     if let Ok(tag) = std::env::var("SG_LAB_TAG") {
         let sorted: BTreeMap<&String, &Value> = emitted.iter().collect();
         std::fs::write(Path::new(&out).join(format!("emitted-{tag}.json")), serde_json::to_string(&sorted).unwrap()).unwrap();

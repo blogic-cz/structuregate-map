@@ -58,6 +58,7 @@ use super::store::{Row, Store};
 use super::value_folds::{
     fold_sided, merge_aliased, per_way_keyed, relabel, unreadable_values, write_gate_features, write_gate_values, Aliases, Classes, Labels, Renames, SetSides,
 };
+use crate::trace::retained;
 use indexmap::{IndexMap, IndexSet};
 use serde_json::Value;
 use std::path::Path;
@@ -146,23 +147,29 @@ pub fn extra_restrictions(
     idx: &EnumIndex,
 ) -> (IndexMap<String, Vec<Value>>, IndexMap<String, Vec<Value>>) {
     let step = crate::trace::stage("restrictions: member enums");
-    let mem = member_enums(store, idx);
+    let mem = retained!("member enums (restrictions)", member_enums(store, idx));
+    crate::trace::metrics_mark!("restrictions: member enums");
     drop(step);
     let step = crate::trace::stage("restrictions: configs");
-    let (cfg, per_loop, _) = gate_config::config_restrictions_all(store, &mem, idx);
+    let (cfg, per_loop, _) = retained!("config restrictions", gate_config::config_restrictions_all(store, &mem, idx));
+    crate::trace::metrics_mark!("restrictions: configs");
     drop(step);
     let step = crate::trace::stage("restrictions: switches");
-    let (sw, _) = gate_switch::switch_restrictions(store, &mem, idx);
+    let (sw, _) = retained!("switch restrictions", gate_switch::switch_restrictions(store, &mem, idx));
+    crate::trace::metrics_mark!("restrictions: switches");
     drop(step);
     let step = crate::trace::stage("restrictions: directives");
-    let (dir, _) = gate_directives::directive_restrictions(store, &mem, idx);
+    let (dir, _) = retained!("directive restrictions", gate_directives::directive_restrictions(store, &mem, idx));
+    crate::trace::metrics_mark!("restrictions: directives");
     drop(step);
     let _step = crate::trace::stage("restrictions: guards");
-    let guards = super::gate_guards::guard_restrictions(store, &mem, idx);
+    let guards = retained!("guard restrictions", super::gate_guards::guard_restrictions(store, &mem, idx));
+    crate::trace::metrics_mark!("restrictions: guards");
     let mut extra = cfg;
     for (gate, rows) in sw.into_iter().chain(dir).chain(guards) {
         extra.entry(gate).or_default().extend(rows);
     }
+    crate::trace::metrics_gone!("member enums (restrictions)");
     (extra, per_loop)
 }
 
@@ -181,32 +188,39 @@ pub fn build_closure(
     let stage = crate::trace::stage("closure: branches");
     let step = crate::trace::stage("branches: index");
     // BUILT ONCE FOR EVERY PASS THAT ASKS (`Store::shared`): six passes made their own, each over every row.
-    let shared_branches = store.shared("branches", Branches::new);
+    let shared_branches = retained!("branches", store.shared("branches", Branches::new));
+    crate::trace::metrics_mark!("branches: index");
     let branches: &Branches = &shared_branches;
-    let idx0 = enum_index(store);
+    let idx0 = retained!("enum index", enum_index(store));
+    crate::trace::metrics_mark!("branches: enum index");
     drop(step);
     let step = crate::trace::stage("branches: edges");
-    let edges = load_edges(store, &branches);
+    let edges = retained!("edges", load_edges(store, &branches));
+    crate::trace::metrics_mark!("branches: edges");
     drop(step);
-    let conds = branches.conds(store, &idx0);
+    let conds = retained!("branch conds", branches.conds(store, &idx0));
+    crate::trace::metrics_mark!("closure: branches");
     drop(stage);
     let stage = crate::trace::stage("closure: gate_features");
     // RESOLVED MEANING, folded over the SAME (ref, path) sets as the ids. It runs BEFORE the
     // routes because the `literal` route needs the ternary writes it proves.
-    let gf = gate_features_with(store, checks, enum_name, &conds, note);
+    let gf = retained!("gate features", gate_features_with(store, checks, enum_name, &conds, note));
+    crate::trace::metrics_mark!("closure: gate_features");
     drop(stage);
     let stage = crate::trace::stage("closure: routes");
     let step = crate::trace::stage("routes: literal gates");
-    let lit_gates = literal_gates(store, &gf.ternary_writes);
+    let lit_gates = retained!("literal gates", literal_gates(store, &gf.ternary_writes));
+    crate::trace::metrics_mark!("routes: literal gates");
     drop(step);
     let step = crate::trace::stage("routes: field sites");
-    let (fields, _) = field_sites(store);
+    let (fields, _) = retained!("field sites", field_sites(store));
+    crate::trace::metrics_mark!("routes: field sites");
     drop(step);
     let step = crate::trace::stage("routes: key routes");
-    let routes = key_routes(store, &lit_gates, &fields);
+    let routes = retained!("routes", key_routes(store, &lit_gates, &fields));
     drop(step);
     let step = crate::trace::stage("routes: locales");
-    let locales = locale_index(store);
+    let locales = retained!("locales", locale_index(store));
     drop(step);
 
     // Paths per COMPONENT, computed once for every component any key reaches, then shared by
@@ -218,40 +232,47 @@ pub fn build_closure(
             needed.insert(comp.clone());
         }
     }
+    crate::trace::metrics_mark!("closure: routes");
     drop(stage);
+    // THE ROUTES READ EVERY CALL'S ARGUMENTS AND EVERY RETURN'S VALUE, the passes after them a few (`Store::forget_decoded`).
+    // The other trees they read, the restrictions read again - every one of them - so those stay.
+    store.forget_decoded(&[("calls", "args"), ("returns", "value")]);
+    crate::give_back();
     let stage = crate::trace::stage("closure: render_paths");
-    let paths = render_paths(store, &edges, &needed);
+    let paths = retained!("render paths", render_paths(store, &edges, &needed));
+    crate::trace::metrics_mark!("closure: render_paths");
     drop(stage);
     let stage = crate::trace::stage("closure: gate_values");
 
     // EVERY STEP A SPAN: most of this stage was in none of its children.
     let step = crate::trace::stage("gate_values: write gate_features");
-    let gf_rows = write_gate_features(store, &gf.map);
+    let gf_rows = retained!("emitted gate_features", write_gate_features(store, &gf.map));
     drop(step);
     let step = crate::trace::stage("gate_values: config restrictions");
-    let (extra, per_loop) = extra_restrictions(store, &idx0);
+    let (extra, per_loop) = retained!("extra restrictions", extra_restrictions(store, &idx0));
     drop(step);
     // A FLAG THE PARENTS BIND DIFFERENTLY IS ONE CONDITION PER RENDER EDGE (`key_bound`).
     let step = crate::trace::stage("gate_values: bound flags");
-    let bound = bound_conds(store);
+    let bound = retained!("bound flags", bound_conds(store));
     drop(step);
     let mut conds = conds;
     conds.extend(bound.conds.clone());
     // A CALLEE'S BRANCH CARRIED THROUGH A CALL, its parameters read as the caller's arguments (`key_args`).
     let step = crate::trace::stage("gate_values: carried arguments");
     let carried = routes.values().flat_map(|h| h.sites.values().flatten().flatten());
-    let (arg_found, arg_params) = super::key_args::arg_conds(store, &branches, carried, &idx0);
+    let (arg_found, arg_params) = retained!("carried arguments", super::key_args::arg_conds(store, &branches, carried, &idx0));
     drop(step);
-    conds.extend(arg_found);
-    let (gv, idx) = gate_values_with(store, &extra, &conds);
+    conds.append(arg_found);
+    let (gv, idx) = retained!("gate values", gate_values_with(store, &extra, &conds));
     let step = crate::trace::stage("gate_values: write gate_values");
-    let gv_rows = write_gate_values(store, &gv.map, &idx);
+    let gv_rows = retained!("emitted gate_values", write_gate_values(store, &gv.map, &idx));
     drop(step);
     // THE FOLDS READ GATES AND BRANCHES ALIKE; only the published tables are gates alone.
     let mut feature_map = gf.map.clone();
     feature_map.extend(gf.conds.iter().map(|(id, f)| (id.clone(), (None, f.clone()))));
     let mut value_map = gv.map.clone();
     value_map.extend(gv.conds.clone());
+    crate::trace::metrics_mark!("closure: gate_values");
     drop(stage);
     let stage = crate::trace::stage("closure: values");
     let mem = member_enums(store, &idx);
@@ -269,11 +290,13 @@ pub fn build_closure(
     // ONE ELEMENT OF AN `*ngFor` AT A TIME: see `gate_config::config_restrictions_all`.
     value_map.extend(per_loop.into_iter().map(|(link, rows)| (link, (None, rows))));
 
+    crate::trace::metrics_mark!("closure: values");
     drop(stage);
     let stage = crate::trace::stage("closure: reach and trace");
-    let reach = reach_index(store);
-    let dead = super::key_dead::dead_gates(store);
-    let trace = source_trace(store, &read_texts(store, root));
+    let reach = retained!("reach index", reach_index(store));
+    let dead = retained!("dead gates", super::key_dead::dead_gates(store));
+    let trace = retained!("source trace", source_trace(store, &read_texts(store, root)));
+    crate::trace::metrics_mark!("closure: reach and trace");
 
     drop(stage);
     let _keys = crate::trace::stage("closure: key_reach");
@@ -285,6 +308,8 @@ pub fn build_closure(
     // EVERY PASS THAT READS THE ROWS IS DONE: what follows folds what they derived. The tables they read, and
     // every tree decoded on the way, were held to the end and were most of the closure's peak.
     store.release();
+    crate::give_back();
+    crate::trace::metrics_mark!("closure: released");
     let scopes = Scopes::new(store);
     // EVERY KEY ON EVERY CORE: a key's row is folded from what the passes above derived and nothing else, so the
     // keys are folded apart and written in the locales' order - the order the rows were always written in.

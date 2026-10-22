@@ -341,7 +341,7 @@ pub fn gate_values(
     store: &Store<'_>,
     extra: &IndexMap<String, Vec<Value>>,
 ) -> (GateValues, EnumIndex) {
-    gate_values_with(store, extra, &IndexMap::new())
+    gate_values_with(store, extra, &super::gate_features::Conds::new())
 }
 
 /// `gate_values`, plus the restrictions each of `conds` proves — a TypeScript condition
@@ -349,7 +349,7 @@ pub fn gate_values(
 pub fn gate_values_with(
     store: &Store<'_>,
     extra: &IndexMap<String, Vec<Value>>,
-    conds: &IndexMap<String, (Value, bool)>,
+    conds: &super::gate_features::Conds,
 ) -> (GateValues, EnumIndex) {
     let stage = crate::trace::stage("gate_values: enums and predicates");
     let idx = enum_index(store);
@@ -420,14 +420,14 @@ pub fn gate_values_with(
     }
     drop(stage);
     let _conds = crate::trace::stage("gate_values: branch conditions");
-    for (id, (ast, negated)) in conds {
+    conds.each(|id, ast, negated| {
         let mut found = OrderedSet::new();
-        necessary_either(&props.expand(ast), *negated, &mut leaf, &mut either, &mut found);
+        necessary_either(&props.expand(ast), negated, &mut leaf, &mut either, &mut found);
         let rows = collapse(&found.iter().cloned().collect::<Vec<Value>>(), &idx);
         if !rows.is_empty() {
             out.conds.insert(id.clone(), (None, rows));
         }
-    }
+    });
     (out, idx)
 }
 

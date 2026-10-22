@@ -309,6 +309,7 @@ fn member_keys(store: &Store<'_>, reader: &Returned<'_, '_>) -> IndexMap<String,
 pub fn field_sites(store: &Store<'_>) -> (Vec<FieldSite>, Stats) {
     let step = crate::trace::stage("field sites: keys by member");
     let by_member = keys_by_member(store);
+    crate::trace::metrics_mark!("field sites: keys by member");
     drop(step);
     let mut out = Vec::new();
     let mut stats = Stats { fields: by_member.len(), nodes: 0, sites: 0 };
@@ -361,9 +362,11 @@ pub fn field_sites(store: &Store<'_>) -> (Vec<FieldSite>, Stats) {
             stats.nodes += 1;
         }
     }
+    crate::trace::metrics_mark!("field sites: template reads");
     drop(step);
     let step = crate::trace::stage("field sites: methods");
     add_methods(store, &mut out, &mut stats);
+    crate::trace::metrics_mark!("field sites: methods");
     drop(step);
     let _step = crate::trace::stage("field sites: loops");
     add_loops(store, &mut out, &mut stats);
