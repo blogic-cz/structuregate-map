@@ -17,7 +17,7 @@ import { locationOf } from './TsNodes.mjs';
 import { catchFacts, chainOf } from './TsCatch.mjs';
 import { loopFacts, loopKind } from './TsLoops.mjs';
 
-export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName, shapeAt, bindingFacts }) {
+export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName, shapeAt, bindingFacts, injectAt }) {
   /**
    * THE BRANCH OR CASE A STATEMENT SITS IN IS PART OF WHAT THE STATEMENT MEANS.
    *
@@ -144,7 +144,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
     return 'var';
   }
 
-  function emitCall(node, ownerId) {
+  function emitCall(node, ownerId, classId) {
     if (!ts.isCallExpression(node) && !ts.isNewExpression(node)) return;
     const callee = node.expression;
     const target = declFileOf(ts.isPropertyAccessExpression(callee) ? callee.name : callee);
@@ -169,6 +169,8 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
     // A CHAINED CALL NAMES THE CALL IT IS MADE ON (`receiver_call`): `a.b(1).then(f)` is two rows starting at one
     // place, and a join on that place is ambiguous on a chain of three. The outer row is minted first - the walk
     // reaches the receiver after it - so the receiver's node is remembered until its own row exists.
+    // AN `inject()` IN A FUNCTION THAT IS NO CLASS MEMBER (a functional interceptor, a provider's factory) is a `di` row of that function (rows 78, `TsExpr/TsInjects.mjs`).
+    if (classId == null && injectAt && ts.isCallExpression(node)) injectAt(node, ownerId);
     const outer = receiverOf.get(node);
     if (outer !== undefined) {
       store.rowOf(outer).receiver_call = id;
@@ -293,18 +295,24 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
     const bindings = [];
     if (ts.isIdentifier(node.name)) bindings.push({ property: null, local: node.name.text });
     else {
-      // EACH BINDING KEEPS ITS DEFAULT, ITS TYPE AND - in an array pattern - ITS POSITION (rows 77, `TsExpr/TsBindings.mjs`): a hole (`[, x]`) is no binding, yet `x` is the second element.
-      const array = ts.isArrayBindingPattern(node.name);
-      node.name.elements.forEach((el, at) => {
-        if (ts.isBindingElement(el)) {
-          bindings.push({
-            property: el.propertyName ? propName(el.propertyName)
-              : (ts.isIdentifier(el.name) ? el.name.text : null),
-            local: el.name.getText(),
-            ...bindingFacts(el, array ? at : null),
-          });
-        }
-      });
+      // EACH NAME THE PATTERN BINDS IS ONE ITEM, AT ANY DEPTH (rows 78): `{ A: { B: { C: c } }, A: a }` binds `c` and `a`, with `property` the PATH to the name (`A.B.C`) - a nested
+      // pattern is no binding of its own, and one item per outer element hid every name inside it. Each keeps its default, its type and - in an array pattern - its position (rows 77,
+      // `TsExpr/TsBindings.mjs`): a hole (`[, x]`) is no binding, yet `x` is the second element. An element of an ARRAY has no key, so the path stops at the array (a top-level
+      // array element keeps the name it binds as its `property`, as before).
+      const bound = (pattern, path) => {
+        const array = ts.isArrayBindingPattern(pattern);
+        pattern.elements.forEach((el, at) => {
+          if (!ts.isBindingElement(el)) return;
+          const key = el.propertyName ? propName(el.propertyName) : (ts.isIdentifier(el.name) ? el.name.text : null);
+          const here = array ? path : [...path, key];
+          if (!ts.isIdentifier(el.name)) { bound(el.name, here); return; }
+          const sf = el.getSourceFile();
+          const where = sf.getLineAndCharacterOfPosition(el.name.getStart());
+          const property = array ? (path.length ? path.join('.') : key) : here.join('.');
+          bindings.push({ property, local: el.name.text, ...bindingFacts(el, array ? at : null), line: where.line + 1, col: where.character + 1 });
+        });
+      };
+      bound(node.name, []);
     }
     rowsWritten += 1;
     store.add('locals', 'lo', {
@@ -533,7 +541,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       }
       // WHERE AN OBJECT LITERAL STANDS is its `shapes` row's context (rows 71, `TsExpr/TsShapes.mjs`).
       if (shapeAt && ts.isObjectLiteralExpression(node)) shapeAt(node, { member: ownerId, class: classId, ...inCase() });
-      emitCall(node, ownerId);
+      emitCall(node, ownerId, classId);
       emitAssignment(node, ownerId, classId);
       emitUpdate(node, ownerId, classId);
       emitLocal(node, ownerId, classId);
