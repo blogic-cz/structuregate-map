@@ -19,6 +19,12 @@ pub struct Schema {
     /// Per column: whether any pass READ it from any row - what a partial run compares to decide the closure it
     /// stored is still the answer (`rows/derive/unchanged.rs`). Set on every read, so it is exact, not listed.
     read: Rc<[std::cell::Cell<bool>]>,
+    /// The table, for what a `metrics` build tallies its decoded cells under.
+    #[cfg(feature = "metrics")]
+    pub(super) table: String,
+    /// Per column, in a `metrics` build: the first and the last closure step that read it (`metrics::reading`).
+    #[cfg(feature = "metrics")]
+    steps: Rc<[std::cell::Cell<(u32, u32)>]>,
 }
 
 impl Schema {
@@ -31,7 +37,10 @@ impl Schema {
         let at = names.iter().cloned().zip(0..).collect();
         nodes.resize_with(names.len(), || None);
         let read = (0..names.len()).map(|_| std::cell::Cell::new(false)).collect();
-        Schema { names, at, nodes, id_at, read }
+        #[cfg(feature = "metrics")]
+        let width = names.len();
+        Schema { names, at, nodes, id_at, read, #[cfg(feature = "metrics")] table: String::new(),
+            #[cfg(feature = "metrics")] steps: (0..width).map(|_| std::cell::Cell::new((u32::MAX, 0))).collect() }
     }
 
     /// The column names and their read flags, SHARED: the store keeps them after it lets the rows (and the
@@ -44,6 +53,18 @@ impl Schema {
         if let Some(flag) = self.read.get(index) {
             flag.set(true);
         }
+        #[cfg(feature = "metrics")]
+        if let Some(steps) = self.steps.get(index) {
+            let (first, last) = steps.get();
+            let now = crate::trace::metrics::step();
+            steps.set((first.min(now), last.max(now)));
+        }
+    }
+
+    /// In a `metrics` build: this table's column steps, kept for `metrics::reading` past the rows.
+    #[cfg(feature = "metrics")]
+    pub(super) fn register(&self) {
+        crate::trace::metrics::register_reads(&self.table, self.names.clone(), Rc::clone(&self.steps));
     }
 }
 
@@ -55,6 +76,10 @@ impl Schema {
 /// measured at gigabytes of decoded payload for a file of hundreds of MB, on a machine with less than that free.
 /// `rowid` is what owns the nodes of a row whose table has no `id`.
 ///
+/// A HELD ROW'S CELLS ARE SHARED by its clones: a pass that groups rows by cloning them (`gate_guards` keeps every call
+/// and return per member) copied every structure decoded in them, a few hundred MB on a large workspace for a pass that
+/// only reads them. A cell is never written in place (`insert` makes a `Built` row), so a clone answers what its original does.
+///
 /// `Built` is a row a pass is making. There are far fewer (about a fifth), they are written
 /// rather than walked, and giving each one a schema of its own would cost more than it saves.
 ///
@@ -65,7 +90,7 @@ impl Schema {
 /// says nothing about a column reads as a row that says "nothing".
 #[derive(Clone)]
 pub enum Row {
-    Held { schema: Rc<Schema>, cells: Box<[Option<Cell>]>, rowid: i64 },
+    Held { schema: Rc<Schema>, cells: Rc<[Option<Cell>]>, rowid: i64 },
     Built(Map<String, Value>),
 }
 
@@ -78,9 +103,15 @@ pub enum Row {
 ///
 /// NO WIDER THAN A VALUE: every row of every table read is made of these, and a structure's cell carrying its
 /// own source handle, owner string and decoded slot inline made each cell of every column half as large again.
+///
+/// SIXTEEN BYTES, NOT EIGHTY: a `Value` is eighty (an object is an `IndexMap`), and every cell of every row read was one,
+/// held inline - most of what the store held was the width of its cells, not what they hold. A scalar is a SHARED value
+/// (`Interned`): one string or number repeated down a table (a file, a kind, a line) is held once, and a NULL is no
+/// value at all.
 #[derive(Clone)]
 pub enum Cell {
-    Value(Value),
+    Value(Rc<Value>),
+    Null,
     Json(Box<(Box<str>, std::cell::OnceCell<Value>)>),
     /// A structure written as nodes: rebuilt from the schema's source for the row's owner the first time a pass reads it.
     Nodes(std::cell::OnceCell<Box<Value>>),
@@ -95,13 +126,26 @@ struct At<'r> {
 }
 
 impl At<'_> {
+    /// A cell decoded TO BE KEPT: in a `metrics` build, what it took is the store's (`metrics::Before::stored`).
+    fn decoded<T>(&self, make: impl FnOnce() -> T) -> T {
+        #[cfg(feature = "metrics")]
+        let before = crate::trace::metrics::Before::now();
+        let made = make();
+        #[cfg(feature = "metrics")]
+        before.stored(&format!("{}.{}", self.schema.table, self.schema.names.get(self.index).map_or("", String::as_str)));
+        made
+    }
+
     /// The structure this cell's nodes hold, rebuilt: the owner is the row's `id`, or its rowid in a table without one.
     fn rebuild(&self) -> Value {
         let Some(source) = self.schema.nodes.get(self.index).and_then(Option::as_ref) else { return Value::Null };
         let id = self.schema.id_at.and_then(|i| self.cells.get(i)).and_then(Option::as_ref);
         let owner = match id {
-            Some(Cell::Value(Value::String(id))) => id.clone(),
-            Some(Cell::Value(Value::Number(n))) if n.is_i64() => n.to_string(),
+            Some(Cell::Value(id)) => match &**id {
+                Value::String(id) => id.clone(),
+                Value::Number(n) if n.is_i64() => n.to_string(),
+                _ => format!("#{}", self.rowid),
+            },
             _ => format!("#{}", self.rowid),
         };
         source.get(&owner).map(null_literal).unwrap_or(Value::Null)
@@ -123,6 +167,12 @@ pub fn null_literal(value: Value) -> Value {
 }
 
 impl Cell {
+    /// A value held by this cell alone.
+    #[cfg(test)]
+    pub fn of(value: Value) -> Cell {
+        if value.is_null() { Cell::Null } else { Cell::Value(Rc::new(value)) }
+    }
+
     pub(super) fn json(text: String) -> Cell {
         Cell::Json(Box::new((text.into_boxed_str(), std::cell::OnceCell::new())))
     }
@@ -130,15 +180,16 @@ impl Cell {
     fn value(&self, at: &At<'_>) -> &Value {
         match self {
             Cell::Value(v) => v,
-            Cell::Json(held) => held.1.get_or_init(|| structure(&held.0)),
-            Cell::Nodes(decoded) => decoded.get_or_init(|| Box::new(at.rebuild())),
+            Cell::Null => &NULL,
+            Cell::Json(held) => held.1.get_or_init(|| at.decoded(|| structure(&held.0))),
+            Cell::Nodes(decoded) => decoded.get_or_init(|| at.decoded(|| Box::new(at.rebuild()))),
         }
     }
 
     /// The structure this cell holds, rebuilt and NOT kept - None when it is a plain value or already decoded.
     fn undecoded(&self, at: &At<'_>) -> Option<Value> {
         match self {
-            Cell::Value(_) => None,
+            Cell::Value(_) | Cell::Null => None,
             Cell::Json(held) => held.1.get().is_none().then(|| structure(&held.0)),
             Cell::Nodes(decoded) => decoded.get().is_none().then(|| at.rebuild()),
         }
@@ -148,7 +199,8 @@ impl Cell {
     /// spells a decoded one (`rawcells`).
     fn into_value(self, at: &At<'_>) -> Value {
         match self {
-            Cell::Value(v) => v,
+            Cell::Value(v) => Rc::try_unwrap(v).unwrap_or_else(|shared| (*shared).clone()),
+            Cell::Null => Value::Null,
             Cell::Json(held) => {
                 let (text, decoded) = *held;
                 decoded.into_inner().unwrap_or_else(|| super::super::super::rawcells::wrap(text.into()))
@@ -164,7 +216,53 @@ impl Cell {
 pub(super) fn cell_of(value: Value) -> Cell {
     match super::super::super::rawcells::text_of(&value) {
         Some(text) => Cell::json(text.to_string()),
-        None => Cell::Value(value),
+        None => Cell::of(value),
+    }
+}
+
+static NULL: Value = Value::Null;
+
+/// EVERY SCALAR OF ONE TABLE'S READ, held once: a cell is a handle on the one value its column's rows repeat. Dropped
+/// when the table is read - what it shared stays shared, and nothing else is kept.
+#[derive(Default)]
+pub struct Interned(std::collections::HashSet<Shared>);
+
+/// A shared scalar, hashed and compared by what it holds (a `Value` is neither).
+struct Shared(Rc<Value>);
+
+impl std::hash::Hash for Shared {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match &*self.0 {
+            Value::String(s) => (0u8, s).hash(state),
+            Value::Bool(b) => (1u8, b).hash(state),
+            Value::Number(n) => (2u8, n.as_i64(), n.as_f64().map(f64::to_bits)).hash(state),
+            other => (3u8, other.to_string()).hash(state),
+        }
+    }
+}
+
+impl PartialEq for Shared {
+    fn eq(&self, other: &Shared) -> bool {
+        // A number is the same only as the same KIND of number (`Number`'s own equality): 1 and 1.0 stay two values.
+        *self.0 == *other.0
+    }
+}
+
+impl Eq for Shared {}
+
+impl Interned {
+    /// `value` as a cell: NULL is none, any other scalar the one this read already holds, or held from now on.
+    pub fn cell(&mut self, value: Value) -> Cell {
+        if value.is_null() {
+            return Cell::Null;
+        }
+        let fresh = Shared(Rc::new(value));
+        if let Some(held) = self.0.get(&fresh) {
+            return Cell::Value(Rc::clone(&held.0));
+        }
+        let cell = Cell::Value(Rc::clone(&fresh.0));
+        self.0.insert(fresh);
+        cell
     }
 }
 
@@ -226,6 +324,19 @@ impl Row {
         }
     }
 
+    /// The structure this row decoded in `column`, forgotten - read again, it is rebuilt (`Store::forget_decoded`). A row
+    /// whose cells a clone shares keeps it.
+    pub(super) fn forget_decoded(&mut self, column: &str) {
+        let Row::Held { schema, cells, .. } = self else { return };
+        let Some(&index) = schema.at.get(column) else { return };
+        let Some(Some(cell)) = Rc::get_mut(cells).and_then(|cells| cells.get_mut(index)) else { return };
+        match cell {
+            Cell::Json(held) => drop(held.1.take()),
+            Cell::Nodes(decoded) => drop(decoded.take()),
+            Cell::Value(_) | Cell::Null => {}
+        }
+    }
+
     /// A cell READ ONCE AND NOT KEPT: a structure nobody decoded yet is rebuilt for `f` and dropped after it, where `get`
     /// would hold it decoded for the rest of the closure. For a scan that asks something of every row's tree; the answer
     /// is the one `get` gives.
@@ -273,7 +384,7 @@ impl Row {
     /// The same, consuming the row so the cells are moved rather than copied.
     pub fn into_map(self) -> Map<String, Value> {
         match self {
-            Row::Held { schema, cells, rowid } => {
+            Row::Held { schema, mut cells, rowid } => {
                 (0..schema.names.len()).for_each(|i| schema.mark(i));
                 let mut map = Map::new();
                 // THE OWNER IS READ BEFORE ANY CELL MOVES: a structure nobody decoded is rebuilt from it.
@@ -284,7 +395,12 @@ impl Row {
                     })
                     .collect();
                 let at = At { schema: &schema, cells: &[], rowid, index: 0 };
-                for ((index, cell), fresh) in cells.into_vec().into_iter().enumerate().zip(rebuilt) {
+                // MOVED when this row is the only one holding them, COPIED from a row it shares them with (`Row` clones share).
+                let owned: Vec<Option<Cell>> = match Rc::get_mut(&mut cells) {
+                    Some(only) => only.iter_mut().map(std::mem::take).collect(),
+                    None => cells.to_vec(),
+                };
+                for ((index, cell), fresh) in owned.into_iter().enumerate().zip(rebuilt) {
                     if let (Some(name), Some(cell)) = (schema.names.get(index), cell) {
                         map.insert(name.clone(), fresh.unwrap_or_else(|| cell.into_value(&at)));
                     }

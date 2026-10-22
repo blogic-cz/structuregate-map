@@ -60,6 +60,8 @@ pub fn closure(receipt: &mut TsReceipt, db_path: &Path, root: &str, workspace: &
         }
         (out, reads)
     };
+    // THE STORE AND WHAT THE PASSES DERIVED ARE GONE: their pages back to the system before the write.
+    crate::give_back();
     receipt.phases.insert("derive the closure".to_string(), closure_started.elapsed().as_millis() as u64);
     // TIMED HERE TOO: the partial branch always said what writing the closure cost, and a full run's was part of
     // the minute and more of `deep: typescript` no span named.
@@ -82,6 +84,8 @@ pub fn closure(receipt: &mut TsReceipt, db_path: &Path, root: &str, workspace: &
         counts: true,
     })?
     .written;
+    drop(emitted);
+    crate::give_back();
     unchanged::record(&Connection::open(db_path)?, LANG, &reads, fingerprint, spec)?;
     receipt.phases.insert("write the closure".to_string(), closure_written.elapsed().as_millis() as u64);
     Ok(written)

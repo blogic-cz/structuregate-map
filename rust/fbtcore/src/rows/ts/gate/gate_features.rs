@@ -282,7 +282,72 @@ pub struct GateFeatures {
 /// A CONDITION THAT IS NOT A TEMPLATE GATE, by id: its tree, and whether it holds NEGATED
 /// (an `else` branch). Read by the same resolver as every gate, so a TypeScript `if` and an
 /// `*ngIf` over the same property cannot answer differently.
-pub type Conds = IndexMap<String, (Value, bool)>;
+///
+/// HELD AS TEXT, read back per use (`each`): the trees are resolved copies with every `const` inlined, and held decoded
+/// from the branches to the gate values they were a fifth of the closure's peak - for two passes that walk each once. A
+/// tree holding a FLOAT stays a tree: the text is exact for every other value, and a float is not promised to parse back
+/// to its own bits.
+#[derive(Default)]
+pub struct Conds(IndexMap<String, (Cond, bool)>);
+
+/// One condition's tree, as text or as the tree itself.
+pub enum Cond {
+    Text(Box<str>),
+    Tree(Value),
+}
+
+impl Conds {
+    pub fn new() -> Conds {
+        Conds::default()
+    }
+
+    pub fn insert(&mut self, id: String, (tree, negated): (Value, bool)) {
+        let cond = if has_float(&tree) { Cond::Tree(tree) } else { Cond::Text(tree.to_string().into_boxed_str()) };
+        self.0.insert(id, (cond, negated));
+    }
+
+    /// `other`'s conditions after these, as `IndexMap::extend` puts them.
+    pub fn append(&mut self, other: Conds) {
+        self.0.extend(other.0);
+    }
+
+    pub fn extend(&mut self, conds: impl IntoIterator<Item = (String, (Value, bool))>) {
+        conds.into_iter().for_each(|(id, cond)| self.insert(id, cond));
+    }
+
+    #[cfg(test)]
+    pub fn contains_key(&self, id: &str) -> bool {
+        self.0.contains_key(id)
+    }
+
+    /// Every condition in order, its tree read back for `f` and dropped after it.
+    pub fn each(&self, mut f: impl FnMut(&String, &Value, bool)) {
+        for (id, (cond, negated)) in &self.0 {
+            match cond {
+                Cond::Tree(tree) => f(id, tree, *negated),
+                Cond::Text(text) => f(id, &crate::rows::cells::deep(text).expect("a tree this map wrote as text reads back"), *negated),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+impl std::ops::Index<&str> for Conds {
+    type Output = (Cond, bool);
+
+    fn index(&self, id: &str) -> &(Cond, bool) {
+        &self.0[id]
+    }
+}
+
+fn has_float(v: &Value) -> bool {
+    match v {
+        Value::Number(n) => n.is_f64(),
+        Value::Array(items) => items.iter().any(has_float),
+        Value::Object(o) => o.values().any(has_float),
+        _ => false,
+    }
+}
 
 /// Gate id -> the FlagCodes it necessarily requires.
 ///
@@ -416,19 +481,19 @@ pub fn gate_features_with(
     }
 
     let mut cond_out: IndexMap<String, Vec<String>> = IndexMap::new();
-    for (id, (ast, negated)) in conds {
+    conds.each(|id, ast, negated| {
         let mut got = OrderedSet::new();
         {
             let mut resolve =
                 make_resolve(&props, None, &member_class, &member_at, &check_members, root);
-            necessary(ast, *negated, &mut resolve, &mut got);
+            necessary(ast, negated, &mut resolve, &mut got);
         }
         if !got.is_empty() {
             let mut features = got.strings();
             features.sort();
             cond_out.insert(id.clone(), features);
         }
-    }
+    });
 
     GateFeatures {
         map: out,

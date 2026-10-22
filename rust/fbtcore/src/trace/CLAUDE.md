@@ -79,6 +79,14 @@ A metrics build also COUNTS rust's allocations (`metrics::Counting`, mimalloc un
 second to `<trace>.rust-mem.tsv` (`<epoch ns>\t<bytes>`): lined up with the process's own memory (`map-lab/memprof.sh`), a phase
 splits into rust's share and the rest - .NET's heap, SQLite's allocations through libc, the runtime.
 
+**Memory by structure** (`metrics.rs`, the ledger): `retained!(name, expr)` charges what a structure KEEPS (held after it was
+built, less what the store took meanwhile and what structures built inside it kept); the TypeScript store charges every table it
+reads and every column it decodes (`store: <table>[.<column>]`, and per step); `metrics_mark!(step)` snapshots, at the end of a
+closure step, `held()`, the most held since the step before, the store's share, the process's anonymous memory and every
+structure still alive (`metrics_gone!` for one dropped). Written as `metric mem: ..` spans; the phase-only harness
+(`rows/tsapply_tests.rs::lab`, built `--features metrics`) prints the marks, the store's tables and columns largest first, and
+the first and last step that read each table and column - what a step could let go after it.
+
 ## `--trace-report`
 
 Per tree, every stage across every run in the file: runs, median, max, total, ordered by total. Every span

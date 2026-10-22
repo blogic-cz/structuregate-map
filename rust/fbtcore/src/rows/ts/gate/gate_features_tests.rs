@@ -254,3 +254,21 @@ fn an_at_for_block_iterates_like_ng_for_so_an_empty_else_proves_the_feature() {
     assert_eq!(features_of(&run(iterated_list("ngForOf")), "g:1"), Some(vec!["ALPHA".to_string()]));
     assert_eq!(features_of(&run(iterated_list("IfBlockBranch")), "g:1"), None);
 }
+
+#[test]
+fn a_condition_held_as_text_reads_back_as_its_tree_and_one_holding_a_float_stays_a_tree() {
+    // `Conds`: the resolved trees are held as their text between the two passes that walk them.
+    let plain = json!({"k": "Binary", "op": "===", "left": {"k": "Read", "name": "a\u{e9}\n\"q\""}, "right": {"k": "Literal", "v": -3}, "z": [true, null, {}]});
+    let float = json!({"k": "Literal", "v": 0.1});
+    let mut conds = Conds::new();
+    conds.insert("br:1".into(), (plain.clone(), false));
+    conds.insert("br:2".into(), (float.clone(), true));
+    conds.extend([("br:3".to_string(), (json!([]), false))]);
+    assert!(matches!(conds["br:1"].0, Cond::Text(_)));
+    assert!(matches!(conds["br:2"].0, Cond::Tree(_)), "a float is not promised to read back to its own bits");
+    let mut seen = Vec::new();
+    conds.each(|id, tree, negated| seen.push((id.clone(), tree.clone(), negated)));
+    assert_eq!(seen, [("br:1".to_string(), plain, false), ("br:2".to_string(), float, true), ("br:3".to_string(), json!([]), false)]);
+    let keys: Vec<String> = seen.iter().map(|(id, ..)| id.clone()).collect();
+    assert_eq!(keys, ["br:1", "br:2", "br:3"], "in the order they were put");
+}

@@ -327,3 +327,57 @@ fn a_whole_cell_spelled_null_reads_as_null_and_undefined_stays_its_literal() {
     drop(db);
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn a_scalar_repeated_down_a_table_is_held_once_and_an_integer_and_a_real_stay_two() {
+    // SIXTEEN-BYTE CELLS (`row::Interned`): one value a column repeats is one value, shared - never one per row.
+    let db = Connection::open_in_memory().unwrap();
+    db.execute_batch(
+        "CREATE TABLE gates (id TEXT, file TEXT, n, half TEXT);
+         INSERT INTO gates VALUES ('g:1', 'a.ts', 1, 'typescript'), ('g:2', 'a.ts', 1.0, 'typescript'), ('g:3', NULL, 2, 'typescript');",
+    )
+    .unwrap();
+    let store = Store::from_db(&db, "typescript").unwrap();
+    let rows = store.table("gates");
+    let file = |row: &Row| match row {
+        Row::Held { schema, cells, .. } => match &cells[schema.at["file"]] {
+            Some(Cell::Value(v)) => Some(Rc::clone(v)),
+            _ => None,
+        },
+        Row::Built(_) => None,
+    };
+    assert!(Rc::ptr_eq(&file(&rows[0]).unwrap(), &file(&rows[1]).unwrap()), "one file, held once");
+    assert_eq!(rows[2].get("file"), Some(&Value::Null), "a NULL is still a null column, not an absent one");
+    assert_eq!(rows[0]["n"], json!(1));
+    assert_eq!(rows[1]["n"], json!(1.0), "a REAL 1.0 is not the INTEGER 1 it equals");
+    assert!(rows[1]["n"].is_f64());
+}
+
+#[test]
+fn a_forgotten_tree_is_rebuilt_and_answers_what_it_answered() {
+    // `Store::forget_decoded` at a step boundary: what is held changes, never what is answered.
+    with_nodes("forget", |db| {
+    let mut store = Store::from_db(db, "typescript").unwrap();
+    let decoded = |row: &Row| matches!(row, Row::Held { cells, .. } if cells.iter().any(|c| matches!(c, Some(Cell::Nodes(d)) if d.get().is_some())));
+    let first = store.table("expressions")[0].get("ast").cloned();
+    assert!(decoded(&store.table("expressions")[0]));
+    store.forget_decoded(&[("expressions", "ast")]);
+    let rows = store.table("expressions");
+    assert!(!decoded(&rows[0]), "the tree is no longer held");
+    assert_eq!(rows[0].get("ast").cloned(), first, "and read again it is the same tree");
+    });
+}
+
+#[test]
+fn a_cloned_row_shares_its_cells_and_answers_what_its_original_does() {
+    // `gate_guards` groups every call per member by cloning it: a clone copied every tree decoded in it.
+    with_nodes("clone", |db| {
+    let store = Store::from_db(db, "typescript").unwrap();
+    let rows = store.table("expressions");
+    let clone = rows[1].clone();
+    assert!(matches!((&rows[1], &clone), (Row::Held { cells: a, .. }, Row::Held { cells: b, .. }) if Rc::ptr_eq(a, b)), "shared, not copied");
+    assert_eq!(clone.get("ast"), Some(&json!({"k": "Read", "name": "n"})));
+    assert_eq!(rows[1].get("ast"), clone.get("ast"));
+    assert_eq!(clone.into_map(), rows[1].to_map(), "a clone given back for a write is the row");
+    });
+}

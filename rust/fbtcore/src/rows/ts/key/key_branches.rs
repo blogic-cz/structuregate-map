@@ -301,17 +301,18 @@ impl Branches {
         for table in ["assignments", "returns", "members"] {
             for r in store.table(table).iter() {
                 let member = if table == "members" { cell(r, "id") } else { cell(r, "member") };
-                if let Some(v) = r.get("value") {
+                // PEEKED: every row's tree is asked, and holding them all decoded was the largest share of this index.
+                r.peek("value", |v| if let Some(v) = v {
                     choices_in(v, &member, &mut out.choices);
-                }
+                });
             }
         }
         // A CALL'S ARGUMENTS choose keys too: `translate(c ? 'a' : 'b')`.
         for c in store.table("calls").iter() {
             let member = cell(c, "member");
-            for arg in c.get("args").and_then(|a| a.as_array()).into_iter().flatten() {
+            c.peek("args", |args| for arg in args.and_then(|a| a.as_array()).into_iter().flatten() {
                 choices_in(arg, &member, &mut out.choices);
-            }
+            });
         }
         // A TEMPLATE EXPRESSION CHOOSES KEYS TOO: `[text]="c ? 'a' : 'b'"` - see `template_arms`.
         let mut held: IndexSet<String> = store.table("template_strings").iter().filter_map(|r| cell(r, "expression")).collect();

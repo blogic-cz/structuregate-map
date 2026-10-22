@@ -20,6 +20,18 @@
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+/// FREED MEMORY BACK TO THE SYSTEM, after a large structure was dropped: mimalloc keeps the pages it freed for the next
+/// allocation, and the process went on holding gigabytes nothing used - after `Store::release` most of what the store
+/// held. `mi_collect(true)` frees this thread's empty pages and purges the arenas now. Declared by hand: the symbol is
+/// in the mimalloc the allocator already links (`libmimalloc-sys` declares it only under a feature), so nothing is added.
+pub(crate) fn give_back() {
+    unsafe extern "C" {
+        fn mi_collect(force: bool);
+    }
+    // SAFETY: mimalloc's own entry point, callable from any thread at any time; it touches only the allocator's state.
+    unsafe { mi_collect(true) }
+}
+
 mod abi;
 mod atlas;
 mod cli;
