@@ -125,7 +125,12 @@ Beside the shared tables it adds the FRAMEWORK tables:
 * **`classes.extends`** is `{text, name, file, external, line, id, type_args}`: `text` as written, `name`/`file`/`line` the
   declaration the checker reached (alias and barrel followed), `id` its `classes` row (none for a library class), and
   `type_args` each type argument the same way (`extends Base<Order>`: Order's `id`), nested arguments under their own.
-* **`di`** is a constructor parameter, or a field initialised by `inject()` (`inject = 1`, `param` the field; its `type_ref` is the declaration the call's type names, rows 77). `token`,
+* **`comments`** holds EVERY comment of a parsed `.ts` file, once (rows 78): `line`, `col`, `kind`, `text`, and `context`, the declaration it sits in (null at the top level) - one in a call chain, after a class's last member or after a regex or template included.
+* **`di`** is a constructor parameter, or an `inject()` (`inject = 1`). A FIELD that IS the call (`x = inject(T)`, through `as`/`<T>`/parentheses/`!`) is `param` the field; a call NESTED in
+  the initializer (`x = (inject(T) as I).x`, `inject(T).y`, `inject(T) ?? z`) makes `x` a copy of something the injected object holds, so the class has ONE row per token it injects that way, `param` NULL and
+  `via` the first field (none where a field already is that call; rows 78); a call in a FUNCTION that is no class member (a functional interceptor, a provider's factory) is a row with `class` NULL and
+  `function`, its `functions` row, `param` the local it initialises (a method body is no injection context: no row). `type`/`type_ref` are the field's (or local's) annotation, else the cast
+  around the call, else the call's own type (rows 77, 78) - `y: I = inject(T) as I` is an `I`, never the token's `unknown`. `token`,
   `token_ref` and `token_id` name the injection token - an `@Inject(TOKEN)` or `inject()`'s argument - where `resolved`
   stays the declared TYPE; a token that is a property of a const object (`Tokens.X`)
   joins that const in `token_id`. An `export { A as B }` alias resolves to `A` (`routes.component_id`, the `id` on each

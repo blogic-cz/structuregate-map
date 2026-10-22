@@ -10,17 +10,23 @@ import { literalUse, numberOf } from './TsLiterals.mjs';
 import { canonicalPath, relativeTo } from './TsPaths.mjs';
 
 /**
- * EVERY comment in the file, through the compiler's own scanner run with trivia enabled.
+ * EVERY comment in the file, ONCE: the compiler's scanner run with trivia enabled over the text BETWEEN the parsed nodes (rows 78).
  *
  * Leading trivia of top-level statements is not enough: the comments that explain business rules sit
  * inside method bodies and next to class members, and a statement-level pass found ZERO of them across
- * hundreds of files of a real frontend. The scanner sees all trivia, so nothing is left behind.
+ * hundreds of files of a real frontend. A scanner over the WHOLE text is not enough either - it has no grammar, so a regex holding a quote
+ * or a backtick, or the text after a template's `}`, opened a string that swallowed every comment up to its end, the file's last ones among them.
+ * What lies between the nodes' own text (their gaps, and the trivia before a token) is punctuation, keywords and comments only: no literal, so no
+ * mistaking one. Every node's span is walked once, so a comment is found once and none can be missed.
  */
 export function collectComments(ts, store, sf, fileId) {
-  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, sf.text);
-  let kind = scanner.scan();
-  while (kind !== ts.SyntaxKind.EndOfFileToken) {
-    if (kind === ts.SyntaxKind.SingleLineCommentTrivia || kind === ts.SyntaxKind.MultiLineCommentTrivia) {
+  const text = sf.text;
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard);
+  const gap = (from, to) => {
+    if (to <= from) return;
+    scanner.setText(text, from, to - from);
+    for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
+      if (kind !== ts.SyntaxKind.SingleLineCommentTrivia && kind !== ts.SyntaxKind.MultiLineCommentTrivia) continue;
       const pos = scanner.getTokenStart();
       const start = sf.getLineAndCharacterOfPosition(pos);
       store.add('comments', 'cm', {
@@ -32,8 +38,21 @@ export function collectComments(ts, store, sf, fileId) {
         text: scanner.getTokenText(),
       });
     }
-    kind = scanner.scan();
-  }
+  };
+  // A LEAF is its trivia and then its token (a literal's own text is no gap); a node is the gaps between its children.
+  const walk = (node) => {
+    const kids = [];
+    ts.forEachChild(node, (child) => { kids.push(child); });
+    if (!kids.length) { gap(node.pos, node.getStart(sf, false)); return; }
+    let at = node.pos;
+    for (const kid of kids) {
+      gap(at, kid.pos);
+      walk(kid);
+      at = kid.end;
+    }
+    gap(at, node.end);
+  };
+  walk(sf);
 }
 
 /** The innermost NAMED declaration containing `pos` - "which class, which method is this comment in".

@@ -103,6 +103,8 @@ const MORE_KEYS = [
   // A CONSTRUCTOR'S INJECTED PARAMETER (`di`) has no member: `['class', 'member']` names an `inject()` field and left
   // every parameter unclaimed, so a file read again renumbered its `di` rows under a full run's.
   ['class', 'param'],
+  // THE REST OF A `di` TABLE (rows 78): a dependency a field NESTS (`param` null, `via` the field) by its class and token, an `inject()` in a function by that function and its place.
+  ['class', 'via', 'token'], ['function', 'line', 'col'],
   // A TRANSLATION KEY A SERVICE CALL HANDS OVER (`i18n_refs`, `TsI18nCalls.mjs`): its call and the key, or the prefix.
   ['call', 'key'], ['call', 'prefix'],
 ];

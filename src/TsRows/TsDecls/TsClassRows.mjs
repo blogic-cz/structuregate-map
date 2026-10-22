@@ -12,6 +12,7 @@ import { canonicalPath, relativeTo, slash } from './TsPaths.mjs';
 import { locationOf } from './TsNodes.mjs';
 import { makeLibPipes } from './TsLibPipes.mjs';
 import { makeViewContexts } from './TsViewContext.mjs';
+import { makeInjectRows } from './TsInjects.mjs';
 
 /** The package a decorator must come FROM to be an Angular one. ONE identity resolved through the type
  *  checker, instead of a list of the five names - which says nothing about origin and would count a
@@ -126,21 +127,6 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
         && e.expression.text === 'Inject' && fromAngularCore(e.expression)) return e.arguments[0];
     }
     return null;
-  };
-
-  /** EVERY `inject(...)` OF A PROPERTY INITIALIZER, in source order. A function-valued initializer is a
-   *  deferred body, run in whatever context calls it, so it is not walked: `lazy = () => inject(X)` is not a
-   *  dependency of the class. */
-  const injectCallsOf = (init) => {
-    const out = [];
-    const visit = (n) => {
-      if (ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isClassExpression(n)) return;
-      if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'inject'
-        && fromAngularCore(n.expression)) out.push(n);
-      ts.forEachChild(n, visit);
-    };
-    visit(init);
-    return out;
   };
 
   const typeIdentifier = (typeNode) => (ts.isTypeReferenceNode(typeNode) ? typeNode.typeName : null);
@@ -306,6 +292,8 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
   /** Is a `type_ref` Angular's own `TemplateRef`? By the DECLARATION it resolved to (`TsTpl/TsRegistry.mjs` asks the same of the stored `di` row), never by the name written. */
   const isAngularTemplateRef = (ref) => !!ref && ref.name === 'TemplateRef' && String(ref.file || '').includes('@angular/core');
 
+  const injectRows = makeInjectRows({ ts, checker, store, typeRefAt, typeText, declFileOf, declFileOfSymbol, resolvedOf, propName, fromAngularCore });
+
   function extractClass(node, fid, holder = null) {
     let injectsTemplateRef = false;
     const mods = modifiersOf(node);
@@ -338,6 +326,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     const contextOf = (declaration) => (viewContexts.has(declaration) ? { context_ref: viewContexts.get(declaration) } : {});
     const members = [];
     const summaries = [];
+    const inj = injectRows.forClass(classId, fid, contextOf);
     for (const m of node.members) {
       const memberId = memberRow(m, classId, fid);
       members.push({ id: memberId, node: m });
@@ -408,30 +397,10 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
         }
       }
       // `inject()` IN A PROPERTY INITIALIZER IS CONSTRUCTOR INJECTION by another spelling: without a row
-      // here a class that takes every dependency through `inject()` looked as if it had none.
-      if (mInit) {
-        for (const call of injectCallsOf(mInit)) {
-          const t = checker.getTypeAtLocation(call);
-          const opts = call.arguments[1];
-          const optional = !!opts && ts.isObjectLiteralExpression(opts) && opts.properties.some((pr) =>
-            ts.isPropertyAssignment(pr) && propName(pr.name) === 'optional'
-            && pr.initializer.kind === ts.SyntaxKind.TrueKeyword);
-          const tokenArg = call.arguments[0];
-          // WHAT `inject(X)` HANDS BACK IS TYPED AS A CONSTRUCTOR PARAMETER IS (rows 77): the declaration its type names, so `inject(TemplateRef)` is the `@angular/core`
-          // class - and a directive taking its template THAT way is structural too. A null here read such a directive as an attribute directive: the `[dir]="x"` it is bound with
-          // on an `<ng-template>` was no gate, and the `let-` variables of its context were typed from nothing.
-          const injected = typeRefAt(call).type_ref ?? null;
-          if (isAngularTemplateRef(injected)) injectsTemplateRef = true;
-          store.add('di', 'd', {
-            class: classId, file: fid, param: propName(m.name), member: memberId, inject: true,
-            type: typeText(call, null), resolved: declFileOfSymbol(t.aliasSymbol ?? t.getSymbol()),
-            type_ref: injected, decorators: [], optional,
-            ...contextOf(m),
-            ...(tokenArg ? { token: tokenArg.getText(), token_ref: declFileOf(tokenArg) } : {}),
-          });
-        }
-      }
+      // here a class that takes every dependency through `inject()` looked as if it had none (`TsExpr/TsInjects.mjs`).
+      if (mInit) inj.field(m, mInit, memberId);
     }
+    if (inj.done()) injectsTemplateRef = true;
     // THE ANGULAR TABLES, from the same decorators and the same member summaries. `io` first, because it is
     // what selector matching and binding validation are both built on.
     let io = { inputs: [], outputs: [] };
@@ -446,5 +415,5 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     return { classId, decorators, members, name: className, io, angularRows, injectsTemplateRef };
   }
 
-  return { extractClass, paramsOf, typeText, declFileOf, decoratorsOf, returnRefOf };
+  return { extractClass, paramsOf, typeText, declFileOf, decoratorsOf, returnRefOf, injectAt: injectRows.atFunction };
 }

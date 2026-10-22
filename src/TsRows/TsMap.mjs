@@ -290,9 +290,14 @@ async function main() {
   //     destructuring binds has `default` (the evaluated default of `{ a = 1 }`), `type` (the checker's text for the name) and, in an array pattern, `index` (holes counted) on a `locals` row's
   //     `bindings`, a parameter's `bindings` items and the per-name `consts` rows of a top-level destructuring (`TsDecls/TsExpr/TsBindings.mjs`). A loop over a framework pipe (`async`) takes the
   //     element of the list it EMITS, not the innermost type: `Observable<Item[][]>` gives `Item[]`, and a loop inside it `Item` (`TsTpl/TsTplReads.mjs::loopValueOf`).
+  // 78: five gaps closed. A `di` row is a field only when the initializer IS the `inject()` call: one nested in it (`(inject(T) as I).x`, `inject(T).y`) is a dependency of the CLASS - one row per
+  //     token, `param` null, `via` the field - and an `inject()` in a function that is no class member (a functional interceptor, a provider's factory) is a row with `function`
+  //     (`TsDecls/TsExpr/TsInjects.mjs`); its `type`/`type_ref` are the annotation, else the cast around the call, else the call's. A `locals` row's `bindings` is one item per name the
+  //     pattern binds at any depth, `property` the path to it, with `line` and `col` (`TsDecls/TsBody.mjs::emitLocal`). `comments` holds every comment of a file, once: the text between nodes
+  //     is scanned, since a scanner with no grammar lost everything after a regex holding a quote (`TsText.mjs::collectComments`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 77, build: args.build,
+    config: config.file, data: config.data, rows: 78, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
