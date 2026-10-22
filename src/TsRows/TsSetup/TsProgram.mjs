@@ -8,12 +8,39 @@
  */
 import { timed } from './TsMetrics.mjs';
 import path from 'node:path';
+import { readdirSync, statSync } from 'node:fs';
 import { builtinModules } from 'node:module';
 
 import { slash } from './TsPaths.mjs';
 
 // Node's own registry, not a list to maintain: it cannot drift when Node adds a module.
 const NODE_BUILTINS = new Set(builtinModules);
+
+/**
+ * WHETHER A RELATIVE SPECIFIER NAMES A FILE ONLY WHEN CASE IS IGNORED: `./Foo` beside `foo.ts`. Windows and macOS resolve it, Linux
+ * does not, so the build that ships from there breaks on what the developers' machines never noticed. Published as
+ * `unresolved_import.case_insensitive_match` so a consumer sees the Windows-only imports apart from the missing ones. Each path segment is
+ * looked up in its folder's listing, and a hit that spells the path exactly (resolution failed for another reason) is not one.
+ */
+function caseInsensitiveMatch(name, containingFile) {
+  if (!name.startsWith('.')) return false;
+  const wanted = path.resolve(path.dirname(containingFile), name);
+  for (const form of ['', '.ts', '.tsx', '.d.ts', '.js', '.mjs', '/index.ts', '/index.d.ts']) {
+    const full = path.normalize(wanted + form);
+    let at = path.parse(full).root;
+    let found = true;
+    for (const part of full.slice(at.length).split(path.sep).filter((p) => p !== '')) {
+      let entries = [];
+      try { entries = readdirSync(at); } catch { found = false; break; }
+      const hit = entries.find((e) => e.toLowerCase() === part.toLowerCase());
+      if (hit === undefined) { found = false; break; }
+      at = path.join(at, hit);
+    }
+    if (!found || at === full) continue;
+    try { if (statSync(at).isFile()) return true; } catch { /* gone since the listing */ }
+  }
+  return false;
+}
 
 // WHAT THE DISK SAID, remembered for the process. The tree cannot change under one run, and the programs of
 // one workspace ask the same questions over and over: on a large Angular workspace module resolution alone took many seconds, most of
@@ -138,7 +165,8 @@ export function createProgram(ts, tsconfigPath, nodeModules, diag, noted, checke
       noted.add(`${name}|${containingFile}`);
       const builtin = name.startsWith('node:') || NODE_BUILTINS.has(name);
       diag.note(builtin ? 'unresolved_node_builtin' : 'unresolved_import',
-        { module: name, from: containingFile });
+        builtin ? { module: name, from: containingFile }
+          : { module: name, from: containingFile, case_insensitive_match: caseInsensitiveMatch(name, containingFile) });
     }
     return r;
   });

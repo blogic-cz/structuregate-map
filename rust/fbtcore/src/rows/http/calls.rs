@@ -3,7 +3,10 @@
 //! A PRIMITIVE is a call the checker resolved into that package. Its url is FOLDED: a string is itself, a template its
 //! parts around its folded holes, a `this.x` the class member of that name, a local the last value it held at the call,
 //! a parameter `{}`, an unknown part `*`. A callable whose primitive's url BEGINS with one of its PARAMETERS is a WRAPPER:
-//! it writes no call itself, and every call OF it does, with the url its caller handed in.
+//! it writes no call itself, and every call OF it does, with the url its caller handed in. The url BEGINS with a parameter
+//! when it is that parameter, a template opening with one, a local holding any of these, EITHER ARM of a ternary
+//! (`q = params ? createQueryUrl(url, params) : url`), or a call whose FIRST argument is one (`createQueryUrl(url, params)` is
+//! the parameter and an unknown suffix: the suffix is the query a caller's url never carries, `finished` cuts it).
 
 use super::files_of;
 use super::inputs::read_of;
@@ -234,6 +237,14 @@ impl World {
             let open = parts.first().and_then(Value::as_str) == Some("");
             return holes.first().filter(|_| open).and_then(|h| self.parameter(h, at, seen));
         }
+        // A TERNARY IS ITS CONDITION'S TWO ARMS, and it carries its own text as `$expr` too - so it is read before the name.
+        if o.contains_key("$cond") {
+            return ["$then", "$else"].iter().filter_map(|arm| o.get(*arm)).find_map(|arm| self.parameter(arm, at, seen));
+        }
+        // A CALL OF THE PARAMETER'S FIRST ARGUMENT is the parameter followed by whatever the callee appends.
+        if o.get("$call").is_some_and(Value::is_string) {
+            return o.get("$args").and_then(Value::as_array).and_then(|a| a.first()).and_then(|a| self.parameter(a, at, seen));
+        }
         let name = o.get("$expr").and_then(Value::as_str).filter(|n| is_name(n))?;
         if self.is_param(at, name) {
             return Some(name.to_string());
@@ -382,6 +393,10 @@ pub(super) fn load(conn: &Connection, typescript: &HashMap<String, String>) -> r
     sites.sort_by(|a, b| (&a.file, a.line, &a.call).cmp(&(&b.file, b.line, &b.call)));
     Ok(sites)
 }
+
+#[cfg(test)]
+#[path = "calls_wrapper_tests.rs"]
+mod wrapper_tests;
 
 #[cfg(test)]
 mod tests {

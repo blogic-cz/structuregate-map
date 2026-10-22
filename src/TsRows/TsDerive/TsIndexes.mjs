@@ -85,7 +85,8 @@ export function rollupGateIndex(store) {
         byIdentifier.set(id, entry);
       }
       entry.gates.push(g.id);
-      entry.components.add(g.component);
+      // AN ORPHAN TEMPLATE'S gate has no component: counting its null made `component_count` one too many.
+      if (g.component != null) entry.components.add(g.component);
     }
   }
   for (const e of [...byIdentifier.values()].sort((a, b) => b.gates.length - a.gates.length)) {

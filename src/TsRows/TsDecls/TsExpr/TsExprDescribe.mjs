@@ -38,6 +38,60 @@ function writtenPaths(node, prefix, out) {
   });
 }
 
+/** A method that changes the list, set or map it is called on - on a draft, a write to that property. */
+const MUTATORS = new Set(['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin',
+  'set', 'add', 'delete', 'clear']);
+
+/**
+ * THE PATHS A DRAFT HANDLER MUTATES (rows 79): `immerOn(Act, (s) => { s.a = 1; s.list.push(x); s.b.c++; })` returns nothing
+ * and writes `a`, `list`, `b.c`, where `on(Act, (s) => ({ ...s, a: 1 }))` returns them (`writtenPaths`). The draft is the
+ * first parameter. A path is the property names from it - an index is not a segment (`s.items[i].done = 1` is `items.done`) -
+ * and a method call on the way (`s.items.find(..)`) is the element it hands back. A LOCAL initialised from such a path
+ * (`const t = s.response.find(..)`) IS that path: `t.active = 1` writes `response.active`. Keys only, as `writtenPaths`.
+ */
+export function draftWrites(ts, fn) {
+  const first = fn.parameters?.[0]?.name;
+  if (first === undefined || !ts.isIdentifier(first)) return [];
+  // BY KIND RANGE: `ts.SyntaxKind[kind]` answers an ALIAS name for the first and last of a range (`FirstAssignment` for `=`).
+  const isAssignment = (k) => k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment;
+  const aliases = new Map();
+  const out = [];
+  const pathOf = (e) => {
+    if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e)
+      || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(e))) return pathOf(e.expression);
+    if (ts.isIdentifier(e)) return e.text === first.text ? [] : aliases.get(e.text) ?? null;
+    if (ts.isPropertyAccessExpression(e)) {
+      const base = pathOf(e.expression);
+      return base === null ? null : [...base, e.name.text];
+    }
+    if (ts.isElementAccessExpression(e)) return pathOf(e.expression);
+    if (ts.isCallExpression(e) && ts.isPropertyAccessExpression(e.expression)) return pathOf(e.expression.expression);
+    return null;
+  };
+  const note = (e) => {
+    const path = pathOf(e);
+    if (path !== null && path.length) out.push(path.join('.'));
+  };
+  const visit = (n) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined) {
+      const path = pathOf(n.initializer);
+      if (path !== null) aliases.set(n.name.text, path);
+    } else if (ts.isBinaryExpression(n) && isAssignment(n.operatorToken.kind)) {
+      note(n.left);
+    } else if ((ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n))
+      && (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken)) {
+      note(n.operand);
+    } else if (ts.isDeleteExpression(n)) {
+      note(n.expression);
+    } else if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && MUTATORS.has(n.expression.name.text)) {
+      note(n.expression.expression);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(fn.body);
+  return [...new Set(out)];
+}
+
 export function makeExprDescriber(ts, addRow, resolveRead, resolveName = null, log = null, resolveLocal = null, resolveParam = null) {
   const norm = makeTsExprNormalizer(ts, resolveRead, resolveName, resolveLocal, resolveParam);
   // Keyed by node AND role - see the note in the returned function.

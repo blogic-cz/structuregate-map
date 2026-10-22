@@ -137,7 +137,7 @@ function joinedPrefix(ts, n, evalNode) {
  *
  * THIS WALK HAS NO CHECKER: a `RegExp` the file declares itself is not told apart from the global one. The
  * plain half does better, because it has the file's bindings. A pattern is known only from a literal; one
- * built at run time is '' - never a guess. A literal handed to `RegExp` is its own row, used by `RegExp`.
+ * built at run time is '' - never a guess. A literal handed to `RegExp` is its own row, used by `RegExp`, and the call is a row of its own too.
  */
 function regexOf(ts, n) {
   if (ts.isRegularExpressionLiteral(n)) {
@@ -148,8 +148,15 @@ function regexOf(ts, n) {
   if (!(ts.isNewExpression(n) || ts.isCallExpression(n)) || !ts.isIdentifier(n.expression)
     || n.expression.text !== 'RegExp') return null;
   const [first, second] = n.arguments ?? [];
-  if (first && ts.isRegularExpressionLiteral(first)) return null;
   const literal = (arg) => (arg && (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) ? arg.text : null);
+  // A `RegExp` CONSTRUCTION OVER A LITERAL (`/x/g` handed to it) IS A CALL TOO (it was no row, only the inner literal): the pattern is the literal's, and the
+  // flags argument OVERRIDES the literal's as JavaScript does - with none, the literal's own are copied.
+  if (first && ts.isRegularExpressionLiteral(first)) {
+    const last = first.text.lastIndexOf('/');
+    const own = first.text.slice(last + 1);
+    return { kind: 'call', api: 'RegExp', pattern: first.text.slice(1, last), pattern_kind: 'literal',
+      flags: second === undefined ? own : (literal(second) ?? ''), source: n.getText(), used_by: usedBy(ts, n) };
+  }
   const pattern = literal(first);
   return { kind: 'call', api: 'RegExp', pattern: pattern ?? '', pattern_kind: pattern === null ? '' : 'literal',
     flags: literal(second) ?? '', source: n.getText(), used_by: usedBy(ts, n) };

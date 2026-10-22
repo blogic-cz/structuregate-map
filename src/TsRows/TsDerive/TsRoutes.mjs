@@ -36,6 +36,16 @@ function withoutAddedIds(key, value) {
 }
 
 /**
+ * THE ARRAY'S SIGNATURE: `withoutAddedIds` and no `$fn_id`. A const's lazy arrow is linked to its `functions` row
+ * (`$fn_id`, `TsWalk.mjs::linkFunctions`) and the same array reached through a module's `forRoot(appRoutes)` is a copy
+ * the link never visited, so every lazy route differed between the two and the array was walked twice - a second row
+ * per route, and every lazy root claimed by two loaders, linked to neither.
+ */
+function forSignature(key, value) {
+  return key === '$fn_id' ? undefined : withoutAddedIds(key, value);
+}
+
+/**
  * A ROUTE'S CELL AS EXTRACTED, without the ids `rollupRefIds` adds later. This pass runs before it, so a full run's
  * route holds none - but a partial run reads the KEPT `ng_modules` rows, stored with them, and a route copied from one
  * held `$module.id` where a full run's did not.
@@ -75,7 +85,7 @@ export function rollupRoutes(store) {
       // identifies it, with the parent path keeping two identical child arrays under different parents apart.
       // ...AS EXTRACTED: the row ids `rollupRefIds` adds inside a module's lists (a nested `$module`'s and `$ref`'s
       // `id`, #75) come back on a partial run's kept rows and not on a const read again, so they are left out.
-      const signature = `${parentPath}|${JSON.stringify(val, withoutAddedIds)}`;
+      const signature = `${parentPath}|${JSON.stringify(val, forSignature)}`;
       let sig = arraySig;
       if (val.some(looksLikeRoute)) {
         sig = signature;
@@ -134,6 +144,12 @@ export function rollupRoutes(store) {
       can_activate: arr(effective.canActivate).map(refOf),
       can_load: arr(effective.canLoad).map(refOf),
       guards: arr(effective.canActivateChild).map(refOf),
+      // THE FIELDS A ROUTER READS THAT THE ROW LEFT OUT (rows 79): `pathMatch` makes `''` a prefix or a whole-URL match, a
+      // `canDeactivate`/`canMatch` guard stops or hides a route, and a `title` names it. Absent they read as a route with none.
+      path_match: effective.pathMatch ?? null,
+      can_deactivate: arr(effective.canDeactivate).map(refOf),
+      can_match: arr(effective.canMatch).map(refOf),
+      title: effective.title ?? null,
       data: effective.data ?? null,
       // Two fields a route may declare only through a factory, and which the fold now knows.
       // Published because a field the map HAS and does not write is indistinguishable from one it lacks.

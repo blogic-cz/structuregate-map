@@ -14,6 +14,7 @@
  * Imports are flat: see `TsTypeRef.mjs`.
  */
 import { makeValueRefs, undefinedLiteral } from './TsValueRefs.mjs';
+import { draftWrites } from './TsExprDescribe.mjs';
 
 /**
  * `describe` is the expressions writer, and it is OPTIONAL: given one, an unevaluable value also carries
@@ -151,9 +152,18 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
         if (typeof id === 'string') receiverExpr = id;
       }
     }
+    const args = node.arguments.map((a) => evalNode(a));
+    // AN IMMER HANDLER WRITES BY MUTATING ITS DRAFT (rows 79), so its `$writes` are the paths it assigns, not a returned object's keys.
+    const handler = node.arguments[node.arguments.length - 1];
+    if (target?.name === 'immerOn' && String(target.file).includes('/ngrx-immer/') && handler !== undefined
+      && (ts.isArrowFunction(handler) || ts.isFunctionExpression(handler))) {
+      const value = args[args.length - 1];
+      const written = draftWrites(ts, handler);
+      if (written.length && value !== null && typeof value === 'object') value.$writes = [...new Set([...(value.$writes ?? []), ...written])];
+    }
     return {
       $call: node.expression.getText(),
-      $args: node.arguments.map((a) => evalNode(a)),
+      $args: args,
       ...(receiver !== undefined ? { $receiver: receiver, $method: node.expression.name.getText() } : {}),
       ...(receiverExpr !== undefined ? { $receiver_expr: receiverExpr } : {}),
       ...(receiverValue !== undefined ? { $receiver_value: receiverValue } : {}),
@@ -244,7 +254,9 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       const lazy = refs.lazyTarget(node);
       if (lazy !== null) out.$module = lazy;
       // THE TEXT FIRST: a walk of every function's body for one callee name most trees never write.
-      const remote = out.$fn.includes('loadRemoteModule') ? refs.remoteTarget(node) : null;
+      let remote = out.$fn.includes('loadRemoteModule') ? refs.remoteTarget(node) : null;
+      // A BARE `import('remote/Module')` no file answers for (rows 79): the host's `remotes` list decides whether it is one.
+      if (remote === null && lazy === null && out.$fn.includes('import(')) remote = refs.importedRemote(node);
       if (remote !== null) out.$remote = remote;
       describeInto(out, node);
       return out;

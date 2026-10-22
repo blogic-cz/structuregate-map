@@ -14,6 +14,8 @@ import { canonicalPath } from './TsPaths.mjs';
  */
 export const undefinedLiteral = (kind) => ({ $literal: 'undefined', $kind: kind });
 
+const ELEMENT_METHODS = new Set(['map', 'forEach', 'filter', 'some', 'every', 'find', 'findIndex', 'flatMap']);
+
 export function makeValueRefs({ ts, checker, symbolAt, api }) {
   /**
    * The declaration that actually CARRIES the value, not whichever the checker lists first.
@@ -58,6 +60,24 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
     return { name: access.name.text, file: canonicalPath(decl.getSourceFile().fileName), owner: owner.name.text };
   }
 
+  /**
+   * THE STRING A PROPERTY READ OF A CALLBACK'S PARAMETER HOLDS IN EACH ELEMENT of the literal array the callback walks
+   * (`list.map((t) => t.Name)`, the first parameter of an array method's function argument), or null when the receiver is
+   * not such a parameter, the list does not evaluate, or an element holds no string there.
+   */
+  function elementValues(access) {
+    const param = ts.isIdentifier(access.expression) ? symbolAt(access.expression)?.declarations?.[0] : undefined;
+    const fn = param?.parent;
+    if (!param || !ts.isParameter(param) || !fn || !(ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) || fn.parameters[0] !== param) return null;
+    const call = fn.parent;
+    if (!ts.isCallExpression(call) || call.arguments[0] !== fn || !ts.isPropertyAccessExpression(call.expression)
+      || !ELEMENT_METHODS.has(call.expression.name.text)) return null;
+    const list = api.evalNode(call.expression.expression);
+    if (!Array.isArray(list) || list.length < 2) return null;
+    const values = list.map((el) => (el !== null && typeof el === 'object' && !Array.isArray(el) ? el[access.name.text] : undefined));
+    return values.every((v) => typeof v === 'string') ? [...new Set(values)] : null;
+  }
+
   /** `Enum.Member` / const-object member -> its resolved constant value, PLUS the provenance. */
   function evalMemberAccess(node) {
     const constant = checker.getConstantValue(node);
@@ -73,7 +93,13 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
       // A CONST OBJECT IS A CONST MAP. `Flags` is a plain object in some applications, so the
       // access resolved to the bare string and the map held no record of which member produced it - silently
       // lossy anywhere a map's value differs from its key.
-      return { $member: node.getText(), value: api.follow(decl, decl.initializer, node.getText()) };
+      const member = { $member: node.getText(), value: api.follow(decl, decl.initializer, node.getText()) };
+      // A PARAMETER OVER A LITERAL ARRAY OF OBJECTS (`[{ Name: 'a' }, { Name: 'b' }].map((t) => t.Name)`) reads the property of EVERY
+      // element, and the checker's one declaration is the first literal's: `value` alone made one ref of three. Every string the
+      // elements hold is kept as `$indexed`, as an unknown index into a const is (`i18n_refs` claims it).
+      const each = elementValues(node);
+      if (each !== null) member.$indexed = each;
+      return member;
     }
     if (decl && ts.isPropertyDeclaration(decl) && decl.initializer
       && (ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Static) !== 0) {
@@ -263,20 +289,50 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
       }
     }
     if (remote === null || expose === null) return null;
-    // `.then((m) => m.X)` ON THE CALL ITSELF: the parameter's own property is the export the route loads.
-    let pick = null;
+    return { remote, expose, pick: pickOf(call) };
+  }
+
+  /**
+   * `.then((m) => m.X)` ON THE CALL ITSELF: the parameter's own property is the export the route loads - written as the
+   * arrow's expression or as the one `return` of its block (`(m) => { return m.X; }`).
+   */
+  function pickOf(call) {
     const then = call.parent;
     const cb = ts.isPropertyAccessExpression(then) && then.name.text === 'then' && ts.isCallExpression(then.parent)
       ? then.parent.arguments[0] : undefined;
-    if (cb !== undefined && (ts.isArrowFunction(cb) || ts.isFunctionExpression(cb)) && cb.parameters.length === 1
-      && ts.isIdentifier(cb.parameters[0].name)) {
-      let body = cb.body;
-      while (ts.isParenthesizedExpression(body)) body = body.expression;
-      if (ts.isPropertyAccessExpression(body) && ts.isIdentifier(body.expression)
-        && body.expression.text === cb.parameters[0].name.text) pick = body.name.text;
+    if (cb === undefined || !(ts.isArrowFunction(cb) || ts.isFunctionExpression(cb)) || cb.parameters.length !== 1
+      || !ts.isIdentifier(cb.parameters[0].name)) return null;
+    let body = cb.body;
+    if (ts.isBlock(body)) {
+      const only = body.statements.length === 1 ? body.statements[0] : undefined;
+      if (only === undefined || !ts.isReturnStatement(only) || only.expression === undefined) return null;
+      body = only.expression;
     }
-    return { remote, expose, pick };
+    while (ts.isParenthesizedExpression(body)) body = body.expression;
+    return ts.isPropertyAccessExpression(body) && ts.isIdentifier(body.expression)
+      && body.expression.text === cb.parameters[0].name.text ? body.name.text : null;
   }
 
-  return { valueDecl, declTarget, ownerTarget, evalMemberAccess, evalIdentifier, evalShorthand, lazyTarget, remoteTarget };
+  /**
+   * A FEDERATED REMOTE IMPORTED BY A BARE SPECIFIER: `import('investment/Module').then((m) => m.X)` - the checker finds
+   * no file (webpack's container resolves it at run time), so `lazyTarget` is null. Read off the syntax as
+   * `remoteTarget` is, marked `dynamic`: only a host's `remotes` list says the first segment IS a remote
+   * (`TsDerive/TsFederation.mjs`), so a package subpath (`lodash/fp`) never gains a name. One import call or none.
+   */
+  function importedRemote(fn) {
+    const calls = [];
+    const visit = (n) => {
+      if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword) calls.push(n);
+      ts.forEachChild(n, visit);
+    };
+    visit(fn);
+    if (calls.length !== 1) return null;
+    const arg = calls[0].arguments[0];
+    if (arg === undefined || !(ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg))) return null;
+    const at = arg.text.indexOf('/');
+    if (at <= 0 || arg.text.startsWith('@') || arg.text.startsWith('.')) return null;
+    return { remote: arg.text.slice(0, at), expose: `./${arg.text.slice(at + 1)}`, pick: pickOf(calls[0]), dynamic: true };
+  }
+
+  return { valueDecl, declTarget, ownerTarget, evalMemberAccess, evalIdentifier, evalShorthand, lazyTarget, remoteTarget, importedRemote };
 }

@@ -156,6 +156,41 @@ Test-Case 'httplinks: the pass is said again over the rows it read and runs agai
     Assert-Line (Get-HttpLinksRows $tree $rows) 'row=GET|api/Orders/all'
 }
 
+
+# A WRAPPER'S URL MAY REACH THE PRIMITIVE THROUGH A DERIVED LOCAL: `const q = params ? createQueryUrl(url, params) : url` is the
+# parameter (either arm of a ternary, a call whose FIRST argument it is) followed by a query a caller's own url never carries. The
+# function is a wrapper, so each caller is a row with its own url and the body is none; a url built from an unrelated call is no wrapper.
+Test-Case 'httplinks: a wrapper whose url is a ternary or a call of its parameter yields a row per caller' {
+    $tree = New-HttpLinksTree
+    $api = Join-Path $tree 'web/apps/shop/src/query.service.ts'
+    Set-Content -LiteralPath $api -NoNewline -Value (@'
+import { HttpClient } from '@angular/common/http';
+export function createQueryUrl(url: string, params: any): string { return url + '?' + String(params); }
+export function apiGet<T>(http: HttpClient, url: string, params?: any) {
+  const q = params ? createQueryUrl(url, params) : url;
+  return http.get<T>(q);
+}
+export function unrelated(http: HttpClient, id: number) {
+  const other = createQueryUrl('/fixed/path', id);
+  return http.get(other);
+}
+export class OrderService {
+  constructor(private http: HttpClient) {}
+  list() { return apiGet(this.http, '/orders/list'); }
+  one(id: number) { return apiGet(this.http, `/orders/${id}`, { a: 1 }); }
+}
+'@)
+    [void](Invoke-HttpLinksMap $tree)
+    $r = Get-HttpLinksRows $tree ("SELECT 'c=' || h.verb || '|' || h.url || '|' || coalesce(m.name, 'fn') || '|' || (h.via <> '') AS r " +
+        "FROM http_calls h LEFT JOIN members m ON m.id = h.member WHERE h.file LIKE '%query.service.ts'")
+    Assert-Line $r 'c=GET|/orders/list|list|1'
+    Assert-Line $r 'c=GET|/orders/{}|one|1'
+    # the control: a call whose first argument is NOT the parameter is no wrapper - its own body is the one unknown `*` row, and the
+    # wrapper's body is none (a second `*` row would be it)
+    Assert-Line $r 'c=GET|*|fn|0'
+    $n = Get-HttpLinksRows $tree "SELECT 'stars=' || count(*) AS r FROM http_calls WHERE url = '*'"
+    Assert-Line $n 'stars=1'
+}
 }
 
 if (Get-Command dotnet -ErrorAction SilentlyContinue) {

@@ -5,7 +5,7 @@
 //!
 //! A PLACE IS A SYMBOL IN A PROJECT. A `partial` class is one place however many files it spans; the same
 //! namespace and name compiled into two projects is two. A declaration with no symbol (a TypeScript enum) is
-//! a place per file. An enum's places are compared by their members, name and value; any other type's are not.
+//! a place per declaration (a TypeScript `classes`, `interfaces` and `type_aliases` row, kind `class`, `interface`, `alias`; its enums too). An enum's places are compared by their members, name and value; any other type's are not.
 
 use super::cells;
 use rusqlite::types::Value as SqlValue;
@@ -13,7 +13,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-const KINDS: [&str; 6] = ["class", "struct", "record", "interface", "enum", "delegate"];
+const KINDS: [&str; 7] = ["class", "struct", "record", "interface", "enum", "delegate", "alias"];
 
 #[derive(Clone)]
 struct Place {
@@ -45,22 +45,39 @@ pub fn write(conn: &Connection) -> rusqlite::Result<usize> {
         let key = if place.symbol.is_empty() { (format!("{}:{}", place.lang, place.at), file) } else { (place.symbol.clone(), project) };
         by_name.entry(name).or_default().entry(key).or_insert(place);
     };
-    if has_columns(conn, "classes", &["file", "name", "kind", "line"]) {
-        let symbol = if has_columns(conn, "classes", &["symbol"]) { "c.symbol" } else { "''" };
+    // THE TYPESCRIPT HALF'S `classes`, `interfaces` AND `type_aliases` HAVE NO `kind` (the table is the kind): a row of a
+    // TypeScript file with none is a class / interface / alias. Reading `kind` alone listed only enums for it, since
+    // every class was skipped and the other two tables were never read.
+    let mut sources: Vec<(&str, &str)> = Vec::new();
+    if has_columns(conn, "classes", &["file", "name", "line"]) {
+        sources.push(("classes", "class"));
+    }
+    if has_columns(conn, "interfaces", &["file", "name", "line"]) {
+        sources.push(("interfaces", "interface"));
+    }
+    if has_columns(conn, "type_aliases", &["file", "name", "line"]) {
+        sources.push(("type_aliases", "alias"));
+    }
+    for (table, own) in sources {
+        let kind_sql = if has_columns(conn, table, &["kind"]) { "c.kind" } else { "''" };
+        let symbol = if has_columns(conn, table, &["symbol"]) { "c.symbol" } else { "''" };
         let project = if has_columns(conn, "files", &["project"]) { "f.project" } else { "''" };
         let sql = format!(
-            "SELECT c.name, c.kind, {symbol}, f.path, c.line, f.lang, {project}, c.file FROM classes c JOIN files f ON f.id = c.file"
+            "SELECT c.name, {kind_sql}, {symbol}, f.path, c.line, f.lang, {project}, c.file FROM {table} c JOIN files f ON f.id = c.file"
         );
         let mut stmt = conn.prepare(&sql)?;
         for row in stmt.query_map([], |r| {
             Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, text(r, 4)?, text(r, 5)?, text(r, 6)?, text(r, 7)?))
         })? {
-            let (name, kind, symbol, path, line, lang, project, file) = row?;
+            let (name, mut kind, symbol, path, line, lang, project, file) = row?;
+            if kind.is_empty() && (lang == "typescript" || lang == "ts") {
+                kind = own.to_string();
+            }
             if !KINDS.contains(&kind.as_str()) || name.is_empty() {
                 continue;
             }
-            let held = members.remove(&(file.clone(), name.clone()));
-            let place = Place { lang, kind: kind.clone(), symbol, at: format!("{path}:{line}"), members: held.filter(|_| kind == "enum") };
+            let held = if kind == "enum" { members.remove(&(file.clone(), name.clone())) } else { None };
+            let place = Place { lang, kind: kind.clone(), symbol, at: format!("{path}:{line}"), members: held };
             add(name, place, project, file);
         }
     }
@@ -311,5 +328,34 @@ mod tests {
         write(&conn).unwrap();
         let nodes: i64 = conn.query_row("SELECT count(*) FROM duplicate_types__at", [], |r| r.get(0)).unwrap();
         assert_eq!(nodes, 4);
+    }
+
+    #[test]
+    fn typescript_classes_interfaces_and_aliases_are_places_and_a_lone_one_is_not() {
+        let conn = Connection::open_in_memory().unwrap();
+        // The Angular half's tables: no `kind`, no `symbol`.
+        conn.execute_batch(
+            "CREATE TABLE files (id, path, lang, project);
+             INSERT INTO files VALUES ('f:1', 'a/x.ts', 'typescript', ''), ('f:2', 'b/x.ts', 'typescript', '');
+             CREATE TABLE classes (id, file, name, line);
+             INSERT INTO classes VALUES ('c:1', 'f:1', 'Alpha', 1), ('c:2', 'f:2', 'Alpha', 2), ('c:3', 'f:1', 'Solo', 5);
+             CREATE TABLE interfaces (id, file, name, line);
+             INSERT INTO interfaces VALUES ('i:1', 'f:1', 'Shape', 7), ('i:2', 'f:2', 'Shape', 9);
+             CREATE TABLE type_aliases (id, file, name, line);
+             INSERT INTO type_aliases VALUES ('t:1', 'f:1', 'Id', 3), ('t:2', 'f:2', 'Id', 4);",
+        )
+        .unwrap();
+        assert_eq!(write(&conn).unwrap(), 3);
+        let kinds: Vec<(String, String)> = conn
+            .prepare("SELECT name, kinds FROM duplicate_types ORDER BY name")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![("Alpha".into(), "class".into()), ("Id".into(), "alias".into()), ("Shape".into(), "interface".into())]
+        );
     }
 }

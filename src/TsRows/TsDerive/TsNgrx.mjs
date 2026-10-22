@@ -16,6 +16,10 @@ const isLibraryCall = (call, name) => {
   return str(call.$target?.name) === name && String(call.$target?.file ?? '').includes('/@ngrx/');
 };
 
+/** A reducer entry by RESOLVED declaration: `on` of `@ngrx/store`, or `immerOn` of `ngrx-immer` (its handler mutates a draft). */
+const isOnCall = (call) => isLibraryCall(call, 'on')
+  || (call !== null && str(call.$target?.name) === 'immerOn' && String(call.$target?.file ?? '').includes('/ngrx-immer/'));
+
 export function rollupStateGraph(store) {
   const consts = store.table('consts');
 
@@ -147,28 +151,33 @@ export function rollupStateGraph(store) {
   for (const { row: c, call } of reducerCalls) {
     for (const entry of expandEntries(arr(call?.$args), c.file, new Set())) {
       const on = asCall(entry);
-      if (!isLibraryCall(on, 'on')) continue;
-      const [actionRef, handler] = arr(on?.$args);
-      // THE ACTION IS PART OF THE HANDLER'S IDENTITY, not just the function. Expression rows are memoized by
-      // AST node, so two entries sharing ONE named handler would share an expression id and the second would
-      // be dropped - a real handler lost to the dedup meant for a duplicated reducer.
-      const identity = `${String(refText(actionRef) ?? '')}|${str(handler?.$expr_id)
-        ?? JSON.stringify(handler?.$writes ?? null)}`;
-      if (emittedHandlers.has(identity)) continue;
-      emittedHandlers.add(identity);
-      store.add('state_handlers', 'sh', {
-        reducer: c.id, reducer_name: c.name, file: c.file, line: c.line,
-        // The action is referenced as `cartActions.resetState`, so the READ is the identity a consumer
-        // joins on - the map does not resolve a namespace import to the const behind it.
-        action_source: refText(actionRef),
-        action_reads: actionRef?.$reads ?? null,
-        // The handler's writes are the paths it produces - the whole point of the join - and its reads say
-        // what it consumed to produce them. Both are already computed and are copied, never recomputed.
-        writes: handler?.$writes ?? null,
-        reads: handler?.$reads ?? null,
-        expression: handler?.$expr_id ?? null,
-      });
-      handlers += 1;
+      if (!isOnCall(on)) continue;
+      // THE HANDLER IS THE LAST ARGUMENT and every one before it is an action: `on(A, B, fn)` answers both (rows 79). Reading
+      // the second argument as the handler took `B` for it and dropped the action list after the first.
+      const onArgs = arr(on?.$args);
+      const handler = onArgs[onArgs.length - 1];
+      for (const actionRef of onArgs.slice(0, -1)) {
+        // THE ACTION IS PART OF THE HANDLER'S IDENTITY, not just the function. Expression rows are memoized by
+        // AST node, so two entries sharing ONE named handler would share an expression id and the second would
+        // be dropped - a real handler lost to the dedup meant for a duplicated reducer.
+        const identity = `${String(refText(actionRef) ?? '')}|${str(handler?.$expr_id)
+          ?? JSON.stringify(handler?.$writes ?? null)}`;
+        if (emittedHandlers.has(identity)) continue;
+        emittedHandlers.add(identity);
+        store.add('state_handlers', 'sh', {
+          reducer: c.id, reducer_name: c.name, file: c.file, line: c.line,
+          // The action is referenced as `cartActions.resetState`, so the READ is the identity a consumer
+          // joins on - the map does not resolve a namespace import to the const behind it.
+          action_source: refText(actionRef),
+          action_reads: actionRef?.$reads ?? null,
+          // The handler's writes are the paths it produces - the whole point of the join - and its reads say
+          // what it consumed to produce them. Both are already computed and are copied, never recomputed.
+          writes: handler?.$writes ?? null,
+          reads: handler?.$reads ?? null,
+          expression: handler?.$expr_id ?? null,
+        });
+        handlers += 1;
+      }
     }
   }
 
@@ -279,19 +288,40 @@ export function rollupStateGraph(store) {
       at = parentOf.get(at) ?? null;
     }
   }
+  const ofTypeActions = (owner) => arr(callsOf.get(owner))
+    .filter((c) => str(c.target?.name) === 'ofType' && String(c.target?.file ?? '').includes('@ngrx/'))
+    .flatMap((c) => arr(c.args).map(refText).filter((x) => x !== null));
+  const emitsOf = (owner) => arr(returnsOf.get(owner)).map((r) => str(r.value?.$call)).filter((x) => x !== null);
   for (const m of store.table('members')) {
     const call = asCall(m.value);
     if (!isLibraryCall(call, 'createEffect')) continue;
-    const listens = arr(callsOf.get(m.id))
-      .filter((c) => str(c.target?.name) === 'ofType' && String(c.target?.file ?? '').includes('@ngrx/'))
-      .flatMap((c) => arr(c.args).map(refText).filter((x) => x !== null));
-    const emits = arr(returnsOf.get(m.id)).map((r) => str(r.value?.$call)).filter((x) => x !== null);
     store.add('state_effects', 'se', {
       member: m.id, class: m.class, file: m.file, name: m.name, line: m.line,
-      actions: listens,
+      actions: ofTypeActions(m.id),
       dispatch: arr(call.$args)[1]?.dispatch !== false,
-      emits,
+      emits: emitsOf(m.id),
       expression: arr(call.$args)[0]?.$expr_id ?? null,
+    });
+    effects += 1;
+  }
+
+  // AN EFFECT CREATED IN A CONSTRUCTOR is an effect too (rows 79): `constructor(private a$: Actions) { [createEffect(() =>
+  // this.a$.pipe(ofType(Act.go))), ...]; }` is how a class lists several without a property each, and reading only members
+  // published such a class with none. The effect is the CALL (by the `@ngrx/effects` declaration it resolves to), `member` the
+  // constructor's row, `name` `constructor@<line>:<col>` - the position, since nothing names it. What it listens to and emits is
+  // read from the callback THAT call holds (`$fn_id`): the constructor holds every effect's, so its own would mix them.
+  const ctors = new Map(store.table('members').filter((m) => m.kind === 'constructor').map((m) => [m.id, m]));
+  for (const c of store.table('calls')) {
+    const ctor = ctors.get(c.member);
+    if (ctor === undefined || str(c.target?.name) !== 'createEffect' || !String(c.target?.file ?? '').includes('/@ngrx/')) continue;
+    const [callback, config] = arr(c.args);
+    const fn = str(callback?.$fn_id);
+    store.add('state_effects', 'se', {
+      member: ctor.id, class: ctor.class, file: ctor.file, name: `constructor@${String(c.line)}:${String(c.col)}`, line: c.line,
+      actions: fn === null ? [] : ofTypeActions(fn),
+      dispatch: config?.dispatch !== false,
+      emits: fn === null ? [] : emitsOf(fn),
+      expression: callback?.$expr_id ?? null,
     });
     effects += 1;
   }

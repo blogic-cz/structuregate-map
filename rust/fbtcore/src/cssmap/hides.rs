@@ -72,8 +72,8 @@ fn own_sheets(db: &Connection, half: &str) -> HashMap<String, BTreeSet<String>> 
 }
 
 /// The classes an `[ngClass]` value puts on the element when they are LITERAL: the keys of an object, a
-/// string, or an array of strings. A key holds several classes when it holds spaces, as Angular reads it.
-fn ng_classes(ast: &Value, out: &mut Vec<String>) {
+/// string, an array of strings, or any of these as an arm of a conditional. A key holds several classes when it holds spaces, as Angular reads it.
+pub(super) fn ng_classes(ast: &Value, out: &mut Vec<String>) {
     let split = |text: &str, out: &mut Vec<String>| out.extend(text.split_whitespace().map(String::from));
     match ast.get("k").and_then(Value::as_str) {
         Some("Source") => {
@@ -93,11 +93,25 @@ fn ng_classes(ast: &Value, out: &mut Vec<String>) {
                 split(text, out);
             }
         }
+        // EVERY ARM A CLASS NAME CAN COME FROM: `c ? 'a' : 'b'`, `ok && 'x'` and `v || 'y'` - in a string form and as an item of
+        // an array alike. Reading an array's literal items only lost `[c ? 'btn' : 'x', hide ? 'hide-mobile' : '']`.
+        Some("Cond") => {
+            for arm in ["then", "else"] {
+                if let Some(inner) = ast.get(arm) {
+                    ng_classes(inner, out);
+                }
+            }
+        }
+        Some("Binary") if matches!(ast.get("op").and_then(Value::as_str), Some("&&" | "||" | "??")) => {
+            for side in ["left", "right"] {
+                if let Some(inner) = ast.get(side) {
+                    ng_classes(inner, out);
+                }
+            }
+        }
         Some("Array") => {
             for item in ast.get("items").and_then(Value::as_array).into_iter().flatten() {
-                if item.get("k").and_then(Value::as_str) == Some("Literal") {
-                    ng_classes(item, out);
-                }
+                ng_classes(item, out);
             }
         }
         _ => {}

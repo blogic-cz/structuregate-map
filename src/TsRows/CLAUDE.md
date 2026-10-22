@@ -149,7 +149,7 @@ An `Fn` tree names its `params` and its `rest` parameter.
   names the call it is made on (`calls.receiver_call`).
 
 - **A shorthand property's value is its const's** (rows 46, `TsValueRefs.mjs::evalShorthand`): `{ template }` is `{ template: template }`, in every object literal. A const-held inline template's spans are placed at the const's line (`TsClassRows.mjs::argPlacesOf`), same file only - an imported const keeps the decorator's line.
-- **A `createEffect` callback's body is walked** (rows 46, `TsDecls/TsClassRows.mjs`, `fromNgrx`): its `ofType`/`pipe` calls are `calls` rows and its nested arrows `functions` rows under the effect member, which `state_effects` (`TsDerive/TsNgrx.mjs`) reads.
+- **A `createEffect` callback's body is walked** (rows 46, `TsDecls/TsClassRows.mjs`, `fromNgrx`): its `ofType`/`pipe` calls are `calls` rows and its nested arrows `functions` rows under the effect member, which `state_effects` (`TsDerive/TsNgrx.mjs`) reads. Routes, reducer entries and effects in a constructor (rows 79): [TsBodyRows.md](TsBodyRows.md).
 - **An arrow-function PROPERTY returns like a METHOD** (divergence #8): `isMain = (id: P) => [P.A].some(...)`
   keeps its `members.value` (`{"$fn": ...}`), gains `members.params` and a `returns` row keyed on the member,
   `implicit = 1` for a concise body. A function-valued `const` has the same under its `functions` row.
@@ -183,7 +183,7 @@ carry no `owner_file`.
   with `overflow(-y): hidden|clip` and no vertical padding, non-zero `min-height`, `display: inline|contents` in the rule;
   `opacity: 0` with `pointer-events: none`; a `&.x`-nested rule inherits its outer rule's partners), `live` (0 inside a
   `@mixin` and for a `%placeholder`).
-- **`class_hides`** (`cssh:`): a `[class.x]` gate (`via = 'class'`) or a literal `[ngClass]` key (`via =
+- **`class_hides`** (`cssh:`): a `[class.x]` gate (`via = 'class'`) or a literal `[ngClass]` class (an object key, a string, an array item or a ternary arm; `via =
   'ngClass'`) joined to every live, on-element, hiding rule whose subject requires the class - `bare` (the whole
   selector is `.x`) and `scope`: `own` (the component's `styleUrls`), `other` (another component's: reaches only
   through `::ng-deep` or `ViewEncapsulation.None`), `shared` (no component names the sheet). `class_hides` is written

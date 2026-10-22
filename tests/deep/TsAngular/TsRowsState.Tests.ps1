@@ -92,4 +92,93 @@ Test-Case 'tsrows: a createEffect member names the actions it listens to, whethe
         "WHERE p.path = 'apps/shop/src/fx.effects.ts' AND f.inline = 1 AND f.line = 7 AND f.col < 30")
     Assert-Line $fx 'fx=7:'
 }
+
+# A REDUCER ENTRY IS `on` OF `@ngrx/store` OR `immerOn` OF `ngrx-immer` (by the declaration the checker reached), and its HANDLER is the
+# LAST argument: every one before it is an action, so `on(A, B, fn)` is two handlers. An immer handler returns nothing - it writes by
+# MUTATING its draft - so its `writes` are the paths it assigns, pushes into or reaches through a local (`list.active`); a handler that
+# returns a new state names its keys as before.
+Test-Case 'tsrows: immerOn and a multi-action on are one state_handlers row per action, an immer handler writes its draft paths' {
+    $files = @{
+        'node_modules/ngrx-immer/package.json' = '{"name":"ngrx-immer","version":"1.0.0"}'
+        'node_modules/ngrx-immer/store/index.d.ts' = @'
+import { ActionCreator, ReducerTypes } from '@ngrx/store';
+export declare function immerOn<State, Creators extends readonly ActionCreator[]>(...args: [...creators: Creators, reducer: (state: State, action: any) => void]): ReducerTypes<State, Creators>;
+'@
+        'apps/shop/src/cart.actions.ts' = @'
+import { createAction } from '@ngrx/store';
+export const add = createAction('[Demo] add');
+export const remove = createAction('[Demo] remove');
+export const reset = createAction('[Demo] reset');
+export const clear = createAction('[Demo] clear');
+'@
+        'apps/shop/src/cart.reducer.ts' = @'
+import { createReducer, on } from '@ngrx/store';
+import { immerOn } from 'ngrx-immer/store';
+import * as cart from './cart.actions';
+export interface Line { id: number; active: boolean; }
+export interface S { n: number; list: Line[]; flag: { on: boolean }; }
+const initial: S = { n: 0, list: [], flag: { on: false } };
+export const cartReducer = createReducer(initial,
+  immerOn(cart.add, (s) => { s.n = 1; s.list.push({ id: 1, active: true }); }),
+  immerOn(cart.remove, cart.reset, (s) => { const t = s.list.find((l) => l.id === 1); if (t) { t.active = false; } s.flag.on = true; }),
+  on(cart.clear, (s) => ({ ...s, n: 0 })));
+export const plainReducer = createReducer(initial,
+  on(cart.add, cart.remove, (s) => ({ ...s, n: 2 })));
+'@
+    }
+    $made = New-TsRowsDb (New-TsRowsWorkspace $files)
+    Assert-Exit $made.Result 0
+    $h = Invoke-TsRowsQ $made.Db ("SELECT 'h=' || h.reducer_name || ' | ' || h.action_source || ' | ' || coalesce((SELECT group_concat(w.value) " +
+        "FROM state_handlers__writes w WHERE w.owner = h.id AND w.value IS NOT NULL), '-') AS r FROM state_handlers h")
+    Assert-Line $h 'h=cartReducer | cart.add | n,list'
+    Assert-Line $h 'h=cartReducer | cart.remove | list.active,flag.on'
+    Assert-Line $h 'h=cartReducer | cart.reset | list.active,flag.on'
+    # the control: `on` of `@ngrx/store` returning a new state, with one action and with two
+    Assert-Line $h 'h=cartReducer | cart.clear | n'
+    Assert-Line $h 'h=plainReducer | cart.add | n'
+    Assert-Line $h 'h=plainReducer | cart.remove | n'
+    $n = Invoke-TsRowsQ $made.Db "SELECT 'n=' || count(*) AS r FROM state_handlers WHERE reducer_name IN ('cartReducer', 'plainReducer')"
+    Assert-Line $n 'n=6'
+}
+
+# A `createEffect` IN A CONSTRUCTOR is an effect: a class lists several there without a property each. The row is the CALL (by its
+# `@ngrx/effects` declaration), `member` the constructor's row, `name` `constructor@line:col`; the actions it listens to and what it
+# emits come from the callback THAT call holds, never from the constructor as a whole. A property effect beside it is as before.
+Test-Case 'tsrows: a createEffect in a constructor body is a state_effects row of its own' {
+    $files = @{
+        'apps/shop/src/fx.actions.ts' = @'
+import { createAction } from '@ngrx/store';
+export const add = createAction('[Demo] add');
+export const remove = createAction('[Demo] remove');
+export const clear = createAction('[Demo] clear');
+export const reset = createAction('[Demo] reset');
+'@
+        'apps/shop/src/fx.effects.ts' = @'
+import { Injectable } from '@angular/core';
+import { Actions, createEffect, ofType } from '@ngrx/effects';
+import { map } from 'rxjs';
+import * as cart from './fx.actions';
+@Injectable() export class CartEffects {
+  constructor(private actions$: Actions) {
+    [createEffect(() => this.actions$.pipe(ofType(cart.add), map(() => cart.reset()))),
+     createEffect(() => this.actions$.pipe(ofType(cart.remove, cart.clear)), { dispatch: false })];
+  }
+}
+export class ListEffects {
+  member$ = createEffect(() => this.actions$.pipe(ofType(cart.add)), { dispatch: false });
+  constructor(private actions$: Actions) {}
+}
+'@
+    }
+    $made = New-TsRowsDb (New-TsRowsWorkspace $files)
+    Assert-Exit $made.Result 0
+    $e = Invoke-TsRowsQ $made.Db ("SELECT 'e=' || (SELECT k.name FROM classes k WHERE k.id = e.class) || '.' || e.name || ' | ' || coalesce((SELECT group_concat(a.value) FROM state_effects__actions a " +
+        "WHERE a.owner = e.id AND a.value IS NOT NULL), '-') || ' | ' || e.dispatch || ' | ' || coalesce((SELECT group_concat(a.value) FROM state_effects__emits a " +
+        "WHERE a.owner = e.id AND a.value IS NOT NULL), '-') AS r FROM state_effects e")
+    Assert-Line $e 'e=ListEffects.member$ | cart.add | 0 | -'
+    Assert-Line $e 'e=CartEffects.constructor@7:6 | cart.add | 1 | cart.reset'
+    Assert-Line $e 'e=CartEffects.constructor@8:6 | cart.remove,cart.clear | 0 | -'
+    $n = Invoke-TsRowsQ $made.Db "SELECT 'n=' || count(*) AS r FROM state_effects"
+    Assert-Line $n 'n=3'
+}
 }

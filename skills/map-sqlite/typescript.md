@@ -62,6 +62,11 @@ Beside the shared tables it adds the FRAMEWORK tables:
   `module-federation.config.{js,ts}` (`name` = the remote) lists under `exposes['./Module']` - read syntactically, never
   run; NULL when no single config, exposed file or class proves it, or for a remote named only by its `remoteEntry` URL.
   A `.catch(() => import(..))` fallback stays `load_children_module` with `load_children_recovery = 1`.
+  A plain `loadChildren: () => import('demo-orders/Module').then((m) => m.X)` is the same route when a host's `module-federation.config`
+  lists `demo-orders` in `remotes` (an array of names, of `[name, url]` pairs, or an object keyed by name); a specifier no host lists is a package path.
+* **A route is one row** however many `RouterModule.forRoot`/`forChild`/`provideRouter` calls reach its array: it sits in the file that declares the array (a module
+  that only hands `appRoutes` to `forRoot` has none), so a lazy root has one loader and its `parent_route` and `absolute_path` are set. `routes` also carries
+  `path_match`, `can_deactivate`, `can_match` (guards, as `can_activate`) and `title`.
 * **`key_reach.paths`** lists a key's ways, one `{path, own}` per way (`n_paths` entries). `path` joins `render_path.id`, may repeat, and is renumbered every build, so only join within one DB. `own` holds the ids the way holds beyond that row's `gates`/`branches`. Fold a per-way fact the map does not compute over the items of `key_reach__paths` (each item's `path` is a row below it, `role = 'path'`; `own` a child list, `role = 'own'`) joined to `render_path` (AND along `gates ∪ branches ∪ own`, UNION over entries). Never filter `render_path` by `key_reach.components`.
 * **A component field NOTHING reads is no site of the key its initializer holds**: `labelCode = 'k'` in a class whose
   template binds only another field adds no way to `key_reach`. `files.prop_reads` (node rows `files__prop_reads`: one row per property name the file reads - the name its `role`, the count its `value` -
@@ -138,7 +143,9 @@ Beside the shared tables it adds the FRAMEWORK tables:
   `RouterModule.forChild([...])` (the class `routes.load_children_module` names) and each `$ref` of a provider object. `in_module` marks an interface or type alias declared inside `declare module`, `declare global` or a
   namespace, and a namespace's class, function, const or enum. `state_selectors.factory` is set on a function that RETURNS `createSelector`. A static attribute that
   matches an input counts in `input_usage` (its `expression` is null) and `io.bound_count`.
-* **`state_effects`** is one row per `createEffect` member: `actions` the `ofType` refs it listens to (as `state_handlers.action_source` spells them), `dispatch` 0 for `{ dispatch: false }`, `emits` the calls its callbacks return, as written.
+* **`state_handlers`** is one row per action a reducer entry names: `on(A, B, fn)` is two (the handler is the LAST argument), and `immerOn` of `ngrx-immer` is an entry as `on` of `@ngrx/store` is - its
+  `writes` are the paths its handler assigns, increments, deletes or mutates through (`s.list.push(..)`, `s.a.b = 1`, a local taken from the draft: `list.active`), where an `on` handler's are the keys it returns.
+* **`state_effects`** is one row per `createEffect` member, and per `createEffect` call in a constructor body (`member` the constructor's row, `name` `constructor@<line>:<col>`): `actions` the `ofType` refs it listens to (as `state_handlers.action_source` spells them), `dispatch` 0 for `{ dispatch: false }`, `emits` the calls its callbacks return, as written.
 * `handlers`: TypeScript names no type a clause catches, so every row is `bare = 1`; the caught name is
   `handlers.name`. The half also writes `raises`, and a `try` row in `branches` (`sense = 'try'`).
 * Its ids restart from 1 when it is the only half in the database, so the same tree numbers the same way;

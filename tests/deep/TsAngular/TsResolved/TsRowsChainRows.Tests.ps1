@@ -29,6 +29,21 @@ $script:TsChainFiles = @{
         "  log = new Log();`n" +
         "  run() { this.log.error('a'); this.log.plain(); return foo().bar; }`n" +
         "}`n"
+    'apps/shop/src/labels.ts' = "export const unusedLabels = 0;`n" + "export const hueLabels = { Alpha: 'A', Beta: 'B' };`n"
+    'apps/shop/src/hue.enum.ts' = "export enum HueIDs { Alpha = 1 }`n"
+    'apps/shop/src/argrefs.ts' = "import { HueIDs } from './hue.enum';`n" +
+        "import { hueLabels } from './labels';`n" +
+        "import { hueLabels as hl } from './labels';`n" +
+        "export class Svc { convert(a: unknown, b: unknown, c?: unknown): void { void a; void b; void c; } }`n" +
+        "export class Host {`n" +
+        "  svc = new Svc();`n" +
+        "  run() {`n" +
+        "    const t = { Gamma: 'G' };`n" +
+        "    this.svc.convert(HueIDs, hueLabels);`n" +
+        "    this.svc.convert(1, hl);`n" +
+        "    this.svc.convert('x', t);`n" +
+        "  }`n" +
+        "}`n"
     'apps/shop/src/flags.ts' = "(globalThis as any).alphaFlag = true;`n"
     'apps/shop/src/links.ts' = "export class Inner { Id: number = 0; }`n" +
         "export class Holder { Inner: Inner = new Inner(); }`n" +
@@ -434,6 +449,30 @@ Test-Case 'tsrows: a nested local destructuring has one binding per bound name, 
     # THE CONTROL: a pattern with no nesting keeps its names and keys.
     $c = Get-TsBindingFacts 'locals__bindings' 'locals' 'o.destructured = 1' 'local' 'JOIN locals__bindings it ON it.owner = o.id AND it.parent = 0'
     Assert-Line $c 'p|default=3|type=number|index=none'
+}
+
+# (rows 79, #103) A CALL ARGUMENT THAT NAMES A VARIABLE KEEPS ITS DECLARATION: `calls.args` holds the const's evaluated value, `arg_refs` one item per such argument - its `position`, the
+# `$ref` name declared, the declaring file and the line of its NAME, which a join to `consts` (module level) or `locals` (a body's) finds. An enum has its `$ref` in the value, and a literal names nothing.
+Test-Case 'tsrows: a call argument naming a const has an arg_refs item joining the declaration, an alias names the declared const' {
+    $db = Get-TsChainDb
+    $items = "FROM calls c JOIN files cf ON cf.id = c.file JOIN calls__arg_refs i ON i.owner = c.id AND i.parent = 0 " +
+        "JOIN calls__arg_refs a ON a.owner = i.owner AND a.parent = i.n AND a.role = 'position' " +
+        "JOIN calls__arg_refs r ON r.owner = i.owner AND r.parent = i.n AND r.role = '`$ref' " +
+        "JOIN calls__arg_refs w ON w.owner = i.owner AND w.parent = i.n AND w.role = 'name' " +
+        "JOIN calls__arg_refs k ON k.owner = i.owner AND k.parent = i.n AND k.role = 'kind' " +
+        "JOIN calls__arg_refs l ON l.owner = i.owner AND l.parent = i.n AND l.role = 'line' " +
+        "JOIN calls__arg_refs d ON d.owner = i.owner AND d.parent = i.n AND d.role = 'file' " +
+        "WHERE cf.path LIKE '%argrefs.ts'"
+    $r = Invoke-TsRowsQ $db ("SELECT 'item=' || c.line || '|' || a.value || '|' || w.value || '|' || r.value || '|' || k.value || '|' || l.value || '|' || " +
+        "(SELECT count(*) FROM consts q JOIN files qf ON qf.id = q.file WHERE qf.abs = d.value AND q.line = l.value AND q.name = r.value) || '|' || " +
+        "(SELECT count(*) FROM locals q JOIN files qf ON qf.id = q.file WHERE qf.abs = d.value AND q.line = l.value AND q.name = r.value) AS r $items ORDER BY c.line")
+    Assert-Line $r 'item=9|1|hueLabels|hueLabels|const|2|1|0'
+    Assert-Line $r 'item=10|1|hl|hueLabels|const|2|1|0'
+    Assert-Line $r 'item=11|1|t|t|const|8|0|1'
+    # THE CONTROLS: the enum, the literals and the number name no variable - three items in all - and the value of the argument is still the evaluated const.
+    Assert-Line (Invoke-TsRowsQ $db "SELECT 'items=' || count(*) AS r $items") 'items=3'
+    $v = Invoke-TsRowsQ $db ("SELECT 'value=' || $(Get-TsItemFieldSql 'calls__args' 'c.id' 1 'Alpha') AS r FROM calls c JOIN files cf ON cf.id = c.file WHERE cf.path LIKE '%argrefs.ts' AND c.line = 9")
+    Assert-Line $v 'value=A'
 }
 
 }

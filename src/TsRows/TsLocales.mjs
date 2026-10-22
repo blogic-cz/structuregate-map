@@ -88,6 +88,13 @@ export function rollupTranslationCoverage(store) {
       if (text !== null && byKey.has(text)) referenced.add(text);
     }
   }
+  // A STATIC ATTRIBUTE'S TEXT IS A LITERAL TOO (`<div tooltip="a.b">`, `label="x.y"`): it is a `bindings` row of kind
+  // `attribute`, never a `template_strings` one, so a key spelled only there was reported unused.
+  for (const row of store.table('bindings')) {
+    if (row.kind !== 'attribute') continue;
+    const text = typeof row.value === 'string' ? row.value : null;
+    if (text !== null && byKey.has(text)) referenced.add(text);
+  }
 
   let defined = 0;
   let missing = 0;

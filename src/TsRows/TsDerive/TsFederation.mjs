@@ -48,7 +48,26 @@ const keyOf = (ts, p) => (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) 
   ? p.name.text : null);
 const textOf = (ts, e) => (e !== undefined && (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) ? e.text : null);
 
-/** `{ name, exposes: Map<module, path> }` of one config's source, or null when it states no `name`. */
+/**
+ * The remotes a HOST's config lists: `remotes: ['investment']`, `[['investment', url]]` (first item the name) or
+ * `{ investment: url }` (the keys) - the three shapes Nx and the Module Federation plugin read.
+ */
+function remoteNames(ts, sf, e, into) {
+  const list = ts.isArrayLiteralExpression(e) ? e : null;
+  if (list !== null) {
+    for (const item of list.elements) {
+      const name = textOf(ts, item) ?? (ts.isArrayLiteralExpression(item) ? textOf(ts, item.elements[0]) : null);
+      if (name !== null) into.add(name);
+    }
+    return;
+  }
+  for (const p of objectOf(ts, sf, e)?.properties ?? []) {
+    const key = ts.isPropertyAssignment(p) ? keyOf(ts, p) : null;
+    if (key !== null) into.add(key);
+  }
+}
+
+/** `{ name, exposes: Map<module, path>, remotes: Set<name> }` of one config's source, with `name` null when it states none (a HOST config that lists only `remotes`), or null when there is no config object. */
 export function readConfig(ts, file, text) {
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true,
     file.endsWith('.ts') ? ts.ScriptKind.TS : ts.ScriptKind.JS);
@@ -65,10 +84,12 @@ export function readConfig(ts, file, text) {
   if (root === null) return null;
   let name = null;
   const exposes = new Map();
+  const remotes = new Set();
   for (const p of root.properties) {
     if (!ts.isPropertyAssignment(p)) continue;
     const key = keyOf(ts, p);
     if (key === 'name') name = textOf(ts, p.initializer);
+    if (key === 'remotes') remoteNames(ts, sf, p.initializer, remotes);
     if (key !== 'exposes') continue;
     const list = objectOf(ts, sf, p.initializer);
     for (const e of list?.properties ?? []) {
@@ -77,7 +98,8 @@ export function readConfig(ts, file, text) {
       if (target !== null) exposes.set(module, target);
     }
   }
-  return name === null ? null : { name, exposes };
+  // A HOST CONFIG MAY LIST ONLY `remotes` (no `name`): its remotes still say which bare specifiers are remotes.
+  return { name, exposes, remotes };
 }
 
 /** The `files` row an exposed path names: `./` from the config's folder, a bare path from the workspace root (Nx). */
@@ -99,6 +121,7 @@ export function rollupRemoteRoutes(ts, store, fe) {
   if (!routes.length) return { remotes: 0, resolved: 0 };
   const fileByAbs = new Map();
   const configs = new Map();
+  const hostRemotes = new Set();
   for (const f of store.table('files')) {
     fileByAbs.set(canonicalPath(f.abs), f.id);
     if (!CONFIGS.has(path.basename(String(f.path)))) continue;
@@ -109,10 +132,14 @@ export function rollupRemoteRoutes(ts, store, fe) {
       config = null;
     }
     if (config === null) continue;
+    for (const remote of config.remotes) hostRemotes.add(remote);
+    if (config.name === null) continue;
     const list = configs.get(config.name) ?? [];
     list.push({ ...config, dir: path.dirname(String(f.abs)) });
     configs.set(config.name, list);
   }
+  // A BARE `import('investment/Module')` IS A REMOTE only when a host's config lists `investment` in `remotes`.
+  const hosted = hostRemotes;
   const classAt = new Map();
   const twice = new Set();
   for (const c of store.table('classes')) {
@@ -120,14 +147,19 @@ export function rollupRemoteRoutes(ts, store, fe) {
     if (classAt.has(key)) twice.add(key); else classAt.set(key, c.id);
   }
   let resolved = 0;
+  let named = 0;
   for (const r of routes) {
-    const { remote, expose, pick } = r.load_children.$remote;
-    r.load_children_remote_name = `${remote}/${expose.startsWith('./') ? expose.slice(2) : expose}`;    const claimed = configs.get(remote) ?? [];
+    const { remote, expose, pick, dynamic } = r.load_children.$remote;
+    if (dynamic === true && !hosted.has(remote)) continue;
+    named += 1;
+    r.load_children_remote_name = `${remote}/${expose.startsWith('./') ? expose.slice(2) : expose}`;
+    const claimed = configs.get(remote) ?? [];
     const target = claimed.length === 1 ? claimed[0].exposes.get(expose) : undefined;
     const fid = target === undefined ? null : exposedFile(target, claimed[0].dir, fe, fileByAbs);
     const key = `${String(fid)}#${String(pick)}`;
     if (fid === null || typeof pick !== 'string' || twice.has(key) || !classAt.has(key)) continue;
-    r.load_children_remote = classAt.get(key);    resolved += 1;
+    r.load_children_remote = classAt.get(key);
+    resolved += 1;
   }
-  return { remotes: routes.length, resolved };
+  return { remotes: named, resolved };
 }

@@ -325,6 +325,14 @@ impl<'s> Walk<'s> {
             (Some(first), Some(last)) => squeeze(self.slice(first.span().start, last.span().end)),
             _ => String::new(),
         };
+        // A CUSTOM PROPERTY'S VALUE IS RAW TOKENS: raffia leaves `!important` in it, no annotation, so `--x: 20px !important`
+        // read as important = 0 with the flag inside the value. The trailing `!` + `important` is the flag, as for any property.
+        let (value, raw_important) = match value.rfind('!') {
+            Some(at) if property.starts_with("--") && value[at + 1..].trim().eq_ignore_ascii_case("important") => {
+                (value[..at].trim_end().to_string(), true)
+            }
+            _ => (value, false),
+        };
         let word = match values.as_slice() {
             [ComponentValue::InterpolableIdent(InterpolableIdent::Literal(id))] => Some(id.name.to_ascii_lowercase()),
             _ => None,
@@ -335,7 +343,8 @@ impl<'s> Walk<'s> {
                     (property.as_str(), word.as_deref()),
                     ("display", Some("none")) | ("visibility", Some("hidden")) | ("visibility", Some("collapse"))
                 );
-        let important = decl.important.is_some()
+        let important = raw_important
+            || decl.important.is_some()
             || decl.value.iter().any(|v| matches!(v, ComponentValue::ImportantAnnotation(_)));
         let (line, col) = self.pos(decl.span.start);
         let join = |parts: &[String], by: &str| (!parts.is_empty()).then(|| parts.join(by));

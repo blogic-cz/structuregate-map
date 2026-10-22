@@ -141,4 +141,133 @@ Test-Case 'tsrows: a partial run keeps a lazy module''s routes under the route t
     Assert-NoLine $kept 'detail<none'
 }
 
+# A ROUTE ARRAY REACHED FROM ANOTHER FILE IS NOT WALKED AGAIN: `forRoot(appRoutes)` in a module beside the const holds the
+# same routes, and a second row per route made every lazy root claimed by TWO loaders, linked to neither (`parent_route`
+# NULL, `absolute_path` without the lazy prefix). A route is one row, in the file that declares it.
+Test-Case 'tsrows: a route array reached through forRoot in another file is one row per route and its lazy child links' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/home.component.ts' = @'
+import { Component } from '@angular/core';
+@Component({ selector: 'demo-home', template: '<p>h</p>' }) export class HomeComponent {}
+@Component({ selector: 'demo-list', template: '<p>l</p>' }) export class OrderListComponent {}
+'@
+        'apps/shop/src/app.routes.ts' = @'
+import { Routes } from '@angular/router';
+import { HomeComponent } from './home.component';
+export const appRoutes: Routes = [{ path: 'orders', loadChildren: () => import('./orders/orders.module').then(m => m.OrdersModule) }, { path: '', component: HomeComponent }];
+'@
+        'apps/shop/src/app.module.ts' = @'
+import { NgModule } from '@angular/core';
+import { RouterModule } from '@angular/router';
+import { appRoutes } from './app.routes';
+@NgModule({ imports: [RouterModule.forRoot(appRoutes, { initialNavigation: 'enabledBlocking' })] })
+export class AppModule {}
+'@
+        'apps/shop/src/orders/orders.module.ts' = @'
+import { NgModule } from '@angular/core';
+import { RouterModule } from '@angular/router';
+import { OrderListComponent } from '../home.component';
+@NgModule({ declarations: [OrderListComponent], imports: [RouterModule.forChild([{ path: 'list', component: OrderListComponent }])] })
+export class OrdersModule {}
+'@
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db "SELECT 'n=' || f.path || '|' || count(*) AS r FROM routes r JOIN files f ON f.id = r.file GROUP BY f.path"
+    Assert-Line $r 'n=apps/shop/src/app.routes.ts|2'
+    Assert-Line $r 'n=apps/shop/src/orders/orders.module.ts|1'
+    Assert-NoLine $r 'app.module.ts'
+    $lazy = Invoke-TsRowsQ $made.Db ("SELECT 'p=' || c.path || '<' || coalesce(p.path, 'none') || '|' || c.absolute_path AS r " +
+        "FROM routes c LEFT JOIN routes p ON p.id = c.parent_route WHERE c.path = 'list'")
+    Assert-Line $lazy 'p=list<orders|orders/list'
+    $d = Invoke-TsRowsQ $made.Db "SELECT 'd=' || kind AS r FROM diagnostics"
+    Assert-NoLine $d 'route_claimed_by_several_lazy_parents'
+}
+
+# A ROUTE'S ROW CARRIES WHAT THE ROUTER READS: `pathMatch` decides whether `''` is a prefix, `canDeactivate` and `canMatch` are
+# guards beside `canActivate`, and `title` names the page. A route that declares none has them NULL / empty (the control).
+Test-Case 'tsrows: a route row carries pathMatch, canDeactivate, canMatch and title' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/edit.routes.ts' = @'
+import { Component } from '@angular/core';
+import { Routes } from '@angular/router';
+export class LeaveGuard {}
+export class MatchGuard {}
+export class ActGuard {}
+export class LoadGuard {}
+export class ChildGuard {}
+@Component({ selector: 'demo-edit', template: '<p>e</p>' }) export class EditComponent {}
+export const editRoutes: Routes = [
+  { path: 'edit/:id', component: EditComponent, pathMatch: 'full', canDeactivate: [LeaveGuard], canMatch: [MatchGuard], title: 'Edit order',
+    canActivate: [ActGuard], canLoad: [LoadGuard], canActivateChild: [ChildGuard] },
+  { path: 'plain', component: EditComponent },
+];
+'@
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'r=' || r.path || '|' || coalesce(r.path_match, '-') || '|' || coalesce(r.title, '-') || '|' || " +
+        "coalesce((SELECT group_concat(x.value) FROM routes__can_deactivate x WHERE x.owner = r.id AND x.role = 'name'), '-') || '|' || " +
+        "coalesce((SELECT group_concat(x.value) FROM routes__can_match x WHERE x.owner = r.id AND x.role = 'name'), '-') AS r " +
+        "FROM routes r WHERE r.file IN (SELECT id FROM files WHERE path LIKE '%edit.routes.ts')")
+    Assert-Line $r 'r=edit/:id|full|Edit order|LeaveGuard|MatchGuard'
+    Assert-Line $r 'r=plain|-|-|-|-'
+    # EVERY GUARD LIST NAMES ITS CLASSES' rows, as `can_activate_ids` did alone: the same join for each of the five lists.
+    $ids = New-Object System.Collections.Generic.List[string]
+    foreach ($column in 'can_activate', 'can_deactivate', 'can_match', 'can_load', 'guards') {
+        $ids.Add("coalesce((SELECT group_concat(c.name) FROM routes__${column}_ids x JOIN classes c ON c.id = x.value " +
+            "WHERE x.owner = r.id AND x.parent = 0), '-')")
+    }
+    $g = Invoke-TsRowsQ $made.Db ("SELECT 'ids=' || r.path || '|' || " + ($ids -join " || '|' || ") + " AS r FROM routes r " +
+        "WHERE r.file IN (SELECT id FROM files WHERE path LIKE '%edit.routes.ts')")
+    Assert-Line $g 'ids=edit/:id|ActGuard|LeaveGuard|MatchGuard|LoadGuard|ChildGuard'
+    Assert-Line $g 'ids=plain|-|-|-|-|-'
+}
+
+# A FEDERATED REMOTE LOADED BY A PLAIN `import('remote/Module')`: webpack's container answers at run time, so no file resolves; the
+# HOST's config lists the remote (`remotes`), the remote's config exposes the module. A specifier no host lists is a package subpath.
+Test-Case 'tsrows: a plain import of a remote the host config lists resolves like loadRemoteModule' {
+    $tree = New-TsRemoteWorkspace
+    $files = @{
+        'apps/shop/src/app.routes.ts' = @'
+import { Routes } from '@angular/router';
+export const appRoutes: Routes = [
+  { path: 'orders', loadChildren: () => import('demo-orders/Module').then((m) => { return m.OrdersEntryModule; }) },
+  { path: 'plain', loadChildren: () => import('demo-lib/Module').then((m) => m.PlainModule) },
+];
+'@
+        'apps/shop/module-federation.config.js' = "module.exports = { name: 'shop', remotes: ['demo-orders'] };`n"
+    }
+    foreach ($key in $files.Keys) { Set-Content -LiteralPath (Join-Path $tree $key) -Value $files[$key] }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'r=' || r.path || '|' || coalesce(rc.name, 'NULL') || '|' || coalesce(r.load_children_remote_name, 'NULL') AS r " +
+        "FROM routes r LEFT JOIN classes rc ON rc.id = r.load_children_remote WHERE r.const_name = 'appRoutes'")
+    Assert-Line $r 'r=orders|OrdersEntryModule|demo-orders/Module'
+    Assert-Line $r 'r=plain|NULL|NULL'
+}
+
+# A HOST CONFIG THAT LISTS ONLY `remotes` (no `name`) STILL SAYS WHICH BARE SPECIFIERS ARE REMOTES: the config was dropped for lack of a
+# `name`, so the route read as a package subpath and named nothing. The control, `demo-lib`, is listed by no host.
+Test-Case 'tsrows: a host federation config with no name still lists its remotes' {
+    $tree = New-TsRemoteWorkspace
+    $files = @{
+        'apps/shop/src/app.routes.ts' = @'
+import { Routes } from '@angular/router';
+export const appRoutes: Routes = [
+  { path: 'orders', loadChildren: () => import('demo-orders/Module').then((m) => m.OrdersEntryModule) },
+  { path: 'plain', loadChildren: () => import('demo-lib/Module').then((m) => m.PlainModule) },
+];
+'@
+        'apps/shop/module-federation.config.js' = "module.exports = { remotes: ['demo-orders'] };`n"
+    }
+    foreach ($key in $files.Keys) { Set-Content -LiteralPath (Join-Path $tree $key) -Value $files[$key] }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'r=' || r.path || '|' || coalesce(rc.name, 'NULL') || '|' || coalesce(r.load_children_remote_name, 'NULL') AS r " +
+        "FROM routes r LEFT JOIN classes rc ON rc.id = r.load_children_remote WHERE r.const_name = 'appRoutes'")
+    Assert-Line $r 'r=orders|OrdersEntryModule|demo-orders/Module'
+    Assert-Line $r 'r=plain|NULL|NULL'
+}
+
 }

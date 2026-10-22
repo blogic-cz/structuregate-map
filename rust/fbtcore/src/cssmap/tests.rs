@@ -155,3 +155,26 @@ fn a_nested_rule_of_the_same_element_inherits_the_partner_and_nothing_else_does(
                 .fade { pointer-events: none; &:not(.on) { opacity: 0; } }\n";
     assert_eq!(hiding(text), vec![".panel.closed|max-height", ".card.shut|height", ".fade:not(.on)|opacity"]);
 }
+
+#[test]
+fn a_custom_property_marked_important_is_important_and_its_value_is_the_value_alone() {
+    let text = ".a { --gap: 20px !important; --tone: red; color: blue !important; --pad:4px ! important; }\n";
+    let got: Vec<String> = rows(text, Syntax::Css).iter().map(|d| format!("{}|{}|{}", d.property, d.value, u8::from(d.important))).collect();
+    assert_eq!(got, vec!["--gap|20px|1", "--tone|red|0", "color|blue|1", "--pad|4px|1"]);
+}
+
+#[test]
+fn an_ng_class_array_and_string_read_every_arm() {
+    use serde_json::json;
+    let lit = |v: &str| json!({"k": "Literal", "v": v});
+    let cond = |a: serde_json::Value, b: serde_json::Value| json!({"k": "Cond", "cond": {"k": "Read", "name": "c"}, "then": a, "else": b});
+    let read = |ast: serde_json::Value| {
+        let mut out = Vec::new();
+        super::hides::ng_classes(&json!({"k": "Source", "ast": ast}), &mut out);
+        out
+    };
+    let array = json!({"k": "Array", "items": [cond(lit("btn"), lit("x")), cond(lit("hide-mobile"), lit(""))]});
+    assert_eq!(read(array), vec!["btn", "x", "hide-mobile"]);
+    assert_eq!(read(cond(lit("a b"), lit("c"))), vec!["a", "b", "c"]);
+    assert_eq!(read(lit("p q")), vec!["p", "q"]);
+}
