@@ -264,9 +264,13 @@ export function rollupRefIds(store) {
   for (const row of store.table('routes')) {
     const componentId = refIn(asRef(row.component), row.file);
     if (componentId !== null) row.component_id = componentId;
-    const ids = (Array.isArray(row.can_activate) ? row.can_activate : [])
-      .map((g) => idOf(asRef(g))).filter((x) => x !== null);
-    if (ids.length) row.can_activate_ids = ids;
+    // EVERY GUARD LIST NAMES ITS CLASSES: a `canDeactivate`, `canMatch`, `canLoad` or `canActivateChild` (`guards`) guard
+    // is the same `classes` row a `canActivate` one is, and had no id beside it.
+    for (const [column, idsColumn] of [['can_activate', 'can_activate_ids'], ['can_deactivate', 'can_deactivate_ids'],
+      ['can_match', 'can_match_ids'], ['can_load', 'can_load_ids'], ['guards', 'guards_ids']]) {
+      const ids = (Array.isArray(row[column]) ? row[column] : []).map((g) => idOf(asRef(g))).filter((x) => x !== null);
+      if (ids.length) row[idsColumn] = ids;
+    }
     const lazy = idOf(lazyRef(row.load_children));
     if (lazy !== null) {
       row.load_children_module = lazy;

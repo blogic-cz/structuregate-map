@@ -17,7 +17,7 @@ import { locationOf } from './TsNodes.mjs';
 import { catchFacts, chainOf } from './TsCatch.mjs';
 import { loopFacts, loopKind } from './TsLoops.mjs';
 
-export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName, shapeAt, bindingFacts, injectAt }) {
+export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName, shapeAt, bindingFacts, injectAt, resolveArg }) {
   /**
    * THE BRANCH OR CASE A STATEMENT SITS IN IS PART OF WHAT THE STATEMENT MEANS.
    *
@@ -157,6 +157,13 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       if (!ts.isSpreadElement(a) || value === null || typeof value !== 'object' || Array.isArray(value)) return value;
       return { ...value, $spread: evalNode(a.expression) };
     });
+    // A BARE ARGUMENT THAT NAMES A VARIABLE KEEPS ITS DECLARATION (rows 79, #103, `TsExpr/TsReadRefs.mjs::resolveArg`): `args` holds the const's evaluated value, and a value cannot be
+    // tied back to the const and the file that declare it. One item per such argument, `position` its index in `args` - never a change to the value, which every reader takes as evaluated.
+    const argRefs = [];
+    [...(node.arguments ?? [])].forEach((a, position) => {
+      const ref = resolveArg(a);
+      if (ref !== null) argRefs.push({ position, ...ref });
+    });
     rowsWritten += 1;
     const id = store.add('calls', 'cl', {
       ...inCase(),
@@ -164,7 +171,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       callee: callee.getText(),
       method: ts.isPropertyAccessExpression(callee) ? callee.name.text : callee.getText(),
       new: ts.isNewExpression(node),
-      target, args, ...locationOf(node),
+      target, args, ...(argRefs.length ? { arg_refs: argRefs } : {}), ...locationOf(node),
     });
     // A CHAINED CALL NAMES THE CALL IT IS MADE ON (`receiver_call`): `a.b(1).then(f)` is two rows starting at one
     // place, and a join on that place is ambiguous on a chain of three. The outer row is minted first - the walk

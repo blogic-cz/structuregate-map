@@ -295,9 +295,20 @@ async function main() {
   //     (`TsDecls/TsExpr/TsInjects.mjs`); its `type`/`type_ref` are the annotation, else the cast around the call, else the call's. A `locals` row's `bindings` is one item per name the
   //     pattern binds at any depth, `property` the path to it, with `line` and `col` (`TsDecls/TsBody.mjs::emitLocal`). `comments` holds every comment of a file, once: the text between nodes
   //     is scanned, since a scanner with no grammar lost everything after a regex holding a quote (`TsText.mjs::collectComments`).
+  // 79: routes, NgRx and federation gaps closed. A route is ONE row however many `forRoot`/`forChild` calls reach its array (the array's signature leaves out `$fn_id`, which only the const's own copy carries,
+  //     `TsDerive/TsRoutes.mjs`), so a lazy root has one loader and links; a route carries `path_match`, `can_deactivate`, `can_match` and `title`. A bare `import('remote/Module')` whose first segment a
+  //     host config lists in `remotes` is a federated route (`TsFederation.mjs`). `immerOn` of `ngrx-immer` is a reducer entry whose `writes` are the draft paths its handler assigns or mutates
+  //     (`TsExpr/TsExprDescribe.mjs::draftWrites`); `on(A, B, fn)` is a handler per action; a `createEffect` in a constructor body is a `state_effects` row named `constructor@line:col` (`TsDerive/TsNgrx.mjs`).
+  //     Second audit, same number: a `RegExp` construction over a literal is a `regexes` call row (the flags argument overrides the literal's, `TsText.mjs::regexOf`); a parameter over a literal array of objects reads every element's
+  //     property (`$indexed` on the `$member`, `TsExpr/TsValueRefs.mjs`), so `i18n_refs` has a ref per element; `routes` carries `can_deactivate_ids`, `can_match_ids`, `can_load_ids` and `guards_ids` beside
+  //     `can_activate_ids` (`TsDecls/TsRefs.mjs`); a host federation config with no `name` still lists its `remotes`; an `unresolved_import` diagnostic carries `case_insensitive_match` (`TsSetup/TsProgram.mjs`);
+  //     `io.bound_count` counts `(event)` bindings for an output; `input_usage` skips a candidate that is `out_of_scope` even where no other is in scope; `translations.referenced` reads static attribute text;
+  //     `gate_index.component_count` skips an orphan template's null component.
+  //     Third audit, same number (#103): a `calls` row carries `arg_refs`, one `{position, name, $ref, file, line, col, kind}` per argument that is a bare name of a `const`/`let`/`var` or a top-level destructured binding
+  //     (through import aliases; `args` keeps the evaluated value), so a passed table joins `consts` or `locals` by file and line (`TsExpr/TsReadRefs.mjs::resolveArg`, `TsDecls/TsBody.mjs::emitCall`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 78, build: args.build,
+    config: config.file, data: config.data, rows: 79, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

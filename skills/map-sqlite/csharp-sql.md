@@ -140,7 +140,7 @@ Two tables are DERIVED after both halves and rewritten whole each run:
   A later UPDATE with a join or another WHERE, and any DELETE, is NOT applied: those rows still read as seeded.
   Compare a deployed database only with the rows whose `condition` its SQLCMD values allow.
 * **`duplicate_types`**: a type name declared in more than one place (a symbol in a project - a `partial`
-  class is one), with every place, and for an enum `members_differ` + `detail` naming each member set.
+  class is one), with every place (a TypeScript class, interface or type alias is a place of `kind` `class`, `interface` or `alias`, one per declaration), and for an enum `members_differ` + `detail` naming each member set.
 
 **`structuregate.sql.json`** (beside the exe, or `--sql-config <file>`; paths relative to it) says what code
 cannot - which database a context or a connection reaches is decided at run time:

@@ -151,5 +151,32 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     return { file: canonicalPath(sf.fileName), line: pos.line + 1, col: pos.character + 1 };
   }
 
-  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember };
+  /**
+   * THE VARIABLE A CALL ARGUMENT NAMES (rows 79, #103): `convert(HueIDs, hueLabels)` evaluates `hueLabels` to the const's value, and the value alone cannot be tied to
+   * the declaration that holds it. A bare name (through parentheses, `as`, `!`, `satisfies`) that resolves, through import aliases, to a `const`/`let`/`var` - a local, a
+   * module's or an imported one - or to a name a TOP-LEVEL destructuring binds is `{name, $ref, file, line, col, kind}`, the place of the declaration's NAME (the `consts`
+   * row, or the `locals` row, that holds it). A class, an enum and a function already carry `$ref` in the value, and a library's own declaration has no row.
+   */
+  function resolveArg(arg) {
+    let at = arg;
+    while (ts.isParenthesizedExpression(at) || ts.isAsExpression(at) || ts.isNonNullExpression(at) || ts.isTypeAssertionExpression(at)
+      || (ts.isSatisfiesExpression && ts.isSatisfiesExpression(at))) at = at.expression;
+    if (!ts.isIdentifier(at)) return null;
+    let symbol = checker.getSymbolAtLocation(at);
+    if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+    const decl = (symbol?.declarations ?? []).find((d) => {
+      if (d.getSourceFile().isDeclarationFile) return false;
+      if (ts.isBindingElement(d)) return ts.isIdentifier(d.name) && moduleLevel(d);
+      return ts.isVariableDeclaration(d) && ts.isIdentifier(d.name);
+    });
+    if (decl === undefined) return null;
+    const binding = ts.isBindingElement(decl);
+    let holder = decl;
+    while (ts.isBindingElement(holder)) holder = holder.parent?.parent;
+    const flags = holder.parent?.flags ?? 0;
+    const kind = binding ? 'binding' : (flags & ts.NodeFlags.Const) !== 0 ? 'const' : (flags & ts.NodeFlags.Let) !== 0 ? 'let' : 'var';
+    return { name: at.text, $ref: decl.name.text, ...placeOf(decl.name), kind };
+  }
+
+  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember, resolveArg };
 }

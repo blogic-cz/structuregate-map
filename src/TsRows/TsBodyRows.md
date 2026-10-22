@@ -40,3 +40,11 @@ Loops, bare expression statements and `++`/`--` had no row of their own. The cas
   the place of its declaration's row, with a value or without; the largest share of the reads with no binding was these. Nothing in rust reads `local` on a tree: the closure's `const` locals are found by (member, name).
 - **A `target` is anchored at the declaration's NAME** (rows 75, `at`): `@Input()` above `label` made a read target the decorator's line, where no `members` row sits - and rust's line-keyed `row_of` found no row for it.
 - **Not bound**: `undefined`, a type parameter, a name of a library no `node_modules` declaration file backs.
+
+## Routes, NgRx entries and federation (rows 79)
+
+In `TsDerive/TsRoutes.mjs`, `TsDerive/TsNgrx.mjs`: the route array a module reaches through `forRoot(appRoutes)` is the const's array (its signature leaves out `$fn_id`, which only the const's copy holds), walked once; `routes` carries `path_match`, `can_deactivate`, `can_match`, `title`. `immerOn` of `ngrx-immer` (by its declaration's module) is an `on`, its `writes` the draft paths `TsExpr/TsExprDescribe.mjs::draftWrites` finds; the handler is the LAST argument of either and every one before it an action. A `createEffect` call in a constructor is a `state_effects` row (`constructor@line:col`). A bare `import('remote/Module')` is a federated route when a host config's `remotes` lists the first segment (`TsFederation.mjs`).
+
+## A call argument that names a variable (rows 79, #103)
+
+`calls.args` keeps the EVALUATED value of every argument - never changed, every reader takes it as evaluated. `calls.arg_refs` (`TsExpr/TsReadRefs.mjs::resolveArg`, written by `TsDecls/TsBody.mjs::emitCall`, only when non-empty) is one `{position, name, $ref, file, line, col, kind}` per argument that is a bare name (through parentheses, `as`, `!`, `satisfies`) resolving through import aliases to a `const`/`let`/`var` or a top-level destructured binding, so a passed table joins the `consts` or `locals` row that declares it. A declaration file has none; a class, enum or function argument keeps its `$ref` in the value.

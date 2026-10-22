@@ -358,17 +358,25 @@ Test-Case 'tsrows: a routed component is reachable from an entry point' {
 # A BINDING FILLS A DECLARED INPUT, and the count is what says an input is live. The alias is the name the
 # template binds, so the join is on THAT and not on the member.
 Test-Case 'tsrows: a template binding is attributed to the input it fills' {
-    $tree = New-TsRowsWorkspace
+    # `ScopedComponent` imports what it uses, so its bindings are in scope. The fixture's own basket template writes `<app-cart [label]>` with
+    # no import reaching `CartComponent`: every candidate is out of scope, so that binding fills nothing (a count of 1, not 2).
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/scoped.component.ts' = "import { Component } from '@angular/core';`n" +
+            "import { CartComponent } from './cart.component';`n" +
+            "import { BasketComponent } from './basket.component';`n" +
+            "@Component({ selector: 'app-scoped', standalone: true, imports: [CartComponent, BasketComponent],`n" +
+            "  template: '<app-cart [label]=`"\'x\'`"></app-cart><app-basket [labelAlias]=`"\'y\'`"></app-basket>' })`n" +
+            "export class ScopedComponent {}`n"
+    }
     $made = New-TsRowsDb $tree -Shared
-    $r = Invoke-TsRowsQ $made.Db ("SELECT u.input, i.member, i.bound_count FROM input_usage u " +
-        "JOIN io i ON i.id = u.io WHERE u.input = 'label'")
-    Assert-Line $r 'label'
-    Assert-Line $r '1'
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'iu=' || u.input || '|' || i.member || '|' || i.bound_count || '|' || count(*) AS r FROM input_usage u " +
+        "JOIN io i ON i.id = u.io WHERE u.input = 'label' GROUP BY u.io")
+    Assert-Line $r 'iu=label|label|1|1'
     # THE ALIAS IS THE NAME A TEMPLATE BINDS. Matched on the member instead, an aliased input is bound by
     # nothing and reads as dead.
-    $aliased = Invoke-TsRowsQ $made.Db ("SELECT u.input, i.member FROM input_usage u JOIN io i ON i.id = u.io " +
+    $aliased = Invoke-TsRowsQ $made.Db ("SELECT 'al=' || u.input || '|' || i.member AS r FROM input_usage u JOIN io i ON i.id = u.io " +
         "WHERE u.input = 'labelAlias'")
-    Assert-Line $aliased 'labelAlias'
+    Assert-Line $aliased 'al=labelAlias|label'
 }
 
 # THE DISPATCHED NAME IS NOT THE DECLARED KEY: an action group lowercases the event key to build the
