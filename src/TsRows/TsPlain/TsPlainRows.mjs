@@ -258,6 +258,8 @@ export function readFile(ts, rows, file) {
             bases: heritage(K.ExtendsKeyword), implements: heritage(K.ImplementsKeyword),
             exported: isExported(ts, node.kind === K.ClassExpression && node.parent ? node.parent : node),
             doc: docOf(ts, node), members: node.members.length,
+            // A CLASS EXPRESSION SAYS SO (rows 80), as the Angular half's `classes` row does: `duplicate_types` skips it.
+            ...(node.kind === K.ClassExpression ? { expression: true } : {}),
         });
     };
 
@@ -294,10 +296,8 @@ export function readFile(ts, rows, file) {
             optional: node.questionDotToken ? 1 : 0, source: src(node),
         });
         // A `RegExp` CONSTRUCTION IS A REGEX ROW too, beside its call row - the global only: a name the file
-        // binds (a function of its own, an import) is not it. A literal first argument is its own row already.
-        const first = (node.arguments ?? [])[0];
-        if (callee === 'RegExp' && targetPath === '' && targetName === ''
-            && !(first && first.kind === K.RegularExpressionLiteral)) regexCall(node);
+        // binds (a function of its own, an import) is not it. A literal first argument is its own row AND the call is one (rows 80).
+        if (callee === 'RegExp' && targetPath === '' && targetName === '') regexCall(node);
         for (const [position, value] of (node.arguments ?? []).entries()) {
             rows.add('arguments', 'arg', { ...where(), call, line: line(value), position, source: src(value),
                 spread: value.kind === K.SpreadElement ? 1 : 0, reads: facts(ts, value).reads });
@@ -347,8 +347,12 @@ export function readFile(ts, rows, file) {
     const literalText = (arg) => (arg && (arg.kind === K.StringLiteral || arg.kind === K.NoSubstitutionTemplateLiteral)
         ? arg.text : null);
 
+    // A LITERAL HANDED TO `RegExp` (`/x/g`) IS ITS PATTERN, its own flags kept unless a second argument gives them, as the Angular half writes it (`TsText.mjs::regexOf`).
     const regexCall = (node) => {
-        const [pattern, flags] = [0, 1].map((i) => literalText((node.arguments ?? [])[i]));
+        const [first, second] = node.arguments ?? [];
+        const own = first && first.kind === K.RegularExpressionLiteral ? first.text : null;
+        const [pattern, flags] = own === null ? [first, second].map(literalText)
+            : [own.slice(1, own.lastIndexOf('/')), second === undefined ? own.slice(own.lastIndexOf('/') + 1) : literalText(second)];
         rows.add('regexes', 'rx', { ...where(), line: line(node), kind: 'call', api: 'RegExp', pattern: pattern ?? '',
             pattern_kind: pattern === null ? '' : 'literal', flags: flags ?? '', used_by: usedBy(node), source: src(node) });
     };

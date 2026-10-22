@@ -6,7 +6,8 @@
  * holds - not a dependency called `x` - so the class has ONE row per distinct token it injects that way, `param` null and `via` the first field
  * that did, and none at all where a field already injects that token (the same dependency listed twice says nothing more).
  * An `inject()` in a FUNCTION that is no class member (a functional interceptor or guard, a provider's factory) is a row with `function`, the
- * `functions` row it sits in, and `param` the local's name when the call IS the local's initializer. A METHOD body is no injection context: no row.
+ * `functions` row it sits in, and `param` the local's name when the call IS the local's initializer. A CONSTRUCTOR body IS an injection context (rows 80): its `inject()` is a row of the
+ * class with `member` the constructor's row, `param` the local's name likewise; a call nested in a callback of the constructor, or in any other METHOD body, is no injection context: no row.
  *
  * THE INJECTED VALUE IS TYPED AS WRITTEN: the field's (or the local's) annotation, else the cast around the call, else the call's own type.
  * `y: ITranslate = inject(TOKEN) as ITranslate` is an `ITranslate` - the token's `InjectionToken<unknown>` says nothing about it, as a constructor's
@@ -101,20 +102,30 @@ export function makeInjectRows({ ts, checker, store, typeRefAt, typeText, declFi
           templateRef = templateRef || row.type_ref?.name === 'TemplateRef' && String(row.type_ref.file ?? '').includes('@angular/core');
           store.add('di', 'd', row);
         }
-        return templateRef;
+        return templateRef || viaConstructor.has(classId);
       },
     };
   }
 
-  /** An `inject()` call met in a body outside any class (`ownerId` the `functions` row it sits in): a `di` row of that function. */
-  function atFunction(call, ownerId, fid) {
+  /** The classes whose CONSTRUCTOR BODY injects Angular's `TemplateRef` (rows 80): by the declaration the `inject()` resolved to, as a field's is. `forClass.done` answers for them too. */
+  const viaConstructor = new Set();
+
+  /** The `members` rows of the constructors met so far: the only class bodies that are an injection context (rows 80). */
+  const constructors = new Set();
+
+  /** An `inject()` call met in a body outside any class (`ownerId` the `functions` row it sits in): a `di` row of that function. Inside a class
+   *  (`classId`) only the constructor's own body (`ownerId` its member row) is one: a row of the class, `member` the constructor. */
+  function atFunction(call, ownerId, fid, classId) {
     if (!isInject(call) || ownerId === null || ownerId === undefined) return;
+    if (classId != null && !constructors.has(ownerId)) return;
     let at = call;
     while (at.parent && isWrapper(at.parent) && at.parent.expression === at) at = at.parent;
     const decl = at.parent && ts.isVariableDeclaration(at.parent) && at.parent.initializer === at && ts.isIdentifier(at.parent.name) ? at.parent : null;
-    const row = rowOf(call, decl?.type ?? castOf(call), { class: null, file: fid, function: ownerId, param: decl ? decl.name.text : null });
+    const owner = classId != null ? { class: classId, file: fid, member: ownerId } : { class: null, file: fid, function: ownerId };
+    const row = rowOf(call, decl?.type ?? castOf(call), { ...owner, param: decl ? decl.name.text : null });
+    if (classId != null && row.type_ref?.name === 'TemplateRef' && String(row.type_ref.file ?? '').includes('@angular/core')) viaConstructor.add(classId);
     store.add('di', 'd', { ...row, ...locationOf(call) });
   }
 
-  return { forClass, atFunction };
+  return { forClass, atFunction, markConstructor: (memberId) => constructors.add(memberId) };
 }

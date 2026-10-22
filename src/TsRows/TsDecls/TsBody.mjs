@@ -17,7 +17,7 @@ import { locationOf } from './TsNodes.mjs';
 import { catchFacts, chainOf } from './TsCatch.mjs';
 import { loopFacts, loopKind } from './TsLoops.mjs';
 
-export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName, shapeAt, bindingFacts, injectAt, resolveArg }) {
+export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName, shapeAt, bindingFacts, injectAt, resolveArg, targetLine }) {
   /**
    * THE BRANCH OR CASE A STATEMENT SITS IN IS PART OF WHAT THE STATEMENT MEANS.
    *
@@ -147,7 +147,10 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
   function emitCall(node, ownerId, classId) {
     if (!ts.isCallExpression(node) && !ts.isNewExpression(node)) return;
     const callee = node.expression;
-    const target = declFileOf(ts.isPropertyAccessExpression(callee) ? callee.name : callee);
+    const calleeName = ts.isPropertyAccessExpression(callee) ? callee.name : callee;
+    // A MEMBER OF AN OBJECT LITERAL OR A TYPE carries its `line` (rows 80, `TsExpr/TsReadRefs.mjs::targetLine`): the rollup binds `target_id` to the row AT that place, never to a same-named declaration of the file.
+    const declared = declFileOf(calleeName);
+    const target = declared !== null && targetLine !== undefined ? { ...declared, ...(targetLine(calleeName) ?? {}) } : declared;
     // EVERY argument, not the first four. A call's fifth argument is as much a fact as its first, and the
     // cut was invisible: a consumer saw a complete-looking row that silently dropped the rest.
     // A SPREAD ARGUMENT CARRIES WHAT IT SPREADS (`$spread`): `list.push(...this.make())` adds the elements `make` returns,
@@ -176,8 +179,9 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
     // A CHAINED CALL NAMES THE CALL IT IS MADE ON (`receiver_call`): `a.b(1).then(f)` is two rows starting at one
     // place, and a join on that place is ambiguous on a chain of three. The outer row is minted first - the walk
     // reaches the receiver after it - so the receiver's node is remembered until its own row exists.
-    // AN `inject()` IN A FUNCTION THAT IS NO CLASS MEMBER (a functional interceptor, a provider's factory) is a `di` row of that function (rows 78, `TsExpr/TsInjects.mjs`).
-    if (classId == null && injectAt && ts.isCallExpression(node)) injectAt(node, ownerId);
+    // AN `inject()` IN A FUNCTION THAT IS NO CLASS MEMBER (a functional interceptor, a provider's factory) is a `di` row of that function (rows 78, `TsExpr/TsInjects.mjs`), and one in a
+    // CONSTRUCTOR body a row of the class (rows 80): `injectAt` knows which owners are constructors, and a method body gets none.
+    if (injectAt && ts.isCallExpression(node)) injectAt(node, ownerId, classId);
     const outer = receiverOf.get(node);
     if (outer !== undefined) {
       store.rowOf(outer).receiver_call = id;
@@ -304,8 +308,8 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
     else {
       // EACH NAME THE PATTERN BINDS IS ONE ITEM, AT ANY DEPTH (rows 78): `{ A: { B: { C: c } }, A: a }` binds `c` and `a`, with `property` the PATH to the name (`A.B.C`) - a nested
       // pattern is no binding of its own, and one item per outer element hid every name inside it. Each keeps its default, its type and - in an array pattern - its position (rows 77,
-      // `TsExpr/TsBindings.mjs`): a hole (`[, x]`) is no binding, yet `x` is the second element. An element of an ARRAY has no key, so the path stops at the array (a top-level
-      // array element keeps the name it binds as its `property`, as before).
+      // `TsExpr/TsBindings.mjs`): a hole (`[, x]`) is no binding, yet `x` is the second element. An element of an ARRAY has no key, so the path stops at the array - a top-level
+      // array element has `property` null and its `index` (rows 80; rows 78 kept the name it binds, against its own contract).
       const bound = (pattern, path) => {
         const array = ts.isArrayBindingPattern(pattern);
         pattern.elements.forEach((el, at) => {
@@ -315,7 +319,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
           if (!ts.isIdentifier(el.name)) { bound(el.name, here); return; }
           const sf = el.getSourceFile();
           const where = sf.getLineAndCharacterOfPosition(el.name.getStart());
-          const property = array ? (path.length ? path.join('.') : key) : here.join('.');
+          const property = array ? (path.length ? path.join('.') : null) : here.join('.');
           bindings.push({ property, local: el.name.text, ...bindingFacts(el, array ? at : null), line: where.line + 1, col: where.character + 1 });
         });
       };
@@ -508,7 +512,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       return;
     }
     const walk = (node) => {
-      if (skip !== null && node === skip) return; // walked by its own declaration
+      if (skip !== null && node === skip.node) { skip.walk(); return; } // its own declaration's row, its body walked HERE: in the branch, loop and case it stands in
       if (node !== bodyNode && isFunctionLike(node)) {
         const inlineId = declareInline(node, ownerId);
         rowsWritten += 1;
@@ -557,6 +561,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       ts.forEachChild(node, walk);
     };
     walk(bodyNode);
+    if (skip !== null) skip.walk(); // a function the walk never reached still has its body walked (idempotent)
   }
 
   /** A parameter's default value is code like any other: `f(cond = () => true)` holds a function. */

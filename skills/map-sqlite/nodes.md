@@ -53,7 +53,7 @@ the token are in [facts.md](facts.md).
 **Angular HTTP calls against C# actions** (rewritten each run): `http_endpoints` is every attribute-routed C#
 action, written for a C#-only tree too (`cls`, `method`, `line`, `verb` - `ANY` for a `[Route]` with no verb -,
 `template` as written with the class route and tokens applied, one row per class `[Route]`, `route` normalized);
-the two tables below need the TypeScript half in the same database, and are empty without it: `http_calls` every `HttpClient` request (not `HttpHeaders`/`HttpParams`), a wrapper's callers standing for the wrapper's own call
+the two tables below need the TypeScript half in the same database, and are empty without it: `http_calls` every `HttpClient` request (not `HttpHeaders`/`HttpParams`), a wrapper's callers standing for the wrapper's own call A url folds through a helper that RETURNS ITS FIRST ARGUMENT (`createQueryUrl(url, params)`: the callee's own `returns` are `${url}${query}`) to that argument, query cut, at a call site as in a wrapper; a call whose callee turns its argument into a url (an id handed to a url builder) is an unknown piece, so `${this.base(id)}/get` is `*/get`, not `*` (rows 80).
 (`url` is the folded pattern - `{}` a parameter, `*` an unknown part, `via` the wrapper); `http_links` which call
 reaches which endpoint (`how` `exact` or `ambiguous`; a call with no row there matched nothing). An unknown base URL
 is a leading `*` and matches any leading segments; of the endpoints a url matches, only those with the most

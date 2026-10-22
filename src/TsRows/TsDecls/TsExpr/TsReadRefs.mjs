@@ -178,5 +178,20 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     return { name: at.text, $ref: decl.name.text, ...placeOf(decl.name), kind };
   }
 
-  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember, resolveArg };
+  /**
+   * THE LINE OF A MEMBER THAT NO NAME KEY CAN TELL (rows 80): a call's `target` is a file and a name, and `getAge` names the property of
+   * `Alpha = { getAge: (..) => .. }` as well as a `function getAge` beside it - the rollup bound the call to the function. A member of an OBJECT LITERAL
+   * that is a value of its own (a method, an accessor, a property whose value is not a bare name - `{ x }` and `{ x: x }` still follow the
+   * declaration they name) and a SIGNATURE of an interface or type literal carry `line`, the place of the declaration the checker named, and
+   * `TsRefs.mjs::rollupRefIds` finds the `shape_members` or `type_members` row there. A library's declaration carries none.
+   */
+  function targetLine(node) {
+    const d = checker.getSymbolAtLocation(node)?.declarations?.[0];
+    if (d === undefined || d.getSourceFile().fileName.includes('/node_modules/')) return null;
+    const own = d.parent !== undefined && ts.isObjectLiteralExpression(d.parent)
+      && ((ts.isPropertyAssignment(d) && !ts.isIdentifier(d.initializer)) || ts.isMethodDeclaration(d) || ts.isGetAccessor(d) || ts.isSetAccessor(d));
+    return own || ts.isPropertySignature(d) || ts.isMethodSignature(d) ? { line: at(d).line } : null;
+  }
+
+  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember, resolveArg, targetLine };
 }

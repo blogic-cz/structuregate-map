@@ -149,6 +149,8 @@ export function makeOwners(store) {
   const NOT_PASSED = Symbol('not passed');
   const resolveRef = (ref, env) => {
     if (ref === null || typeof ref !== 'object') return null;
+    // WHAT A `keyvalue` PIPE HANDS ON (rows 80, `TsTplHops.mjs`): a `{ key, value }` pair of the owners its two refs name.
+    if (ref.pair === true) return { kind: 'pair', id: 'pair', key: resolveRef(ref.key ?? null, env), keyRef: ref.key ?? null, value: resolveRef(ref.value ?? null, env), valueRef: ref.value ?? null };
     // A CONSTRAINT THAT NAMES SEVERAL (`T extends A | B`) is a list of refs, not one.
     if (Array.isArray(ref.type_refs) && ref.file === undefined) return ownerOfRow(ref, env);
     const name = str(ref.name) ?? str(ref.text);

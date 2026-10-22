@@ -100,8 +100,10 @@ export function makeDeclRows({ ts, store, modifiersOf, localExports, evalCell, p
       params: paramsOf(fn), returns: fn.type ? fn.type.getText() : typeText(fn),
       ...(target ? { target } : {}), ...locationOf(inner),
     });
-    if (fn.body) collectBody(fn.body, fnId, null);
-    return fn;
+    // THE BODY IS WALKED WHERE THE STATEMENT'S WALK MEETS THE FUNCTION (rows 80, `TsBody.mjs::collectBody`'s `skip`), not here: under `if (!X.prototype.m)` the walk is inside the
+    // `then` arm, so its calls, returns and locals carry that `branch` as any function's body does - walked from here they had none. The row stays the method's own (detached).
+    let done = false;
+    return { node: fn, walk() { if (done) return; done = true; if (fn.body) collectBody(fn.body, fnId, null); } };
   }
 
   const isPrototype = (n) => ts.isPropertyAccessExpression(n) && n.name.text === 'prototype';

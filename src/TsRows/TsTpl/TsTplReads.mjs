@@ -11,11 +11,17 @@
 
 import { makeOwners } from './TsTplOwners.mjs';
 import { makeContexts } from './TsTplContext.mjs';
+import { judgeScope, makeScopes } from './TsModuleScope.mjs';
+import { makeHops } from './TsTplHops.mjs';
+import { makeEvents } from './TsTplEvents.mjs';
 
 const str = (v) => (typeof v === 'string' ? v : null);
 
 export function rollupTemplateReads(store) {
   const owners = makeOwners(store);
+  // THE MODULE SCOPES, built once and only when a `#ref` has several candidates (`refValueOf`); the notes were made by the render rollup.
+  let scoped = null;
+  const scopes = () => (scoped ??= makeScopes(store, { note() {} }));
   const { ownerOf, propByOwner, indexByShape, resolveRef, elementRefOf, ownerOfRow, hopOf } = owners;
 
   // Which class each template expression belongs to. EVERY template expression carries `node`; only some
@@ -159,16 +165,22 @@ export function rollupTemplateReads(store) {
     }
   }
   const contexts = makeContexts(store, owners, directivesAt, inputsAt);
+  const hopRules = makeHops({ hopOf, indexByShape, scopes });
+  const eventOf = makeEvents({ store, propByOwner, directivesAt, declaredBy, contexts, resolveRef, scopes, judgeScope });
   // A GENERIC COMPONENT'S REF IS ITS INSTANCE AS THE ELEMENT INSTANTIATES IT (rows 74): `<demo-table #t [rows]="items">` over `DemoTable<T>` binds `T` from what `items` holds, so `t.selected`
   // reads as the item. The inputs are read once per ref, in the element's scope with no ref typed (a ref read inside another's input is not asked: they could ask each other for ever).
   const instanceOfRef = new Map();
   const refValueOf = (ref, component) => {
     if (ref.kind === 'Template') return null;
     const asked = ref.value.trim();
-    const hit = ref.directives.find((d) => {
+    const matching = ref.directives.filter((d) => {
       const one = declaredBy.get(d.id);
       return one !== undefined && one.class != null && (asked === '' ? d.is_component === true || d.is_component === 1 : one.exportAs.includes(asked));
     });
+    // TWO DECLARATIONS OF ONE SELECTOR (rows 80): the ref is the one the host's SCOPE renders - the choice `renders` makes (`judgeScope`, the rule `rollupModuleScope` stamps) - and
+    // a candidate the host cannot see only when no other matches: the first match typed `#popper` with the library's copy, not the shared component the template renders.
+    const seen = matching.length > 1 ? matching.filter((d) => judgeScope(scopes(), { from_class: component.id, to_class: declaredBy.get(d.id).class, to_name: d.name }).scope !== 'out_of_scope') : matching;
+    const hit = seen[0] ?? matching[0];
     if (hit === undefined) return null;
     const key = `${String(ref.node)}#${ref.name}`;
     if (!instanceOfRef.has(key)) {
@@ -213,7 +225,8 @@ export function rollupTemplateReads(store) {
    */
   const conditionOf = (ast) => {
     let at = ast;
-    while (at && (at.k === 'Source' || at.k === 'NonNull')) at = at.k === 'Source' ? at.ast : at.expr;
+    // AN `a && b` CONDITION'S VALUE IS ITS LAST OPERAND'S (rows 80): `*ngIf="ok && find() as found"` binds `found` to what `find()` returns - `a && b` is `b` wherever the block renders.
+    while (at && (at.k === 'Source' || at.k === 'NonNull' || (at.k === 'Binary' && at.op === '&&'))) at = at.k === 'Source' ? at.ast : at.k === 'Binary' ? at.right : at.expr;
     return at ?? null;
   };
   const aliasValueOf = (ast, component, scope) => valueOf(conditionOf(ast), component, scope);
@@ -223,6 +236,8 @@ export function rollupTemplateReads(store) {
     const at = conditionOf(ast);
     const held = at ? valueOf(at, component, scope) : null;
     if (held === null) return null;
+    // WHAT `keyvalue` HANDS ON is a list of `{ key, value }` pairs: the variable is the pair (`TsTplHops.mjs`).
+    if (held.ref?.element?.pair === true) return { owner: resolveRef(held.ref.element, held.env ?? null), ref: held.ref.element, row: null, env: held.env ?? null };
     const name = at.k === 'Pipe' ? str(at.name) : null;
     const element = at.k !== 'Pipe' || (name !== null && transformRefOfPipe.has(name));
     if (!element) {
@@ -301,6 +316,16 @@ export function rollupTemplateReads(store) {
 
   // SEVERAL OWNERS AT ONCE (`any`) have no id: two of them are never one owner.
   const sameOwner = (a, b) => (a?.owner && b?.owner && a.owner.kind !== 'any' && a.owner.kind === b.owner.kind && a.owner.id === b.owner.id ? a : null);
+  // TWO LISTS OF ONE ELEMENT are one value too (rows 80): an array's owner is `Array`, which no row declares, so `c ? kids : children` over two `Child[]` holds no owner - the loop over it
+  // takes the element both arms name. Refs are the SAME declaration by name, file and line.
+  const sameDeclared = (x, y) => x && y && x.name === y.name && x.file === y.file && x.line === y.line;
+  const sameValue = (a, b) => {
+    if (a?.owner || b?.owner) return sameOwner(a, b);
+    const [x, y] = [a?.ref ? elementRefOf(a.ref) : null, b?.ref ? elementRefOf(b.ref) : null];
+    return x && y && sameDeclared(x, y) ? a : null;
+  };
+  // AN ARM THAT HOLDS NOTHING (rows 80): `[]`, `null`, `undefined` - the value is the other arm's, as the checker types `c ? [] : children`.
+  const emptyArm = (n) => (n?.k === 'Array' && !n.items?.length) || (n?.k === 'Literal' && n.v == null);
 
   /**
    * WHAT AN EXPRESSION'S VALUE IS, as the declarations say: `{ owner, ref, row, env }` or null. A read chain is its last hop; a keyed
@@ -310,7 +335,7 @@ export function rollupTemplateReads(store) {
    */
   const valueOf = (node, component, scope) => {
     if (!node || typeof node !== 'object') return null;
-    const same = (x, y) => sameOwner(valueOf(x, component, scope), valueOf(y, component, scope));
+    const same = (x, y) => sameValue(valueOf(x, component, scope), valueOf(y, component, scope));
     switch (node.k) {
       case 'Source': return valueOf(node.ast, component, scope);
       case 'NonNull': return valueOf(node.expr, component, scope);
@@ -336,6 +361,8 @@ export function rollupTemplateReads(store) {
       case 'Pipe': {
         const name = str(node.name);
         const declared = name === null ? undefined : transformRefOfPipe.get(name);
+        // THE FRAMEWORK'S `keyvalue` (rows 80): `@angular/common`'s `KeyValuePipe` found in the scope of the host - never the name - hands a list of `{ key, value }`; one that cannot be typed is refused.
+        if (declared === undefined && name !== null && !knownPipes.has(name) && hopRules.isKeyValuePipe(hopRules.libraryPipeOf(component.id, name))) return hopRules.keyValueOf(valueOf(node.exp, component, scope));
         // A PIPE IN THE MAP THAT CANNOT BE TYPED MUST REFUSE, not borrow its input's type (only a pipe this map lacks unwraps).
         const exp = declared === undefined && name !== null && !knownPipes.has(name) ? valueOf(node.exp, component, scope) : null;
         const ref = declared ?? exp?.ref?.unwrapped ?? null;
@@ -347,7 +374,7 @@ export function rollupTemplateReads(store) {
         return ref === null ? null : { owner: resolveRef(ref, declared ? null : exp?.env ?? null), ref, row: null, env: null, ...(wrapped ? { wrapped } : {}) };
       }
       case 'Binary': return node.op === '??' || node.op === '||' ? same(node.left, node.right) : null;
-      case 'Cond': return same(node.then, node.else);
+      case 'Cond': return emptyArm(node.then) ? valueOf(node.else, component, scope) : emptyArm(node.else) ? valueOf(node.then, component, scope) : same(node.then, node.else);
       default: return null;
     }
   };
@@ -371,17 +398,19 @@ export function rollupTemplateReads(store) {
       // A HOP PAST A VALUE WITH NO OWNER IS LOST: `last` must not stay the previous hop's.
       if (cursor === null) { last = null; return; }
       // THE MEMBER A WRITE HEADS IS ITS SETTER; every other hop is read.
-      const hop = hopOf(cursor, name, node.k === 'Write' && i === names.length - 1);
+      // A `{ key, value }` PAIR and a UNION STEP ITS ARMS AGREE ON go on with no target of their own (rows 80, `TsTplHops.mjs`).
+      const hop = cursor.kind === 'pair' ? hopRules.pairHop(cursor, name)
+        : hopOf(cursor, name, node.k === 'Write' && i === names.length - 1) ?? hopRules.agreedHop(cursor, name);
       if (!hop) { cursor = null; last = null; return; }
       const target = nodes[i];
-      if (target) {
+      if (target && hop.file !== undefined) {
         // COUNT WHAT WAS ADDED, not what was visited: the walk re-enters a chain through its own
         // receiver, so a per-visit counter reported far more hops than resolved nodes.
         if (target.target === undefined) { hops += 1; resolvedAny = true; }
         target.target = { name: hop.name, file: hop.file, line: hop.line, row: hop.row };
       }
       cursor = hop.owner;
-      last = { owner: hop.owner, ref: hop.member.type_ref ?? null, row: hop.member, env: hop.env };
+      last = { owner: hop.owner, ref: hop.member?.type_ref ?? hop.ref ?? null, row: hop.member ?? null, env: hop.env };
     });
     if (resolvedAny) chains += 1;
     return last;
@@ -402,7 +431,11 @@ export function rollupTemplateReads(store) {
     if (classId === undefined || nodeId == null) continue;
     const component = { kind: 'class', id: classId };
     const own = kindOfNode.get(nodeId) === 'Template' || row.kind === 'block_IfBlockBranch';
-    walk(row.ast, component, scopeAt(nodeId, component, own));
+    const scope = scopeAt(nodeId, component, own);
+    // `$event` OF AN OUTPUT BINDING is the type the bound output's emitter was declared with (rows 80, `TsTplEvents.mjs`); a DOM event has none, and stays unread.
+    const event = row.kind === 'output' ? eventOf(row, component, () => scopeAt(nodeId, component, false, true), valueOf) : null;
+    if (event !== null) scope.set('$event', event);
+    walk(row.ast, component, scope);
   }
   return { chains, hops };
 }

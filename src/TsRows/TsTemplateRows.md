@@ -57,3 +57,13 @@ Four template rows said more, or less, than the compiler does. Each is read off 
   the view one. `di.context_ref` is the `type_ref` of that second argument (a shape ref for an object literal or a literal-typed local) on the `di` row of the `TemplateRef` the call renders - found by the declaration the
   checker resolved (`createEmbeddedView` in `@angular/core`) and the declaration the first argument names, only when every call of the class hands ONE type - and the `let-x` / `as x` variables read it where the guard and the declared
   `TemplateRef<Ctx>` say nothing. A directive with no context of its own takes its BASE class's (`baseTypedOf`, the base's parameters bound from `extends`). `inject(TemplateRef)` in a property initializer makes a directive STRUCTURAL as the constructor parameter does (rows 77): its `di` row carries the `type_ref` of the call's type (`TsClassRows.mjs::isAngularTemplateRef`, `TsRegistry.mjs`). Case: `tests/deep/TsAngular/TsValues/TsRowsTemplateTypes.Tests.ps1`.
+
+# Reads a real workspace's checker found lost or wrong (rows 80)
+
+Found by reading every template read of a large workspace against Angular's own type checker; the case is `tests/deep/TsAngular/TsValues/TsRowsTemplateGaps.Tests.ps1`.
+
+- **A `#ref` is the candidate the host's scope renders** (`TsTplReads.mjs::refValueOf`): two components may share a selector, and the element matches both; the ref is typed by the one `TsModuleScope.mjs::judgeScope` (the rule `renders.scope` is stamped by) finds in scope, an out-of-scope one only when no other matches.
+- **`keyvalue` is a list of `{ key, value }`** (`TsTplHops.mjs`): the pipe is the framework's by its CLASS - `KeyValuePipe` declared in `@angular/common`, found in the host's scope (`external_pipes`), never by the name - and over `Record<K, V>`, `Map<K, V>` or an index signature its loop variable's `value` is `V`'s owner and `key` `K`'s. Any other input is refused.
+- **`$event` is what the output's emitter holds** (`TsTplEvents.mjs`): the first type argument of the bound output's own member type - `EventEmitter<T>`, `output<T>()`, a parameter or an unnamed intersection through the `element` the ref keeps - bound by the generic instance the element makes. A DOM event, and an output declared with no argument, type nothing.
+- **A ternary with an empty arm is the other arm** (`valueOf`, `emptyArm`): `[]`, `null` and `undefined` hold nothing; two lists of one element (`sameValue`) are one value, a loop takes the element. **The `as` alias of `a && b` is `b`** (`conditionOf`). **A union step its arms agree on** keeps no `target` but the chain goes on (`TsTplHops.mjs::agreedHop`): every arm must declare the name, all as one owner.
+

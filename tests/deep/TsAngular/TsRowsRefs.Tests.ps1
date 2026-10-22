@@ -178,4 +178,24 @@ Test-Case 'tsrows: an inject() in a function body is a di row of that function, 
     Assert-Line (Invoke-TsRowsQ $made.Db "SELECT 'delta=' || count(*) AS r FROM di WHERE class = (SELECT id FROM classes WHERE name = 'Delta')") 'delta=0'
 }
 
+
+# (rows 80) A CONSTRUCTOR BODY IS AN INJECTION CONTEXT, so its `inject()` is a `di` row of the class: `member` the constructor's row, `param` the local it initialises (null for a bare call), typed as a field's is
+# (`TsExpr/TsInjects.mjs::atFunction`). A callback in the constructor and a METHOD body are none (an `inject()` there throws at run time). Control: the field `svc = inject(Other)` keeps its row.
+Test-Case 'tsrows: an inject() in a constructor body is a di row of the class, a method body gets none' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/ctor.service.ts' = "import { Injectable, inject } from '@angular/core';`n" +
+            "export class Other {}`nexport class Third {}`n" +
+            "@Injectable() export class CtorService {`n  readonly svc = inject(Other);`n" +
+            "  constructor() {`n    const router = inject(Other);`n    inject(Third);`n    const later = () => inject(Third);`n  }`n" +
+            "  setup() { const other = inject(Other); }`n}`n"
+    }
+    $made = New-TsRowsDb $tree -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'ci=' || coalesce(d.param, '-') || '|' || m.kind || '|' || d.type || '|' || d.inject AS r " +
+        "FROM di d JOIN members m ON m.id = d.member WHERE d.class = (SELECT id FROM classes WHERE name = 'CtorService') ORDER BY d.id")
+    Assert-Line $r 'ci=router|constructor|Other|1'
+    Assert-Line $r 'ci=-|constructor|Third|1'
+    Assert-Line $r 'ci=svc|property|Other|1'
+    Assert-Line (Invoke-TsRowsQ $made.Db "SELECT 'n=' || count(*) AS r FROM di d WHERE d.class = (SELECT id FROM classes WHERE name = 'CtorService')") 'n=3'
+}
 }

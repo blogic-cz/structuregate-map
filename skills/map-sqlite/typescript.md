@@ -13,6 +13,8 @@ like python's, in the same tables where the meaning is the same (`functions`, `c
 `expressions`, `parameters`, `classes`, `handlers`, `comments`, `regexes`) plus **`types`** (interfaces and
 type aliases) and **`jsx`** (one row per JSX element).
 
+* (rows 80) A class EXPRESSION (`static Inner = class { .. }`) is a `classes` row with `expression` 1, as the Angular half writes it, and `duplicate_types` skips it; `new RegExp(/x/g)` is a `regexes` call row whose pattern is the literal's and whose flags are
+  the second argument's, else the literal's own - beside the literal's own row.
 * A call binds (`target_path`, `target_name`) through the file's own imports and top-level declarations,
   and never when an enclosing function declares the same name.
 * **`functions.body_shape`** and **`expressions.shape`** are the digests the JSON map's
@@ -65,7 +67,8 @@ Beside the shared tables it adds the FRAMEWORK tables:
   A plain `loadChildren: () => import('demo-orders/Module').then((m) => m.X)` is the same route when a host's `module-federation.config`
   lists `demo-orders` in `remotes` (an array of names, of `[name, url]` pairs, or an object keyed by name); a specifier no host lists is a package path.
 * **A route is one row** however many `RouterModule.forRoot`/`forChild`/`provideRouter` calls reach its array: it sits in the file that declares the array (a module
-  that only hands `appRoutes` to `forRoot` has none), so a lazy root has one loader and its `parent_route` and `absolute_path` are set. `routes` also carries
+  that only hands `appRoutes` to `forRoot` has none), so a lazy root has one loader and its `parent_route` and `absolute_path` are set. A root SEVERAL routes load (rows 80: the module an in-app `import()` loads is the one a federated remote's `loadRemoteModule` loads too) keeps the in-app loader as `parent_route` - the standalone path -
+  and lists every OTHER loader's route id in `routes.also_loaded_by` (`routes__also_loaded_by`, items `role = 'also_loaded_by'`; remote loaders included, two in-app loaders both listed with no `parent_route`); a root only a remote loads has no `parent_route` and lists it. `routes` also carries
   `path_match`, `can_deactivate`, `can_match` (guards, as `can_activate`) and `title`.
 * **`key_reach.paths`** lists a key's ways, one `{path, own}` per way (`n_paths` entries). `path` joins `render_path.id`, may repeat, and is renumbered every build, so only join within one DB. `own` holds the ids the way holds beyond that row's `gates`/`branches`. Fold a per-way fact the map does not compute over the items of `key_reach__paths` (each item's `path` is a row below it, `role = 'path'`; `own` a child list, `role = 'own'`) joined to `render_path` (AND along `gates ∪ branches ∪ own`, UNION over entries). Never filter `render_path` by `key_reach.components`.
 * **A component field NOTHING reads is no site of the key its initializer holds**: `labelCode = 'k'` in a class whose
@@ -130,11 +133,11 @@ Beside the shared tables it adds the FRAMEWORK tables:
 * **`classes.extends`** is `{text, name, file, external, line, id, type_args}`: `text` as written, `name`/`file`/`line` the
   declaration the checker reached (alias and barrel followed), `id` its `classes` row (none for a library class), and
   `type_args` each type argument the same way (`extends Base<Order>`: Order's `id`), nested arguments under their own.
-* **`comments`** holds EVERY comment of a parsed `.ts` file, once (rows 78): `line`, `col`, `kind`, `text`, and `context`, the declaration it sits in (null at the top level) - one in a call chain, after a class's last member or after a regex or template included.
+* **`comments`** holds EVERY comment of a parsed `.ts` file, once (rows 78): `line`, `col`, `kind`, `text`, and `context`, the declaration it sits in (null at the top level) - one in a call chain, after a class's last member, after a regex or template, or inside an EMPTY block, object, array, `switch` or type literal (`onEdit(_) { // TODO }`, rows 80) included.
 * **`di`** is a constructor parameter, or an `inject()` (`inject = 1`). A FIELD that IS the call (`x = inject(T)`, through `as`/`<T>`/parentheses/`!`) is `param` the field; a call NESTED in
   the initializer (`x = (inject(T) as I).x`, `inject(T).y`, `inject(T) ?? z`) makes `x` a copy of something the injected object holds, so the class has ONE row per token it injects that way, `param` NULL and
   `via` the first field (none where a field already is that call; rows 78); a call in a FUNCTION that is no class member (a functional interceptor, a provider's factory) is a row with `class` NULL and
-  `function`, its `functions` row, `param` the local it initialises (a method body is no injection context: no row). `type`/`type_ref` are the field's (or local's) annotation, else the cast
+  `function`, its `functions` row, `param` the local it initialises (a CONSTRUCTOR body is an injection context, rows 80: a row of the class with `member` the constructor's row and `param` the local it initialises, null for a bare call; a callback in it and a method body are none: no row). `type`/`type_ref` are the field's (or local's) annotation, else the cast
   around the call, else the call's own type (rows 77, 78) - `y: I = inject(T) as I` is an `I`, never the token's `unknown`. `token`,
   `token_ref` and `token_id` name the injection token - an `@Inject(TOKEN)` or `inject()`'s argument - where `resolved`
   stays the declared TYPE; a token that is a property of a const object (`Tokens.X`)

@@ -270,4 +270,55 @@ export const appRoutes: Routes = [
     Assert-Line $r 'r=plain|NULL|NULL'
 }
 
+# A ROOT SEVERAL ROUTES LOAD HAS ONE PARENT AND LISTS THE REST (rows 80): the module an in-app `import()` loads is the one a federated remote's `loadRemoteModule` loads too, and the
+# roots it configures were claimed by the in-app loader alone. `parent_route` (and so `absolute_path`) stays the in-app loader's - the standalone path - and `also_loaded_by` holds
+# the route id of every other loader, the remote one included. The controls: a root one in-app loader loads lists none, and a root only a remote loads has no parent but lists it.
+Test-Case 'tsrows: a root loaded by an in-app route and a remote route keeps the in-app parent and lists the remote one' {
+    $tree = New-TsRemoteWorkspace
+    $files = @{
+        'apps/shop/src/app.routes.ts' = @'
+import { Routes } from '@angular/router';
+import { loadRemoteModule } from '@angular-architects/module-federation';
+export const appRoutes: Routes = [
+  { path: 'local', loadChildren: () => import('../../orders/src/entry.module').then((m) => m.OrdersEntryModule) },
+  { path: 'orders', loadChildren: () => loadRemoteModule('demo-orders', './Module').then((m) => m.OrdersEntryModule) },
+  { path: 'solo', loadChildren: () => import('./solo.module').then((m) => m.SoloModule) },
+  { path: 'far', loadChildren: () => loadRemoteModule('demo-orders', './Far').then((m) => m.FarModule) },
+];
+'@
+        'apps/shop/src/solo.module.ts' = @'
+import { NgModule } from '@angular/core';
+import { RouterModule } from '@angular/router';
+@NgModule({ imports: [RouterModule.forChild([{ path: 'solo-list', redirectTo: 'x' }])] })
+export class SoloModule {}
+'@
+        'apps/orders/src/entry.module.ts' = @'
+import { NgModule } from '@angular/core';
+import { RouterModule } from '@angular/router';
+@NgModule({ imports: [RouterModule.forChild([{ path: 'entry-list', redirectTo: 'x' }])] })
+export class OrdersEntryModule {}
+'@
+        'apps/orders/src/far.module.ts' = @'
+import { NgModule } from '@angular/core';
+import { RouterModule } from '@angular/router';
+@NgModule({ imports: [RouterModule.forChild([{ path: 'far-list', redirectTo: 'x' }])] })
+export class FarModule {}
+'@
+        'apps/orders/module-federation.config.js' = "module.exports = { name: 'demo-orders', exposes: { './Module': 'apps/orders/src/entry.module.ts', './Far': 'apps/orders/src/far.module.ts' } };`n"
+    }
+    foreach ($key in $files.Keys) { Set-Content -LiteralPath (Join-Path $tree $key) -Value $files[$key] }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $p = Invoke-TsRowsQ $made.Db ("SELECT 'p=' || c.path || '<' || coalesce(p.path, 'none') || '|' || coalesce(c.absolute_path, 'NULL') AS r " +
+        "FROM routes c LEFT JOIN routes p ON p.id = c.parent_route WHERE c.path LIKE '%-list'")
+    Assert-Line $p 'p=entry-list<local|local/entry-list'
+    Assert-Line $p 'p=solo-list<solo|solo/solo-list'
+    Assert-Line $p 'p=far-list<none|far-list'
+    $a = Invoke-TsRowsQ $made.Db ("SELECT 'also=' || c.path || '|' || o.path AS r FROM routes c JOIN routes__also_loaded_by a ON a.owner = c.id AND a.node = 'string' " +
+        "JOIN routes o ON o.id = a.value WHERE c.path LIKE '%-list'")
+    Assert-Line $a 'also=entry-list|orders'
+    Assert-Line $a 'also=far-list|far'
+    Assert-NoLine $a 'solo-list'
+}
+
 }

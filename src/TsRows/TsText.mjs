@@ -43,7 +43,14 @@ export function collectComments(ts, store, sf, fileId) {
   const walk = (node) => {
     const kids = [];
     ts.forEachChild(node, (child) => { kids.push(child); });
-    if (!kids.length) { gap(node.pos, node.getStart(sf, false)); return; }
+    if (!kids.length) {
+      // A TOKEN (identifier, literal, keyword) is its trivia and then its own text. A childless node with PUNCTUATION of its own - an empty block, object or array literal,
+      // case block, type literal - holds comments BETWEEN its braces: scanning only the trivia before `{` lost every `onEdit(_) { // TODO }` (rows 80).
+      const token = node.kind >= ts.SyntaxKind.FirstToken && node.kind <= ts.SyntaxKind.LastToken;
+      if (token) gap(node.pos, node.getStart(sf, false));
+      else gap(node.pos, node.end);
+      return;
+    }
     let at = node.pos;
     for (const kid of kids) {
       gap(at, kid.pos);

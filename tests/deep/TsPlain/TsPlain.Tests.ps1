@@ -151,6 +151,33 @@ Test-Case 'tsplain: a RegExp construction is a row, its pattern known only from 
     Assert-Equal (Get-TsPlainScalar $tree "SELECT count(*) FROM calls WHERE callee = 'RegExp'") '2' 'the call rows stay'
 }
 
+# (rows 80) A LITERAL HANDED TO `RegExp` IS ITS PATTERN: the call is a row beside the literal's own, its pattern the literal's and its flags the second argument's, else the literal's, as the Angular half writes it.
+Test-Case 'tsplain: a RegExp construction over a literal has its pattern, and the flags argument overrides the literal''s' {
+    $tree = Use-Tree @{ 'a.ts' = "const a = new RegExp(/a+/g);`nconst b = new RegExp(/b+/g, 'i');`nconst c = RegExp(/c+/gi, 'm');`nconst d = /plain/;`nexport const all = [a, b, c, d];`n" }
+    Invoke-TsPlainMap $tree | Out-Null
+    $r = Get-TsPlainRows $tree "SELECT 'rx=' || kind || '|' || api || '|' || pattern || '|' || pattern_kind || '|' || flags || '|' || used_by FROM regexes ORDER BY line, kind"
+    Assert-Line $r 'rx=call|RegExp|a+|literal|g|= a'
+    Assert-Line $r 'rx=call|RegExp|b+|literal|i|= b'
+    Assert-Line $r 'rx=call|RegExp|c+|literal|m|= c'
+    # THE CONTROL: the literals stay rows of their own, one per literal written (4), and `/plain/` is no call.
+    Assert-Equal (Get-TsPlainScalar $tree "SELECT count(*) FROM regexes WHERE kind = 'literal'") '4' 'the literal rows stay'
+    Assert-Equal (Get-TsPlainScalar $tree "SELECT count(*) FROM regexes WHERE kind = 'call'") '3' 'one call row per construction'
+}
+
+# (rows 80) A CLASS EXPRESSION IS NO DECLARATION OF A TYPE in the plain half either: its `classes` row says `expression`, and `duplicate_types` skips it - `Pair` is declared twice and held a third time (2 places).
+Test-Case 'tsplain: duplicate_types skips a class expression' {
+    $tree = Use-Tree @{
+        'a.ts' = "export class Household {}`nexport class Pair {}`n"
+        'b.ts' = "export class Registry {`n  static Household = class { code = 1; };`n  static Pair = class { code = 2; };`n}`n"
+        'c.ts' = "export class Pair {}`n"
+    }
+    Invoke-TsPlainMap $tree | Out-Null
+    $r = Get-TsPlainRows $tree "SELECT 'dt=' || name || '|' || kinds || '|' || places FROM duplicate_types"
+    Assert-Line $r 'dt=Pair|class|2'
+    Assert-NoLine $r 'dt=Household'
+    Assert-Equal (Get-TsPlainScalar $tree "SELECT count(*) FROM classes WHERE expression = 1") '2' 'the expressions are rows, marked'
+}
+
 Test-Case 'tsplain: a RegExp declared in the file is not the global one' {
     # The literal is there so the table is: a database with no regex row has no `regexes` table to count.
     $tree = Use-Tree @{ 'a.ts' = "function RegExp(s: string) { return s; }`nexport const x = RegExp('a');`nexport const y = /b/;`n" }

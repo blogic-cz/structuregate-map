@@ -5,8 +5,11 @@
 //! a parameter `{}`, an unknown part `*`. A callable whose primitive's url BEGINS with one of its PARAMETERS is a WRAPPER:
 //! it writes no call itself, and every call OF it does, with the url its caller handed in. The url BEGINS with a parameter
 //! when it is that parameter, a template opening with one, a local holding any of these, EITHER ARM of a ternary
-//! (`q = params ? createQueryUrl(url, params) : url`), or a call whose FIRST argument is one (`createQueryUrl(url, params)` is
-//! the parameter and an unknown suffix: the suffix is the query a caller's url never carries, `finished` cuts it).
+//! (`q = params ? createQueryUrl(url, params) : url`), or a call whose FIRST argument is one AND whose callee returns that argument
+//! (`createQueryUrl(url, params)` is the parameter and an unknown suffix: the suffix is the query a caller's url never carries,
+//! `finished` cuts it). The callee's own `returns` say so (`calls_helpers.rs`): `` `${url}${query}` `` does, `` `${this.root}x` `` over an
+//! id parameter does not - that call is an unknown piece (`*`) and the literal after it stays. A CALLER's own url folds through such a
+//! helper to its first argument too (`createQueryUrl(`${base}/count`, options)` is `${base}/count`).
 
 use super::files_of;
 use super::inputs::read_of;
@@ -62,6 +65,9 @@ struct World {
     locals: HashMap<String, Vec<(String, i64, Value)>>,
     /// (file, name) -> a module constant's value.
     consts: HashMap<(String, String), Value>,
+    /// (abs path, name) -> every callable of that name, and each callable's `returns` (`calls_helpers.rs`).
+    callees: HashMap<(String, String), Vec<String>>,
+    returns: HashMap<String, Vec<Value>>,
 }
 
 /// Where a value is read: the file, the callable, the class `this` names and the line.
@@ -154,6 +160,7 @@ impl World {
                 }
             }
         }
+        w.load_helpers(conn, typescript)?;
         Ok(w)
     }
 
@@ -183,6 +190,10 @@ impl World {
                         out.push_str(part.as_str().unwrap_or(""));
                     }
                     return out;
+                }
+                // A CALL OF A HELPER THAT RETURNS ITS FIRST ARGUMENT is that argument (`calls_helpers.rs`): its tail is the query `finished` cuts.
+                if o.get("$call").is_some_and(Value::is_string) && self.forwards_first(o, true) {
+                    return o.get("$args").and_then(Value::as_array).and_then(|a| a.first()).map_or("*".into(), |a| self.fold(a, at, seen));
                 }
                 match o.get("$expr").and_then(Value::as_str) {
                     Some(expr) => self.expression(expr, at, seen),
@@ -241,8 +252,12 @@ impl World {
         if o.contains_key("$cond") {
             return ["$then", "$else"].iter().filter_map(|arm| o.get(*arm)).find_map(|arm| self.parameter(arm, at, seen));
         }
-        // A CALL OF THE PARAMETER'S FIRST ARGUMENT is the parameter followed by whatever the callee appends.
+        // A CALL OF THE PARAMETER'S FIRST ARGUMENT is the parameter followed by whatever the callee appends - when the callee's own returns say it
+        // returns that argument (`calls_helpers.rs`); a callee that turns it into a url (an id handed to a url builder) makes the call an unknown piece.
         if o.get("$call").is_some_and(Value::is_string) {
+            if !self.forwards_first(o, false) {
+                return None;
+            }
             return o.get("$args").and_then(Value::as_array).and_then(|a| a.first()).and_then(|a| self.parameter(a, at, seen));
         }
         let name = o.get("$expr").and_then(Value::as_str).filter(|n| is_name(n))?;
@@ -394,9 +409,16 @@ pub(super) fn load(conn: &Connection, typescript: &HashMap<String, String>) -> r
     Ok(sites)
 }
 
+#[path = "calls_helpers.rs"]
+mod calls_helpers;
+
 #[cfg(test)]
 #[path = "calls_wrapper_tests.rs"]
 mod wrapper_tests;
+
+#[cfg(test)]
+#[path = "calls_helpers_tests.rs"]
+mod helpers_tests;
 
 #[cfg(test)]
 mod tests {

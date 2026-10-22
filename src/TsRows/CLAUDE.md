@@ -129,7 +129,7 @@ An `Fn` tree names its `params` and its `rest` parameter.
 
 - **A namespace's statements are a file's** (`TsTypeRows.mjs::moduleRows`): a class, function or const in `namespace X { .. }` is a row like a top-level one, and every row a namespace declares carries `in_module`; an AMBIENT block (`declare module`, `declare global`, `declare namespace`) yields only its interfaces and aliases.
 
-- **A top-level `X.prototype.m = function` is a `functions` row** with `form: 'prototype-method'`, `name` the assigned text and `target` the declaration a call of `m` resolves to (`TsDeclRows.mjs::prototypeRow`). Also under a top-level `if (!X.prototype.m)` and from `Object.defineProperty(X.prototype, 'm', { value: function })`, targeted through the prototype's type.
+- **A top-level `X.prototype.m = function` is a `functions` row** with `form: 'prototype-method'`, `name` the assigned text and `target` the declaration a call of `m` resolves to (`TsDeclRows.mjs::prototypeRow`). Also under a top-level `if (!X.prototype.m)` and from `Object.defineProperty(X.prototype, 'm', { value: function })`, targeted through the prototype's type. Its body's rows carry the enclosing `if` arm's `branch` (rows 80), which no reader takes for a condition on what the method returns (`gate_curried.rs::definition_guards`).
 
 - **A template literal keeps each hole evaluated** (`$hole_values`, beside `$holes`' source text, rows 41); a string method
   chained on a call keeps the receiver's value (`$receiver_value`, only a string-typed one); a const object of strings read by

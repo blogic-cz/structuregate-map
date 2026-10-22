@@ -80,4 +80,63 @@ Test-Case 'tsrows: a comment in a call chain, after the last member and after a 
     Assert-Line (Invoke-TsRowsQ $made.Db "SELECT 'ctx=' || c.context AS r FROM comments c WHERE c.text LIKE '%ARCHITECTURE END'") 'ctx=Alpha'
 }
 
+
+# (rows 80) A COMMENT INSIDE AN EMPTY CONTAINER IS A ROW (`TsText.mjs::collectComments`): a node with no children - an empty block (a method, arrow, `if` arm, `catch`), object literal, array literal,
+# `switch` body or type literal - holds its comments BETWEEN its braces, and only the trivia before `{` was scanned (`onEdit(_) { // TODO }` was lost). Controls: the comment in an empty
+# class body, interface, call and parameter list, which sit between a named child and the end, and the comment after a template - each found once, 19 comments in all.
+$script:TsRowsCommentsEmpty = @'
+// HEAD
+export class Alpha {
+  onEdit(_: number) { // TODO method
+  }
+  onBlock(_: number) { /* inline block */ }
+  cb = () => { // TODO arrow
+  };
+  run(flag: boolean) {
+    if (flag) { // TODO arm
+    } else { /* else arm */ }
+    try { this.onEdit(1); } catch (e) { // TODO catch
+    }
+    const o = { /* empty object */ };
+    const a = [ /* empty array */ ];
+    switch (flag) { /* empty switch */ }
+    return o && a;
+  }
+}
+export class Beta { /* empty class */ }
+export interface Kind { /* empty interface */ }
+export type Shape = { /* empty literal */ };
+export function f(/* no params */) {}
+export const x = f(/* no args */);
+export const tpl = `a ${1} b`; // after template
+export const rx = /`/; // regex with a quote
+export const last = { a: 1, /* between */ b: 2 }; // END
+'@
+
+Test-Case 'tsrows: a comment inside an empty block, object, array, switch or type literal is a comments row, once' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace @{ 'apps/shop/src/empty.ts' = $script:TsRowsCommentsEmpty }) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'c=' || c.line || ':' || c.text AS r FROM comments c JOIN files f ON f.id = c.file WHERE f.path LIKE '%empty.ts' ORDER BY c.line, c.col")
+    Assert-Line $r 'c=3:// TODO method'
+    Assert-Line $r 'c=5:/* inline block */'
+    Assert-Line $r 'c=6:// TODO arrow'
+    Assert-Line $r 'c=9:// TODO arm'
+    Assert-Line $r 'c=10:/* else arm */'
+    Assert-Line $r 'c=11:// TODO catch'
+    Assert-Line $r 'c=13:/* empty object */'
+    Assert-Line $r 'c=14:/* empty array */'
+    Assert-Line $r 'c=15:/* empty switch */'
+    Assert-Line $r 'c=19:/* empty class */'
+    Assert-Line $r 'c=20:/* empty interface */'
+    Assert-Line $r 'c=21:/* empty literal */'
+    Assert-Line $r 'c=22:/* no params */'
+    Assert-Line $r 'c=23:/* no args */'
+    Assert-Line $r 'c=24:// after template'
+    Assert-Line $r 'c=25:// regex with a quote'
+    Assert-Line $r 'c=26:/* between */'
+    Assert-Line $r 'c=26:// END'
+    Assert-Line (Invoke-TsRowsQ $made.Db "SELECT 'n=' || count(*) || '/' || count(DISTINCT c.line || ':' || c.col) AS r FROM comments c JOIN files f ON f.id = c.file WHERE f.path LIKE '%empty.ts'") 'n=19/19'
+    # The method's comment keeps its declaration.
+    Assert-Line (Invoke-TsRowsQ $made.Db "SELECT 'ctx=' || c.context AS r FROM comments c WHERE c.text = '// TODO method'") 'ctx=Alpha.onEdit'
+}
 }

@@ -22,8 +22,8 @@ const NODE_BUILTINS = new Set(builtinModules);
  * `unresolved_import.case_insensitive_match` so a consumer sees the Windows-only imports apart from the missing ones. Each path segment is
  * looked up in its folder's listing, and a hit that spells the path exactly (resolution failed for another reason) is not one.
  */
-function caseInsensitiveMatch(name, containingFile) {
-  if (!name.startsWith('.')) return false;
+function caseInsensitiveMatch(ts, name, containingFile, options, host, nmDummy) {
+  if (!name.startsWith('.')) return aliasMatch(ts, name, containingFile, options, host, nmDummy);
   const wanted = path.resolve(path.dirname(containingFile), name);
   for (const form of ['', '.ts', '.tsx', '.d.ts', '.js', '.mjs', '/index.ts', '/index.d.ts']) {
     const full = path.normalize(wanted + form);
@@ -40,6 +40,47 @@ function caseInsensitiveMatch(name, containingFile) {
     try { if (statSync(at).isFile()) return true; } catch { /* gone since the listing */ }
   }
   return false;
+}
+
+/**
+ * A NON-RELATIVE SPECIFIER (a `paths` alias such as `@shared/x`) resolves only with case ignored (rows 80): the program's own resolution failed, so it is resolved AGAIN through a host
+ * whose `fileExists` and `directoryExists` compare each path segment ignoring case - the `paths` mapping, `baseUrl` and `node_modules` lookups are the compiler's own, never re-implemented.
+ * It is asked only of a specifier the exact resolution refused, so a hit is a case-only match by definition; a specifier nothing resolves (`version.json`) stays false.
+ */
+const LISTINGS = new Map();
+function actualPath(file) {
+  const full = path.normalize(file);
+  let at = path.parse(full).root;
+  for (const part of full.slice(at.length).split(path.sep).filter((p) => p !== '')) {
+    if (!LISTINGS.has(at)) {
+      let entries;
+      try { entries = readdirSync(at); } catch { entries = null; }
+      LISTINGS.set(at, entries);
+    }
+    const entries = LISTINGS.get(at);
+    if (entries === null) return undefined;
+    const hit = entries.includes(part) ? part : entries.find((e) => e.toLowerCase() === part.toLowerCase());
+    if (hit === undefined) return undefined;
+    at = path.join(at, hit);
+  }
+  return at;
+}
+function aliasMatch(ts, name, containingFile, options, host, nmDummy) {
+  const statOf = (p) => { const real = actualPath(p); try { return real === undefined ? null : statSync(real); } catch { return null; } };
+  const folded = {
+    fileExists: (f) => statOf(f)?.isFile() ?? false,
+    directoryExists: (d) => statOf(d)?.isDirectory() ?? false,
+    readFile: (f) => host.readFile(actualPath(f) ?? f),
+    realpath: (p) => p,
+    getCurrentDirectory: () => host.getCurrentDirectory(),
+    getDirectories: (d) => host.getDirectories?.(actualPath(d) ?? d) ?? [],
+  };
+  try {
+    return !!(ts.resolveModuleName(name, containingFile, options, folded).resolvedModule
+      ?? ts.resolveModuleName(name, nmDummy, options, folded).resolvedModule);
+  } catch {
+    return false;
+  }
 }
 
 // WHAT THE DISK SAID, remembered for the process. The tree cannot change under one run, and the programs of
@@ -166,7 +207,7 @@ export function createProgram(ts, tsconfigPath, nodeModules, diag, noted, checke
       const builtin = name.startsWith('node:') || NODE_BUILTINS.has(name);
       diag.note(builtin ? 'unresolved_node_builtin' : 'unresolved_import',
         builtin ? { module: name, from: containingFile }
-          : { module: name, from: containingFile, case_insensitive_match: caseInsensitiveMatch(name, containingFile) });
+          : { module: name, from: containingFile, case_insensitive_match: caseInsensitiveMatch(ts, name, containingFile, opts, host, nmDummy) });
     }
     return r;
   });
