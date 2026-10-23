@@ -229,7 +229,9 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     if (!(ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name) || ts.isNumericLiteral(prop.name))) return null;
     // PUSHED INTO AN UN-ANNOTATED ARRAY (rows 88): the checker's contextual type is only that array's inferred element type; the type the array takes later answers instead.
     const contextual = checker.getContextualType(prop.parent);
-    const type = pushedInto(climb(prop.parent).n) === null ? contextual : undefined;
+    // (rows 95) so is a value a `then`/`catch` or `map`/`flatMap` callback returns: the checker's type there is inferred from the value itself.
+    const top = climb(prop.parent).n;
+    const type = pushedInto(top) === null && settledBy(top) === null && mappedBy(top) === null ? contextual : undefined;
     const later = type === undefined ? laterTypes(prop.parent) : [];
     if (type === undefined && !later.length) return null;
     const name = prop.name.text;
@@ -293,6 +295,8 @@ export function makeReadRefs(ts, checker, canonicalPath) {
       else if (p !== undefined && ts.isBinaryExpression(p) && (p.right === n || (p.left === n && p.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken))
         && [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(p.operatorToken.kind)) n = p;
       else if (p !== undefined && ts.isConditionalExpression(p) && (p.whenTrue === n || p.whenFalse === n)) n = p;
+      // A SPREAD IN AN ARRAY LITERAL (rows 95): `[...a, ...[{ .. }]]` makes the spread array's elements the outer one's - the level already counted stays.
+      else if (p !== undefined && ts.isSpreadElement(p) && p.expression === n && p.parent !== undefined && ts.isArrayLiteralExpression(p.parent)) n = p.parent;
       else break;
     }
     return { n, levels };
@@ -338,6 +342,11 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     // ASKED BEFORE THE CHECKER: inside a `then` callback its contextual type is the one it INFERRED from this very value, which names no member.
     const settled = settledBy(top);
     if (settled !== null) return down(awaited(typesAt(climb(settled).n, 0, null)), levels);
+    const mapped = mappedBy(top);
+    if (mapped !== null) {
+      const result = typesAt(climb(mapped.call).n, 0, null);
+      return down(mapped.flat ? [...result, ...down(result, 1)] : down(result, 1), levels);
+    }
     const t = checker.getContextualType(top);
     if (t !== undefined) return down([t], levels);
     const fn = returnedFrom(top);
@@ -347,18 +356,33 @@ export function makeReadRefs(ts, checker, canonicalPath) {
    *  `this.rule()` the `Rule` the call's own type awaits. `Promise`'s own method (checked by its declaration), the callback an anonymous function among its
    *  arguments; the call is what is asked. Null otherwise. */
   const settledBy = (n) => {
-    let fn = null;
-    if (n.parent !== undefined && ts.isReturnStatement(n.parent)) {
-      fn = n.parent.parent;
-      while (fn !== undefined && !ts.isFunctionLike(fn)) fn = fn.parent;
-    } else if (n.parent !== undefined && ts.isArrowFunction(n.parent) && n.parent.body === n) fn = n.parent;
-    if (fn === undefined || fn === null || !(ts.isArrowFunction(fn) || ts.isFunctionExpression(fn))) return null;
+    const fn = callbackOf(n);
+    if (fn === null) return null;
     const call = fn.parent;
     if (call === undefined || !ts.isCallExpression(call) || !call.arguments.includes(fn) || !ts.isPropertyAccessExpression(call.expression)) return null;
     const access = call.expression;
     const promised = (access.name.text === 'then' || access.name.text === 'catch')
       && (checker.getSymbolAtLocation(access.name)?.declarations ?? []).some((d) => d.parent !== undefined && ts.isInterfaceDeclaration(d.parent) && d.parent.name.text === 'Promise');
     return promised ? call : null;
+  };
+  /** A VALUE AN `Array` `map`/`flatMap` CALLBACK RETURNS is an element of what the call makes (rows 95): `list.map((e) => this.rule(e))` typed `Rule[]` makes `rule()` a
+   *  `Rule`; a `flatMap` callback may return an element or an array of them, so both are offered (`flat`) and the property lookup keeps the one that declares it.
+   *  `Array`'s own method (checked by its declaration), the callback an anonymous function among the arguments. Null otherwise. */
+  const mappedBy = (n) => {
+    const fn = callbackOf(n);
+    const call = fn?.parent;
+    if (call === undefined || !ts.isCallExpression(call) || !call.arguments.includes(fn) || !ts.isPropertyAccessExpression(call.expression)) return null;
+    if (!arrayMethod(call.expression, ['map', 'flatMap'])) return null;
+    return { call, flat: call.expression.name.text === 'flatMap' };
+  };
+  /** The anonymous function a value is returned from - a `return` in its body, or an arrow's concise body - or null. */
+  const callbackOf = (n) => {
+    let fn = null;
+    if (n.parent !== undefined && ts.isReturnStatement(n.parent)) {
+      fn = n.parent.parent;
+      while (fn !== undefined && !ts.isFunctionLike(fn)) fn = fn.parent;
+    } else if (n.parent !== undefined && ts.isArrowFunction(n.parent) && n.parent.body === n) fn = n.parent;
+    return fn !== undefined && fn !== null && (ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) ? fn : null;
   };
   /** What a promise type settles to: each arm's awaited type, the checker's own `getAwaitedType`. */
   const awaited = (types) => types.flatMap((t) => (t.isUnion() ? t.types : [t])).flatMap((t) => {
@@ -444,5 +468,27 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     return found;
   }
 
-  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember, resolveArg, targetLine, fieldTarget };
+  /**
+   * A HOLE THAT NAMES AN ENUM MEMBER (rows 97, #108): `${Hue[this.hue]}` indexes the enum by a VALUE - TypeScript's reverse mapping - so it yields one of the
+   * member NAMES, and only a numeric member has one. `{name, file, line, kind: 'enum_name', names}` - the enum's declaration (its name line, as every target) and
+   * the names it can yield, in declaration order across a merged enum - or null: a string index (`Hue['Red']`) is the member itself, no name lookup.
+   */
+  function enumNameHole(expr) {
+    let e = expr;
+    while (passes(e)) e = e.expression;
+    if (!ts.isElementAccessExpression(e)) return null;
+    let symbol = checker.getSymbolAtLocation(e.expression);
+    if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+    if (symbol === undefined || (symbol.flags & ts.SymbolFlags.Enum) === 0) return null;
+    // A STRING KEY - every arm of its type string-like - reads the member itself, no name lookup.
+    const key = checker.getTypeAtLocation(e.argumentExpression);
+    if ((key.isUnion() ? key.types : [key]).every((t) => (t.flags & ts.TypeFlags.StringLike) !== 0)) return null;
+    const decls = (symbol.declarations ?? []).filter((d) => ts.isEnumDeclaration(d));
+    if (!decls.length) return null;
+    const names = decls.flatMap((d) => d.members.filter((m) => typeof checker.getConstantValue(m) === 'number').map((m) => (ts.isIdentifier(m.name) || ts.isStringLiteral(m.name) ? m.name.text : m.name.getText())));
+    // No numeric member, no reverse mapping: a string enum yields no names, so the hole names no enum.
+    return names.length ? { name: symbol.getName(), ...at(decls[0]), kind: 'enum_name', names } : null;
+  }
+
+  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember, resolveArg, targetLine, fieldTarget, enumNameHole };
 }

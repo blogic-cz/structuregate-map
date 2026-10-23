@@ -88,10 +88,24 @@ function enclosingLabel(ts, sf, pos) {
  * A bare `'en'` says nothing. `'en'` as the `locale` property of a call to `setLanguage` says what it is,
  * and `context`/`property` are how that is published without anyone having to re-read the source.
  */
-export function collectStrings(ts, store, node, owner, propName, evalNode, fieldTarget) {
+export function collectStrings(ts, store, node, owner, propName, evalNode, fieldTarget, enumNameHole) {
   const text = (n) => n.getText();
   // THE MEMBER AN OBJECT LITERAL'S VALUE FILLS (rows 81, #104): `target` is `{name, file, line}` where the checker says the property is declared, replacing the empty text a
   // literal in a property carries (`TsReadRefs.mjs::fieldTarget`). A checker refusal leaves the row without one, never without the row.
+  // A HOLE THAT NAMES AN ENUM MEMBER (rows 97, #108): `hole_refs` is one entry per hole - the enum a `${Hue[x]}` looks a member NAME up in, else null - and when
+  // EVERY hole is one, `expands` lists each string the literal can build (`palette.Red.caption`, `palette.Blue.caption`), in the enums' member order.
+  // A checker refusal leaves the row without them, never without the row.
+  const enumHoles = (n, parts) => {
+    try {
+      const refs = enumNameHole ? n.templateSpans.map((span) => enumNameHole(span.expression)) : [];
+      if (!refs.some((r) => r !== null)) return {};
+      const holeRefs = refs.map((r) => (r === null ? null : { name: r.name, file: r.file, line: r.line, kind: r.kind }));
+      if (refs.some((r) => r === null) || parts.length !== refs.length + 1) return { hole_refs: holeRefs };
+      let built = [parts[0]];
+      refs.forEach((r, i) => { built = built.flatMap((head) => r.names.map((name) => head + name + parts[i + 1])); });
+      return { hole_refs: holeRefs, expands: built };
+    } catch { return {}; }
+  };
   const field = (n) => {
     try { const target = fieldTarget ? fieldTarget(n) : null; return target ? { target } : {}; } catch { return {}; }
   };
@@ -115,7 +129,7 @@ export function collectStrings(ts, store, node, owner, propName, evalNode, field
       const joined = joinedPrefix(ts, n, evalNode);
       if (joined && parts.length) parts[0] = joined + parts[0];
       store.add('template_literals', 'tl', {
-        ...owner, parts, holes: v.$holes ?? [],
+        ...owner, parts, holes: v.$holes ?? [], ...enumHoles(n, parts),
         // THE MEMBER IT FILLS (rows 89): a template in an object literal's property names it as a string there does (`field`).
         context: parentKind(ts, n), property: propertyContext(ts, n, propName), ...field(n), ...locationOf(n),
       });

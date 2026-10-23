@@ -162,6 +162,8 @@ Test-Case 'tsrows: a function in an object literal names the member of its conte
 # typed `HueRule`, and a const that only another const aliases before the return - each object's literal and function name the member they fill, as with an annotation.
 # THE CONTROL: a const pushed into another un-annotated array takes that array's INFERRED literal type, whose `Message` is the other literal's own property - no member, so none.
 $script:TsFieldLater = @{
+    # `flatMap` is ES2019's: the default ES5 lib has no such `Array` method for the checker to name.
+    'apps/shop/tsconfig.app.json' = '{"compilerOptions":{"strict":true,"target":"es2020"},"include":["src/**/*.ts"]}'
     'apps/shop/src/rule.ts' = "export interface HueRule {`n" +
         "  Field: string;`n" +
         "  Message: string | (() => string);`n" +
@@ -214,6 +216,11 @@ $script:TsFieldLater = @{
         "  bySettings() { const rule = this.plainRule(); rule.Message = 'hue.tau.settings'; return rule; }`n" +
         "  loosePromise() { return this.settings().then(() => this.plainLoose()); }`n" +
         "  plainLoose() { return { Field: 'upsilon', Message: 'hue.upsilon.loose' }; }`n" +
+        "  mapped(): HueRule[] { return ['a'].map((x) => this.oneRule(x)); }`n" +
+        "  oneRule(x: string) { return { Field: x, Message: 'hue.phi.mapped' }; }`n" +
+        "  flat(): HueRule[] { return ['a'].flatMap((x) => [{ Field: x, Message: 'hue.chi.flat' }]); }`n" +
+        "  flatOne(): HueRule[] { return ['a'].flatMap((x) => ({ Field: x, Message: 'hue.chi.one' })); }`n" +
+        "  spread(): HueRule[] { const base = [{ Field: 'psi', Message: 'hue.psi.base' }]; return [...base, ...[{ Field: 'omega', Message: 'hue.omega.spread' }]]; }`n" +
         "  loose(): number {`n" +
         "    const free = { Field: 'eps', Message: 'hue.eps.loose' };`n" +
         "    const other = [{ Field: 'zeta', Message: 'hue.zeta.loose' }];`n" +
@@ -257,5 +264,11 @@ Test-Case 'tsrows: a literal in an un-annotated const names the member of the ty
     Assert-Line $r 'hue.sigma.plain=Message@3:rule.ts:tm Message@3'
     Assert-Line $r 'sigma=Field@2:rule.ts:tm Field@2'
     Assert-Line $r 'hue.upsilon.loose=-@-:-:-'
+    # (rows 95) RETURNED FROM A `map`/`flatMap` CALLBACK, an element of what the call takes - an array or one element from `flatMap` - and SPREAD into a returned array.
+    Assert-Line $r 'hue.phi.mapped=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'hue.chi.flat=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'hue.chi.one=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'hue.psi.base=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'hue.omega.spread=Message@3:rule.ts:tm Message@3'
 }
 }
