@@ -43,7 +43,9 @@ derives the graph from the payload, DROPS it, and only then runs the closure ove
 both put the exe at many GB. `Store::from_payload` is a test fixture's door only. **A held list or object cell is
 rebuilt from its node rows when a pass first reads it** (`Cell::Nodes`, `cells::load`); one never read stays rows and is never rebuilt. A pass
 must not collect every `ast` into a map up front: map ids to ROWS and read on lookup; a scan that asks something of
-EVERY row's tree reads it with `Row::peek`, which keeps nothing decoded, and checks the id before it asks. The store
+EVERY row's tree reads it with `Row::peek`, which keeps nothing decoded, and checks the id before it asks - one scan that
+asked `get("ast")` of every expression and only then its id (`gate_curried::definition_guards`) held every tree of the
+workspace decoded to the release, nearly half again the closure's peak. The store
 is RELEASED before `key_reach` (`Store::release`): nothing after reads the rows, and holding them was most of the peak.
 **WHAT THE CLOSURE HOLDS IS MEASURED, NOT GUESSED** (a metrics build: `trace/CLAUDE.md`, "Memory by structure"). Measured on a
 large workspace, the peak was the store, and most of the store was the WIDTH of its cells: so a held cell is 16 bytes, a
