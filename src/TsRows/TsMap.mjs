@@ -342,9 +342,12 @@ async function main() {
   //     un-annotated array, and a property value whose object is typed later (`TsExpr/TsReadRefs.mjs::climb`, `typesAt`, `propertyTypes`).
   // 91: the climb crosses `&&`/`||`/`??` operands and a ternary's arms, and a value returned from a function with no declared return type takes what its calls in the same file take
   //     (`TsExpr/TsReadRefs.mjs::returnedFrom`, `callersOf`).
+  // 92: `io.type` is the type the member's `members` row has - inferred for an un-annotated property, a setter's parameter type - not the annotation alone (`TsDecls/TsClassRows.mjs`).
+  // 93: a tag several components match in a template NO component owns is `selector_ambiguous_without_scope`, not `selector_ambiguous_in_scope` (`TsDerive/TsModuleScope.mjs`).
+  // 94: a value a `Promise` `then`/`catch` callback returns takes what the call's own type awaits (`TsExpr/TsReadRefs.mjs::settledBy`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 91, build: args.build,
+    config: config.file, data: config.data, rows: 94, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

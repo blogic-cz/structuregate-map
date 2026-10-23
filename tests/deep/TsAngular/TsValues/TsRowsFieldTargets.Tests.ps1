@@ -206,6 +206,14 @@ $script:TsFieldLater = @{
         "  private implied() { return [this.strict && { Field: 'omicron', Message: 'hue.omicron.implied' }, { Field: 'pi', Message: 'hue.pi.implied' }]; }`n" +
         "  wire(): void { checkAll(this.implied() as HueRule[]); checkAll(this.implied()); }`n" +
         "  private orphan() { return [{ Field: 'rho', Message: 'hue.rho.orphan' }]; }`n" +
+        "  settings(): Promise<Record<string, string>> { return Promise.resolve({}); }`n" +
+        "  validation(): Promise<HueRule> {`n" +
+        "    return this.settings().then((r) => { if (r['on']) { return this.bySettings(); } return this.plainRule(); }, () => this.plainRule());`n" +
+        "  }`n" +
+        "  plainRule() { return { Field: 'sigma', Message: 'hue.sigma.plain' }; }`n" +
+        "  bySettings() { const rule = this.plainRule(); rule.Message = 'hue.tau.settings'; return rule; }`n" +
+        "  loosePromise() { return this.settings().then(() => this.plainLoose()); }`n" +
+        "  plainLoose() { return { Field: 'upsilon', Message: 'hue.upsilon.loose' }; }`n" +
         "  loose(): number {`n" +
         "    const free = { Field: 'eps', Message: 'hue.eps.loose' };`n" +
         "    const other = [{ Field: 'zeta', Message: 'hue.zeta.loose' }];`n" +
@@ -244,5 +252,10 @@ Test-Case 'tsrows: a literal in an un-annotated const names the member of the ty
     Assert-Line $r 'hue.omicron.implied=Message@3:rule.ts:tm Message@3'
     Assert-Line $r 'hue.pi.implied=Message@3:rule.ts:tm Message@3'
     Assert-Line $r 'hue.rho.orphan=-@-:-:-'
+    # (rows 94) SETTLED BY A PROMISE CALLBACK: `plainRule()` is returned from `then` callbacks (and through `bySettings`' const) in a method typed `Promise<HueRule>`,
+    # so its object is the `HueRule` the call awaits. THE CONTROL: a promise nothing types (`loosePromise`, no return type, no caller) gives none.
+    Assert-Line $r 'hue.sigma.plain=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'sigma=Field@2:rule.ts:tm Field@2'
+    Assert-Line $r 'hue.upsilon.loose=-@-:-:-'
 }
 }

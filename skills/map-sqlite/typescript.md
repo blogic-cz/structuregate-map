@@ -130,7 +130,8 @@ Beside the shared tables it adds the FRAMEWORK tables:
   joins `pipes.id`; `external` (with `class`) is a library pipe (`date` through `CommonModule`); `ambiguous` is two in scope
   (Angular warns and takes the last registered, so none is picked); none of them, no pipe of that name in scope - a
   `diagnostics` row `pipe_unresolved_in_scope` (`reason`) or `pipe_ambiguous_in_scope`. A translate pipe's `i18n_refs` row
-  reaches it through `i18n_refs.expression`.
+  reaches it through `i18n_refs.expression`. A TAG several components match is `selector_ambiguous_in_scope` (`node`, `tag`,
+  `candidates`) where a host's scope sees them all, `selector_ambiguous_without_scope` in a template no component owns (rows 93).
 * **`classes.extends`** is `{text, name, file, external, line, id, type_args}`: `text` as written, `name`/`file`/`line` the
   declaration the checker reached (alias and barrel followed), `id` its `classes` row (none for a library class), and
   `type_args` each type argument the same way (`extends Base<Order>`: Order's `id`), nested arguments under their own.

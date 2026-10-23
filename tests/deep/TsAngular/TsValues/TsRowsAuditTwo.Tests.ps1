@@ -16,7 +16,7 @@ function New-TsAuditTwoTree {
         'apps/shop/src/audit.ts' = @'
 import { Component, Directive, EventEmitter, Input, Output } from '@angular/core';
 @Directive({ selector: '[demoMask]', standalone: true })
-export class DemoMaskDirective { @Input() demoMask = ''; @Output() demoDone = new EventEmitter<string>(); }
+export class DemoMaskDirective { @Input() demoMask = ''; @Output() demoDone = new EventEmitter<string>(); @Input() set demoTone(v: number) { void v; } }
 @Directive({ selector: '[demoNote]', standalone: true })
 export class DemoNoteDirective {
   @Input() demoNote = '';
@@ -71,6 +71,16 @@ Test-Case 'tsrows: an output counts the event bindings that name it' {
     Assert-Line $r 'out=noted|1'
     Assert-Line $r 'out=quiet|0'
     Assert-Line $r 'out=demoDone|0'
+}
+
+# (rows 92) `io.type` IS THE MEMBER'S TYPE, as its `members` row has it: an un-annotated `@Input() demoNote = ''` is `string`, an `@Output()` holding
+# `new EventEmitter<string>()` is `EventEmitter<string>`, and a setter input is its parameter's type. It read the annotation alone, empty for all three.
+Test-Case 'tsrows: an input or output is typed as its member is, annotated or not' {
+    $made = New-TsRowsDb (New-TsAuditTwoTree) -Shared
+    $r = Invoke-TsRowsQ $made.Db "SELECT 'ty=' || member || '|' || coalesce(type, '-') AS r FROM io WHERE class IN (SELECT id FROM classes WHERE name LIKE 'Demo%')"
+    Assert-Line $r 'ty=demoNote|string'
+    Assert-Line $r 'ty=noted|EventEmitter<string>'
+    Assert-Line $r 'ty=demoTone|number'
 }
 
 # THE ORPHAN TEMPLATE IS NO COMPONENT: `orphanFlag` is read by the card's template and by a template no component names, and one
