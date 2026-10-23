@@ -288,6 +288,9 @@ impl Before {
         }
         let mut texts: BTreeMap<String, Option<(BTreeSet<String>, BTreeSet<String>)>> =
             rewrites.paths.iter().map(|p| (p.clone(), None)).collect();
+        // A MAP BUILT WITH `--map-no-text` HOLDS NO TEXT TO COMPARE, so every affected path stays `None` and `moved`
+        // answers "no text was held": the closure is derived again on every partial run that rewrites a file. The same
+        // rows as keeping it, only slower (`rows/cells/text.rs`).
         // ONE SCAN OF `file_text` for every path: it is a virtual table, and `path = ?` reads every document in it.
         if !rewrites.paths.is_empty() && schema::existing_columns(db, "file_text").map(|c| !c.is_empty()).unwrap_or(false) {
             let marks = vec!["?"; rewrites.paths.len()].join(",");

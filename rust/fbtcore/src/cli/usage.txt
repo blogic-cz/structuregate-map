@@ -112,6 +112,15 @@ structuregate — structure rules, enforced where they cannot be skipped.
   --map-row-fts         also build a full-text index over every row of the deep map (`row_fts` +
                         `row_map`), for "which row anywhere mentions this word". Off by default:
                         close to a million rows on a large map, and nothing in a build reads it.
+  --map-no-text         with --map-sqlite: do NOT store the source of the files (`file_text` and its
+                        FTS5 index, most of a code-heavy map's bytes); every other table is the same.
+                        --map-query --cat reads the file from disk under the recorded roots, --text
+                        fails saying the map holds no text (use --grep / --find over the rows), and a
+                        partial run derives the render closure again where it would have compared
+                        text. A switch is made true of an existing map at once: ON drops the stored
+                        text, OFF rebuilds so every file is read and stored again. Recorded in `_meta`
+                        `options:text`. It is a flag of the map run: pass it where --map-sqlite is
+                        (`-GateArgs`, `StructureGateArgs`); the gate run ignores it.
   --map-atlas <dir>     also write one navigable overview of the finished map into <dir> —
                         atlas.json (ids, so it joins back) and atlas.md (the reading). Projects,
                         NgModule areas, every route with what it can reach, and the boundaries

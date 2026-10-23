@@ -49,9 +49,9 @@ fn a_wrapper_over_a_derived_local_yields_a_row_per_caller_and_none_for_its_own_b
     rows("locals", vec![json!({"id": "l:1", "file": "f:1", "member": "m:1", "name": "q", "line": 3, "value": ternary()})]);
     let primitive = json!({"file": "node_modules/@angular/common/http/index.d.ts", "owner": "HttpClient", "name": "get"});
     rows("calls", vec![
-        json!({"id": "call:1", "file": "f:1", "line": 4, "member": "m:1", "target_id": "", "target": primitive,
+        json!({"id": "call:1", "file": "f:1", "line": 4, "member": "m:1", "callee_id": "", "target": primitive,
             "args": [{"$expr": "q"}], "arg_params": []}),
-        json!({"id": "call:2", "file": "f:1", "line": 9, "member": "m:2", "target_id": "m:1",
+        json!({"id": "call:2", "file": "f:1", "line": 9, "member": "m:2", "callee_id": "m:1",
             "args": [{"$expr": "this.http"}, "/orders/list", {"$expr": "p"}], "arg_params": []}),
     ]);
     let sites = load(&conn, &files_of(&conn, "typescript").unwrap()).unwrap();

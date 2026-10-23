@@ -73,9 +73,9 @@ fn a_call_site_reads_the_helper_from_the_rows() {
         "value": call("createQueryUrl", json!({"$template": ["", "/calculations/count"], "$hole_values": [{"$expr": "this.base"}]}))})]);
     let primitive = json!({"file": "node_modules/@angular/common/http/index.d.ts", "owner": "HttpClient", "name": "get"});
     rows("calls", vec![
-        json!({"id": "call:1", "file": "f:1", "line": 4, "member": "m:1", "target_id": "", "target": primitive, "args": [{"$expr": "url"}], "arg_params": []}),
-        json!({"id": "call:2", "file": "f:1", "line": 9, "member": "m:2", "target_id": "m:1", "args": [{"$expr": "url"}], "arg_params": []}),
-        json!({"id": "call:3", "file": "f:1", "line": 12, "member": "m:4", "target_id": "m:1",
+        json!({"id": "call:1", "file": "f:1", "line": 4, "member": "m:1", "callee_id": "", "target": primitive, "args": [{"$expr": "url"}], "arg_params": []}),
+        json!({"id": "call:2", "file": "f:1", "line": 9, "member": "m:2", "callee_id": "m:1", "args": [{"$expr": "url"}], "arg_params": []}),
+        json!({"id": "call:3", "file": "f:1", "line": 12, "member": "m:4", "callee_id": "m:1",
             "args": [{"$template": ["", "/get-vinculants"], "$hole_values": [call("getBase", json!({"$expr": "id"}))]}], "arg_params": []}),
     ]);
     let sites = load(&conn, &files_of(&conn, "typescript").unwrap()).unwrap();
@@ -84,4 +84,55 @@ fn a_call_site_reads_the_helper_from_the_rows() {
     assert!(urls.contains(&("call:2", "*/calculations/count")), "{urls:?}");
     // `vinculants` hands an id to a url builder: not a wrapper either, and its own call keeps the suffix.
     assert!(urls.contains(&("call:3", "*/get-vinculants")), "{urls:?}");
+}
+
+/// `createQueryUrl(url, parameter)`: `if (..) { const parsedUrl = new URL(url); return parsedUrl.toString(); } return url + stringify(parameter);`
+fn url_builder(first: Value, returns: Vec<Value>) -> World {
+    let mut w = world();
+    w.returns.insert("fn:1".into(), returns);
+    w.locals.insert("fn:1".into(), vec![("parsedUrl".into(), 5, json!({"$new": "URL", "$args": [first, {"$expr": "base"}]}))]);
+    w
+}
+
+fn to_string_of_local() -> Value {
+    json!({"$call": "parsedUrl.toString", "$args": [], "$owner": "URL", "$target": {"name": "toString", "file": "/lib/lib.dom.d.ts"}})
+}
+
+fn concat(operands: Vec<Value>) -> Value {
+    json!({"$concat": operands})
+}
+
+#[test]
+fn a_concatenation_opening_with_the_argument_and_a_url_object_made_of_it_hand_it_back() {
+    let url = json!({"$expr": "url"});
+    let stringify = json!({"$call": "stringify", "$args": [{"$expr": "parameter"}], "$target": target("stringify")});
+    let both = vec![to_string_of_local(), concat(vec![url.clone(), stringify.clone()])];
+    let w = url_builder(url.clone(), both.clone());
+    // A caller's url folds to its first argument (the query is cut), and a wrapper's base reads through it.
+    assert_eq!(finished(&w.url(&call("createQueryUrl", json!("/x/y")), &at())), "/x/y");
+    assert_eq!(w.base(&call("createQueryUrl", url.clone()), &at()).as_deref(), Some("url"));
+    // A longer chain nests to the left: its first operand is still the argument; a query's own text is a tail.
+    let chain = concat(vec![concat(vec![url.clone(), json!("?x=")]), stringify.clone()]);
+    assert_eq!(url_builder(url.clone(), vec![chain]).base(&call("createQueryUrl", url.clone()), &at()).as_deref(), Some("url"));
+    // `.href` of the same object is the same url.
+    let href = json!({"$expr": "parsedUrl.href"});
+    assert_eq!(url_builder(url.clone(), vec![href]).base(&call("createQueryUrl", url.clone()), &at()).as_deref(), Some("url"));
+    // THE CONTROLS: every return must forward. One that does not (`/fixed`) is no helper.
+    let mut one_bad = both.clone();
+    one_bad.push(json!("/fixed"));
+    assert_eq!(url_builder(url.clone(), one_bad).base(&call("createQueryUrl", url.clone()), &at()), None);
+    // A concatenation that OPENS with something else, or that appends path text of its own, changes the url.
+    let opens_elsewhere = concat(vec![stringify.clone(), url.clone()]);
+    assert_eq!(url_builder(url.clone(), vec![opens_elsewhere]).base(&call("createQueryUrl", url.clone()), &at()), None);
+    let path = concat(vec![url.clone(), json!("/orders"), stringify]);
+    assert_eq!(url_builder(url.clone(), vec![path]).base(&call("createQueryUrl", url.clone()), &at()), None);
+    // A URL object made of something other than the first parameter, a receiver that is no `URL`, and a local the callee never held.
+    let other = url_builder(json!({"$expr": "other"}), vec![to_string_of_local()]);
+    assert_eq!(other.base(&call("createQueryUrl", url.clone()), &at()), None);
+    let mut foreign = url_builder(url.clone(), vec![to_string_of_local()]);
+    foreign.returns.insert("fn:1".into(), vec![json!({"$call": "parsedUrl.toString", "$args": [], "$owner": "Buffer"})]);
+    assert_eq!(foreign.base(&call("createQueryUrl", url.clone()), &at()), None);
+    let mut none = url_builder(url.clone(), vec![to_string_of_local()]);
+    none.locals.clear();
+    assert_eq!(none.base(&call("createQueryUrl", url), &at()), None);
 }

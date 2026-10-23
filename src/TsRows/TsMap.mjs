@@ -317,9 +317,16 @@ async function main() {
   //     with an empty arm (`[]`, `null`, `undefined`) is the other arm, and two lists of one element are one value; the `as` alias of `a && b` is `b`; a chain goes on past a union step whose arms all declare it as ONE type (the step keeps no `target`).
   //     `routes.also_loaded_by` lists every other route loading a root (a remote's `loadRemoteModule`, a second in-app loader), `parent_route` staying the one in-app loader (`TsDerive/TsRouteTree.mjs`). An `inject(TemplateRef)` in a CONSTRUCTOR body
   //     makes the directive structural (`TsExpr/TsInjects.mjs`). The plain half (`ROWS_VERSION` 8): a class EXPRESSION's `classes` row has `expression`, and a `RegExp` construction over a literal (`/x/g`) is a call row with the literal's pattern and flags.
+  // 81: a call's declaration is found by its PLACE, whatever it is. EVERY in-tree call `target` carries `line` (the checker's declaration, an overload set its implementation) and `target_id` is the row AT that file, line and
+  //     name - a function, a method, a class, a local, a module const, an object-literal or type member - never a same-named declaration (a bare `getAmounts(..)` over a local `const getAmounts` was bound to a same-named METHOD
+  //     of the class). A property that only names a value (`{ x }`, `{ y: x }`) is the declaration itself: `target_id` is its `shape_members` row and `target.follow` the place of the value it names. `calls.callee_id` is the
+  //     callable that RUNS (a function, method or class row; through `follow` for such a property) - what `arg_params`, the http pass, the dynamic-render creators and `key_literals` read, as they read `target_id` before
+  //     (`TsRefs.mjs::rollupRefIds`, `TsExpr/TsReadRefs.mjs::targetLine`). The http pass reads a helper that hands its url back through a `+` or a `new URL(url)` too (rust, `rows/http/calls_helpers.rs`).
+  //     #104: a string or number literal that is the value of an object literal's property has `target` `{name, file, line}` (the member the checker's contextual type declares; one place, else none) and `target_id` (`TsText.mjs::collectStrings`, `TsExpr/TsReadRefs.mjs::fieldTarget`, `TsRefs.mjs::rollupRefIds`).
+  //     `target_id` is only ever the declaration's OWN row (`owner_file` = `file`): a library member, which only a computed type's copy in another file carries, keeps its `target` and has no id (`TsRefs.mjs::rollupRefIds`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 80, build: args.build,
+    config: config.file, data: config.data, rows: 81, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

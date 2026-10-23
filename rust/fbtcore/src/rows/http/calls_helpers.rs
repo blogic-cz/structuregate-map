@@ -1,11 +1,16 @@
-//! A CALL THAT HANDS ITS FIRST ARGUMENT BACK as the url it extends (`calls.rs`, rows 80).
+//! A CALL THAT HANDS ITS FIRST ARGUMENT BACK as the url it extends (`calls.rs`, rows 80, 81).
 //!
 //! `createQueryUrl(url, params)` returns `` `${url}${query}` ``: its result IS the url its caller handed in, with an unknown
 //! tail the url never carries (`finished` cuts a query), so a wrapper's url reads through it and a caller's url folds to its
 //! first argument. `this.getBase(productTypeID)` does not: the parameter is an id the helper turns into a url, and reading
 //! the call as the parameter made the url `*` and lost the literal suffix written after it. WHICH it is comes from the
-//! callee's OWN `returns`, found by the call's `$target` (file and name) - never from the name: every return of the one
-//! declaration there must be its first parameter, or a template that opens with it and has no other text.
+//! callee's OWN `returns`, found by the call's `$target` (file and name) - never from the name: EVERY return of the one
+//! declaration there must hand the first parameter back, in one of these forms (rows 81 added the last two):
+//!   * the parameter itself, or a template that opens with it and has no text of its own;
+//!   * a `+` concatenation (`$concat`) whose first operand is the parameter and whose tail is no path text of its
+//!     own - an unknown piece (`url + stringify(p)`), or text that starts a query (`?`, `&`, `#`): `url + '/orders'` changes the url;
+//!   * the `toString()` or `href` of a LOCAL of the callee that is `new URL(<the parameter>, ..)` (`const parsedUrl = new URL(url);
+//!     return parsedUrl.toString();`) - the receiver found by the checker's `$owner` (`URL`), the local by the callee's own `locals`.
 //!
 //! A call with no `$target` at all (a value the checker did not resolve) keeps the reading it always had - the parameter
 //! as the base - where the CALLER's fold takes only a call it resolved. A `$target` that names no row of the tree
@@ -57,18 +62,75 @@ impl World {
         };
         let Some([id]) = self.callees.get(&(file.replace('\\', "/"), name.to_string())).map(Vec::as_slice) else { return false };
         let Some(first) = self.params.get(id).and_then(|p| p.iter().find(|n| *n != "this")) else { return false };
-        self.returns.get(id).is_some_and(|rs| !rs.is_empty() && rs.iter().all(|r| begins_with(r, first)))
+        self.returns.get(id).is_some_and(|rs| !rs.is_empty() && rs.iter().all(|r| self.hands_back(id, r, first)))
+    }
+
+    /// Does this return of the callable `id` hand its parameter `first` back (see the module doc)?
+    fn hands_back(&self, id: &str, value: &Value, first: &str) -> bool {
+        if begins_with(value, first) || self.url_of(id, value, first) {
+            return true;
+        }
+        let mut operands = vec![];
+        flatten(value, &mut operands);
+        operands.len() > 1 && (begins_with(operands[0], first) || self.url_of(id, operands[0], first)) && query_tail(operands[1..].iter().copied())
+    }
+
+    /// `parsedUrl.toString()` / `parsedUrl.href` over a local the callable holds only as `new URL(first, ..)`.
+    fn url_of(&self, id: &str, value: &Value, first: &str) -> bool {
+        let Value::Object(o) = value else { return false };
+        let local = match o.get("$call").and_then(Value::as_str) {
+            Some(call) if o.get("$owner").and_then(Value::as_str) == Some("URL") => call.strip_suffix(".toString"),
+            Some(_) => None,
+            None => o.get("$expr").and_then(Value::as_str).and_then(|e| e.strip_suffix(".href")),
+        };
+        let Some(name) = local.filter(|n| is_name(n)) else { return false };
+        let held: Vec<&Value> = self.locals.get(id).into_iter().flatten().filter(|(n, _, _)| n == name).map(|(_, _, v)| v).collect();
+        let made_of_first = |v: &Value| {
+            v.get("$new").and_then(Value::as_str) == Some("URL")
+                && v.get("$args").and_then(Value::as_array).and_then(|a| a.first()).is_some_and(|a| begins_with(a, first))
+        };
+        !held.is_empty() && held.into_iter().all(made_of_first)
     }
 }
 
-/// `first`, or `` `${first}${..}` `` with no text of its own beyond the holes.
+fn is_first(v: &Value, first: &str) -> bool {
+    v.get("$expr").and_then(Value::as_str) == Some(first)
+}
+
+/// `first`, or `` `${first}${..}` `` with no text of its own beyond the holes (text after it is a path, or a query a template cannot be told from: `${url}?${q}` stays no helper).
 fn begins_with(value: &Value, first: &str) -> bool {
-    let is_first = |v: &Value| v.get("$expr").and_then(Value::as_str) == Some(first);
     let Value::Object(o) = value else { return false };
     match (o.get("$template"), o.get("$hole_values")) {
         (Some(Value::Array(parts)), Some(Value::Array(holes))) => {
-            parts.iter().all(|p| p.as_str() == Some("")) && holes.first().is_some_and(is_first)
+            parts.iter().all(|p| p.as_str() == Some("")) && holes.first().is_some_and(|h| is_first(h, first))
         }
-        _ => is_first(value),
+        _ => is_first(value, first),
     }
+}
+
+/// The operands of a `+` chain in source order, a nested chain flattened into its place (`(a + b) + c`).
+fn flatten<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
+    match value.get("$concat") {
+        Some(Value::Array(operands)) => operands.iter().for_each(|o| flatten(o, out)),
+        _ => out.push(value),
+    }
+}
+
+/// What follows the url adds no PATH to it: nothing, an unknown piece, or text that starts a query. The first literal text decides - what
+/// comes after a query is the query's - and a template's own text before its first hole is that literal. `rest` is a template's text
+/// pieces after the url's hole, or a chain's operands after its first.
+fn query_tail<'a>(rest: impl IntoIterator<Item = &'a Value>) -> bool {
+    let starts_query = |s: &str| s.starts_with(['?', '&', '#']);
+    for piece in rest {
+        match piece {
+            Value::String(s) if s.is_empty() => {}
+            Value::String(s) => return starts_query(s),
+            Value::Object(o) => {
+                let text = o.get("$template").and_then(Value::as_array).and_then(|p| p.first()).and_then(Value::as_str);
+                return text.filter(|t| !t.is_empty()).is_none_or(|t| starts_query(t));
+            }
+            _ => return true,
+        }
+    }
+    true
 }

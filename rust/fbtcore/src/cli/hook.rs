@@ -31,7 +31,7 @@ pub fn run(event: &str, out: &mut Out) -> i64 {
         return 0;
     }
     let reply = match event {
-        "session-start" => Some(session_start(&maps)),
+        "session-start" => Some(session_start(&maps, root)),
         "pre-tool-use" => pre_tool_use(&input, &maps),
         _ => None,
     };
@@ -110,15 +110,23 @@ fn cached(root: &Path) -> Option<Vec<(String, i64)>> {
     maps.iter().all(|(rel, _)| root.join(rel).is_file()).then_some(maps)
 }
 
-fn session_start(maps: &[(String, i64)]) -> Value {
+fn session_start(maps: &[(String, i64)], root: &Path) -> Value {
     let first = &maps[0].0;
+    // A MAP BUILT WITH `--map-no-text` HAS NO TEXT TO SEARCH: the nudge does not send a model to a lens that fails.
+    let stored = rusqlite::Connection::open_with_flags(root.join(first), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_or(true, |db| crate::rows::text::held(&db));
+    let full_text = if stored {
+        format!("`buildtools/structuregate --map-query {first} --text \"<phrase>\"`: full-text over the code")
+    } else {
+        format!("`buildtools/structuregate --map-query {first} --grep \"<phrase>\"`: a phrase in the rows (no source text in this map; `--cat <file>` reads one from disk)")
+    };
     let listed: Vec<String> = maps.iter().take(5).map(|(rel, n)| format!("`{rel}` ({n} files)")).collect();
     let text = format!(
         "This repository has structuregate code map(s): {}. Each holds every declaration, call, read and expression, \
          bound by the language's own compiler. Ask one BEFORE grepping for a symbol - grep cannot tell a call from a \
          comment or a same-named symbol elsewhere:\n\
          - `buildtools/structuregate --map-query {first} --find <Name>`: who declares, calls and reads it\n\
-         - `buildtools/structuregate --map-query {first} --text \"<phrase>\"`: full-text over the code\n\
+         - {full_text}\n\
          - `buildtools/structuregate --map-query {first} --sql \"SELECT ...\"`: exact counts and joins\n\
          The `map-sqlite` and `buildmap` skills describe the tables. Grep stays right for text the map does not hold: \
          configs, logs, prose.",

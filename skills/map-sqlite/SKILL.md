@@ -8,7 +8,7 @@ argument-hint: "[a name, a symbol, a file fragment, a search string, or SQL]"
 One SQLite file holding every row the tree's deep halves produce - on a small python tree that
 is **tens of thousands of rows in 15 tables**; on a large multi-language tree (C# bound by Roslyn, Angular
 and SQL) it is 70 tables and millions of rows - every join column indexed, plus
-`file_text` with the source itself FTS5-indexed.
+`file_text` with the source itself FTS5-indexed (left out by `--map-no-text`, see the traps).
 
 **The origin of this skill is `skills\map-sqlite` in the `structuregate-map` repository**; the copy here is a
 junction to it. Each half's own tables and columns are a page beside this one - read the one for the
@@ -189,6 +189,10 @@ database is built and refreshed: [../buildmap/outputs.md](../buildmap/outputs.md
 * **`file_text` is a virtual FTS5 table.** Its content column is `content`, not `text`, and `--schema
   file_text` may answer oddly because the schema lens reads `PRAGMA table_info`. That does not mean the
   source is unreachable — `--text` and `--cat` both work, and so does `SELECT content FROM file_text`.
+* **A map built with `--map-no-text` holds no `file_text` at all** (`_meta` `options:text = 0`; no FTS tables, every
+  other table the same). `--cat FILE` still prints the file - read from DISK under the recorded roots, so an edit
+  since the build shows; `--text` exits 1 saying the map holds no text (use `--grep TEXT` or `--find NAME` over the
+  rows); `SELECT .. FROM file_text` fails with no such table. `--map-row-fts` is unaffected (it reads rows).
 * **A row id means nothing outside one build.** `x:41` is the 41st expression THIS extraction emitted. Join
   with it inside a session; never store it. Nine prefixes (`f`, `c`, `x`, `fn`, `br`, `p`, `k`, `e`, `i`)
   are shared between the C# and Angular halves.

@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// Every TypeScript table and column the http pass reads (`calls.rs`).
 pub const TS_INPUTS: &[(&str, &[&str])] = &[
     ("files", &["id", "path", "lang", "abs"]),
-    ("calls", &["id", "file", "line", "member", "target_id", "target", "args", "arg_params"]),
+    ("calls", &["id", "file", "line", "member", "callee_id", "target", "args", "arg_params"]),
     ("members", &["id", "file", "class", "name", "params", "value"]),
     ("functions", &["id", "file", "name", "params"]),
     ("returns", &["member", "value"]),

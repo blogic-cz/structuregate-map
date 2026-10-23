@@ -320,7 +320,7 @@ pub fn render(db_path: &Path, ask: &Ask) -> Result<Answer> {
         "id" => lens_id(&db, &mut out, &ask.arg, width),
         "file" => lens_file(&db, &mut out, &ask.arg, limit, width),
         "cat" => cat::lens(&db, &mut out, &ask.arg, &ask.lines).map(|shown| refused = !shown),
-        "text" => lens_text(&db, &mut out, &ask.arg, limit, width),
+        "text" => lens_text(&db, &mut out, &ask.arg, limit, width).map(|searched| refused = !searched),
         "grep" => lens_grep(&db, &mut out, &ask.arg, &ask.table, limit, width),
         "reads" => lens_reads(&db, &mut out, &ask.arg, limit, width),
         "key" => lens_key(&db, &mut out, &ask.arg, limit, width),

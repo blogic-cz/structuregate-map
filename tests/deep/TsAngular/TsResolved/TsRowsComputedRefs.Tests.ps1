@@ -76,9 +76,9 @@ Test-Case 'tsrows: a type literal member another operand also declares has its o
 }
 
 
-# (rows 80) A CALL'S `target_id` IS THE DECLARATION THE CHECKER NAMED, found by its PLACE (`TsRefs.mjs::rollupRefIds`, `TsExpr/TsReadRefs.mjs::targetLine`): `Ident.getAge(..)` is the property of an object literal -
-# its `shape_members` row - though `function getAge` sits in the same file, and `this.mask.writeValue(..)` is the member of a type literal (`type_members`), not the class's own `writeValue`. Controls: a property
-# that only names a function (`getAge: getAge`, `{ getAge }`) still follows the declaration it names.
+# (rows 80, 81) A CALL'S `target_id` IS THE DECLARATION THE CHECKER NAMED, found by its PLACE (`TsRefs.mjs::rollupRefIds`, `TsExpr/TsReadRefs.mjs::targetLine`): `Ident.getAge(..)` is the property of an object literal -
+# its `shape_members` row - though `function getAge` sits in the same file, and `this.mask.writeValue(..)` is the member of a type literal (`type_members`), not the class's own `writeValue`. A property that only
+# names a function (`getAge: getAge`, `{ getAge }`, `{ age: getAge }`) is ITSELF the declaration (rows 81): its `shape_members` row is `target_id`, and `callee_id` is the function its value names - the callable the readers follow.
 Test-Case 'tsrows: a call of an object literal or type member has the row at the checker declaration, not a same-named one' {
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/target.ts' = "export function getAge(d: string): number { return d.length; }`n" +
@@ -87,16 +87,44 @@ Test-Case 'tsrows: a call of an object literal or type member has the row at the
             "export const Same = { getAge: getAge };`nexport const Short = { getAge };`n" +
             "type MaskType = { writeValue: (v: string) => void };`n" +
             "export class Field {`n  mask!: MaskType;`n  writeValue(v: string) { this.mask.writeValue(v); }`n" +
-            "  run() { Ident.getAge('a'); Ident.normalize('b'); Same.getAge('c'); Short.getAge('d'); }`n}`n"
+            "  run() { Ident.getAge('a'); Ident.normalize('b'); Same.getAge('c'); Short.getAge('d'); Ren.age('e'); }`n}`n" +
+            "export const Ren = { age: getAge };`n"
     }
     $made = New-TsRowsDb $tree -Shared
     Assert-Exit $made.Result 0
-    $r = Invoke-TsRowsQ $made.Db ("SELECT 'tg=' || c.callee || '|' || coalesce((SELECT 'sm@' || line FROM shape_members WHERE id = c.target_id), (SELECT 'tm@' || line FROM type_members WHERE id = c.target_id), " +
-        "(SELECT 'fn@' || line FROM functions WHERE id = c.target_id), (SELECT 'm@' || line FROM members WHERE id = c.target_id), 'none') AS r FROM calls c JOIN files f ON f.id = c.file WHERE f.path LIKE '%target.ts'")
-    Assert-Line $r 'tg=Ident.getAge|sm@4'
-    Assert-Line $r 'tg=Ident.normalize|sm@5'
-    Assert-Line $r 'tg=this.mask.writeValue|tm@9'
-    Assert-Line $r 'tg=Same.getAge|fn@1'
-    Assert-Line $r 'tg=Short.getAge|fn@1'
+    $place = { param([string]$Id) "coalesce((SELECT 'sm@' || line FROM shape_members WHERE id = c.$Id), (SELECT 'tm@' || line FROM type_members WHERE id = c.$Id), " +
+        "(SELECT 'fn@' || line FROM functions WHERE id = c.$Id), (SELECT 'm@' || line FROM members WHERE id = c.$Id), 'none')" }
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'tg=' || c.callee || '|' || " + (& $place 'target_id') + " || '|' || " + (& $place 'callee_id') + " AS r FROM calls c JOIN files f ON f.id = c.file WHERE f.path LIKE '%target.ts'")
+    Assert-Line $r 'tg=Ident.getAge|sm@4|none'
+    Assert-Line $r 'tg=Ident.normalize|sm@5|none'
+    Assert-Line $r 'tg=this.mask.writeValue|tm@9|none'
+    Assert-Line $r 'tg=Same.getAge|sm@7|fn@1'
+    Assert-Line $r 'tg=Short.getAge|sm@8|fn@1'
+    Assert-Line $r 'tg=Ren.age|sm@15|fn@1'
+}
+
+# (rows 81) A BARE CALL OF A LOCAL IS THE LOCAL, never a same-named member of the class (`TsRefs.mjs::rollupRefIds`): `getAmounts(1)` over `const getAmounts = (..) => ..` is the `locals` row at its name, while `this.getAmounts(3)`
+# is the method, `top(..)` and `arrow(..)` are their `functions` rows, `new Alpha()` the class, and a call of an OVERLOADED method is its implementation (the last signature), as the checker's first signature names the set.
+Test-Case 'tsrows: a bare call of a local function is the local, not a same-named class member' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/local.ts' = "export class Alpha {`n  tariff = 1;`n  getAmounts(x: number) { return x; }`n  run() {`n" +
+            "    const getAmounts = (y: number) => y + 1;`n    const tariff = () => 2;`n    getAmounts(1);`n    tariff();`n    this.getAmounts(3);`n  }`n" +
+            "  over(a: string): void;`n  over(a: string, b: number): void;`n  over(a: string, b?: number) { return; }`n" +
+            "  callOver() { this.over('a'); }`n}`n" +
+            "export function top(a: number) { return a; }`nexport const arrow = (a: number) => a;`n" +
+            "export function use() { top(1); arrow(2); new Alpha(); }`n"
+    }
+    $made = New-TsRowsDb $tree -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'tg=' || c.line || ':' || c.callee || '|' || coalesce((SELECT 'lo@' || line FROM locals WHERE id = c.target_id), (SELECT 'fn@' || line FROM functions WHERE id = c.target_id), " +
+        "(SELECT 'm@' || line FROM members WHERE id = c.target_id), (SELECT 'cl@' || line FROM classes WHERE id = c.target_id), 'none') AS r FROM calls c JOIN files f ON f.id = c.file WHERE f.path LIKE '%local.ts'")
+    Assert-Line $r 'tg=7:getAmounts|lo@5'
+    Assert-Line $r 'tg=8:tariff|lo@6'
+    # the controls: the method, an overloaded method's implementation, a function, an arrow const and a class
+    Assert-Line $r 'tg=9:this.getAmounts|m@3'
+    Assert-Line $r 'tg=14:this.over|m@13'
+    Assert-Line $r 'tg=18:top|fn@16'
+    Assert-Line $r 'tg=18:arrow|fn@17'
+    Assert-Line $r 'tg=18:Alpha|cl@1'
 }
 }

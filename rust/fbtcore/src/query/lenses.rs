@@ -138,7 +138,7 @@ pub(super) fn lens_id(db: &Connection, out: &mut String, row_id: &str, width: us
 
 /// Every root of the map as `(prefix, dir)`: what each half recorded as `roots:<lang>`, or the one `_meta.root`
 /// with no prefix for a database that recorded none.
-fn roots_of(db: &Connection) -> Vec<(String, String)> {
+pub(super) fn roots_of(db: &Connection) -> Vec<(String, String)> {
     let mut roots = Vec::new();
     for (_, listed) in crate::rows::meta::scan(db, Some("roots:%")) {
         let pairs: Vec<(String, String)> = serde_json::from_str(&listed).unwrap_or_default();
@@ -245,15 +245,21 @@ pub(super) fn lens_file(db: &Connection, out: &mut String, fragment: &str, limit
     Ok(())
 }
 
-pub(super) fn lens_text(db: &Connection, out: &mut String, needle: &str, limit: usize, width: usize) -> Result<()> {
+pub(super) fn lens_text(db: &Connection, out: &mut String, needle: &str, limit: usize, width: usize) -> Result<bool> {
     let sql = "SELECT path, snippet(file_text, 1, '>>', '<<', '...', 12) \
                FROM file_text WHERE file_text MATCH ? LIMIT ?";
     // THIS ONE CATCHES ITS OWN, as the python did: a map built without FTS5 has no `file_text` to match against,
     // and that is worth saying plainly rather than as a failed query.
     let held = db.query_row("SELECT 1 FROM sqlite_master WHERE name = 'file_text'", [], |_| Ok(())).is_ok();
+    // A MAP BUILT WITH `--map-no-text` HAS NO TEXT TO SEARCH, AND SAYS SO: exit 1, never an empty answer that reads as "no
+    // file mentions it". The disk is not searched in its place - `--grep` and `--find` read the rows, `--cat` a file.
+    if !held && !crate::rows::text::held(db) {
+        let _ = writeln!(out, "no source text in this database: it was built with --map-no-text, so --text has nothing to search - use --grep TEXT or --find NAME over the rows, --cat FILE for a file, or rebuild without --map-no-text");
+        return Ok(false);
+    }
     if !held {
         let _ = writeln!(out, "the source index is not in this database (built without FTS5) - see --tables");
-        return Ok(());
+        return Ok(true);
     }
     match query(db, sql, &[&needle, &(limit as i64)]) {
         Ok((_, rows)) => show(out, &rows, &named(&["file", "match"]), limit, width),
@@ -272,7 +278,7 @@ pub(super) fn lens_text(db: &Connection, out: &mut String, needle: &str, limit: 
             }
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 pub(super) fn lens_grep(db: &Connection, out: &mut String, needle: &str, table: &str, limit: usize, width: usize) -> Result<()> {

@@ -13,7 +13,7 @@
 //! THE CHAIN IS ID JOINS END TO END, never a name match:
 //!   * `string_literals.file` + `.line` → the `returns`/`assignments` row whose span
 //!     encloses it, INNERMOST
-//!   * `returns.member` → `calls.target_id` — the member is CALLED somewhere
+//!   * `returns.member` → `calls.callee_id` (the callable that runs, rows 81) — the member is CALLED somewhere
 //!   * a `calls.line` inside a PROVEN ternary assignment's span → that assignment's target
 //!   * `gates.reads` names the property, in the literal's own component → the gate
 //!
@@ -92,7 +92,7 @@ fn member_properties(store: &Store<'_>, ternary_writes: &TernaryWrites) -> Index
     let calls = store.table("calls");
     let mut sites: IndexMap<String, Vec<&Row>> = IndexMap::new();
     for c in calls.iter() {
-        let (Some(target), Some(_)) = (id_of(c, "target_id"), id_of(c, "member")) else {
+        let (Some(target), Some(_)) = (id_of(c, "callee_id"), id_of(c, "member")) else {
             continue;
         };
         sites.entry(target).or_default().push(c);
@@ -311,7 +311,7 @@ mod tests {
             "classes": [{"id": "c:1", "file": "f:1"}],
             "string_literals": [{"value": "list.item1", "file": "f:1", "line": 20}],
             "returns": [{"class": "c:1", "member": "m:build", "line": 15, "end_line": 25}],
-            "calls": [{"target_id": "m:build", "member": "m:build", "line": 50}],
+            "calls": [{"callee_id": "m:build", "member": "m:build", "line": 50}],
             "gates": [{"id": "g:1", "component": "ng:1", "reads": ["entries"]}],
         });
         let writes = json!([
@@ -335,8 +335,8 @@ mod tests {
         // entitled to it.
         let (mut tables, writes) = chain();
         tables["calls"] = json!([
-            {"target_id": "m:build", "member": "m:build", "line": 50},
-            {"target_id": "m:build", "member": "m:build", "line": 900},
+            {"callee_id": "m:build", "member": "m:build", "line": 50},
+            {"callee_id": "m:build", "member": "m:build", "line": 900},
         ]);
         assert!(run(tables, writes).is_empty());
     }
@@ -345,8 +345,8 @@ mod tests {
     fn call_sites_resolving_to_different_properties_prove_nothing() {
         let (mut tables, _) = chain();
         tables["calls"] = json!([
-            {"target_id": "m:build", "member": "m:build", "line": 50},
-            {"target_id": "m:build", "member": "m:build", "line": 70},
+            {"callee_id": "m:build", "member": "m:build", "line": 50},
+            {"callee_id": "m:build", "member": "m:build", "line": 70},
         ]);
         let writes = json!([
             {"id": "a:1", "member": "m:build", "class": "c:1", "target": "entries",
@@ -394,8 +394,8 @@ mod tests {
             {"class": "c:1", "member": "m:tight", "line": 18, "end_line": 22},
         ]);
         tables["calls"] = json!([
-            {"target_id": "m:build", "member": "m:build", "line": 50},
-            {"target_id": "m:tight", "member": "m:tight", "line": 46},
+            {"callee_id": "m:build", "member": "m:build", "line": 50},
+            {"callee_id": "m:tight", "member": "m:tight", "line": 46},
         ]);
         tables["gates"] = json!([
             {"id": "g:wide", "component": "ng:1", "reads": ["entries"]},
@@ -424,8 +424,8 @@ mod tests {
             {"class": "c:1", "member": "m:two", "line": 65, "end_line": 75},
         ]);
         tables["calls"] = json!([
-            {"target_id": "m:build", "member": "m:build", "line": 50},
-            {"target_id": "m:two", "member": "m:two", "line": 46},
+            {"callee_id": "m:build", "member": "m:build", "line": 50},
+            {"callee_id": "m:two", "member": "m:two", "line": 46},
         ]);
         tables["gates"] = json!([
             {"id": "g:1", "component": "ng:1", "reads": ["entries"]},

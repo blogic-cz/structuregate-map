@@ -47,6 +47,9 @@ pub struct Options {
     pub facts_pull: bool,
     pub ts_html: Option<String>,
     pub map_row_fts: bool,
+    /// `--map-no-text`: THE SAME FLAGS REACH THE GATE RUN AND THE MAP RUN (`-GateArgs`, `StructureGateArgs`), so with no
+    /// `--map-sqlite` it is ignored, as `--map-row-fts` is. The deep map does not store the source of its files (`file_text`) - `rows/cells/text.rs`.
+    pub map_no_text: bool,
     pub map_atlas_dir: Option<String>,
     /// `--map-exclude`, repeatable: C# files the deep map lists and never walks.
     pub map_exclude: Vec<String>,
@@ -181,6 +184,7 @@ pub fn parse(args: &[String]) -> Result<Parsed, String> {
             "--facts-pull" => o.facts_pull = true,
             "--ts-html" => o.ts_html = Some(full(&next()?)),
             "--map-row-fts" => o.map_row_fts = true,
+            "--map-no-text" => o.map_no_text = true,
             "--map-atlas" => o.map_atlas_dir = Some(full(&next()?)),
             "--map-exclude" => o.map_exclude.push(next()?),
             "--map-reread" => o.map_reread.extend(list(&next()?).into_iter().map(|h| h.to_lowercase())),

@@ -19,6 +19,7 @@ pub type FastSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
 pub mod calls;
 pub mod cells;
 pub use cells::meta;
+pub use cells::text;
 pub mod fts;
 // THE PARTIAL RUN'S OWN MACHINERY - what is handed back, which files depend on which, what each read - in a folder
 // by `#[path]`, so every `super::` in them still means `rows`.

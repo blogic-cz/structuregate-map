@@ -257,7 +257,7 @@ export function rollupDynamicRenders(store, diag) {
   for (;;) {
     const before = sites.length;
     for (const call of store.table('calls')) {
-      const creator = call.target_id;
+      const creator = call.callee_id; // the callable that RUNS: `target_id` is the checker's declaration, a property for `{ make }` (rows 81)
       if (creator === undefined || claimed.has(call.id)) continue;
       const slotNames = creatorSlots.get(creator);
       if (slotNames === undefined) continue;

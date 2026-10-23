@@ -1,4 +1,5 @@
-//! `--cat FRAGMENT [--lines A-B]`: one file's source out of `file_text`, numbered.
+//! `--cat FRAGMENT [--lines A-B]`: one file's source out of `file_text`, numbered - or, in a map built with
+//! `--map-no-text` (`rows/cells/text.rs`), off the DISK, under the roots the map recorded.
 //! A child of `query`: what it reads of the lenses' helpers is theirs, by `super::*`.
 
 use super::*;
@@ -10,8 +11,15 @@ const LISTED: usize = 20;
 /// THE LINE IS PRINTED WHOLE, whatever `--width` says: a source viewer that cuts `formatRowHe...[+40 chars]` has
 /// to be read twice.
 pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, span: &str) -> Result<bool> {
-    let sql = "SELECT path, content FROM file_text WHERE path LIKE ?";
-    if !has_file_text(db) {
+    // A MAP BUILT WITHOUT TEXT NAMES ITS FILES IN `files` AND READS THEM WHERE THEY ARE: what the map recorded is the
+    // rows, and the file is what the rows were read from. A file edited since is shown as it is NOW.
+    let disk = !has_file_text(db) && !crate::rows::text::held(db);
+    let sql = if disk {
+        "SELECT DISTINCT path, path FROM files WHERE path LIKE ?"
+    } else {
+        "SELECT path, content FROM file_text WHERE path LIKE ?"
+    };
+    if !disk && !has_file_text(db) {
         let _ = writeln!(out, "no source for {} - this database has no file_text: it was built without FTS5, see --tables", quoted(fragment));
         return Ok(false);
     }
@@ -33,7 +41,23 @@ pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, span: &str
         return Ok(false);
     };
     let path = &paths[chosen];
-    let content = cell(&found[chosen][1]);
+    let content = if disk {
+        match on_disk(db, path) {
+            Some(text) => text.replace("\r\n", "\n"),
+            None => {
+                let tried: Vec<String> = candidates(db, path).iter().map(|d| d.display().to_string()).collect();
+                let _ = writeln!(
+                    out,
+                    "no source for {} - {path} is mapped, this map holds no text (built with --map-no-text) and the file is not readable under {}",
+                    quoted(fragment),
+                    tried.join(", ")
+                );
+                return Ok(false);
+            }
+        }
+    } else {
+        cell(&found[chosen][1])
+    };
     // A LAST NEWLINE ENDS THE LAST LINE, it does not start one more: `files.lines` counts the same way.
     let lines: Vec<&str> = content.strip_suffix('\n').unwrap_or(&content).split('\n').collect();
     let Some((first, last)) = range(span, lines.len()) else {
@@ -49,6 +73,33 @@ pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, span: &str
         let _ = writeln!(out, "{n:>5}  {}", lines[n - 1]);
     }
     Ok(true)
+}
+
+/// Every place `path` may be on disk: under each root the map recorded (the prefix its paths carry taken off), and
+/// under the Angular workspace below it - that half's paths are workspace-relative, not root-relative.
+fn candidates(db: &Connection, path: &str) -> Vec<std::path::PathBuf> {
+    let workspace = crate::rows::meta::get(db, "rederive:typescript")
+        .and_then(|record| serde_json::from_str::<serde_json::Value>(&record).ok())
+        .and_then(|record| record["fe"].as_str().map(str::to_string))
+        .filter(|fe| !fe.is_empty() && fe != ".");
+    let mut found = Vec::new();
+    for (prefix, dir) in roots_of(db) {
+        let Some(inner) = path.strip_prefix(&prefix) else { continue };
+        let inner = inner.replace('/', std::path::MAIN_SEPARATOR_STR);
+        found.push(std::path::Path::new(&dir).join(&inner));
+        if let Some(fe) = &workspace {
+            found.push(std::path::Path::new(&dir).join(fe).join(&inner));
+        }
+    }
+    found
+}
+
+/// One mapped file read as it is on disk, or None when no recorded root holds it.
+fn on_disk(db: &Connection, path: &str) -> Option<String> {
+    candidates(db, path)
+        .iter()
+        .find_map(|full| std::fs::read(full).ok())
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
 }
 
 fn has_file_text(db: &Connection) -> bool {

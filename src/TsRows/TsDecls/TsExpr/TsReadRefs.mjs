@@ -179,19 +179,60 @@ export function makeReadRefs(ts, checker, canonicalPath) {
   }
 
   /**
-   * THE LINE OF A MEMBER THAT NO NAME KEY CAN TELL (rows 80): a call's `target` is a file and a name, and `getAge` names the property of
-   * `Alpha = { getAge: (..) => .. }` as well as a `function getAge` beside it - the rollup bound the call to the function. A member of an OBJECT LITERAL
-   * that is a value of its own (a method, an accessor, a property whose value is not a bare name - `{ x }` and `{ x: x }` still follow the
-   * declaration they name) and a SIGNATURE of an interface or type literal carry `line`, the place of the declaration the checker named, and
-   * `TsRefs.mjs::rollupRefIds` finds the `shape_members` or `type_members` row there. A library's declaration carries none.
+   * THE PLACE OF THE DECLARATION A CALL NAMES (rows 80, 81): a call's `target` is a file and a name, and a name names several things in one file - the property
+   * `getAge` of `Alpha = { getAge: (..) => .. }` and the `function getAge` beside it, a class's `getAmounts` method and a function's own `const getAmounts` - so the
+   * rollup (`TsRefs.mjs::rollupRefIds`) never binds by name: EVERY in-tree target carries `line`, the NAME's line of the declaration the checker reached (an alias followed,
+   * as a read's `target` is anchored), and the row AT that file, line and name is the call's `target_id`. A library's declaration carries none. An OVERLOAD SET
+   * names its IMPLEMENTATION (the signature that has a body, as the class's last row of that name always was), never the first signature the checker lists.
+   * A PROPERTY THAT ONLY NAMES A VALUE (`{ x }`, `{ y: x }`) is itself the declaration, so `follow` is where `x` is declared - the callable the call runs (`callee_id`).
    */
   function targetLine(node) {
-    const d = checker.getSymbolAtLocation(node)?.declarations?.[0];
-    if (d === undefined || d.getSourceFile().fileName.includes('/node_modules/')) return null;
-    const own = d.parent !== undefined && ts.isObjectLiteralExpression(d.parent)
-      && ((ts.isPropertyAssignment(d) && !ts.isIdentifier(d.initializer)) || ts.isMethodDeclaration(d) || ts.isGetAccessor(d) || ts.isSetAccessor(d));
-    return own || ts.isPropertySignature(d) || ts.isMethodSignature(d) ? { line: at(d).line } : null;
+    const declarationsOf = (sym) => {
+      if (sym !== undefined && (sym.flags & ts.SymbolFlags.Alias) !== 0) {
+        try { sym = checker.getAliasedSymbol(sym); } catch { return []; }
+      }
+      return sym?.declarations ?? [];
+    };
+    const placeOfDecl = (decls) => {
+      const [first] = decls;
+      if (first === undefined || first.getSourceFile().fileName.includes('/node_modules/')) return null;
+      const impl = ts.isFunctionLike(first) && first.body === undefined
+        ? decls.find((x) => x.getSourceFile() === first.getSourceFile() && ts.isFunctionLike(x) && x.body !== undefined) : undefined;
+      return impl ?? first;
+    };
+    const d = placeOfDecl(declarationsOf(checker.getSymbolAtLocation(node)));
+    if (d === null) return null;
+    const value = ts.isShorthandPropertyAssignment(d) ? checker.getShorthandAssignmentValueSymbol(d)
+      : ts.isPropertyAssignment(d) && ts.isIdentifier(d.initializer) ? checker.getSymbolAtLocation(d.initializer) : undefined;
+    const named = value === undefined ? null : placeOfDecl(declarationsOf(value));
+    return { line: at(d).line, ...(named === null ? {} : { follow: { name: value.getName(), ...at(named) } }) };
   }
 
-  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember, resolveArg, targetLine };
+  /**
+   * THE MEMBER A LITERAL IN AN OBJECT LITERAL FILLS (rows 81, #104): `{ Field: 'alpha' }` typed `HueRule[]` (an element of a typed array, a typed variable, member, parameter or return, a
+   * call argument - whatever the CHECKER gives the object as its contextual type) puts 'alpha' in the member `Field` of `HueRule`, and a consumer should join that place, never match
+   * the property's SPELLING. `{name, file, line}` is the declaration's NAME line, as every read's `target` is (a library's file kept); `target_id` is the row there (`TsRefs.mjs::rollupRefIds`).
+   * A union contextual type asks the arms that DECLARE the name: ONE declaration place is the target, several name none (the template rule). An object with no contextual type, and a property the
+   * type does not declare (an excess one, a computed name), have none. A sign in front of a number is stepped through.
+   */
+  function fieldTarget(node) {
+    let child = node;
+    while (child.parent !== undefined && ts.isPrefixUnaryExpression(child.parent)) child = child.parent;
+    const prop = child.parent;
+    if (prop === undefined || !ts.isPropertyAssignment(prop) || prop.initializer !== child) return null;
+    if (!(ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name) || ts.isNumericLiteral(prop.name))) return null;
+    const type = checker.getContextualType(prop.parent);
+    if (type === undefined) return null;
+    const name = prop.name.text;
+    const places = new Map();
+    for (const arm of type.isUnion() ? type.types : [type]) {
+      const [first] = checker.getPropertyOfType(arm, name)?.declarations ?? [];
+      if (first === undefined) continue;
+      const place = at(first);
+      places.set(`${place.file}#${place.line}`, place);
+    }
+    return places.size === 1 ? { name, ...[...places.values()][0] } : null;
+  }
+
+  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember, resolveArg, targetLine, fieldTarget };
 }

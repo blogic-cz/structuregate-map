@@ -97,28 +97,48 @@ export function rollupRefIds(store) {
     const id = idOf(asRef(row.resolved));
     if (id !== null) row.resolved_id = id;
   }
-  // A MEMBER OF AN OBJECT LITERAL OR A TYPE IS FOUND BY ITS PLACE, never by its name (rows 80): a call's `target.line` is the declaration the checker named, and the row at that
-  // file, line and name is the `shape_members` or `type_members` row. The name key above has no such row - it bound `Alpha.getAge(..)`, a property, to a `function getAge` of the file.
-  // A place with no row has NO id: falling back to the name was the bug.
+  // A CALL'S TARGET IS FOUND BY ITS PLACE, never by its name (rows 80, 81): `target.line` is the declaration the checker named (`TsExpr/TsReadRefs.mjs::targetLine`), and the row at that file, line and
+  // name is `target_id` - a function, a method, a class, the member of a type or an object literal, a local, a module const. The name key above bound a bare `getAmounts(..)` to a same-named METHOD of the
+  // class around a local `const getAmounts`, and `Alpha.getAge(..)`, a property, to a `function getAge` of the file. A place with no row has NO id: falling back to the name was the bug.
+  // `callee_id` is the callable that RUNS - the function, method or class row itself, or for a property that only names a value (`{ x }`, `{ y: x }`: `target.follow`) the callable it names - which is what a
+  // reader following the call into the callee's `returns` and parameters needs, and a `shape_members` row has neither.
   const placed = new Map();
-  for (const table of ['type_members', 'shape_members']) { // a NAMED type's member (interface, alias) first: an anonymous literal has only the shape's
+  const callable = new Set();
+  for (const table of ['functions', 'members', 'classes', 'type_members', 'shape_members', 'locals', 'consts']) { // a NAMED declaration first: an anonymous literal has only the shape's, and a function-valued const is a `functions` row and a `consts` row
     for (const row of store.table(table)) {
       const name = str(row.name);
-      if (name === null || typeof row.line !== 'number') continue;
+      // ONLY A ROW THAT IS THE DECLARATION ITSELF: one a file's extraction made for a declaration in ANOTHER file (`owner_file` is not `file` - a computed type's `via: 'computed'` copy of a library member) is not it,
+      // and binding to it made the reference depend on a file it never read, chosen by file order. A library member keeps its `target` and has no id.
+      if (name === null || typeof row.line !== 'number' || (row.owner_file !== undefined && row.owner_file !== row.file)) continue;
       const key = `${String(row.file)}#${row.line}#${name}`;
-      if (!placed.has(key)) placed.set(key, row.id);
+      if (placed.has(key)) continue;
+      placed.set(key, row.id);
+      if (table === 'functions' || table === 'members' || table === 'classes') callable.add(row.id);
     }
   }
+  const placeKey = (ref) => {
+    const fid = idByPath.get(str(ref?.file) ?? '');
+    return fid === undefined || typeof ref?.line !== 'number' ? null : `${String(fid)}#${ref.line}#${String(ref.name)}`;
+  };
   for (const row of store.table('calls')) {
     const ref = asRef(row.target);
-    if (typeof ref?.line === 'number') {
-      const fid = idByPath.get(str(ref.file) ?? '');
-      const hit = fid === undefined ? undefined : placed.get(`${String(fid)}#${ref.line}#${String(ref.name)}`);
+    const key = placeKey(ref);
+    const hit = key === null ? undefined : placed.get(key);
+    if (hit === undefined) continue;
+    row.target_id = hit;
+    const followKey = callable.has(hit) ? null : placeKey(asRef(ref.follow));
+    const callee = callable.has(hit) ? hit : followKey === null ? undefined : placed.get(followKey);
+    if (callee !== undefined && callable.has(callee)) row.callee_id = callee;
+  }
+  // A LITERAL IN AN OBJECT LITERAL NAMES THE MEMBER IT FILLS (rows 81, #104): `target` is the declaration the checker's contextual type reached (`TsExpr/TsReadRefs.mjs::fieldTarget`), and the row AT its file,
+  // line and name - a `type_members`, `members` or `shape_members` row - is `target_id`, by the same place key a call's is. A library's member has no row, so no id.
+  for (const table of ['string_literals', 'number_literals']) {
+    for (const row of store.table(table)) {
+      const ref = asRef(row.target);
+      const key = ref === null ? null : placeKey(ref);
+      const hit = key === null ? undefined : placed.get(key);
       if (hit !== undefined) row.target_id = hit;
-      continue;
     }
-    const id = idOf(ref);
-    if (id !== null) row.target_id = id;
   }
   // `external` IS THE SPELLING (a specifier not starting with `.`); whether the import lands IN THE TREE is
   // `in_tree`, which most consumers meant by it: a tsconfig alias is external and in the tree.
@@ -327,7 +347,9 @@ export function rollupCallParams(store) {
   collect(store.table('members'));
 
   for (const row of store.table('calls')) {
-    const list = row.target_id === undefined ? undefined : params.get(row.target_id);
+    // THE CALLABLE THAT RUNS (`callee_id`, rows 81): a property that only names a function has `target_id` = the property, whose parameters are the function's.
+    const callee = row.callee_id ?? row.target_id;
+    const list = callee === undefined ? undefined : params.get(callee);
     const args = row.args;
     if (!list || !Array.isArray(args) || !args.length) continue;
     const rest = list.find((p) => p.rest);

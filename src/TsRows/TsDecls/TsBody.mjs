@@ -148,7 +148,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
     if (!ts.isCallExpression(node) && !ts.isNewExpression(node)) return;
     const callee = node.expression;
     const calleeName = ts.isPropertyAccessExpression(callee) ? callee.name : callee;
-    // A MEMBER OF AN OBJECT LITERAL OR A TYPE carries its `line` (rows 80, `TsExpr/TsReadRefs.mjs::targetLine`): the rollup binds `target_id` to the row AT that place, never to a same-named declaration of the file.
+    // EVERY IN-TREE TARGET CARRIES THE `line` OF ITS DECLARATION (rows 80, 81, `TsExpr/TsReadRefs.mjs::targetLine`): the rollup binds `target_id` to the row AT that place, never to a same-named declaration of the file.
     const declared = declFileOf(calleeName);
     const target = declared !== null && targetLine !== undefined ? { ...declared, ...(targetLine(calleeName) ?? {}) } : declared;
     // EVERY argument, not the first four. A call's fifth argument is as much a fact as its first, and the

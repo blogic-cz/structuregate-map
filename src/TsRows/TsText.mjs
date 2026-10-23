@@ -88,18 +88,23 @@ function enclosingLabel(ts, sf, pos) {
  * A bare `'en'` says nothing. `'en'` as the `locale` property of a call to `setLanguage` says what it is,
  * and `context`/`property` are how that is published without anyone having to re-read the source.
  */
-export function collectStrings(ts, store, node, owner, propName, evalNode) {
+export function collectStrings(ts, store, node, owner, propName, evalNode, fieldTarget) {
   const text = (n) => n.getText();
+  // THE MEMBER AN OBJECT LITERAL'S VALUE FILLS (rows 81, #104): `target` is `{name, file, line}` where the checker says the property is declared, replacing the empty text a
+  // literal in a property carries (`TsReadRefs.mjs::fieldTarget`). A checker refusal leaves the row without one, never without the row.
+  const field = (n) => {
+    try { const target = fieldTarget ? fieldTarget(n) : null; return target ? { target } : {}; } catch { return {}; }
+  };
   const walk = (n) => {
     // `use`/`callee`/`target` are the vocabulary every half shares (TsLiterals.mjs); `context` stays this
     // half's own - the parent's SyntaxKind - for the readers that already ask for it.
     if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
       store.add('string_literals', 'sl', {
         ...owner, value: n.text, context: parentKind(ts, n),
-        property: propertyContext(ts, n, propName), ...literalUse(ts, n, text), ...locationOf(n),
+        property: propertyContext(ts, n, propName), ...literalUse(ts, n, text), ...field(n), ...locationOf(n),
       });
     } else if (ts.isNumericLiteral(n)) {
-      store.add('number_literals', 'nl', { ...owner, ...numberOf(ts, n, text), ...literalUse(ts, n, text), ...locationOf(n) });
+      store.add('number_literals', 'nl', { ...owner, ...numberOf(ts, n, text), ...literalUse(ts, n, text), ...field(n), ...locationOf(n) });
     }
     // A TEMPLATE LITERAL WITH SUBSTITUTIONS IS NOT A STRING, and it is not nothing either: its literal
     // PARTS are the stable half of a key or a path built at run time, and its HOLES say where the rest
