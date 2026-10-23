@@ -194,7 +194,7 @@ export class OrderService {
 }
 
 # A HELPER THAT HANDS ITS URL BACK MAY DO IT THROUGH A `+` OR A URL OBJECT (calls_helpers.rs): `return parsedUrl.toString()` over `new URL(url)` and `return url + stringify(p)` both give the caller's url back
-# with a query the url never carries, so the call folds to its first argument and the query is cut. The control appends path text of its own (`url + '/orders'`): the call stays an unknown piece.
+# with a query the url never carries, so the call folds to its first argument and the query is cut. The control appends path text of its own (`url + '/orders'`): no forward - it is a builder (rows 88), read as what it returns.
 Test-Case 'httplinks: a url builder returning a concatenation or a URL made of its argument yields the argument' {
     $tree = New-HttpLinksTree
     $api = Join-Path $tree 'web/apps/shop/src/count.service.ts'
@@ -225,7 +225,8 @@ export class CountService {
     $r = Get-HttpLinksRows $tree ("SELECT 'c=' || h.verb || '|' || h.url || '|' || m.name AS r FROM http_calls h JOIN members m ON m.id = h.member WHERE h.file LIKE '%count.service.ts'")
     Assert-Line $r 'c=GET|/calculations/count|count'
     Assert-Line $r 'c=GET|/orders/{}|one'
-    Assert-Line $r 'c=GET|*|tail'
+    # (rows 88) the control is a BUILDER now: what it returns, its own path text kept and the unknown tail `*` - never the `/api` a forward would give.
+    Assert-Line $r 'c=GET|/api/orders*|tail'
 }
 
 # (rows 88) A HELPER THAT BUILDS THE URL is what it returns (`calls_helpers.rs::built`): `this.ordersUrl('list')` over an arrow PROPERTY and over a method that both return
@@ -252,6 +253,38 @@ export class BuiltService {
     Assert-Line $r 'c=GET|*/orders/list|byArrow'
     Assert-Line $r 'c=GET|*/orders/item/{}|byMethod'
     Assert-Line $r 'c=GET|*/x|byEither'
+}
+
+# (rows 88) THREE MORE WAYS A URL IS SPELLED (`calls.rs::fold`, `calls_helpers.rs::load_constructed`): a `+` chain of templates, a ternary whose arms differ only by the query, and a
+# member with no initializer that the constructor sets once. THE CONTROLS: a ternary of two different paths, and a member the constructor sets that another method writes again, stay `*`.
+Test-Case 'httplinks: a url spelled by a concatenation, an agreeing ternary or a constructor-set member is folded' {
+    $tree = New-HttpLinksTree
+    $api = Join-Path $tree 'web/apps/shop/src/spelled.service.ts'
+    Set-Content -LiteralPath $api -NoNewline -Value (@'
+import { HttpClient } from '@angular/common/http';
+export class SpelledService {
+  base = '/api';
+  csvUrl: string;
+  movedUrl: string;
+  constructor(private http: HttpClient) {
+    this.csvUrl = `${this.base}/csv`;
+    this.movedUrl = `${this.base}/first`;
+  }
+  joined(id: number) { const url = `${this.base}/clone` + `?id=${id}`; return this.http.get(url); }
+  agreed(all: boolean) { const url = all ? `${this.base}/list?all=true` : `${this.base}/list`; return this.http.get(url); }
+  apart(admin: boolean) { return this.http.get(admin ? '/admin/reset' : '/saas/reset'); }
+  csv() { return this.http.get(`${this.csvUrl}`); }
+  moved() { return this.http.get(this.movedUrl); }
+  move() { this.movedUrl = '/second'; }
+}
+'@)
+    [void](Invoke-HttpLinksMap $tree)
+    $r = Get-HttpLinksRows $tree ("SELECT 'c=' || h.verb || '|' || h.url || '|' || m.name AS r FROM http_calls h JOIN members m ON m.id = h.member WHERE h.file LIKE '%spelled.service.ts'")
+    Assert-Line $r 'c=GET|/api/clone|joined'
+    Assert-Line $r 'c=GET|/api/list|agreed'
+    Assert-Line $r 'c=GET|/api/csv|csv'
+    Assert-Line $r 'c=GET|*|apart'
+    Assert-Line $r 'c=GET|*|moved'
 }
 }
 
