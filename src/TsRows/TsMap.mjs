@@ -345,9 +345,13 @@ async function main() {
   // 92: `io.type` is the type the member's `members` row has - inferred for an un-annotated property, a setter's parameter type - not the annotation alone (`TsDecls/TsClassRows.mjs`).
   // 93: a tag several components match in a template NO component owns is `selector_ambiguous_without_scope`, not `selector_ambiguous_in_scope` (`TsDerive/TsModuleScope.mjs`).
   // 94: a value a `Promise` `then`/`catch` callback returns takes what the call's own type awaits (`TsExpr/TsReadRefs.mjs::settledBy`).
+  // 95: a value an `Array` `map`/`flatMap` callback returns is an element of what the call takes, and a spread in an array literal keeps its elements' level (`TsExpr/TsReadRefs.mjs::mappedBy`, `climb`).
+  // 96: `module_ref_from_dependency` is one row per name and file, not one per scope that asked (`TsDerive/TsModuleScope.mjs`).
+  // 97: #108 - a template literal's hole that indexes an enum by a value (`${Hue[x]}`, a member NAME) is a `hole_refs` entry naming the enum, and a literal whose every hole
+  //     is one lists the strings it builds in `expands` (`TsText.mjs::collectStrings`, `TsExpr/TsReadRefs.mjs::enumNameHole`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 94, build: args.build,
+    config: config.file, data: config.data, rows: 97, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

@@ -81,6 +81,8 @@ export function makeScopes(store, diag) {
     }
   }
 
+  // ONE NOTE PER NAME AND FILE (rows 96): a ref is asked again for every scope that reaches it - one refusal was noted up to fifty times.
+  const refused = new Set();
   const modulesForRef = (ref, ownerFile) => {
     const name = ref?.name ?? (typeof ref?.call === 'string' ? ref.call.split('.')[0] : null);
     if (!name) return [];
@@ -100,7 +102,11 @@ export function makeScopes(store, diag) {
       }
     }
     if (ownerFile != null && npmNamesByFile.get(ownerFile)?.has(name)) {
-      note('module_ref_from_dependency', { name, file: ownerFile });
+      const key = `${String(ownerFile)}\0${name}`;
+      if (!refused.has(key)) {
+        refused.add(key);
+        note('module_ref_from_dependency', { name, file: ownerFile });
+      }
       return [];
     }
     return byName.get(name) ?? [];

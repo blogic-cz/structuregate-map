@@ -85,4 +85,41 @@ Test-Case 'tsrows literals: a returned name stays an identifier, and one a destr
         "JOIN returns__value lv ON lv.owner = r.id AND lv.parent = 0 AND lv.role = '`$local'")
     Assert-Line $p 'param=0'
 }
+# (rows 97, #108) A HOLE THAT NAMES AN ENUM MEMBER (`TsText.mjs::collectStrings`, `TsReadRefs.mjs::enumNameHole`): `${Hue[this.hue]}` indexes the enum by a value, so it
+# yields a member NAME - `hole_refs` names `Hue` (hue.ts:1, `kind` enum_name) and `expands` lists `palette.Red.caption`, `palette.Blue.caption`. Two such holes build every
+# pair. THE CONTROLS: a string index (`Hue['Red']`... spelled through a string-typed key) and a hole of anything else name no enum; a literal with one plain hole has
+# `hole_refs` but no `expands`; a string enum has no reverse mapping, so it yields no names.
+Test-Case 'tsrows: a template literal hole that indexes an enum by value names it and lists the strings it builds (#108)' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/hue.ts' = "export enum Hue { Red = 1, Blue = 2 }`nexport enum Size { Small, Large }`nexport enum Word { A = 'a', B = 'b' }`n"
+        'apps/shop/src/widget.ts' = "import { Hue, Size, Word } from './hue';`n" +
+            "export class Widget {`n" +
+            "  hue = Hue.Red; size = Size.Small; key: string = 'Red'; other = 'x'; word = Word.A;`n" +
+            '  caption = `palette.${Hue[this.hue]}.caption`;' + "`n" +
+            '  pair = `p.${Hue[this.hue]}.${Size[this.size]}`;' + "`n" +
+            '  mixed = `m.${Hue[this.hue]}.${this.other}`;' + "`n" +
+            '  byKey = `k.${this.other}`;' + "`n" +
+            '  stringy = `w.${Word[this.word as unknown as keyof typeof Word]}`;' + "`n" +
+            '  byName = `n.${Hue[this.key as ''Red'']}`;' + "`n" +
+            "}`n"
+    }
+    $made = New-TsRowsDb $tree -Shared
+    Assert-Exit $made.Result 0
+    $ex = Invoke-TsRowsQ $made.Db ("SELECT 'ex=' || t.line || '|' || e.value AS r FROM template_literals t JOIN template_literals__expands e ON e.owner = t.id AND e.node = 'string' " +
+        "JOIN files f ON f.id = t.file AND f.path LIKE '%widget.ts'")
+    Assert-Line $ex 'ex=4|palette.Red.caption'
+    Assert-Line $ex 'ex=4|palette.Blue.caption'
+    foreach ($p in 'p.Red.Small', 'p.Red.Large', 'p.Blue.Small', 'p.Blue.Large') { Assert-Line $ex "ex=5|$p" }
+    Assert-NoLine $ex 'ex=6|'
+    Assert-NoLine $ex 'ex=8|'
+    $refs = Invoke-TsRowsQ $made.Db ("SELECT 'hr=' || t.line || '|' || h.ord || '|' || coalesce((SELECT value FROM template_literals__hole_refs n WHERE n.owner = t.id AND n.parent = h.n AND n.role = 'name'), '-') || '|' || " +
+        "coalesce((SELECT value FROM template_literals__hole_refs n WHERE n.owner = t.id AND n.parent = h.n AND n.role = 'kind'), '-') AS r " +
+        "FROM template_literals t JOIN template_literals__hole_refs h ON h.owner = t.id AND h.parent = 0 JOIN files f ON f.id = t.file AND f.path LIKE '%widget.ts'")
+    Assert-Line $refs 'hr=4|0|Hue|enum_name'
+    Assert-Line $refs 'hr=6|0|Hue|enum_name'
+    Assert-Line $refs 'hr=6|1|-|-'
+    Assert-NoLine $refs 'hr=7|'
+    Assert-NoLine $refs 'hr=8|'
+    Assert-NoLine $refs 'hr=9|'
+}
 }
