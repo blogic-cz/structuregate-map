@@ -174,8 +174,10 @@ fn definition_guards(store: &Store<'_>, found: &IndexMap<String, (String, Option
     if spans.is_empty() {
         return out;
     }
+    // THE ID FIRST: asked of every row, `get("ast")` held every tree of the workspace decoded until the store's release.
+    let conditions: IndexSet<&str> = spans.iter().map(|(_, _, c)| c.as_str()).collect();
     for e in store.table("expressions").iter() {
-        let Some(x) = e.get("id").and_then(Value::as_str) else { continue };
+        let Some(x) = e.get("id").and_then(Value::as_str).filter(|x| conditions.contains(x)) else { continue };
         let Some(ast) = e.get("ast").map(unwrap) else { continue };
         for (fid, bid, _) in spans.iter().filter(|(_, _, c)| c == x) {
             let read = ast.get("expr").map(unwrap).filter(|r| is_read(r));
