@@ -116,7 +116,8 @@ export function collectStrings(ts, store, node, owner, propName, evalNode, field
       if (joined && parts.length) parts[0] = joined + parts[0];
       store.add('template_literals', 'tl', {
         ...owner, parts, holes: v.$holes ?? [],
-        context: parentKind(ts, n), property: propertyContext(ts, n, propName), ...locationOf(n),
+        // THE MEMBER IT FILLS (rows 89): a template in an object literal's property names it as a string there does (`field`).
+        context: parentKind(ts, n), property: propertyContext(ts, n, propName), ...field(n), ...locationOf(n),
       });
     }
     const regex = regexOf(ts, n);
