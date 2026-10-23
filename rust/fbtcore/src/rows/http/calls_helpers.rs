@@ -3,7 +3,8 @@
 //! `createQueryUrl(url, params)` returns `` `${url}${query}` ``: its result IS the url its caller handed in, with an unknown
 //! tail the url never carries (`finished` cuts a query), so a wrapper's url reads through it and a caller's url folds to its
 //! first argument. `this.getBase(productTypeID)` does not: the parameter is an id the helper turns into a url, and reading
-//! the call as the parameter made the url `*` and lost the literal suffix written after it. WHICH it is comes from the
+//! the call as the parameter made the url `*` and lost the literal suffix written after it - such a BUILDER is folded as what it
+//! returns instead (`built`, rows 88). WHICH it is comes from the
 //! callee's OWN `returns`, found by the call's `$target` (file and name) - never from the name: EVERY return of the one
 //! declaration there must hand the first parameter back, in one of these forms (rows 81 added the last two):
 //!   * the parameter itself, or a template that opens with it and has no text of its own;
@@ -40,7 +41,8 @@ impl World {
             for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?)))? {
                 let (id, file, name) = row?;
                 if let Some(path) = abs.get(&file) {
-                    self.callees.entry((path.clone(), name)).or_default().push(id);
+                    self.callees.entry((path.clone(), name)).or_default().push(id.clone());
+                    self.callable_file.insert(id, file);
                 }
             }
         }
@@ -63,6 +65,40 @@ impl World {
         let Some([id]) = self.callees.get(&(file.replace('\\', "/"), name.to_string())).map(Vec::as_slice) else { return false };
         let Some(first) = self.params.get(id).and_then(|p| p.iter().find(|n| *n != "this")) else { return false };
         self.returns.get(id).is_some_and(|rs| !rs.is_empty() && rs.iter().all(|r| self.hands_back(id, r, first)))
+    }
+
+    /// A CALL OF A HELPER THAT BUILDS THE URL (rows 88): `this.ordersUrl('list')` over `ordersUrl = (relative) => `${base}orders/${relative}``
+    /// is what the helper returns, folded in the helper - its `this`, locals and consts - with each parameter the caller's argument folded
+    /// where the call is. The one declaration the call's `$target` names (file and name, as `forwards_first`); several returns that fold
+    /// apart are an unknown piece; a helper on the way to itself (`seen`) is a cycle and `*`. None when the call names no such helper.
+    pub(super) fn built(&self, call: &serde_json::Map<String, Value>, at: &At, seen: &mut HashSet<String>) -> Option<String> {
+        call.get("$call").filter(|c| c.is_string())?;
+        let target = call.get("$target")?.as_object()?;
+        let (file, name) = (target.get("file")?.as_str()?, target.get("name")?.as_str()?);
+        let [id] = self.callees.get(&(file.replace('\\', "/"), name.to_string()))?.as_slice() else { return None };
+        let returns = self.returns.get(id).filter(|r| !r.is_empty())?;
+        let key = format!("helper\0{id}");
+        if !seen.insert(key.clone()) {
+            return Some("*".into());
+        }
+        let args = call.get("$args").and_then(Value::as_array);
+        let names: Vec<&String> = self.params.get(id).into_iter().flatten().filter(|n| *n != "this").collect();
+        let bound: HashMap<String, String> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| ((*n).clone(), args.and_then(|a| a.get(i)).map_or_else(|| "*".to_string(), |a| self.fold(a, at, seen))))
+            .collect();
+        let inner = At {
+            file: self.callable_file.get(id).map_or(at.file, String::as_str),
+            member: id,
+            class: self.class_of.get(id).map(String::as_str),
+            line: i64::MAX,
+            bound: Some(&bound),
+        };
+        let urls: HashSet<String> = returns.iter().map(|r| self.fold(r, &inner, seen)).collect();
+        seen.remove(&key);
+        let one = urls.len() == 1;
+        Some(urls.into_iter().next().filter(|_| one).unwrap_or_else(|| "*".into()))
     }
 
     /// Does this return of the callable `id` hand its parameter `first` back (see the module doc)?

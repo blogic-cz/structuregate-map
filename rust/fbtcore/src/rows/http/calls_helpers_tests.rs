@@ -20,7 +20,7 @@ fn world() -> World {
 }
 
 fn at() -> At<'static> {
-    At { file: "f:1", member: "m:1", class: None, line: 5 }
+    At { file: "f:1", member: "m:1", class: None, line: 5, bound: None }
 }
 
 fn call(name: &str, first: Value) -> Value {
@@ -28,17 +28,28 @@ fn call(name: &str, first: Value) -> Value {
 }
 
 #[test]
-fn a_helper_returning_its_first_argument_is_read_through_and_a_url_builder_is_an_unknown_piece() {
+fn a_helper_returning_its_first_argument_is_read_through_and_a_url_builder_is_what_it_returns() {
     let w = world();
     let url = json!({"$expr": "url"});
     // `createQueryUrl(url)`: the base is the parameter, and a caller's own url folds to the argument.
     assert_eq!(w.base(&call("createQueryUrl", url.clone()), &at()).as_deref(), Some("url"));
     assert_eq!(w.url(&call("createQueryUrl", json!("/calculations/count")), &at()), "/calculations/count");
-    // `getBase(id)` returns something else: the parameter handed to it is no base, and the call is `*` before the literal suffix.
+    // `getBase(id)` returns something else: the parameter handed to it is no base, and (rows 88) the call is what the builder returns, the suffix kept.
     let id = json!({"$expr": "url"});
     let suffixed = json!({"$template": ["", "/get-vinculants"], "$hole_values": [call("getBase", id.clone())]});
     assert_eq!(w.base(&suffixed, &at()), None);
-    assert_eq!(finished(&w.url(&suffixed, &at())), "*/get-vinculants");
+    assert_eq!(finished(&w.url(&suffixed, &at())), "*/vehicle/get-vinculants");
+    // (rows 88) A BUILDER'S PARAMETER IS WHAT ITS CALLER HANDED IN: `ordersUrl('list')` over `${this.root}orders/${relative}`, and a caller's own parameter stays `{}`.
+    let mut built = world();
+    built.callees.insert(("/abs/api.ts".into(), "ordersUrl".into()), vec!["m:5".into()]);
+    built.params.insert("m:5".into(), vec!["relative".into()]);
+    built.returns.insert("m:5".into(), vec![json!({"$template": ["", "orders/", ""], "$hole_values": [{"$expr": "this.root"}, {"$expr": "relative"}]})]);
+    assert_eq!(finished(&built.url(&call("ordersUrl", json!("list")), &at())), "*/orders/list");
+    assert_eq!(finished(&built.url(&call("ordersUrl", json!({"$expr": "url"})), &at())), "*/orders/{}");
+    // THE CONTROL: a builder whose returns fold apart is an unknown piece, the suffix after it kept.
+    built.returns.get_mut("m:5").unwrap().push(json!("/other"));
+    let apart = json!({"$template": ["", "/x"], "$hole_values": [call("ordersUrl", json!("list"))]});
+    assert_eq!(finished(&built.url(&apart, &at())), "*/x");
     // A callee the tree does not hold (a library function), and one that returns nothing it can read: no helper.
     assert_eq!(w.base(&call("encodeURI", id.clone()), &at()), None);
     assert!(!w.forwards_first(call("encodeURI", id.clone()).as_object().unwrap(), false));
@@ -82,8 +93,8 @@ fn a_call_site_reads_the_helper_from_the_rows() {
     let urls: Vec<(&str, &str)> = sites.iter().map(|s| (s.call.as_str(), s.url.as_str())).collect();
     // `count` is no wrapper (its url is a local the helper made, a base nobody hands in): its call reads the argument of the helper, query cut.
     assert!(urls.contains(&("call:2", "*/calculations/count")), "{urls:?}");
-    // `vinculants` hands an id to a url builder: not a wrapper either, and its own call keeps the suffix.
-    assert!(urls.contains(&("call:3", "*/get-vinculants")), "{urls:?}");
+    // `vinculants` hands an id to a url builder: not a wrapper either, and its own call is what the builder returns, the suffix kept (rows 88).
+    assert!(urls.contains(&("call:3", "*/vehicle/get-vinculants")), "{urls:?}");
 }
 
 /// `createQueryUrl(url, parameter)`: `if (..) { const parsedUrl = new URL(url); return parsedUrl.toString(); } return url + stringify(parameter);`
