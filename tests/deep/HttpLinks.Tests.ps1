@@ -227,6 +227,32 @@ export class CountService {
     Assert-Line $r 'c=GET|/orders/{}|one'
     Assert-Line $r 'c=GET|*|tail'
 }
+
+# (rows 88) A HELPER THAT BUILDS THE URL is what it returns (`calls_helpers.rs::built`): `this.ordersUrl('list')` over an arrow PROPERTY and over a method that both return
+# `${this.root}orders/${relative}` fold to the root (`*`), the literal path and the caller's argument; a caller's own parameter handed in stays `{}`.
+# THE CONTROL: a builder whose two returns fold apart is an unknown piece, the suffix after it kept.
+Test-Case 'httplinks: a call of a url builder is the url it returns, its parameter what the caller handed in' {
+    $tree = New-HttpLinksTree
+    $api = Join-Path $tree 'web/apps/shop/src/built.service.ts'
+    Set-Content -LiteralPath $api -NoNewline -Value (@'
+import { HttpClient } from '@angular/common/http';
+declare const root: string;
+export class BuiltService {
+  constructor(private http: HttpClient) {}
+  byArrow() { return this.http.get(this.arrowUrl('list')); }
+  byMethod(id: number) { return this.http.get(this.methodUrl(`item/${id}`)); }
+  byEither(flag: boolean) { return this.http.get(`${this.either(flag)}/x`); }
+  private arrowUrl = (relative: string) => `${root}orders/${relative}`;
+  private methodUrl(relative: string) { return `${root}orders/${relative}`; }
+  private either(flag: boolean) { if (flag) { return '/a'; } return '/b'; }
+}
+'@)
+    [void](Invoke-HttpLinksMap $tree)
+    $r = Get-HttpLinksRows $tree ("SELECT 'c=' || h.verb || '|' || h.url || '|' || m.name AS r FROM http_calls h JOIN members m ON m.id = h.member WHERE h.file LIKE '%built.service.ts'")
+    Assert-Line $r 'c=GET|*/orders/list|byArrow'
+    Assert-Line $r 'c=GET|*/orders/item/{}|byMethod'
+    Assert-Line $r 'c=GET|*/x|byEither'
+}
 }
 
 if (Get-Command dotnet -ErrorAction SilentlyContinue) {

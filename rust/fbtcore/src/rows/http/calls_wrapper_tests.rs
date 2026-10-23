@@ -9,7 +9,7 @@ fn world() -> World {
 }
 
 fn at(line: i64) -> At<'static> {
-    At { file: "f:1", member: "m:1", class: None, line }
+    At { file: "f:1", member: "m:1", class: None, line, bound: None }
 }
 
 /// The evaluator's value for `params ? createQueryUrl(url, params) : url`: both arms and the ternary's own text.

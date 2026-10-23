@@ -8,7 +8,7 @@
 //! (`q = params ? createQueryUrl(url, params) : url`), or a call whose FIRST argument is one AND whose callee returns that argument
 //! (`createQueryUrl(url, params)` is the parameter and an unknown suffix: the suffix is the query a caller's url never carries,
 //! `finished` cuts it). The callee's own `returns` say so (`calls_helpers.rs`): `` `${url}${query}` `` does, `` `${this.root}x` `` over an
-//! id parameter does not - that call is an unknown piece (`*`) and the literal after it stays. A CALLER's own url folds through such a
+//! id parameter does not - that call is what the builder returns (`calls_helpers.rs::built`, rows 88), the literal after it kept. A CALLER's own url folds through such a
 //! helper to its first argument too (`createQueryUrl(`${base}/count`, options)` is `${base}/count`).
 //!
 //! A CALL IS OF A WRAPPER BY `calls.callee_id` (rows 81), the callable that runs - never `target_id`, which is the checker's declaration and may be
@@ -71,6 +71,8 @@ struct World {
     /// (abs path, name) -> every callable of that name, and each callable's `returns` (`calls_helpers.rs`).
     callees: HashMap<(String, String), Vec<String>>,
     returns: HashMap<String, Vec<Value>>,
+    /// callable -> the `files` id it is declared in (`calls_helpers.rs::built`).
+    callable_file: HashMap<String, String>,
 }
 
 /// Where a value is read: the file, the callable, the class `this` names and the line.
@@ -80,6 +82,8 @@ struct At<'a> {
     member: &'a str,
     class: Option<&'a str>,
     line: i64,
+    /// A helper's parameters as its caller handed them, folded (`calls_helpers.rs::built`); none outside a helper.
+    bound: Option<&'a HashMap<String, String>>,
 }
 
 fn names(cell: Value) -> Vec<String> {
@@ -198,6 +202,9 @@ impl World {
                 if o.get("$call").is_some_and(Value::is_string) && self.forwards_first(o, true) {
                     return o.get("$args").and_then(Value::as_array).and_then(|a| a.first()).map_or("*".into(), |a| self.fold(a, at, seen));
                 }
+                if let Some(built) = self.built(o, at, seen) {
+                    return built;
+                }
                 match o.get("$expr").and_then(Value::as_str) {
                     Some(expr) => self.expression(expr, at, seen),
                     None => "*".into(),
@@ -229,6 +236,9 @@ impl World {
                 let key = format!("local\0{}\0{expr}\0{line}", at.member);
                 return self.through(key, value, &At { line: *line, ..at.clone() }, seen);
             }
+            if let Some(held) = at.bound.and_then(|b| b.get(expr)) {
+                return held.clone();
+            }
             return if self.is_param(at, expr) { "{}".into() } else { "*".into() };
         }
         if let Some((object, key)) = expr.split_once('.').filter(|(o, k)| is_name(o) && is_name(k)) {
@@ -256,7 +266,7 @@ impl World {
             return ["$then", "$else"].iter().filter_map(|arm| o.get(*arm)).find_map(|arm| self.parameter(arm, at, seen));
         }
         // A CALL OF THE PARAMETER'S FIRST ARGUMENT is the parameter followed by whatever the callee appends - when the callee's own returns say it
-        // returns that argument (`calls_helpers.rs`); a callee that turns it into a url (an id handed to a url builder) makes the call an unknown piece.
+        // returns that argument (`calls_helpers.rs`); a callee that turns it into a url (an id handed to a url builder) makes the call no base (a caller's fold reads what it builds).
         if o.get("$call").is_some_and(Value::is_string) {
             if !self.forwards_first(o, false) {
                 return None;
@@ -335,7 +345,7 @@ fn finished(url: &str) -> String {
 }
 
 fn place<'a>(world: &'a World, c: &'a Call) -> At<'a> {
-    At { file: &c.file, member: &c.member, class: world.class_of.get(&c.member).map(String::as_str), line: c.line }
+    At { file: &c.file, member: &c.member, class: world.class_of.get(&c.member).map(String::as_str), line: c.line, bound: None }
 }
 
 pub(super) fn load(conn: &Connection, typescript: &HashMap<String, String>) -> rusqlite::Result<Vec<Site>> {
@@ -439,7 +449,7 @@ mod tests {
     }
 
     fn at(line: i64) -> At<'static> {
-        At { file: "f:1", member: "m:1", class: Some("c:1"), line }
+        At { file: "f:1", member: "m:1", class: Some("c:1"), line, bound: None }
     }
 
     #[test]
