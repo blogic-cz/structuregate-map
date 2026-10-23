@@ -340,9 +340,11 @@ async function main() {
   // 89: a `template_literals` row in an object literal's property has `target` and `target_id` of the member it fills, as a string there has (`TsText.mjs::collectStrings`).
   // 90: #107 - the climb to the type a value takes later crosses `Array`'s `filter`/`slice`/`sort`/`reverse`/`concat` (the RESULT is typed), a const that is an element of another
   //     un-annotated array, and a property value whose object is typed later (`TsExpr/TsReadRefs.mjs::climb`, `typesAt`, `propertyTypes`).
+  // 91: the climb crosses `&&`/`||`/`??` operands and a ternary's arms, and a value returned from a function with no declared return type takes what its calls in the same file take
+  //     (`TsExpr/TsReadRefs.mjs::returnedFrom`, `callersOf`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 90, build: args.build,
+    config: config.file, data: config.data, rows: 91, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

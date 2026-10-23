@@ -289,6 +289,10 @@ export function makeReadRefs(ts, checker, canonicalPath) {
       else if (p !== undefined && ts.isArrayLiteralExpression(p)) { n = p; levels++; }
       else if (p !== undefined && ts.isPropertyAccessExpression(p) && p.expression === n && p.parent !== undefined && ts.isCallExpression(p.parent)
         && p.parent.expression === p && arrayMethod(p, SAME_ELEMENTS)) n = p.parent;
+      // A VALUE A CONDITION PASSES ON (rows 91): `c && { .. }`, `a || { .. }`, `a ?? { .. }` and a ternary's arm are the value of the whole where they win.
+      else if (p !== undefined && ts.isBinaryExpression(p) && (p.right === n || (p.left === n && p.operatorToken.kind !== ts.SyntaxKind.AmpersandAmpersandToken))
+        && [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(p.operatorToken.kind)) n = p;
+      else if (p !== undefined && ts.isConditionalExpression(p) && (p.whenTrue === n || p.whenFalse === n)) n = p;
       else break;
     }
     return { n, levels };
@@ -332,7 +336,46 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     const held = propertyTypes(top);
     if (held !== null) return down(held, levels);
     const t = checker.getContextualType(top);
-    return t === undefined ? [] : down([t], levels);
+    if (t !== undefined) return down([t], levels);
+    const fn = returnedFrom(top);
+    return fn === null ? [] : callersOf(fn, levels);
+  };
+  /** THE FUNCTION A VALUE IS RETURNED FROM when it declares no return type (rows 91): `return x` in its body, or an arrow's concise body - named by a declaration,
+   *  a method, or the variable or property an arrow or function expression is held in. Null otherwise: an annotated return is the contextual type already. */
+  const returnedFrom = (n) => {
+    let fn = null;
+    if (n.parent !== undefined && ts.isReturnStatement(n.parent)) {
+      fn = n.parent.parent;
+      while (fn !== undefined && !ts.isFunctionLike(fn)) fn = fn.parent;
+    } else if (n.parent !== undefined && ts.isArrowFunction(n.parent) && n.parent.body === n) fn = n.parent;
+    if (fn === undefined || fn === null || fn.type !== undefined) return null;
+    const holder = (ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) && fn.parent !== undefined
+      && (ts.isVariableDeclaration(fn.parent) || ts.isPropertyDeclaration(fn.parent)) && fn.parent.initializer === fn ? fn.parent : fn;
+    return holder.name !== undefined && ts.isIdentifier(holder.name) ? holder : null;
+  };
+  /** WHAT A FUNCTION'S CALLS TAKE (rows 91): every call of it in its own FILE - a private method's callers are all there - climbed and asked as a value is,
+   *  `levels` down. Callers in other files are not searched: that is the whole program per function. Memoized per function and depth, empty while asked. */
+  const callersOf = (fn, levels) => {
+    const memo = laterMemo.get(fn) ?? new Map();
+    laterMemo.set(fn, memo);
+    if (memo.has(levels)) return memo.get(levels);
+    memo.set(levels, []);
+    const symbol = checker.getSymbolAtLocation(fn.name);
+    const found = [];
+    const stack = symbol === undefined ? [] : [fn.getSourceFile()];
+    while (stack.length) {
+      const node = stack.pop();
+      if (ts.isCallExpression(node)) {
+        const callee = ts.isPropertyAccessExpression(node.expression) ? node.expression.name : node.expression;
+        if (ts.isIdentifier(callee) && callee.text === fn.name.text && checker.getSymbolAtLocation(callee) === symbol) {
+          const { n: top, levels: inside } = climb(node);
+          found.push(...typesAt(top, levels + inside, null));
+        }
+      }
+      ts.forEachChild(node, (c) => { stack.push(c); });
+    }
+    memo.set(levels, found);
+    return found;
   };
   function laterTypes(object) {
     // Asked of an object the checker gives no contextual type (or only a pushed-into array's inferred one): what its climbed node takes, `typesAt` in order.

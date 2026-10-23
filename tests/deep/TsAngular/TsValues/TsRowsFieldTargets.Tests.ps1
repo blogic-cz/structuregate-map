@@ -167,8 +167,9 @@ $script:TsFieldLater = @{
         "  Message: string | (() => string);`n" +
         "  Children?: HueRule[];`n" +
         "}`n" +
-        "export function check(r: HueRule): void { void r; }`n"
-    'apps/shop/src/use.ts' = "import { HueRule, check } from './rule';`n" +
+        "export function check(r: HueRule): void { void r; }`n" +
+        "export function checkAll(r: HueRule[]): void { void r; }`n"
+    'apps/shop/src/use.ts' = "import { HueRule, check, checkAll } from './rule';`n" +
         "export class Widget {`n" +
         "  strict = false;`n" +
         "  rules(): HueRule[] {`n" +
@@ -202,6 +203,9 @@ $script:TsFieldLater = @{
         "    return list;`n" +
         "  }`n" +
         "  filtered(): HueRule[] { return [{ Field: 'xi', Message: 'hue.xi.filtered' }].filter((r) => !!r); }`n" +
+        "  private implied() { return [this.strict && { Field: 'omicron', Message: 'hue.omicron.implied' }, { Field: 'pi', Message: 'hue.pi.implied' }]; }`n" +
+        "  wire(): void { checkAll(this.implied() as HueRule[]); checkAll(this.implied()); }`n" +
+        "  private orphan() { return [{ Field: 'rho', Message: 'hue.rho.orphan' }]; }`n" +
         "  loose(): number {`n" +
         "    const free = { Field: 'eps', Message: 'hue.eps.loose' };`n" +
         "    const other = [{ Field: 'zeta', Message: 'hue.zeta.loose' }];`n" +
@@ -235,5 +239,10 @@ Test-Case 'tsrows: a literal in an un-annotated const names the member of the ty
     Assert-Line $r 'hue.mu.outer=Message@3:rule.ts:tm Message@3'
     Assert-Line $r 'hue.nu.child=Message@3:rule.ts:tm Message@3'
     Assert-Line $r 'hue.xi.filtered=Message@3:rule.ts:tm Message@3'
+    # (rows 91) RETURNED FROM A METHOD WITH NO RETURN TYPE, what its call takes (`checkAll(this.implied())` in the same file), an element behind `&&` too.
+    # THE CONTROL: a method nobody calls gives its array nothing to take.
+    Assert-Line $r 'hue.omicron.implied=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'hue.pi.implied=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'hue.rho.orphan=-@-:-:-'
 }
 }
