@@ -330,9 +330,11 @@ async function main() {
   //     as a literal there has (`TsWalk.mjs::declareInline`, `TsExpr/TsReadRefs.mjs::fieldTarget`, `TsRefs.mjs::rollupRefIds`); parentheses, `as` and `satisfies` around the value are stepped through.
   // 84: a function declared in a body (`function inner() {..}`) is a `functions` row NAMED by its declaration, so a bare `inner(..)` has `target_id` and `callee_id` (`TsWalk.mjs::declareInline`);
   //     a call of a local or const that holds a function has `callee_id`, the function its value names (`$fn_id`, `TsRefs.mjs::rollupRefIds`).
+  // 85: `$event` of an output a directive INHERITS is typed as one it declares: the output is looked up on the class, then its nearest base, the base's type parameters
+  //     bound by the `extends` (`TsTpl/TsTplEvents.mjs::outputOf`); a type parameter's owner keeps the literals its intersection dropped (`T & { cell: X }`, `TsTplOwners.mjs::withShapes`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 84, build: args.build,
+    config: config.file, data: config.data, rows: 85, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
