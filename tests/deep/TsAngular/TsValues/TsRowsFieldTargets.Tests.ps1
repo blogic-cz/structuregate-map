@@ -145,4 +145,55 @@ Test-Case 'tsrows: a function in an object literal names the member of its conte
     Assert-Line $l 'alpha=Field@2:rule.ts:tm Field@2'
     Assert-Line $l 'beta=Field@2:rule.ts:tm Field@2'
 }
+# (rows 87, #106) AN UN-ANNOTATED CONST TAKES ITS TYPE LATER (`TsReadRefs.mjs::laterTypes`): `const list = [..]; return list;` in a method typed `HueRule[]`, a const handed to a parameter
+# typed `HueRule`, and a const that only another const aliases before the return - each object's literal and function name the member they fill, as with an annotation.
+# THE CONTROL: a const pushed into another un-annotated array takes that array's INFERRED literal type, whose `Message` is the other literal's own property - no member, so none.
+$script:TsFieldLater = @{
+    'apps/shop/src/rule.ts' = "export interface HueRule {`n" +
+        "  Field: string;`n" +
+        "  Message: string | (() => string);`n" +
+        "}`n" +
+        "export function check(r: HueRule): void { void r; }`n"
+    'apps/shop/src/use.ts' = "import { HueRule, check } from './rule';`n" +
+        "export class Widget {`n" +
+        "  strict = false;`n" +
+        "  rules(): HueRule[] {`n" +
+        "    const list = [`n" +
+        "      { Field: 'alpha', Message: 'hue.alpha.required' },`n" +
+        "      { Field: 'beta', Message: () => (this.strict ? 'hue.beta.strict' : 'hue.beta.required') },`n" +
+        "    ];`n" +
+        "    return list;`n" +
+        "  }`n" +
+        "  run(): void {`n" +
+        "    const one = { Field: 'gamma', Message: 'hue.gamma.arg' };`n" +
+        "    check(one);`n" +
+        "  }`n" +
+        "  nested(): HueRule[][] {`n" +
+        "    const grid = [[{ Field: 'delta', Message: 'hue.delta' }]];`n" +
+        "    const same = grid;`n" +
+        "    return same;`n" +
+        "  }`n" +
+        "  loose(): number {`n" +
+        "    const free = { Field: 'eps', Message: 'hue.eps.loose' };`n" +
+        "    const other = [{ Field: 'zeta', Message: 'hue.zeta.loose' }];`n" +
+        "    other.push(free);`n" +
+        "    return other.length;`n" +
+        "  }`n" +
+        "}`n"
+}
+
+Test-Case 'tsrows: a literal in an un-annotated const names the member of the type it takes later (#106)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsFieldLater) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db (Get-TsFieldTargetSql 'string_literals' 'value')
+    Assert-Line $r 'hue.alpha.required=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'alpha=Field@2:rule.ts:tm Field@2'
+    Assert-Line $r 'hue.gamma.arg=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'hue.delta=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'hue.eps.loose=-@-:-:-'
+    Assert-Line $r 'hue.zeta.loose=-@-:-:-'
+    $fn = Invoke-TsRowsQ $made.Db ("SELECT 'fn=' || fn.line || ':' || coalesce((SELECT t.name || '@' || t.line FROM type_members t WHERE t.id = fn.target_id), '-') AS v FROM functions fn " +
+        "JOIN files f ON f.id = fn.file AND f.path LIKE '%use.ts' WHERE fn.inline = 1")
+    Assert-Line $fn 'fn=7:Message@3'
+}
 }

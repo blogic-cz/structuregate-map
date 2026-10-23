@@ -228,16 +228,95 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     if (prop === undefined || !(method || (ts.isPropertyAssignment(prop) && prop.initializer === child))) return null;
     if (!(ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name) || ts.isNumericLiteral(prop.name))) return null;
     const type = checker.getContextualType(prop.parent);
-    if (type === undefined) return null;
+    const later = type === undefined ? laterTypes(prop.parent) : [];
+    if (type === undefined && !later.length) return null;
     const name = prop.name.text;
     const places = new Map();
-    for (const arm of type.isUnion() ? type.types : [type]) {
+    for (const arm of (type === undefined ? later : [type]).flatMap((t) => (t.isUnion() ? t.types : [t]))) {
       const [first] = checker.getPropertyOfType(arm, name)?.declarations ?? [];
       if (first === undefined) continue;
+      // A TYPE INFERRED FROM ANOTHER LITERAL is no declared member (`list.push(x)` over an un-annotated `list`): its property is that literal's, and names nothing here.
+      if (type === undefined && first.parent !== undefined && ts.isObjectLiteralExpression(first.parent)) continue;
       const place = at(first);
       places.set(`${place.file}#${place.line}`, place);
     }
     return places.size === 1 ? { name, ...[...places.values()][0] } : null;
+  }
+
+  /**
+   * THE TYPE AN UN-ANNOTATED CONST'S LITERAL TAKES LATER (rows 87, #106): `const list = [{ Field: 'alpha' }]; return list;` in a method typed `HueRule[]` gives the object no
+   * contextual type where it is written, yet the only type the value ever takes is `HueRule[]` at the `return`. The object is climbed out of its array literals (one level each,
+   * parentheses and `!` stepped through) to the initializer of a `const` with no annotation; every use of that const in its scope is asked for its contextual type - a typed
+   * `return`, a parameter, a typed variable or member - indexed down as many levels; a use that initializes another un-annotated `const` is followed into it (a visited set ends a
+   * cycle). Uses with no contextual type (`list.length`, `list.push(..)`) say nothing. The types found are what the object's property is looked up on.
+   */
+  const passes = (n) => ts.isParenthesizedExpression(n) || ts.isNonNullExpression(n);
+  const constOf = (n) => {
+    const decl = n.parent;
+    return decl !== undefined && ts.isVariableDeclaration(decl) && decl.initializer === n && decl.type === undefined && ts.isIdentifier(decl.name)
+      && ts.isVariableDeclarationList(decl.parent) && (decl.parent.flags & ts.NodeFlags.Const) !== 0 ? decl : null;
+  };
+  const scopeOf = (decl) => {
+    let n = decl.parent;
+    while (n !== undefined && !(ts.isBlock(n) || ts.isSourceFile(n) || ts.isModuleBlock(n) || ts.isCaseClause(n) || ts.isDefaultClause(n))) n = n.parent;
+    return n;
+  };
+  const down = (types, levels) => {
+    let out = types;
+    for (let i = 0; i < levels; i++) {
+      out = out.flatMap((t) => (t.isUnion() ? t.types : [t])).flatMap((t) => {
+        const element = checker.getIndexTypeOfType(t, ts.IndexKind.Number);
+        return element === undefined ? [] : [element];
+      });
+    }
+    return out;
+  };
+  function laterTypes(object) {
+    let n = object;
+    let levels = 0;
+    for (;;) {
+      const p = n.parent;
+      if (p !== undefined && passes(p)) n = p;
+      else if (p !== undefined && ts.isArrayLiteralExpression(p)) { n = p; levels++; }
+      else break;
+    }
+    const first = constOf(n);
+    if (first === null) return [];
+    // EVERY LITERAL OF ONE ARRAY asks the same question: answered once per const and depth.
+    const memo = laterMemo.get(first) ?? new Map();
+    laterMemo.set(first, memo);
+    if (!memo.has(levels)) memo.set(levels, usesOf(first, levels));
+    return memo.get(levels);
+  }
+  const laterMemo = new Map();
+  function usesOf(first, levels) {
+    const found = [];
+    const seen = new Set();
+    const todo = [first];
+    while (todo.length) {
+      const decl = todo.pop();
+      if (seen.has(decl)) continue;
+      seen.add(decl);
+      const symbol = checker.getSymbolAtLocation(decl.name);
+      const scope = scopeOf(decl);
+      if (symbol === undefined || scope === undefined) continue;
+      const stack = [scope];
+      while (stack.length) {
+        const node = stack.pop();
+        if (ts.isIdentifier(node) && node !== decl.name && node.text === decl.name.text && checker.getSymbolAtLocation(node) === symbol) {
+          let use = node;
+          while (use.parent !== undefined && passes(use.parent)) use = use.parent;
+          const next = constOf(use);
+          if (next !== null) todo.push(next);
+          else {
+            const t = checker.getContextualType(use);
+            if (t !== undefined) found.push(...down([t], levels));
+          }
+        }
+        ts.forEachChild(node, (c) => { stack.push(c); });
+      }
+    }
+    return found;
   }
 
   return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember, resolveArg, targetLine, fieldTarget };
