@@ -136,6 +136,27 @@ Test-Case 'tsrows: duplicate_types lists a class, an interface and an alias' {
     Assert-NoLine $r 'DemoSolo'
 }
 
+# (rows 81) WHAT TYPESCRIPT MERGES IS ONE PLACE (`rows/dups.rs`): a class and an interface of one name in one file, an
+# interface reopened, an enum continued are one declaration to the compiler. `Merged` is that place plus a class in
+# another file (2); `Twice` is reopened in one file, again in a namespace and once elsewhere (3); `Kind` is continued in
+# one file and copied whole into another (2, the members agree); `Lone` is only continued (no row).
+Test-Case 'tsrows: duplicate_types counts a declaration typescript merges as one place' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/merge-a.ts' = "export class Merged {}`nexport interface Merged { a: number }`n" +
+            "export interface Twice { a: number }`nexport interface Twice { b: number }`n" +
+            "export namespace Box { export interface Twice { c: number } }`n" +
+            "export enum Kind { A = 1 }`nexport enum Kind { B = 2 }`nexport enum Lone { A }`nexport enum Lone { B = 1 }`n"
+        'apps/shop/src/merge-b.ts' = "export class Merged {}`nexport interface Twice { z: number }`nexport enum Kind { A = 1, B = 2 }`n"
+    }
+    $made = New-TsRowsDb $tree -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db "SELECT 'dt=' || name || '|' || kinds || '|' || places || '|' || coalesce(members_differ, '-') AS r FROM duplicate_types"
+    Assert-Line $r 'dt=Merged|class,interface|2|-'
+    Assert-Line $r 'dt=Twice|interface|3|-'
+    Assert-Line $r 'dt=Kind|enum|2|0'
+    Assert-NoLine $r 'dt=Lone'
+}
+
 # AN IMPORT ONLY CASE-INSENSITIVE RESOLUTION FINDS says so: `./Cart` beside `cart.ts` resolves on Windows and macOS, not where the build ships.
 Test-Case 'tsrows: an unresolved import notes when only the casing differs' {
     $tree = New-TsRowsWorkspace @{

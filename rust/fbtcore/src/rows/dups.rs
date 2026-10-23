@@ -6,6 +6,11 @@
 //! A PLACE IS A SYMBOL IN A PROJECT. A `partial` class is one place however many files it spans; the same
 //! namespace and name compiled into two projects is two. A declaration with no symbol (a TypeScript enum) is
 //! a place per declaration (a TypeScript `classes`, `interfaces` and `type_aliases` row, kind `class`, `interface`, `alias`; its enums too). An enum's places are compared by their members, name and value; any other type's are not.
+//!
+//! EXCEPT WHERE TYPESCRIPT ITSELF MERGES THEM: a class, an interface or an enum declared again under one name in one
+//! file and one namespace (`in_module`) is ONE declaration to the compiler - `class Order {}` beside `interface Order {..}`,
+//! an interface reopened, an enum continued - so it is one place, its kinds joined and an enum's members the union.
+//! An alias is never merged (the compiler refuses a second one).
 
 use super::cells;
 use rusqlite::types::Value as SqlValue;
@@ -24,26 +29,48 @@ struct Place {
     members: Option<String>,
 }
 
+impl Place {
+    /// Another declaration TypeScript merges into this one: its kind joins this one's; the first line stays the place.
+    fn merge(&mut self, other: &Place) {
+        if !self.kind.split(',').any(|k| k == other.kind) {
+            self.kind = format!("{},{}", self.kind, other.kind);
+        }
+    }
+}
+
 /// The table rewritten whole. The number of names it holds.
 pub fn write(conn: &Connection) -> rusqlite::Result<usize> {
     let mut by_name: BTreeMap<String, BTreeMap<(String, String), Place>> = BTreeMap::new();
-    let mut members: BTreeMap<(String, String), String> = BTreeMap::new();
+    // An enum's members by (file, namespace, name): a TypeScript enum continued in its file adds to the same list.
+    let mut members: BTreeMap<(String, String, String), Vec<Value>> = BTreeMap::new();
     let enums = has_columns(conn, "enums", &["file", "name", "members"]);
     if enums {
         // `members` is a list of `{name, value}`: its nodes, read back row by row.
         let mut list = Column::new(conn, "enums", "members")?;
-        let sql = format!("SELECT file, name, {}, {} FROM enums e", owner_sql(conn, "enums", "e"), scalar_sql(conn, "enums", "e", "members"));
+        let sql = format!(
+            "SELECT file, name, {}, {}, {} FROM enums e",
+            owner_sql(conn, "enums", "e"),
+            scalar_sql(conn, "enums", "e", "members"),
+            scope_sql(conn, "enums", "e")
+        );
         let mut stmt = conn.prepare(&sql)?;
-        let rows: Vec<(String, String, String, SqlValue)> =
-            stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, r.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
-        for (file, name, owner, scalar) in rows {
+        let rows: Vec<(String, String, String, SqlValue, String)> =
+            stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, r.get(3)?, text(r, 4)?)))?.collect::<rusqlite::Result<_>>()?;
+        for (file, name, owner, scalar, scope) in rows {
             let held = list.value(&owner, &scalar)?;
-            members.insert((file, name), canonical(&held));
+            members.entry((file, scope, name)).or_default().extend(held.as_array().cloned().unwrap_or_default());
         }
     }
-    let mut add = |name: String, place: Place, project: String, file: String| {
-        let key = if place.symbol.is_empty() { (format!("{}:{}", place.lang, place.at), file) } else { (place.symbol.clone(), project) };
-        by_name.entry(name).or_default().entry(key).or_insert(place);
+    let mut add = |name: String, place: Place, project: String, file: String, scope: &str| {
+        let merges = (place.lang == "typescript" || place.lang == "ts") && place.kind != "alias";
+        let key = if !place.symbol.is_empty() {
+            (place.symbol.clone(), project)
+        } else if merges {
+            (format!("{}:{scope}", place.lang), file)
+        } else {
+            (format!("{}:{}", place.lang, place.at), file)
+        };
+        by_name.entry(name).or_default().entry(key).and_modify(|held| held.merge(&place)).or_insert(place);
     };
     // THE TYPESCRIPT HALF'S `classes`, `interfaces` AND `type_aliases` HAVE NO `kind` (the table is the kind): a row of a
     // TypeScript file with none is a class / interface / alias. Reading `kind` alone listed only enums for it, since
@@ -62,36 +89,42 @@ pub fn write(conn: &Connection) -> rusqlite::Result<usize> {
         let kind_sql = if has_columns(conn, table, &["kind"]) { "c.kind" } else { "''" };
         let symbol = if has_columns(conn, table, &["symbol"]) { "c.symbol" } else { "''" };
         let project = if has_columns(conn, "files", &["project"]) { "f.project" } else { "''" };
+        let scope = scope_sql(conn, table, "c");
         // A CLASS EXPRESSION IS NOT A DECLARATION OF A TYPE (`static Inner = class { .. }` is a `classes` row named by its holder, `expression` set): skipped,
         // or a holder named like a class elsewhere read as a duplicate of it.
         let declared = if table == "classes" && has_columns(conn, table, &["expression"]) { " WHERE coalesce(c.expression, 0) = 0" } else { "" };
         let sql = format!(
-            "SELECT c.name, {kind_sql}, {symbol}, f.path, c.line, f.lang, {project}, c.file FROM {table} c JOIN files f ON f.id = c.file{declared}"
+            "SELECT c.name, {kind_sql}, {symbol}, f.path, c.line, f.lang, {project}, c.file, {scope} FROM {table} c JOIN files f ON f.id = c.file{declared}"
         );
         let mut stmt = conn.prepare(&sql)?;
         for row in stmt.query_map([], |r| {
-            Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, text(r, 4)?, text(r, 5)?, text(r, 6)?, text(r, 7)?))
+            Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, text(r, 4)?, text(r, 5)?, text(r, 6)?, text(r, 7)?, text(r, 8)?))
         })? {
-            let (name, mut kind, symbol, path, line, lang, project, file) = row?;
+            let (name, mut kind, symbol, path, line, lang, project, file, scope) = row?;
             if kind.is_empty() && (lang == "typescript" || lang == "ts") {
                 kind = own.to_string();
             }
             if !KINDS.contains(&kind.as_str()) || name.is_empty() {
                 continue;
             }
-            let held = if kind == "enum" { members.remove(&(file.clone(), name.clone())) } else { None };
+            let held = if kind == "enum" { members.remove(&(file.clone(), scope.clone(), name.clone())).map(|l| canonical(&Value::Array(l))) } else { None };
             let place = Place { lang, kind: kind.clone(), symbol, at: format!("{path}:{line}"), members: held };
-            add(name, place, project, file);
+            add(name, place, project, file, &scope);
         }
     }
     // AN ENUM NO `classes` ROW NAMES - the TypeScript half keeps its enums apart.
     if enums && !members.is_empty() {
-        let mut stmt = conn.prepare("SELECT e.file, e.name, f.path, e.line, f.lang FROM enums e JOIN files f ON f.id = e.file")?;
-        for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, text(r, 4)?)))? {
-            let (file, name, path, line, lang) = row?;
-            let Some(list) = members.get(&(file.clone(), name.clone())) else { continue };
-            let place = Place { lang, kind: "enum".into(), symbol: String::new(), at: format!("{path}:{line}"), members: Some(list.clone()) };
-            add(name, place, String::new(), file);
+        let sql = format!(
+            "SELECT e.file, e.name, f.path, e.line, f.lang, {} FROM enums e JOIN files f ON f.id = e.file",
+            scope_sql(conn, "enums", "e")
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, text(r, 4)?, text(r, 5)?)))? {
+            let (file, name, path, line, lang, scope) = row?;
+            let Some(list) = members.get(&(file.clone(), scope.clone(), name.clone())) else { continue };
+            let list = canonical(&Value::Array(list.clone()));
+            let place = Place { lang, kind: "enum".into(), symbol: String::new(), at: format!("{path}:{line}"), members: Some(list) };
+            add(name, place, String::new(), file, &scope);
         }
     }
 
@@ -109,7 +142,8 @@ pub fn write(conn: &Connection) -> rusqlite::Result<usize> {
         }
         let places: Vec<&Place> = places.values().collect();
         let set = |pick: &dyn Fn(&Place) -> String| -> Vec<String> {
-            let mut out: Vec<String> = places.iter().map(|p| pick(p)).filter(|s| !s.is_empty()).collect();
+            // A merged place's kinds are joined (`class,interface`): each is one of the set.
+            let mut out: Vec<String> = places.iter().flat_map(|p| pick(p).split(',').map(str::to_string).collect::<Vec<_>>()).filter(|s| !s.is_empty()).collect();
             out.sort();
             out.dedup();
             out
@@ -131,6 +165,12 @@ pub fn write(conn: &Connection) -> rusqlite::Result<usize> {
     super::store::insert_rows(conn, "duplicate_types", &made).map_err(failed)?;
     conn.execute_batch("CREATE INDEX ix_duplicate_types_name ON duplicate_types(name);")?;
     Ok(n)
+}
+
+/// WHERE A DECLARATION SITS inside its file, in SQL: its namespace (`in_module`) and the function it is local to (`func`, the
+/// plain half's) - two declarations TypeScript merges share both.
+fn scope_sql(conn: &Connection, table: &str, alias: &str) -> String {
+    format!("coalesce({}, '') || '|' || coalesce({}, '')", scalar_sql(conn, table, alias, "in_module"), scalar_sql(conn, table, alias, "func"))
 }
 
 /// Whether the places' members differ - NULL unless every place is an enum with members - and which sets there are.

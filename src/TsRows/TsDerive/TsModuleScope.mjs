@@ -252,6 +252,9 @@ export function judgeScope(scopes, r) {
   // read as `declared`.
   const standalone = standaloneByClass.get(r.from_class);
   if (standalone) {
+    // IT IS IN ITS OWN SCOPE (rows 82): the compiler puts a standalone component itself among its dependencies, so its own
+    // selector in its own template is a render Angular instantiates, imported or not - `declared`, as a module's own declaration is.
+    if (r.to_class === r.from_class) return { scope: 'declared', standalone: true, byName: false };
     // Its own `imports` array IS the scope - the rule the compiler applies to a standalone component.
     const hit = reach(standaloneScope(standalone), r);
     return { scope: hit === null ? 'out_of_scope' : 'imported', standalone: true, byName: hit === 'name' };

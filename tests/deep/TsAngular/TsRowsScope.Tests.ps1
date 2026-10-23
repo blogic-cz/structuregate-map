@@ -170,4 +170,27 @@ Test-Case 'tsrows: a component only an out-of-scope candidate names is unused' {
     Assert-Line $r 'BBoxComponent=1'
 }
 
+# (rows 82) A STANDALONE COMPONENT IS IN ITS OWN SCOPE: Angular's compiler puts the component itself among a standalone
+# component's dependencies, so `<demo-tree>` inside `DemoTreeComponent`'s own template is a render it instantiates - a
+# `renders` row `declared`, an edge of `render_graph` - with nothing imported. The control: another standalone component
+# that writes `<demo-tree>` without importing it stays `out_of_scope`, set aside.
+Test-Case 'tsrows: a standalone component rendering its own selector is in scope' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/tree.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-tree', standalone: true, template: '@if (more) { <demo-tree [more]=`"false`"></demo-tree> }' })`n" +
+            "export class DemoTreeComponent { @Input() more = true; }`n" +
+            "@Component({ selector: 'demo-forest', standalone: true, template: '<demo-tree></demo-tree>' })`n" +
+            "export class DemoForestComponent {}`n"
+    }
+    $made = New-TsRowsDb $tree -Shared
+    Assert-Exit $made.Result 0
+    $rows = Invoke-TsRowsQ $made.Db ("SELECT 'r=' || p.name || '>' || r.to_name || '=' || r.scope AS edge FROM (SELECT from_class, scope, to_name " +
+        "FROM renders UNION ALL SELECT from_class, scope, to_name FROM renders_out_of_scope) r JOIN classes p ON p.id = r.from_class")
+    Assert-Line $rows 'r=DemoTreeComponent>DemoTreeComponent=declared'
+    Assert-Line $rows 'r=DemoForestComponent>DemoTreeComponent=out_of_scope'
+    $graph = Invoke-TsRowsQ $made.Db ("SELECT 'g=' || p.name || '>' || g.to_name AS edge FROM render_graph g JOIN classes p ON p.id = g.from_class")
+    Assert-Line $graph 'g=DemoTreeComponent>DemoTreeComponent'
+    Assert-NoLine $graph 'g=DemoForestComponent'
+}
+
 }
