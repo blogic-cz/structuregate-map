@@ -8,7 +8,7 @@
 
 import { slash } from './TsPaths.mjs';
 
-export function makeHops({ hopOf, indexByShape, scopes }) {
+export function makeHops({ hopOf, indexByShape, scopes, fieldsOf }) {
   /**
    * THE LIBRARY PIPE a name is in the scope of a component's class, read off the typings the extraction recorded (`external_pipes`, the scope's `ext`): `{name, class, file}` or
    * null. A pipe is the framework's by WHERE ITS CLASS IS DECLARED (`@angular/common`'s `KeyValuePipe`), never by the name a template spells it with.
@@ -25,14 +25,23 @@ export function makeHops({ hopOf, indexByShape, scopes }) {
   /**
    * WHAT `keyvalue` HANDS ON, as Angular types it: over `Record<K, V>`, `Map<K, V>` or an index signature `{ [k: string]: V }` a LIST of `{ key: K, value: V }` - a value
    * whose element ref is a PAIR (`pair`, resolved to the owner of that name by `TsTplOwners.mjs::resolveRef`). A value of any other type is refused: it must not borrow its input's.
+   * (rows 86) What a framework pipe EMITS is read, not what it unwraps to (`wrapped`: `x$ | async | keyvalue` over `Observable<Record<K, V>>` is the record); an ARRAY is the
+   * `Record<number, T>` the pipe's overload takes it as, its value the element; and a class or interface with no base is `Record<string, V>`, `V` the union of what its
+   * members are typed as (`fieldsOf`) - refused when one is typed by nothing the map holds, as a union with an unknown arm would be.
    */
   const keyValueOf = (held) => {
-    const ref = held?.ref ?? null;
+    const ref = held?.wrapped ?? held?.ref ?? null;
     const two = Array.isArray(ref?.args) && ref.args.length === 2;
     let pair = null;
     if (ref?.index) pair = { key: two ? ref.args[0] : null, value: ref.index };
     else if (two && ['Record', 'Map', 'ReadonlyMap'].includes(ref.name)) pair = { key: ref.args[0], value: ref.args[1] };
     else if (held?.owner?.kind === 'shape' && indexByShape.get(held.owner.id)?.type_ref) pair = { key: null, value: indexByShape.get(held.owner.id).type_ref };
+    else if (['Array', 'ReadonlyArray'].includes(ref?.name) && ref.element) pair = { key: null, value: ref.element };
+    else if (held?.wrapped === undefined && (held?.owner?.kind === 'class' || held?.owner?.kind === 'type')) {
+      const fields = fieldsOf(held.owner);
+      const refs = fields?.flatMap((f) => (f.type_ref ? [f.type_ref] : Array.isArray(f.type_refs) ? f.type_refs : [null]));
+      if (refs?.length && refs.every((r) => r !== null)) pair = { key: null, value: refs.length === 1 ? refs[0] : { type_refs: refs, type_refs_of: 'or' } };
+    }
     return pair === null ? null : { owner: null, ref: { element: { pair: true, ...pair } }, row: null, env: held.env ?? null };
   };
 

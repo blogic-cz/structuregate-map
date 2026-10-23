@@ -165,7 +165,23 @@ export function rollupTemplateReads(store) {
     }
   }
   const contexts = makeContexts(store, owners, directivesAt, inputsAt);
-  const hopRules = makeHops({ hopOf, indexByShape, scopes });
+  // THE FIELDS OF A CLASS OR INTERFACE, by owner (rows 86, what `keyvalue` hands over a plain object): its own members, or null when it has a base - whose members it holds
+  // too, which this list would leave out - or a member that is a method or a signature, which no field is.
+  const NOT_FIELDS = new Set(['method', 'MethodSignature', 'CallSignature', 'ConstructSignature', 'IndexSignature', 'getter', 'setter']);
+  const fieldsByOwner = new Map();
+  for (const [key, row] of propByOwner) {
+    const at = key.lastIndexOf('#');
+    const owner = key.slice(0, at);
+    if (!fieldsByOwner.has(owner)) fieldsByOwner.set(owner, []);
+    fieldsByOwner.get(owner).push(row);
+  }
+  const basedTypes = new Set(store.table('interfaces').filter((r) => Array.isArray(r.extends_refs) && r.extends_refs.length).map((r) => String(r.id)));
+  const fieldsOf = (owner) => {
+    if (owner.kind === 'class' ? owners.baseTypedOf(owner) !== null : basedTypes.has(String(owner.id))) return null;
+    const rows = fieldsByOwner.get(`${owner.kind}:${String(owner.id)}`) ?? [];
+    return rows.length && rows.every((r) => !NOT_FIELDS.has(String(r.kind ?? ''))) ? rows : null;
+  };
+  const hopRules = makeHops({ hopOf, indexByShape, scopes, fieldsOf });
   const eventOf = makeEvents({ store, propByOwner, directivesAt, declaredBy, contexts, resolveRef, scopes, judgeScope, baseTypedOf: owners.baseTypedOf });
   // A GENERIC COMPONENT'S REF IS ITS INSTANCE AS THE ELEMENT INSTANTIATES IT (rows 74): `<demo-table #t [rows]="items">` over `DemoTable<T>` binds `T` from what `items` holds, so `t.selected`
   // reads as the item. The inputs are read once per ref, in the element's scope with no ref typed (a ref read inside another's input is not asked: they could ask each other for ever).
