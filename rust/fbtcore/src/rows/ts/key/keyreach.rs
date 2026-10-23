@@ -73,7 +73,8 @@ const TEXT_EXTS: &[&str] = &[
 ///
 /// The dead-key trace reads raw text, and the rows do not carry it. `file_text` is written
 /// by the row writer, which reads the same files off disk; re-reading here costs less than
-/// carrying tens of MB through a payload.
+/// carrying tens of MB through a payload. It reads the DISK and never `file_text`, so a map
+/// built with `--map-no-text` traces the same (`rows/cells/text.rs`).
 ///
 /// NEWLINE TRANSLATION IS OFF — the bytes have to be what the file holds, because every
 /// offset and every `\r` strip in the scan depends on it. This language does not translate

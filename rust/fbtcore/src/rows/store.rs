@@ -343,6 +343,10 @@ impl Texts<'_> {
 }
 
 fn search(db: &Connection, texts: &Texts<'_>, counts: bool) -> Result<i64> {
+    // `--map-no-text`: NO TABLE, NO INDEX, NOTHING READ OFF THE DISK. The count is 0 and not -1, which says "no FTS5 here".
+    if !super::text::effective(db) {
+        return Ok(0);
+    }
     if db
         .execute_batch("CREATE VIRTUAL TABLE IF NOT EXISTS file_text USING fts5(path, content)")
         .is_err()
@@ -520,7 +524,9 @@ pub fn write(path: &Path, req: &WriteRequest<'_>) -> Result<Applied> {
         for table in schema::listable_tables(&db)? {
             written.insert(table.clone(), schema::count_of(&db, &table));
         }
-        written.insert("file_text".to_string(), found);
+        if super::text::effective(&db) {
+            written.insert("file_text".to_string(), found);
+        }
     }
     lap("count the tables", &mut steps);
     let wrong = if req.counts { verify(&db, req.shas, req.lang) } else { 0 };
@@ -565,9 +571,17 @@ fn write_meta(
     meta.insert("schema".into(), SCHEMA_VERSION.into());
     meta.insert("root".into(), root);
     meta.insert(format!("files:{}", req.lang), req.shas.len().to_string());
+    // THE SETTING IS RECORDED WITH THE ROWS IT SHAPED: `text::reconcile` reads it back to tell a switch from a rerun.
+    meta.insert(super::text::KEY.into(), if super::text::effective(db) { "1" } else { "0" }.into());
     meta.insert(
         "fts5".into(),
-        if found >= 0 { "yes".into() } else { "no - this build has no FTS5, so file_text is absent".to_string() },
+        if !super::text::effective(db) {
+            "not used - built without source text (--map-no-text)".to_string()
+        } else if found >= 0 {
+            "yes".into()
+        } else {
+            "no - this build has no FTS5, so file_text is absent".to_string()
+        },
     );
     if req.counts {
         meta.insert("files".into(), schema::count_of(db, "files").to_string());

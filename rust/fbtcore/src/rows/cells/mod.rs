@@ -522,6 +522,7 @@ pub fn load_all(db: &Connection, table: &str, column: &str) -> Result<HashMap<St
 
 pub mod meta;
 pub mod probe;
+pub mod text;
 
 #[cfg(test)]
 #[path = "tests.rs"]

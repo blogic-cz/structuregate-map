@@ -10,6 +10,9 @@
 //! `finished` cuts it). The callee's own `returns` say so (`calls_helpers.rs`): `` `${url}${query}` `` does, `` `${this.root}x` `` over an
 //! id parameter does not - that call is an unknown piece (`*`) and the literal after it stays. A CALLER's own url folds through such a
 //! helper to its first argument too (`createQueryUrl(`${base}/count`, options)` is `${base}/count`).
+//!
+//! A CALL IS OF A WRAPPER BY `calls.callee_id` (rows 81), the callable that runs - never `target_id`, which is the checker's declaration and may be
+//! a property of an object literal (`{ get }`) whose value is the function. A helper hands its url back through a `+` or a `new URL(url)` too (`calls_helpers.rs`).
 
 use super::files_of;
 use super::inputs::read_of;
@@ -41,7 +44,7 @@ struct Call {
     file: String,
     line: i64,
     member: String,
-    target_id: String,
+    callee_id: String,
     args: Vec<Value>,
     arg_params: Vec<String>,
     primitive: Option<String>,
@@ -294,7 +297,7 @@ fn load_calls(conn: &Connection, typescript: &HashMap<String, String>) -> rusqli
         (Column::new(conn, "calls", "target")?, Column::new(conn, "calls", "args")?, Column::new(conn, "calls", "arg_params")?);
     let scalar = |c: &str| scalar_sql(conn, "calls", "c", c);
     let sql = format!(
-        "SELECT c.id, c.file, c.line, c.member, c.target_id, {}, {}, {}, {} FROM calls c",
+        "SELECT c.id, c.file, c.line, c.member, c.callee_id, {}, {}, {}, {} FROM calls c",
         owner_sql(conn, "calls", "c"),
         scalar("target"),
         scalar("args"),
@@ -306,7 +309,7 @@ fn load_calls(conn: &Connection, typescript: &HashMap<String, String>) -> rusqli
     })?;
     let mut out = vec![];
     for row in rows {
-        let (id, file, line, member, target_id, owner, target, held_args, held_params) = row?;
+        let (id, file, line, member, callee_id, owner, target, held_args, held_params) = row?;
         if !typescript.contains_key(&file) {
             continue;
         }
@@ -320,7 +323,7 @@ fn load_calls(conn: &Connection, typescript: &HashMap<String, String>) -> rusqli
             .map(str::to_string);
         let Value::Array(args) = args.value(&owner, &held_args)? else { continue };
         let arg_params = names(arg_params.value(&owner, &held_params)?);
-        out.push(Call { id, file, line: line.parse().unwrap_or(0), member, target_id, args, arg_params, primitive });
+        out.push(Call { id, file, line: line.parse().unwrap_or(0), member, callee_id, args, arg_params, primitive });
     }
     Ok(out)
 }
@@ -367,7 +370,7 @@ pub(super) fn load(conn: &Connection, typescript: &HashMap<String, String>) -> r
     loop {
         let mut found: Vec<(String, Wrapper)> = vec![];
         for c in &calls {
-            let Some(w) = wrappers.get(&c.target_id).filter(|_| !c.target_id.is_empty()) else { continue };
+            let Some(w) = wrappers.get(&c.callee_id).filter(|_| !c.callee_id.is_empty()) else { continue };
             if wrappers.contains_key(&c.member) {
                 continue;
             }
@@ -386,9 +389,9 @@ pub(super) fn load(conn: &Connection, typescript: &HashMap<String, String>) -> r
     // THE ROWS: a primitive nobody parameterises, and every call of a wrapper that hands it a url of its own.
     let mut sites = vec![];
     for (n, c) in calls.iter().enumerate() {
-        let (verb, via, value) = match (verbs.get(&n), wrappers.get(&c.target_id).filter(|_| !c.target_id.is_empty())) {
+        let (verb, via, value) = match (verbs.get(&n), wrappers.get(&c.callee_id).filter(|_| !c.callee_id.is_empty())) {
             (Some((verb, url)), _) => (verb.clone(), String::new(), c.args.get(*url)),
-            (None, Some(w)) => (w.verb.clone(), c.target_id.clone(), c.args.get(position(w, c))),
+            (None, Some(w)) => (w.verb.clone(), c.callee_id.clone(), c.args.get(position(w, c))),
             _ => continue,
         };
         let value = value.unwrap_or(&none);
@@ -496,7 +499,7 @@ mod tests {
             json!({"id": "m:2", "file": "f:1", "class": "c:1", "name": "base", "params": [], "value": "/api"}),
         ]);
         rows("calls", vec![json!({
-            "id": "call:1", "file": "f:1", "line": 4, "member": "m:1", "target_id": "",
+            "id": "call:1", "file": "f:1", "line": 4, "member": "m:1", "callee_id": "",
             "target": {"file": "node_modules/@angular/common/http/index.d.ts", "owner": "HttpClient", "name": "get"},
             "args": [{"$template": ["", "/orders"], "$hole_values": [{"$expr": "this.base"}]}], "arg_params": [],
         })]);

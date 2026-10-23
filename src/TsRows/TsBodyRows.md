@@ -48,3 +48,7 @@ In `TsDerive/TsRoutes.mjs`, `TsDerive/TsNgrx.mjs`: the route array a module reac
 ## A call argument that names a variable (rows 79, #103)
 
 `calls.args` keeps the EVALUATED value of every argument - never changed, every reader takes it as evaluated. `calls.arg_refs` (`TsExpr/TsReadRefs.mjs::resolveArg`, written by `TsDecls/TsBody.mjs::emitCall`, only when non-empty) is one `{position, name, $ref, file, line, col, kind}` per argument that is a bare name (through parentheses, `as`, `!`, `satisfies`) resolving through import aliases to a `const`/`let`/`var` or a top-level destructured binding, so a passed table joins the `consts` or `locals` row that declares it. A declaration file has none; a class, enum or function argument keeps its `$ref` in the value.
+
+## A literal in an object literal names the member it fills (rows 81, #104)
+
+`string_literals.target` / `number_literals.target` (`TsText.mjs::collectStrings`, `TsExpr/TsReadRefs.mjs::fieldTarget`) is `{name, file, line}` of the member the object's contextual type declares - one declaration place, else none - and `target_id` the row there (`TsRefs.mjs::rollupRefIds`, the place key a call's `target_id` uses). The text `target` of `compare`/`index` uses never meets it: a literal inside a property is never an operand.

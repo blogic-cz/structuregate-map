@@ -308,7 +308,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
         diag.note('dynamic_import_scan_failed');
       }
       try {
-        collectStrings(ts, store, sf, { file: fid }, propName, evalNode);
+        collectStrings(ts, store, sf, { file: fid }, propName, evalNode, readRefs.fieldTarget);
       } catch {
         diag.note('string_scan_failed');
       }

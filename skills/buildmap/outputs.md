@@ -19,6 +19,16 @@ a half that failed (there is no `--map-check` to ask).
 (`reads`, `calls`, `strings`), so a query never parses the text again. Pattern-matching over `source`
 re-implements, badly, what the pass already resolved.
 
+## `--map-no-text` - a map with no source text
+
+`file_text` (and the FTS5 index over it) is most of a code-heavy map's bytes. `--map-no-text` leaves it out; every
+other table is the same, so every join, `key_reach` trace and stylesheet table is unchanged. Without text:
+`--map-query --cat FILE` reads the file from disk (as it is NOW), `--text` exits 1 and says why, and a partial run
+derives the TypeScript closure again where it would have compared the old text with the new (same rows, slower).
+It is recorded as `_meta` `options:text`, and a change of it is made true of the existing map at once: ON drops the
+stored text, OFF rebuilds so every file is read and stored again. Wire it like `--map-exclude`: with `--map-sqlite`
+(`-GateArgs`, `StructureGateArgs`); the plain gate run ignores it.
+
 ## `--map-exclude <glob>` - what a codebase keeps out
 
 A generated C# file (marked, or `.Designer.cs`/`.g.cs`) is listed and never walked by default. Hand-written

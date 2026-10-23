@@ -185,11 +185,47 @@ export class OrderService {
         "FROM http_calls h LEFT JOIN members m ON m.id = h.member WHERE h.file LIKE '%query.service.ts'")
     Assert-Line $r 'c=GET|/orders/list|list|1'
     Assert-Line $r 'c=GET|/orders/{}|one|1'
-    # the control: a call whose first argument is NOT the parameter is no wrapper - its own body is the one unknown `*` row, and the
-    # wrapper's body is none (a second `*` row would be it)
-    Assert-Line $r 'c=GET|*|fn|0'
+    # the control: a call whose first argument is NOT the parameter is no wrapper - its own body is the one row, with the url its helper hands back
+    # (`createQueryUrl` returns `url + '?' + ..`: the concrete `/fixed/path`, rows 81; it was `*` while only a template of the parameter counted), and the
+    # wrapper's body is none (a second row, whose url the parameter makes `*`, would be it)
+    Assert-Line $r 'c=GET|/fixed/path|fn|0'
     $n = Get-HttpLinksRows $tree "SELECT 'stars=' || count(*) AS r FROM http_calls WHERE url = '*'"
-    Assert-Line $n 'stars=1'
+    Assert-Line $n 'stars=0'
+}
+
+# A HELPER THAT HANDS ITS URL BACK MAY DO IT THROUGH A `+` OR A URL OBJECT (calls_helpers.rs): `return parsedUrl.toString()` over `new URL(url)` and `return url + stringify(p)` both give the caller's url back
+# with a query the url never carries, so the call folds to its first argument and the query is cut. The control appends path text of its own (`url + '/orders'`): the call stays an unknown piece.
+Test-Case 'httplinks: a url builder returning a concatenation or a URL made of its argument yields the argument' {
+    $tree = New-HttpLinksTree
+    $api = Join-Path $tree 'web/apps/shop/src/count.service.ts'
+    Set-Content -LiteralPath $api -NoNewline -Value (@'
+import { HttpClient } from '@angular/common/http';
+declare function stringify(p: object): string;
+export function createQueryUrl<K extends object>(url: string, parameter: K) {
+  if (typeof URL !== 'undefined') {
+    const parsedUrl = new URL(url);
+    if (parsedUrl.search) {
+      return parsedUrl.toString();
+    }
+  }
+  return (
+    url +
+    stringify(parameter)
+  );
+}
+export function suffixed(url: string, parameter: object) { return url + '/orders' + stringify(parameter); }
+export class CountService {
+  constructor(private http: HttpClient) {}
+  count(o: object) { return this.http.get(createQueryUrl('/calculations/count', o)); }
+  one(id: number) { return this.http.get(createQueryUrl(`/orders/${id}`, {})); }
+  tail(o: object) { return this.http.get(suffixed('/api', o)); }
+}
+'@)
+    [void](Invoke-HttpLinksMap $tree)
+    $r = Get-HttpLinksRows $tree ("SELECT 'c=' || h.verb || '|' || h.url || '|' || m.name AS r FROM http_calls h JOIN members m ON m.id = h.member WHERE h.file LIKE '%count.service.ts'")
+    Assert-Line $r 'c=GET|/calculations/count|count'
+    Assert-Line $r 'c=GET|/orders/{}|one'
+    Assert-Line $r 'c=GET|*|tail'
 }
 }
 

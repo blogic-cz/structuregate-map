@@ -76,7 +76,7 @@ fn sheets(db: &Connection, half: &str) -> Result<Vec<(String, String, raffia::Sy
     Ok(out)
 }
 
-/// One file read and parsed. A panic inside the parser is that file's error, not the map's.
+/// One file read and parsed - off the disk, never `file_text`, so `--map-no-text` changes nothing here. A panic inside the parser is that file's error, not the map's.
 fn read_one(workspace: &Path, path: &str, syntax: raffia::Syntax) -> sheet::Sheet {
     let bytes = match std::fs::read(workspace.join(path)) {
         Ok(bytes) => bytes,

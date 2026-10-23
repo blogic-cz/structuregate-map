@@ -69,6 +69,7 @@ struct Run {
     ts_config: Option<String>,
     ts_html: Option<String>,
     map_row_fts: bool,
+    map_no_text: bool,
     map_atlas_dir: Option<String>,
     map_exclude: Vec<String>,
     map_reread: Vec<String>,
@@ -243,6 +244,14 @@ fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
         stage_errors: stage_errors.clone(),
     };
     let mut ask = |question: &Value| callback(deep, free, &question.to_string());
+
+    // WHETHER THE MAP KEEPS SOURCE TEXT IS MADE TRUE OF THE DATABASE FIRST, before any half (the early ones included)
+    // reads it: a switch drops the stored text or rebuilds to store it - see `rows/cells/text.rs`.
+    if let Some(db) = &input.map_sqlite
+        && let Some(note) = crate::rows::text::reconcile(Path::new(db), !input.map_no_text)
+    {
+        into.notes.push(note);
+    }
 
     // `--map-sqlite` WITHOUT `--map`: the deep rows and none of the file-level pass - what a per-turn hook runs.
     if !input.map {
