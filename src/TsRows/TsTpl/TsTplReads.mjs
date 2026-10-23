@@ -166,7 +166,7 @@ export function rollupTemplateReads(store) {
   }
   const contexts = makeContexts(store, owners, directivesAt, inputsAt);
   const hopRules = makeHops({ hopOf, indexByShape, scopes });
-  const eventOf = makeEvents({ store, propByOwner, directivesAt, declaredBy, contexts, resolveRef, scopes, judgeScope });
+  const eventOf = makeEvents({ store, propByOwner, directivesAt, declaredBy, contexts, resolveRef, scopes, judgeScope, baseTypedOf: owners.baseTypedOf });
   // A GENERIC COMPONENT'S REF IS ITS INSTANCE AS THE ELEMENT INSTANTIATES IT (rows 74): `<demo-table #t [rows]="items">` over `DemoTable<T>` binds `T` from what `items` holds, so `t.selected`
   // reads as the item. The inputs are read once per ref, in the element's scope with no ref typed (a ref read inside another's input is not asked: they could ask each other for ever).
   const instanceOfRef = new Map();

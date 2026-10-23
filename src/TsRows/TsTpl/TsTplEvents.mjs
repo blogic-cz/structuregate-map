@@ -11,7 +11,7 @@
  *  or an unnamed intersection (`EventEmitter<T & { cell: Cell }>`), which `args` leave out. */
 const argumentOf = (member) => member?.type_ref?.args?.[0] ?? member?.type_ref?.element ?? null;
 
-export function makeEvents({ store, propByOwner, directivesAt, declaredBy, contexts, resolveRef, scopes, judgeScope }) {
+export function makeEvents({ store, propByOwner, directivesAt, declaredBy, contexts, resolveRef, scopes, judgeScope, baseTypedOf }) {
   // THE OUTPUTS OF A CLASS by the name a template spells them: the `io` row's member, whose `type_ref` carries the emitter's arguments.
   const outputsOf = new Map();
   for (const io of store.table('io')) {
@@ -20,12 +20,23 @@ export function makeEvents({ store, propByOwner, directivesAt, declaredBy, conte
     outputsOf.set(`${String(io.class)}#${io.binding_name}`, propByOwner.get(`class:${String(io.class)}#${String(io.member)}`) ?? null);
   }
 
+  /** AN OUTPUT A DIRECTIVE INHERITS IS STILL ITS OUTPUT (rows 85): `{ member, owner }` - the output of that name the class declares, else its nearest base's, `owner` the class it was found
+   *  on as the walk bound it (`baseTypedOf`: `Heir extends Base<Picked>` binds `Base`'s `T`), over a visited set since `extends` is data and data can name a loop. Null when none declares it. */
+  const outputOf = (classId, name, env) => {
+    const seen = new Set();
+    for (let owner = { kind: 'class', id: classId, env }; owner !== null && owner.kind === 'class' && !seen.has(owner.id); owner = baseTypedOf(owner)) {
+      seen.add(owner.id);
+      const member = outputsOf.get(`${String(owner.id)}#${String(name)}`);
+      if (argumentOf(member) !== null) return { member, owner };
+    }
+    return null;
+  };
+
   /** `{ owner, ref, row, env }` for `$event` of the output expression `row` (kind `output`), or null when no matched directive declares an output of that name with a type argument. */
   return (row, component, scopeFor, valueOf) => {
     const matched = (directivesAt.get(row.node) ?? []).filter((d) => {
       const klass = declaredBy.get(d.id)?.class;
-      const member = klass == null ? null : outputsOf.get(`${String(klass)}#${String(row.name)}`);
-      return argumentOf(member) !== null;
+      return klass != null && outputOf(klass, row.name, null) !== null;
     });
     // TWO MATCHED CANDIDATES: the one the host's SCOPE renders, as `renders` chooses (`judgeScope`).
     const seen = matched.length > 1
@@ -34,9 +45,10 @@ export function makeEvents({ store, propByOwner, directivesAt, declaredBy, conte
     const hit = seen[0] ?? matched[0];
     if (hit === undefined) return null;
     const classId = declaredBy.get(hit.id).class;
-    const ref = argumentOf(outputsOf.get(`${String(classId)}#${String(row.name)}`));
     const instance = contexts.instanceOf(classId, row.node, component, scopeFor(), valueOf);
-    const env = instance?.env ?? null;
+    const found = outputOf(classId, row.name, instance?.env ?? null);
+    const ref = argumentOf(found.member);
+    const env = found.owner.env ?? null;
     return { owner: resolveRef(ref, env), ref, row: null, env };
   };
 }

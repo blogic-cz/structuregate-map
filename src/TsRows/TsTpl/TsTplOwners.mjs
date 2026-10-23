@@ -156,20 +156,23 @@ export function makeOwners(store) {
     const name = str(ref.name) ?? str(ref.text);
     const owner = ownerOf(ref);
     // A heritage argument names a parameter only by its text (`extends Base<T>`); a type_ref says so (`param`).
-    if (ref.param === true || (owner === null && name !== null && env?.has(name))) return paramOwner(ref, name, env);
+    // `T & { .. }` (rows 85): a parameter's owner takes the literals the intersection dropped too, as a declaration's does below.
+    if (ref.param === true || (owner === null && name !== null && env?.has(name))) return withShapes(paramOwner(ref, name, env), ref);
     // THE ALIAS WRITTEN STANDS IN for a type the checker took past it (`type Desc = Readonly<{ .. }>` is `Readonly`, a library type, with `alias` Desc): the
     // alias's own computed members answer. Its arguments are the library type's, never the alias's own.
     if (owner === null) {
       const written = ownerOf(ref.alias);
       return written === null ? null : bound(written, undefined, env);
     }
-    const one = bound(owner, ref.args ?? ref.type_args, env);
-    // `X & { .. }` (rows 72): the literals the intersection dropped from the ref answer beside `X`, as one `and` owner, in the order the parts are
-    // written - a literal written ahead of `X` (`before`) declares a name first.
+    return withShapes(bound(owner, ref.args ?? ref.type_args, env), ref);
+  };
+  // `X & { .. }` (rows 72): the literals the intersection dropped from the ref answer beside `X`, as one `and` owner, in the order the parts are
+  // written - a literal written ahead of `X` (`before`) declares a name first. `X` naming nothing leaves the literals alone.
+  const withShapes = (one, ref) => {
     const dropped = Array.isArray(ref.shapes) ? ref.shapes.filter((r) => ownerOf(r) !== null) : [];
     if (!dropped.length) return one;
-    const ahead = dropped.filter((r) => r.before === true).map(ownerOf);
-    return { kind: 'any', op: 'and', of: [...ahead, one, ...dropped.filter((r) => r.before !== true).map(ownerOf)] };
+    const parts = [...dropped.filter((r) => r.before === true).map(ownerOf), ...(one === null ? [] : [one]), ...dropped.filter((r) => r.before !== true).map(ownerOf)];
+    return parts.length === 1 ? parts[0] : { kind: 'any', op: 'and', of: parts };
   };
   // WHAT A TYPE PARAMETER IS (rows 72): what its instantiation passed; the DEFAULT when it passed none (`Slot` is `Slot<Dto>`); and outside any
   // instantiation - the generic class's own template, `row: T` - the CONSTRAINT (`T extends Row` reads as `Row`). A bound it lacks names nothing.

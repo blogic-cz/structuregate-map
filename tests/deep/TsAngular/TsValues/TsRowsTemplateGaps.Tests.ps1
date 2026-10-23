@@ -35,7 +35,7 @@ export class SharedPopperComponent {
 }
 '@
     'apps/shop/src/gap.rows.ts' = @'
-import { Component, EventEmitter, Input, Output, output } from '@angular/core';
+import { Component, Directive, EventEmitter, Input, Output, output } from '@angular/core';
 import { Child, Picked } from './gap.models';
 @Component({ selector: 'demo-rows', standalone: true, template: '' })
 export class RowsComponent {
@@ -47,23 +47,31 @@ export class GridComponent<T> {
   @Input() rows: T[] = [];
   @Output() cellClick = new EventEmitter<T & { cell: Child }>();
 }
+@Directive()
+export abstract class PickerBase<P> {
+  @Output() handed = new EventEmitter<P>();
+}
+@Component({ selector: 'demo-heir', standalone: true, template: '' })
+export class HeirComponent extends PickerBase<Picked> {}
 '@
     'apps/shop/src/gap.host.ts' = @'
 import { Component } from '@angular/core';
 import { KeyValuePipe, NgFor, NgIf } from '@angular/common';
 import { Child, DocA, DocB, DocC, DocD, DocE, Section } from './gap.models';
-import { GridComponent, RowsComponent } from './gap.rows';
+import { GridComponent, HeirComponent, RowsComponent } from './gap.rows';
 import { SharedPopperComponent } from './gap.popper';
 @Component({
   selector: 'demo-host',
   standalone: true,
-  imports: [SharedPopperComponent, RowsComponent, GridComponent, KeyValuePipe, NgFor, NgIf],
+  imports: [SharedPopperComponent, RowsComponent, GridComponent, HeirComponent, KeyValuePipe, NgFor, NgIf],
   template: `
 <demo-popper #pop></demo-popper><p (click)="pop.close()">a</p>
 <div *ngFor="let section of sections | keyvalue: preserve"><b>{{ section.value.sectionName }}</b><i>{{ section.key.length }}</i><p *ngFor="let it of section.value.items">{{ it.RowID }}</p></div>
 <div *ngFor="let each of named | keyvalue">{{ each.key.length }}</div>
 <demo-rows (picked)="go($event.row.RowID)" (chosen)="go($event.row.RowID + 1)"></demo-rows>
 <demo-grid [rows]="children" (cellClick)="go($event.label)"></demo-grid>
+<demo-grid [rows]="children" (cellClick)="go($event.cell.label)"></demo-grid>
+<demo-heir (handed)="go($event.row.RowID - 1)"></demo-heir>
 <p (click)="go($event.target)">dom</p>
 <p *ngFor="let kid of blocked ? [] : children">{{ kid.label }}</p>
 <p *ngFor="let twin of filtering ? kids : children">{{ twin.label }}</p>
@@ -129,6 +137,14 @@ Test-Case 'tsrows gaps: $event of an in-tree output is the type its emitter was 
     # A GENERIC EMITTER (`EventEmitter<T & { cell }>`) is read as the element instantiates it: `T` is what `[rows]` holds.
     Assert-Line (Get-TsGapTargets 'go($event.label)') 'read=go($event.label)|label=m@apps/shop/src/gap.models.ts:3'
     Assert-Line (Get-TsGapTargets 'go($event.target)') 'read=go($event.target)|target=none'
+    # (rows 85) THE LITERAL PART of `T & { cell: Child }` answers too: `cell` is its member, and `label` is read on through it.
+    Assert-Line (Get-TsGapTargets 'go($event.cell.label)') 'read=go($event.cell.label)|cell=sm@apps/shop/src/gap.rows.ts:11'
+    Assert-Line (Get-TsGapTargets 'go($event.cell.label)') 'read=go($event.cell.label)|label=m@apps/shop/src/gap.models.ts:3'
+}
+
+# (rows 85) AN OUTPUT A COMPONENT INHERITS types `$event` too (`TsTplEvents.mjs::outputOf`): `handed` is declared on `PickerBase<P>`, and `HeirComponent extends PickerBase<Picked>` binds `P`.
+Test-Case 'tsrows gaps: $event of an output inherited from a generic base is the type the base is bound to' {
+    Assert-Line (Get-TsGapTargets 'go($event.row.RowID - 1)') 'read=go($event.row.RowID - 1)|RowID=m@apps/shop/src/gap.models.ts:1'
 }
 
 Test-Case 'tsrows gaps: a loop over a ternary takes the arm that is no empty list, or the one both arms name' {
