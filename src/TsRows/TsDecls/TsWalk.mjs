@@ -181,8 +181,9 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     const filled = (node) => {
       try { const target = readRefs.fieldTarget(node); return target ? { target } : {}; } catch { return {}; }
     };
+    // A FUNCTION DECLARED IN A BODY (`function inner() {..}`) is named by its declaration (rows 84): a bare `inner(..)` binds it by its place (`TsRefs.mjs::rollupRefIds`).
     const declareInline = (node, parentId) => store.add('functions', 'fn', {
-      file: fileId(node.getSourceFile().fileName), name: null, parent: parentId, inline: true,
+      file: fileId(node.getSourceFile().fileName), name: ts.isFunctionDeclaration(node) && node.name ? node.name.text : null, parent: parentId, inline: true,
       form: ts.isArrowFunction(node) ? 'arrow'
         : ts.isFunctionExpression(node) ? 'function-expression'
           : ts.isMethodDeclaration(node) ? 'method' : 'function',

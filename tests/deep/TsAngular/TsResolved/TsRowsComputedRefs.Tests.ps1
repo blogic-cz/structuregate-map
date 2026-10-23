@@ -127,4 +127,21 @@ Test-Case 'tsrows: a bare call of a local function is the local, not a same-name
     Assert-Line $r 'tg=18:arrow|fn@17'
     Assert-Line $r 'tg=18:Alpha|cl@1'
 }
+# (rows 84) A FUNCTION DECLARED IN A BODY IS NAMED, and a local holding one is called through it (`TsWalk.mjs::declareInline`, `TsRefs.mjs::rollupRefIds`): `inner(1)` over
+# `function inner() {..}` inside a method - and `deep()` inside a function - has the `functions` row at its name as both `target_id` and `callee_id`; `twice(2)` over
+# `const twice = (..) => ..` keeps the `locals` row as `target_id` and has the arrow's `functions` row as `callee_id`, the function its value names (`$fn_id`).
+Test-Case 'tsrows: a call of a function declared in a body or held by a local has its callee' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/inner.ts' = "export class Beta {`n  run(): number {`n    function inner(a: number) { return a + 1; }`n" +
+            "    const twice = (b: number) => b * 2;`n    return inner(1) + twice(2);`n  }`n}`n" +
+            "export function outer(): number {`n  function deep() { return 3; }`n  return deep();`n}`n"
+    }
+    $made = New-TsRowsDb $tree -Shared
+    Assert-Exit $made.Result 0
+    $place = { param([string]$Id) "coalesce((SELECT 'lo@' || line FROM locals WHERE id = c.$Id), (SELECT 'fn ' || coalesce(name, '-') || '@' || line FROM functions WHERE id = c.$Id), 'none')" }
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'cc=' || c.callee || '|' || " + (& $place 'target_id') + " || '|' || " + (& $place 'callee_id') + " AS r FROM calls c JOIN files f ON f.id = c.file WHERE f.path LIKE '%inner.ts'")
+    Assert-Line $r 'cc=inner|fn inner@3|fn inner@3'
+    Assert-Line $r 'cc=twice|lo@4|fn -@4'
+    Assert-Line $r 'cc=deep|fn deep@9|fn deep@9'
+}
 }

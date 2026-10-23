@@ -104,6 +104,14 @@ export function rollupRefIds(store) {
   // reader following the call into the callee's `returns` and parameters needs, and a `shape_members` row has neither.
   const placed = new Map();
   const callable = new Set();
+  // A LOCAL OR CONST HOLDING A FUNCTION runs that function (rows 84): its value names the `functions` row (`$fn_id`, `TsWalk.mjs::linkFunctions`), which is the callee of a call of it.
+  const holds = new Map();
+  for (const table of ['locals', 'consts']) {
+    for (const row of store.table(table)) {
+      const fn = asRef(row.value)?.$fn_id;
+      if (typeof fn === 'string') holds.set(row.id, fn);
+    }
+  }
   for (const table of ['functions', 'members', 'classes', 'type_members', 'shape_members', 'locals', 'consts']) { // a NAMED declaration first: an anonymous literal has only the shape's, and a function-valued const is a `functions` row and a `consts` row
     for (const row of store.table(table)) {
       const name = str(row.name);
@@ -127,8 +135,8 @@ export function rollupRefIds(store) {
     if (hit === undefined) continue;
     row.target_id = hit;
     const followKey = callable.has(hit) ? null : placeKey(asRef(ref.follow));
-    const callee = callable.has(hit) ? hit : followKey === null ? undefined : placed.get(followKey);
-    if (callee !== undefined && callable.has(callee)) row.callee_id = callee;
+    const callee = callable.has(hit) ? hit : followKey === null ? holds.get(hit) : placed.get(followKey);
+    if (callee !== undefined && (callable.has(callee) || holds.get(hit) === callee)) row.callee_id = callee;
   }
   // A LITERAL IN AN OBJECT LITERAL NAMES THE MEMBER IT FILLS (rows 81, #104): `target` is the declaration the checker's contextual type reached (`TsExpr/TsReadRefs.mjs::fieldTarget`), and the row AT its file,
   // line and name - a `type_members`, `members` or `shape_members` row - is `target_id`, by the same place key a call's is. A library's member has no row, so no id.
