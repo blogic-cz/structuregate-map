@@ -303,7 +303,10 @@ export function rollupModuleScope(store, diag, scopes = makeScopes(store, diag))
   for (const [, rows] of perNode) {
     const targets = new Map(rows.filter((r) => r.kind === 'component').map((r) => [r.to, r]));
     if (targets.size > 1) {
-      diag.note('selector_ambiguous_in_scope', { node: rows[0].node, tag: rows[0].tag,
+      // NO SCOPE TO BE IN (rows 93): a template no component owns (an `index.html`, an orphan `.html`) keeps every candidate as `unknown` - nothing chose among
+      // them, which is not an ambiguity Angular would meet in a scope, so it is said apart.
+      const scoped = rows.some((r) => r.scope !== 'unknown');
+      diag.note(scoped ? 'selector_ambiguous_in_scope' : 'selector_ambiguous_without_scope', { node: rows[0].node, tag: rows[0].tag,
         candidates: [...targets.values()].map((r) => ({ id: r.to, name: r.to_name, scope: r.scope })) });
     }
   }

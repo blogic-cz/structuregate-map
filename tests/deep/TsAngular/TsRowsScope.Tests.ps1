@@ -193,4 +193,26 @@ Test-Case 'tsrows: a standalone component rendering its own selector is in scope
     Assert-NoLine $graph 'g=DemoForestComponent'
 }
 
+# (rows 93) AN AMBIGUOUS TAG SAYS WHETHER A SCOPE SAW IT (`TsModuleScope.mjs`): two components share `demo-twin`. A module declaring both meets the ambiguity in its
+# scope (`selector_ambiguous_in_scope`); a template NO component owns (`orphan.component.html`) has no scope to choose with, every candidate `unknown`
+# (`selector_ambiguous_without_scope`). THE CONTROL: a standalone host importing one twin has one candidate in scope - no diagnostic.
+Test-Case 'tsrows: an ambiguous tag in a template no component owns is said apart from one in a scope' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/twins.ts' = "import { Component, NgModule } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-twin', template: '<i>a</i>' })`nexport class TwinAComponent {}`n" +
+            "@Component({ selector: 'demo-twin', template: '<i>b</i>' })`nexport class TwinBComponent {}`n" +
+            "@Component({ selector: 'demo-pair', template: '<demo-twin></demo-twin>' })`nexport class PairComponent {}`n" +
+            "@NgModule({ declarations: [TwinAComponent, TwinBComponent, PairComponent] })`nexport class TwinModule {}`n" +
+            "@Component({ selector: 'demo-solo-twin', standalone: true, template: '<p>s</p>' })`nexport class SoloTwinComponent {}`n"
+        'apps/shop/src/solo.ts' = "import { Component } from '@angular/core';`nimport { SoloTwinComponent } from './twins';`n" +
+            "@Component({ selector: 'demo-one', standalone: true, imports: [SoloTwinComponent], template: '<demo-solo-twin></demo-solo-twin>' })`nexport class OneComponent {}`n"
+        'apps/shop/src/orphan.component.html' = "<demo-twin></demo-twin>`n"
+    }
+    $made = New-TsRowsDb $tree -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db "SELECT 'amb=' || kind || '|' || tag AS r FROM diagnostics WHERE kind LIKE 'selector_ambiguous%'"
+    Assert-Line $r 'amb=selector_ambiguous_in_scope|demo-twin'
+    Assert-Line $r 'amb=selector_ambiguous_without_scope|demo-twin'
+    Assert-NoLine $r 'demo-solo-twin'
+}
 }

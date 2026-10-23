@@ -354,9 +354,13 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
         }
       }
       const mInit = ts.isPropertyDeclaration(m) && m.initializer ? m.initializer : null;
+      // THE TYPE THE `members` ROW HAS (rows 92): an `@Input() kind = Kind.A`, `@Output() picked = new EventEmitter<Row>()` or `@Input() set kind(v: Kind)`
+      // is typed by what the checker infers for the property, as its member is - `io.type` read the annotation alone and was empty for most outputs.
+      const summaryKind = kindOfMember(m);
       summaries.push(memberSummary(ts, m,
-        m.name ? propName(m.name) : kindOfMember(m), decoratorsOf(m),
-        m.type ? m.type.getText() : null, mInit ? evalNode(mInit) : undefined));
+        m.name ? propName(m.name) : summaryKind, decoratorsOf(m),
+        summaryKind === 'property' || summaryKind === 'getter' || summaryKind === 'setter' ? typeText(m, m.type) : (m.type ? m.type.getText() : null),
+        mInit ? evalNode(mInit) : undefined));
       // A MEMBER CAN BE A FUNCTION: `handler = () => {...}` deserves the same walk as a method's body. ONE
       // walk for calls, assignments, locals and returns, and the rows carry `class` as well as `member` - a
       // gate names a property of the COMPONENT and the assignment explaining it usually sits in a different

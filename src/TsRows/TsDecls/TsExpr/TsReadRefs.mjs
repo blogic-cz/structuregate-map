@@ -335,11 +335,36 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     }
     const held = propertyTypes(top);
     if (held !== null) return down(held, levels);
+    // ASKED BEFORE THE CHECKER: inside a `then` callback its contextual type is the one it INFERRED from this very value, which names no member.
+    const settled = settledBy(top);
+    if (settled !== null) return down(awaited(typesAt(climb(settled).n, 0, null)), levels);
     const t = checker.getContextualType(top);
     if (t !== undefined) return down([t], levels);
     const fn = returnedFrom(top);
     return fn === null ? [] : callersOf(fn, levels);
   };
+  /** A VALUE A `then`/`catch` CALLBACK RETURNS settles the promise that call makes (rows 94): `p.then((r) => this.rule())` in a method typed `Promise<Rule>` hands
+   *  `this.rule()` the `Rule` the call's own type awaits. `Promise`'s own method (checked by its declaration), the callback an anonymous function among its
+   *  arguments; the call is what is asked. Null otherwise. */
+  const settledBy = (n) => {
+    let fn = null;
+    if (n.parent !== undefined && ts.isReturnStatement(n.parent)) {
+      fn = n.parent.parent;
+      while (fn !== undefined && !ts.isFunctionLike(fn)) fn = fn.parent;
+    } else if (n.parent !== undefined && ts.isArrowFunction(n.parent) && n.parent.body === n) fn = n.parent;
+    if (fn === undefined || fn === null || !(ts.isArrowFunction(fn) || ts.isFunctionExpression(fn))) return null;
+    const call = fn.parent;
+    if (call === undefined || !ts.isCallExpression(call) || !call.arguments.includes(fn) || !ts.isPropertyAccessExpression(call.expression)) return null;
+    const access = call.expression;
+    const promised = (access.name.text === 'then' || access.name.text === 'catch')
+      && (checker.getSymbolAtLocation(access.name)?.declarations ?? []).some((d) => d.parent !== undefined && ts.isInterfaceDeclaration(d.parent) && d.parent.name.text === 'Promise');
+    return promised ? call : null;
+  };
+  /** What a promise type settles to: each arm's awaited type, the checker's own `getAwaitedType`. */
+  const awaited = (types) => types.flatMap((t) => (t.isUnion() ? t.types : [t])).flatMap((t) => {
+    const settled = checker.getAwaitedType(t);
+    return settled === undefined || settled === t ? [] : [settled];
+  });
   /** THE FUNCTION A VALUE IS RETURNED FROM when it declares no return type (rows 91): `return x` in its body, or an arrow's concise body - named by a declaration,
    *  a method, or the variable or property an arrow or function expression is held in. Null otherwise: an annotated return is the contextual type already. */
   const returnedFrom = (n) => {
