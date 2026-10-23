@@ -46,7 +46,8 @@ Beside the shared tables it adds the FRAMEWORK tables:
   `imported`, `unknown`, `direct_reference`) - the same edges `render_graph`, `component_reach` and `render_path`
   walk. A selector candidate the host's NgModule or standalone `imports` cannot see is a `renders_out_of_scope`
   row instead (same columns, `scope = 'out_of_scope'`), so every candidate a tag matched is `renders UNION ALL
-  renders_out_of_scope` (a table no row was written to does not exist). A host no module declares (`unknown`) keeps an
+  renders_out_of_scope` (a table no row was written to does not exist). A standalone component's own selector in its
+  own template is `declared` (rows 82): Angular puts the component in its own scope. A host no module declares (`unknown`) keeps an
   edge to every candidate. `components.unused = 1` when no `renders` edge, route or `bootstrap` reaches the
   class - a `renders_out_of_scope` candidate is no render. A render created in code names the method that returned the class
   (`returned_by`) and each way it was returned (`return_ways`, `returns` ids); a `case` or `if` every way sits

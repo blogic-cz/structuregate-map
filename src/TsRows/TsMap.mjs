@@ -324,9 +324,11 @@ async function main() {
   //     (`TsRefs.mjs::rollupRefIds`, `TsExpr/TsReadRefs.mjs::targetLine`). The http pass reads a helper that hands its url back through a `+` or a `new URL(url)` too (rust, `rows/http/calls_helpers.rs`).
   //     #104: a string or number literal that is the value of an object literal's property has `target` `{name, file, line}` (the member the checker's contextual type declares; one place, else none) and `target_id` (`TsText.mjs::collectStrings`, `TsExpr/TsReadRefs.mjs::fieldTarget`, `TsRefs.mjs::rollupRefIds`).
   //     `target_id` is only ever the declaration's OWN row (`owner_file` = `file`): a library member, which only a computed type's copy in another file carries, keeps its `target` and has no id (`TsRefs.mjs::rollupRefIds`).
+  // 82: a standalone component is in its own scope - its own selector in its own template is a `renders` row `declared`, an edge
+  //     of `render_graph`, as the compiler instantiates it (`TsDerive/TsModuleScope.mjs::judgeScope`); it was `out_of_scope`, set aside.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 81, build: args.build,
+    config: config.file, data: config.data, rows: 82, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
