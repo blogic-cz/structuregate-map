@@ -332,9 +332,11 @@ async function main() {
   //     a call of a local or const that holds a function has `callee_id`, the function its value names (`$fn_id`, `TsRefs.mjs::rollupRefIds`).
   // 85: `$event` of an output a directive INHERITS is typed as one it declares: the output is looked up on the class, then its nearest base, the base's type parameters
   //     bound by the `extends` (`TsTpl/TsTplEvents.mjs::outputOf`); a type parameter's owner keeps the literals its intersection dropped (`T & { cell: X }`, `TsTplOwners.mjs::withShapes`).
+  // 86: a framework `keyvalue` hands `{ key, value }` over what a framework pipe EMITS (`x$ | async | keyvalue`, `wrapped`), over an array (its element) and over a class or
+  //     interface with no base (the union of its fields' types), as Angular's overloads type them (`TsTpl/TsTplHops.mjs::keyValueOf`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 85, build: args.build,
+    config: config.file, data: config.data, rows: 86, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

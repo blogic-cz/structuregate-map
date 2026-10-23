@@ -21,6 +21,8 @@ export class DocB { Number!: Pin; }
 export class DocC { Number!: Pin; }
 export class DocD { Alt!: Pin; }
 export class DocE { Alt!: Child; }
+export interface Bag { first: Child; second: Child; }
+export interface Mixed { first: Child; count: number; }
 '@
     'apps/shop/src/gap.popper.ts' = @'
 import { Component } from '@angular/core';
@@ -56,14 +58,15 @@ export class HeirComponent extends PickerBase<Picked> {}
 '@
     'apps/shop/src/gap.host.ts' = @'
 import { Component } from '@angular/core';
-import { KeyValuePipe, NgFor, NgIf } from '@angular/common';
-import { Child, DocA, DocB, DocC, DocD, DocE, Section } from './gap.models';
+import { AsyncPipe, KeyValuePipe, NgFor, NgIf } from '@angular/common';
+import { Observable, of } from 'rxjs';
+import { Bag, Child, DocA, DocB, DocC, DocD, DocE, Mixed, Section } from './gap.models';
 import { GridComponent, HeirComponent, RowsComponent } from './gap.rows';
 import { SharedPopperComponent } from './gap.popper';
 @Component({
   selector: 'demo-host',
   standalone: true,
-  imports: [SharedPopperComponent, RowsComponent, GridComponent, HeirComponent, KeyValuePipe, NgFor, NgIf],
+  imports: [SharedPopperComponent, RowsComponent, GridComponent, HeirComponent, KeyValuePipe, AsyncPipe, NgFor, NgIf],
   template: `
 <demo-popper #pop></demo-popper><p (click)="pop.close()">a</p>
 <div *ngFor="let section of sections | keyvalue: preserve"><b>{{ section.value.sectionName }}</b><i>{{ section.key.length }}</i><p *ngFor="let it of section.value.items">{{ it.RowID }}</p></div>
@@ -79,6 +82,11 @@ import { SharedPopperComponent } from './gap.popper';
 <p *ngIf="ok && find() as found">{{ found.label }}</p>
 <u>{{ model.Number.Value }}</u>
 <u>{{ ctl.Alt.Value }}</u>
+<p *ngFor="let ka of children | keyvalue">{{ ka.value.label }}</p>
+<p *ngFor="let kb of bag | keyvalue">{{ kb.value.label }}</p>
+<p *ngFor="let km of mixed | keyvalue">{{ km.value.label }}</p>
+<div *ngIf="rec$ | async as rec"><p *ngFor="let kc of rec | keyvalue">{{ kc.value.label }}</p></div>
+<p *ngFor="let kd of rec$ | async | keyvalue">{{ kd.value.label }}</p>
 `,
 })
 export class HostComponent {
@@ -91,6 +99,9 @@ export class HostComponent {
   ctl!: DocD | DocE;
   find(): Child | null { return null; }
   go(x: unknown) {}
+  bag!: Bag;
+  mixed!: Mixed;
+  rec$: Observable<Record<string, Child>> = of({});
 }
 '@
 }
@@ -128,6 +139,14 @@ Test-Case 'tsrows gaps: a keyvalue pipe hands a loop variable of key and value, 
     Assert-Line (Get-TsGapTargets '{{ it.RowID }}') 'read={{ it.RowID }}|RowID=m@apps/shop/src/gap.models.ts:1'
     # THE CONTROL: the key is the key type (a string - no declaration in the tree), and a Map's value is read as a record's.
     Assert-Line (Get-TsGapTargets '{{ section.key.length }}') 'read={{ section.key.length }}|length=none'
+}
+
+# (rows 86) `keyvalue` OVER AN ARRAY, A PLAIN INTERFACE AND WHAT `async` EMITS (`TsTplHops.mjs::keyValueOf`): an array is `Record<number, T>` to the pipe, an interface with no base
+# `Record<string, V>` with `V` its fields' types, and `rec$ | async` - piped on, or through an `as` alias - is the record the observable emits, not the element it unwraps to.
+# THE CONTROL: an interface with a field typed by nothing the map holds (`count: number`) is refused, as a union with an unknown arm.
+Test-Case 'tsrows gaps: a keyvalue pipe over an array, a plain interface or an async value hands the value it holds' {
+    foreach ($v in 'ka', 'kb', 'kc', 'kd') { Assert-Line (Get-TsGapTargets "{{ $v.value.label }}") "read={{ $v.value.label }}|label=m@apps/shop/src/gap.models.ts:3" }
+    Assert-Line (Get-TsGapTargets '{{ km.value.label }}') 'read={{ km.value.label }}|label=none'
 }
 
 Test-Case 'tsrows gaps: $event of an in-tree output is the type its emitter was declared with, a DOM event types nothing' {
