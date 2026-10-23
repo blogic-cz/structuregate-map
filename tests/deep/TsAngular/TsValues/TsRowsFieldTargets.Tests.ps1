@@ -103,4 +103,46 @@ Test-Case 'tsrows: a library member has a target and no target_id, an in-tree on
     Assert-NoLine $made.Result 'recorded reads miss'
     Assert-Line (Invoke-TsRowsQ $made.Db "SELECT 'reads=' || value AS r FROM _meta WHERE key = 'reads:typescript'") 'reads=proven'
 }
+# A FUNCTION IN AN OBJECT LITERAL NAMES THE MEMBER IT FILLS (rows 83, #105, `TsWalk.mjs::declareInline`): an arrow, a function expression and a method
+# written in the object are `functions` rows (`inline`) whose `target` is the member and `target_id` its `type_members` row, as a literal's are - so what
+# an arrow RETURNS (`returns.member`) joins that member through its function. Parentheses and `as const` around a literal are stepped through (`fieldTarget`).
+# Control: a function in an object with no contextual type names none.
+$script:TsFieldFns = @{
+    'apps/shop/src/rule.ts' = "export interface HueRule {`n" +
+        "  Field: string;`n" +
+        "  Message: string | (() => string);`n" +
+        "  Check?: (v: string) => boolean;`n" +
+        "}`n"
+    'apps/shop/src/use.ts' = "import { HueRule } from './rule';`n" +
+        "export class HueForm {`n" +
+        "  strict = false;`n" +
+        "  rules: HueRule[] = [`n" +
+        "    { Field: ('alpha'), Message: () => (this.strict ? 'hue.alpha.strict' : 'hue.alpha.required') },`n" +
+        "    { Field: 'beta' as const, Message: function () { return 'hue.beta'; }, Check(v) { return v.length > 0; } },`n" +
+        "  ];`n" +
+        "  loose = { Message: () => 'hue.loose' };`n" +
+        "}`n"
+}
+
+Test-Case 'tsrows: a function in an object literal names the member of its contextual type (#105)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsFieldFns) -Shared
+    Assert-Exit $made.Result 0
+    $f = { param($role) Get-TsRootFieldSql 'functions__target' 'fn.id' $role }
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'fn=' || fn.form || '@' || fn.line || '=' || coalesce($(& $f 'name'), '-') || '@' || coalesce($(& $f 'line'), '-') || ':' || " +
+        "coalesce((SELECT 'tm ' || t.name || '@' || t.line FROM type_members t WHERE t.id = fn.target_id), '-') AS v FROM functions fn " +
+        "JOIN files f ON f.id = fn.file AND f.path LIKE '%use.ts' WHERE fn.inline = 1")
+    Assert-Line $r 'fn=arrow@5=Message@3:tm Message@3'
+    Assert-Line $r 'fn=function-expression@6=Message@3:tm Message@3'
+    Assert-Line $r 'fn=method@6=Check@4:tm Check@4'
+    Assert-Line $r 'fn=arrow@8=-@-:-'
+    # THE ISSUE'S JOIN: what a function returns (`returns.member` is the function) reaches the member it fills.
+    $j = Invoke-TsRowsQ $made.Db ("SELECT 'ret=' || r.source || '>' || t.name AS v FROM returns r JOIN functions fn ON fn.id = r.member " +
+        "JOIN type_members t ON t.id = fn.target_id")
+    Assert-Line $j "ret=(this.strict ? 'hue.alpha.strict' : 'hue.alpha.required')>Message"
+    Assert-Line $j "ret='hue.beta'>Message"
+    Assert-NoLine $j 'hue.loose'
+    $l = Invoke-TsRowsQ $made.Db (Get-TsFieldTargetSql 'string_literals' 'value')
+    Assert-Line $l 'alpha=Field@2:rule.ts:tm Field@2'
+    Assert-Line $l 'beta=Field@2:rule.ts:tm Field@2'
+}
 }

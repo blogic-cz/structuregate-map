@@ -326,9 +326,11 @@ async function main() {
   //     `target_id` is only ever the declaration's OWN row (`owner_file` = `file`): a library member, which only a computed type's copy in another file carries, keeps its `target` and has no id (`TsRefs.mjs::rollupRefIds`).
   // 82: a standalone component is in its own scope - its own selector in its own template is a `renders` row `declared`, an edge
   //     of `render_graph`, as the compiler instantiates it (`TsDerive/TsModuleScope.mjs::judgeScope`); it was `out_of_scope`, set aside.
+  // 83: #105 - an inline function that is an object literal's property value (an arrow, a function expression, a method written in the object) has `target` and `target_id` of the member it fills,
+  //     as a literal there has (`TsWalk.mjs::declareInline`, `TsExpr/TsReadRefs.mjs::fieldTarget`, `TsRefs.mjs::rollupRefIds`); parentheses, `as` and `satisfies` around the value are stepped through.
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 82, build: args.build,
+    config: config.file, data: config.data, rows: 83, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

@@ -176,13 +176,18 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     /** An inline function - a callback, a nested arrow - as a `functions` row, so its body has an owner. It
      *  is anonymous by construction, so it is identified by POSITION, and `parent` says which body it sits
      *  in. */
+    // ONE IN AN OBJECT LITERAL'S PROPERTY NAMES THE MEMBER IT FILLS (rows 83, #105): `target` `{name, file, line}`, as a literal there carries (`TsReadRefs.mjs::fieldTarget`),
+    // and `target_id` the row at that place (`TsRefs.mjs::rollupRefIds`). A checker refusal leaves the row without one, never without the row.
+    const filled = (node) => {
+      try { const target = readRefs.fieldTarget(node); return target ? { target } : {}; } catch { return {}; }
+    };
     const declareInline = (node, parentId) => store.add('functions', 'fn', {
       file: fileId(node.getSourceFile().fileName), name: null, parent: parentId, inline: true,
       form: ts.isArrowFunction(node) ? 'arrow'
         : ts.isFunctionExpression(node) ? 'function-expression'
           : ts.isMethodDeclaration(node) ? 'method' : 'function',
       params: classRows.paramsOf(node), returns: node.type ? node.type.getText() : null,
-      ...nodeLocation(node),
+      ...filled(node), ...nodeLocation(node),
     });
     // A CLASS EXPRESSION is named by what holds it - `static Inner = class {..}`, `const Inner = class {..}` - or stays anonymous.
     const declareClass = (node) => {
