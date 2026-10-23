@@ -8,7 +8,7 @@ what the rust closure derives from these rows is
 ## What the half writes
 
 `--map-sqlite` over an Angular workspace writes FRAMEWORK facts no compiler produces alone: bindings, template
-nodes, render edges, input uses, routes and what each can reach - 57 tables with the four the closure derives,
+nodes, render edges, input uses, routes and what each can reach - 67 tables with rows on a large workspace (v2.8.34), the closure's included,
 plus `diagnostics` (what the extraction could not answer: a count with no names cannot be checked). Every row
 carries `half = "typescript"`.
 
