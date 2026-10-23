@@ -173,6 +173,13 @@ $script:TsFieldLater = @{
         "    const same = grid;`n" +
         "    return same;`n" +
         "  }`n" +
+        "  pushed(): HueRule[] {`n" +
+        "    const out = [];`n" +
+        "    const rule = { Field: 'theta', Message: 'hue.theta.pushed' };`n" +
+        "    out.push(rule);`n" +
+        "    out.push({ Field: 'iota', Message: () => 'hue.iota.pushed' });`n" +
+        "    return out;`n" +
+        "  }`n" +
         "  loose(): number {`n" +
         "    const free = { Field: 'eps', Message: 'hue.eps.loose' };`n" +
         "    const other = [{ Field: 'zeta', Message: 'hue.zeta.loose' }];`n" +
@@ -195,5 +202,10 @@ Test-Case 'tsrows: a literal in an un-annotated const names the member of the ty
     $fn = Invoke-TsRowsQ $made.Db ("SELECT 'fn=' || fn.line || ':' || coalesce((SELECT t.name || '@' || t.line FROM type_members t WHERE t.id = fn.target_id), '-') AS v FROM functions fn " +
         "JOIN files f ON f.id = fn.file AND f.path LIKE '%use.ts' WHERE fn.inline = 1")
     Assert-Line $fn 'fn=7:Message@3'
+    # (rows 88) PUSHED INTO AN UN-ANNOTATED ARRAY that is returned typed: a const object and a literal handed to `out.push(..)` take `HueRule`, one level below `out`'s `HueRule[]`.
+    Assert-Line $r 'hue.theta.pushed=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'theta=Field@2:rule.ts:tm Field@2'
+    Assert-Line $r 'iota=Field@2:rule.ts:tm Field@2'
+    Assert-Line $fn 'fn=24:Message@3'
 }
 }

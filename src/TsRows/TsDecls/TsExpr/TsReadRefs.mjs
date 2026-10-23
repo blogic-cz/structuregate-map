@@ -227,7 +227,9 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     const prop = method ? node : child.parent;
     if (prop === undefined || !(method || (ts.isPropertyAssignment(prop) && prop.initializer === child))) return null;
     if (!(ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name) || ts.isNumericLiteral(prop.name))) return null;
-    const type = checker.getContextualType(prop.parent);
+    // PUSHED INTO AN UN-ANNOTATED ARRAY (rows 88): the checker's contextual type is only that array's inferred element type; the type the array takes later answers instead.
+    const contextual = checker.getContextualType(prop.parent);
+    const type = pushedInto(climb(prop.parent).n) === null ? contextual : undefined;
     const later = type === undefined ? laterTypes(prop.parent) : [];
     if (type === undefined && !later.length) return null;
     const name = prop.name.text;
@@ -235,7 +237,7 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     for (const arm of (type === undefined ? later : [type]).flatMap((t) => (t.isUnion() ? t.types : [t]))) {
       const [first] = checker.getPropertyOfType(arm, name)?.declarations ?? [];
       if (first === undefined) continue;
-      // A TYPE INFERRED FROM ANOTHER LITERAL is no declared member (`list.push(x)` over an un-annotated `list`): its property is that literal's, and names nothing here.
+      // A TYPE INFERRED FROM ANOTHER LITERAL is no declared member (an un-annotated array nothing types later): its property is that literal's, and names nothing here.
       if (type === undefined && first.parent !== undefined && ts.isObjectLiteralExpression(first.parent)) continue;
       const place = at(first);
       places.set(`${place.file}#${place.line}`, place);
@@ -271,7 +273,8 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     }
     return out;
   };
-  function laterTypes(object) {
+  /** An object climbed out of its array literals: the outermost node `n` and how many arrays it sits in. */
+  const climb = (object) => {
     let n = object;
     let levels = 0;
     for (;;) {
@@ -280,8 +283,28 @@ export function makeReadRefs(ts, checker, canonicalPath) {
       else if (p !== undefined && ts.isArrayLiteralExpression(p)) { n = p; levels++; }
       else break;
     }
-    const first = constOf(n);
+    return { n, levels };
+  };
+  /** THE UN-ANNOTATED CONST AN ARGUMENT IS PUSHED INTO (rows 88): `list.push(x)` / `list.unshift(x)` - the method `Array` declares, checked by its declaration - makes `x` an
+   *  ELEMENT of `list`, so `x` takes what `list` takes later, one level down. Null for any other call, or a receiver that is annotated (its type is then the contextual one). */
+  const pushedInto = (n) => {
+    const call = n.parent;
+    if (call === undefined || !ts.isCallExpression(call) || !call.arguments.includes(n)) return null;
+    const callee = call.expression;
+    if (!ts.isPropertyAccessExpression(callee) || !(callee.name.text === 'push' || callee.name.text === 'unshift')) return null;
+    const decls = checker.getSymbolAtLocation(callee.name)?.declarations ?? [];
+    if (!decls.some((d) => d.parent !== undefined && ts.isInterfaceDeclaration(d.parent) && d.parent.name.text === 'Array')) return null;
+    let receiver = callee.expression;
+    while (passes(receiver)) receiver = receiver.expression;
+    const held = ts.isIdentifier(receiver) ? checker.getSymbolAtLocation(receiver)?.valueDeclaration : undefined;
+    return held !== undefined && ts.isVariableDeclaration(held) && held.initializer !== undefined ? constOf(held.initializer) : null;
+  };
+  function laterTypes(object) {
+    const { n, levels: inside } = climb(object);
+    const into = pushedInto(n);
+    const first = into ?? constOf(n);
     if (first === null) return [];
+    const levels = into === null ? inside : inside + 1;
     // EVERY LITERAL OF ONE ARRAY asks the same question: answered once per const and depth.
     const memo = laterMemo.get(first) ?? new Map();
     laterMemo.set(first, memo);
@@ -289,14 +312,15 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     return memo.get(levels);
   }
   const laterMemo = new Map();
-  function usesOf(first, levels) {
+  function usesOf(start, depth) {
     const found = [];
-    const seen = new Set();
-    const todo = [first];
+    const seen = new Map();
+    const todo = [{ decl: start, levels: depth }];
     while (todo.length) {
-      const decl = todo.pop();
-      if (seen.has(decl)) continue;
-      seen.add(decl);
+      const { decl, levels } = todo.pop();
+      const asked = seen.get(decl) ?? new Set();
+      if (asked.has(levels)) continue;
+      seen.set(decl, asked.add(levels));
       const symbol = checker.getSymbolAtLocation(decl.name);
       const scope = scopeOf(decl);
       if (symbol === undefined || scope === undefined) continue;
@@ -307,7 +331,9 @@ export function makeReadRefs(ts, checker, canonicalPath) {
           let use = node;
           while (use.parent !== undefined && passes(use.parent)) use = use.parent;
           const next = constOf(use);
-          if (next !== null) todo.push(next);
+          const into = next === null ? pushedInto(use) : null;
+          if (next !== null) todo.push({ decl: next, levels });
+          else if (into !== null) todo.push({ decl: into, levels: levels + 1 });
           else {
             const t = checker.getContextualType(use);
             if (t !== undefined) found.push(...down([t], levels));
