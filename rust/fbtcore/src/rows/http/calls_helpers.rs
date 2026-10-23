@@ -46,10 +46,49 @@ impl World {
                 }
             }
         }
+        self.load_constructed(conn, typescript)?;
         if has_columns(conn, "returns", read_of("returns")) {
             let mut value = Column::new(conn, "returns", "value")?;
             for (member, _, _, _, owner, held, _) in read(conn, "returns", "member, '', '', ''", &["value"], "")? {
                 self.returns.entry(member).or_default().push(blank(null_literal(value.value(&owner, &held)?)));
+            }
+        }
+        Ok(())
+    }
+
+    /// A MEMBER WITH NO INITIALIZER THAT ITS CONSTRUCTOR SETS (rows 88): `featuresUrl: string;` then `this.featuresUrl = `${this.api}/csv`` in the
+    /// constructor is that value, as an initializer would be - when that is the ONLY write of the member anywhere (`=`, through `this`): a member
+    /// written again, by a compound operator or from another method, holds no one value.
+    fn load_constructed(&mut self, conn: &Connection, typescript: &HashMap<String, String>) -> rusqlite::Result<()> {
+        if !has_columns(conn, "assignments", read_of("assignments")) || !has_columns(conn, "members", &["id", "file", "class", "name"]) {
+            return Ok(());
+        }
+        let mut named: HashMap<String, (String, String)> = HashMap::new();
+        let mut constructors: HashSet<String> = HashSet::new();
+        let mut stmt = conn.prepare("SELECT id, file, class, name FROM members")?;
+        for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?)))? {
+            let (id, file, class, name) = row?;
+            if !typescript.contains_key(&file) || class.is_empty() {
+                continue;
+            }
+            if name == "constructor" {
+                constructors.insert(id.clone());
+            }
+            named.insert(id, (class, name));
+        }
+        let mut value = Column::new(conn, "assignments", "value")?;
+        let mut written: HashMap<String, Vec<(String, Value)>> = HashMap::new();
+        for (target, member, scope, operator, owner, held, _) in read(conn, "assignments", "target_id, member, scope, operator", &["value"], "")? {
+            if named.contains_key(&target) {
+                let from = if scope == "this" && operator == "=" { member } else { String::new() };
+                written.entry(target).or_default().push((from, blank(null_literal(value.value(&owner, &held)?))));
+            }
+        }
+        for (target, writes) in written {
+            let [(member, value)] = writes.as_slice() else { continue };
+            let key = named[&target].clone();
+            if constructors.contains(member) && !is_empty(value) && !self.members.contains_key(&key) {
+                self.members.insert(key, value.clone());
             }
         }
         Ok(())

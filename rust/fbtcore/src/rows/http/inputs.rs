@@ -1,7 +1,7 @@
 //! WHAT THE HTTP PASS READS OF THE TYPESCRIPT HALF, and whether a run moved it - so the pass is not run again over the
 //! same rows (`mapper/deep/passes.rs::http`).
 //!
-//! The pass reads `files`, `calls`, `members`, `functions`, `locals` and `consts` - the columns `TS_INPUTS` names, the
+//! The pass reads `files`, `calls`, `members`, `functions`, `returns`, `locals`, `consts` and `assignments` - the columns `TS_INPUTS` names, the
 //! same lists its loaders ask for (`calls.rs`) - and those rows change only when the half stores. So the half keeps a
 //! TOKEN in `_meta` (`TOKEN`) that moves whenever they may have: a fresh one on a full run, and on a partial one unless
 //! the rows it removed and the rows it wrote in their place hash alike, every listed column with its node rows
@@ -22,6 +22,7 @@ pub const TS_INPUTS: &[(&str, &[&str])] = &[
     ("returns", &["member", "value"]),
     ("locals", &["file", "member", "name", "line", "value"]),
     ("consts", &["file", "name", "value"]),
+    ("assignments", &["target_id", "member", "scope", "operator", "value"]),
 ];
 
 /// The columns of `table` the pass reads, as `TS_INPUTS` lists them - what each loader asks the table for.

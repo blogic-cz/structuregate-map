@@ -198,6 +198,14 @@ impl World {
                     }
                     return out;
                 }
+                // (rows 88) A `+` CHAIN is its operands folded in order; A TERNARY is its arms when they spell one url once a query is cut (`finished`), else unknown.
+                if let Some(Value::Array(operands)) = o.get("$concat") {
+                    return operands.iter().map(|v| self.fold(v, at, seen)).collect();
+                }
+                if o.contains_key("$cond") {
+                    let arms: Vec<String> = ["$then", "$else"].iter().filter_map(|k| o.get(*k)).map(|v| self.fold(v, at, seen)).collect();
+                    return match arms.as_slice() { [a, b] if finished(a) == finished(b) => a.clone(), _ => "*".into() };
+                }
                 // A CALL OF A HELPER THAT RETURNS ITS FIRST ARGUMENT is that argument (`calls_helpers.rs`): its tail is the query `finished` cuts.
                 if o.get("$call").is_some_and(Value::is_string) && self.forwards_first(o, true) {
                     return o.get("$args").and_then(Value::as_array).and_then(|a| a.first()).map_or("*".into(), |a| self.fold(a, at, seen));
