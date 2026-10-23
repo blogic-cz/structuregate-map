@@ -141,7 +141,7 @@ export function rollupRefIds(store) {
   // A LITERAL IN AN OBJECT LITERAL NAMES THE MEMBER IT FILLS (rows 81, #104): `target` is the declaration the checker's contextual type reached (`TsExpr/TsReadRefs.mjs::fieldTarget`), and the row AT its file,
   // line and name - a `type_members`, `members` or `shape_members` row - is `target_id`, by the same place key a call's is. A library's member has no row, so no id.
   // An INLINE function in such a property names it the same way (rows 83, #105); a `prototype-method` row's `target` is what a call of it resolves to, and gets no id here.
-  for (const table of ['string_literals', 'number_literals', 'functions']) {
+  for (const table of ['string_literals', 'number_literals', 'template_literals', 'functions']) {
     for (const row of store.table(table)) {
       if (table === 'functions' && row.inline !== true) continue;
       const ref = asRef(row.target);

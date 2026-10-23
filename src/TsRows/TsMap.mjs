@@ -337,9 +337,12 @@ async function main() {
   // 87: #106 - a literal or function in an object of an UN-ANNOTATED `const` (through its array literals) names the member it fills by the type the const takes LATER: every use's
   //     contextual type (a typed `return`, a parameter, a typed variable), indexed down the array levels, an alias const followed (`TsExpr/TsReadRefs.mjs::laterTypes`).
   // 88: an object (or a const holding one) pushed into an un-annotated array with `push`/`unshift` takes the type the array takes later, one level down (`TsReadRefs.mjs::pushedInto`).
+  // 89: a `template_literals` row in an object literal's property has `target` and `target_id` of the member it fills, as a string there has (`TsText.mjs::collectStrings`).
+  // 90: #107 - the climb to the type a value takes later crosses `Array`'s `filter`/`slice`/`sort`/`reverse`/`concat` (the RESULT is typed), a const that is an element of another
+  //     un-annotated array, and a property value whose object is typed later (`TsExpr/TsReadRefs.mjs::climb`, `typesAt`, `propertyTypes`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 88, build: args.build,
+    config: config.file, data: config.data, rows: 90, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

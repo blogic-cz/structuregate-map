@@ -25,6 +25,7 @@ $script:TsFieldFiles = @{
         "export class HueForm {`n" +
         "  rules: HueRule[] = [{ Field: 'alpha', Message: 'hue.alpha.required', Weight: 7 }];`n" +
         "  loose = { Field: 'beta', Message: 'hue.beta.loose', Weight: 8 };`n" +
+        '  built: HueRule = { Field: `${''kappa''}`, Message: `hue.${this.rules.length}.built` };' + "`n" +
         "  run(): void {`n" +
         "    check({ Field: 'gamma', Message: 'hue.gamma.arg' });`n" +
         "    checkEither({ Message: 'hue.delta.either' });`n" +
@@ -66,6 +67,18 @@ Test-Case 'tsrows: a number in an object literal names the member of its context
     $r = Invoke-TsRowsQ $made.Db (Get-TsFieldTargetSql 'number_literals' 'value')
     Assert-Line $r '7=Weight@4:rule.ts:tm Weight@4'
     Assert-Line $r '8=-@-:-:-'
+}
+
+# (rows 89) A TEMPLATE LITERAL in such a property names the member too: its `template_literals` row has the `target` and `target_id` a string there has.
+Test-Case 'tsrows: a template literal in an object literal names the member of its contextual type' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsFieldFiles) -Shared
+    Assert-Exit $made.Result 0
+    $f = { param($role) Get-TsRootFieldSql 'template_literals__target' 't.id' $role }
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'tl=' || t.line || ':' || coalesce($(& $f 'name'), '-') || '@' || coalesce($(& $f 'line'), '-') || ':' || " +
+        "coalesce((SELECT 'tm ' || m.name || '@' || m.line FROM type_members m WHERE m.id = t.target_id), '-') AS v FROM template_literals t " +
+        "JOIN files f ON f.id = t.file AND f.path LIKE '%use.ts'")
+    Assert-Line $r 'tl=5:Field@2:tm Field@2'
+    Assert-Line $r 'tl=5:Message@3:tm Message@3'
 }
 
 # `target_id` IS THE DECLARATION'S OWN ROW. `a-wide.ts` flattens a library's `Dataset` into its alias (`via = 'computed'` rows it owns, about the
@@ -152,6 +165,7 @@ $script:TsFieldLater = @{
     'apps/shop/src/rule.ts' = "export interface HueRule {`n" +
         "  Field: string;`n" +
         "  Message: string | (() => string);`n" +
+        "  Children?: HueRule[];`n" +
         "}`n" +
         "export function check(r: HueRule): void { void r; }`n"
     'apps/shop/src/use.ts' = "import { HueRule, check } from './rule';`n" +
@@ -180,6 +194,14 @@ $script:TsFieldLater = @{
         "    out.push({ Field: 'iota', Message: () => 'hue.iota.pushed' });`n" +
         "    return out;`n" +
         "  }`n" +
+        "  shaped(): HueRule[] {`n" +
+        "    const first = { Field: 'lambda', Message: 'hue.lambda.first' };`n" +
+        "    const list = [first, { Field: 'mu', Message: 'hue.mu.outer', Children: [`n" +
+        "      { Field: 'nu', Message: 'hue.nu.child' },`n" +
+        "    ].filter((r) => !!r) }];`n" +
+        "    return list;`n" +
+        "  }`n" +
+        "  filtered(): HueRule[] { return [{ Field: 'xi', Message: 'hue.xi.filtered' }].filter((r) => !!r); }`n" +
         "  loose(): number {`n" +
         "    const free = { Field: 'eps', Message: 'hue.eps.loose' };`n" +
         "    const other = [{ Field: 'zeta', Message: 'hue.zeta.loose' }];`n" +
@@ -207,5 +229,11 @@ Test-Case 'tsrows: a literal in an un-annotated const names the member of the ty
     Assert-Line $r 'theta=Field@2:rule.ts:tm Field@2'
     Assert-Line $r 'iota=Field@2:rule.ts:tm Field@2'
     Assert-Line $fn 'fn=24:Message@3'
+    # (rows 90, #107) A CONST THAT IS AN ELEMENT of another un-annotated array (`first`), a property value whose object is typed later (`Children: [..].filter(..)`,
+    # `Children` declared by the interface), and an array whose `filter` RESULT is what is typed (`return [..].filter(..)`).
+    Assert-Line $r 'hue.lambda.first=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'hue.mu.outer=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'hue.nu.child=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'hue.xi.filtered=Message@3:rule.ts:tm Message@3'
 }
 }

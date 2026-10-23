@@ -273,14 +273,22 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     }
     return out;
   };
-  /** An object climbed out of its array literals: the outermost node `n` and how many arrays it sits in. */
-  const climb = (object) => {
-    let n = object;
+  /** `Array`'s own method of that name - checked by the declaration the checker names, never by the name alone. */
+  const arrayMethod = (access, names) => names.includes(access.name.text)
+    && (checker.getSymbolAtLocation(access.name)?.declarations ?? []).some((d) => d.parent !== undefined && ts.isInterfaceDeclaration(d.parent) && d.parent.name.text === 'Array');
+  // THE ARRAY METHODS WHOSE RESULT HOLDS THE RECEIVER'S ELEMENTS (rows 90, #107): `[{..}].filter(Boolean)` is typed where its RESULT stands.
+  const SAME_ELEMENTS = ['filter', 'slice', 'sort', 'reverse', 'concat'];
+  /** A node climbed out of what keeps it an element: parentheses and `!`, array literals (one level each) and the receiver of a `SAME_ELEMENTS` call - the outermost
+   *  node `n` and how many arrays down the node sits in it. */
+  const climb = (node) => {
+    let n = node;
     let levels = 0;
     for (;;) {
       const p = n.parent;
       if (p !== undefined && passes(p)) n = p;
       else if (p !== undefined && ts.isArrayLiteralExpression(p)) { n = p; levels++; }
+      else if (p !== undefined && ts.isPropertyAccessExpression(p) && p.expression === n && p.parent !== undefined && ts.isCallExpression(p.parent)
+        && p.parent.expression === p && arrayMethod(p, SAME_ELEMENTS)) n = p.parent;
       else break;
     }
     return { n, levels };
@@ -291,26 +299,56 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     const call = n.parent;
     if (call === undefined || !ts.isCallExpression(call) || !call.arguments.includes(n)) return null;
     const callee = call.expression;
-    if (!ts.isPropertyAccessExpression(callee) || !(callee.name.text === 'push' || callee.name.text === 'unshift')) return null;
-    const decls = checker.getSymbolAtLocation(callee.name)?.declarations ?? [];
-    if (!decls.some((d) => d.parent !== undefined && ts.isInterfaceDeclaration(d.parent) && d.parent.name.text === 'Array')) return null;
+    if (!ts.isPropertyAccessExpression(callee) || !arrayMethod(callee, ['push', 'unshift'])) return null;
     let receiver = callee.expression;
     while (passes(receiver)) receiver = receiver.expression;
     const held = ts.isIdentifier(receiver) ? checker.getSymbolAtLocation(receiver)?.valueDeclaration : undefined;
     return held !== undefined && ts.isVariableDeclaration(held) && held.initializer !== undefined ? constOf(held.initializer) : null;
   };
+  /** A PROPERTY VALUE'S TYPE IS WHAT ITS OBJECT'S TYPES GIVE THE PROPERTY (rows 90, #107): `Children: [{..}].filter(..)` in an object that is itself a `HueRule`
+   *  (by its contextual type, or the type it takes later) is `HueRule['Children']`. Null when `n` is no property value of an object literal. */
+  const propertyTypes = (n) => {
+    const prop = n.parent;
+    if (prop === undefined || !ts.isPropertyAssignment(prop) || prop.initializer !== n || !ts.isObjectLiteralExpression(prop.parent)) return null;
+    if (!(ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name) || ts.isNumericLiteral(prop.name))) return [];
+    const outer = prop.parent;
+    const contextual = checker.getContextualType(outer);
+    const holders = contextual !== undefined && pushedInto(climb(outer).n) === null ? [contextual] : laterTypes(outer);
+    return holders.flatMap((t) => (t.isUnion() ? t.types : [t])).flatMap((t) => {
+      const member = checker.getPropertyOfType(t, prop.name.text);
+      return member === undefined ? [] : [checker.getTypeOfSymbolAtLocation(member, outer)];
+    });
+  };
+  /** WHAT A CLIMBED NODE TAKES, `levels` arrays down: an un-annotated const's or a pushed-into array's later types (asked of their uses, queued on `todo` when one is
+   *  given, else read through `laterOf`), a property value's type in its object, else the checker's contextual type. */
+  const typesAt = (top, levels, todo) => {
+    const next = constOf(top);
+    const into = next === null ? pushedInto(top) : null;
+    if (next !== null || into !== null) {
+      const job = { decl: next ?? into, levels: next !== null ? levels : levels + 1 };
+      if (todo !== null) { todo.push(job); return []; }
+      return laterOf(job.decl, job.levels);
+    }
+    const held = propertyTypes(top);
+    if (held !== null) return down(held, levels);
+    const t = checker.getContextualType(top);
+    return t === undefined ? [] : down([t], levels);
+  };
   function laterTypes(object) {
-    const { n, levels: inside } = climb(object);
-    const into = pushedInto(n);
-    const first = into ?? constOf(n);
-    if (first === null) return [];
-    const levels = into === null ? inside : inside + 1;
-    // EVERY LITERAL OF ONE ARRAY asks the same question: answered once per const and depth.
-    const memo = laterMemo.get(first) ?? new Map();
-    laterMemo.set(first, memo);
-    if (!memo.has(levels)) memo.set(levels, usesOf(first, levels));
-    return memo.get(levels);
+    // Asked of an object the checker gives no contextual type (or only a pushed-into array's inferred one): what its climbed node takes, `typesAt` in order.
+    const { n, levels } = climb(object);
+    return typesAt(n, levels, null);
   }
+  /** EVERY LITERAL OF ONE ARRAY asks the same question: answered once per const and depth, the answer held as nothing while it is being asked (a cycle). */
+  const laterOf = (decl, levels) => {
+    const memo = laterMemo.get(decl) ?? new Map();
+    laterMemo.set(decl, memo);
+    if (!memo.has(levels)) {
+      memo.set(levels, []);
+      memo.set(levels, usesOf(decl, levels));
+    }
+    return memo.get(levels);
+  };
   const laterMemo = new Map();
   function usesOf(start, depth) {
     const found = [];
@@ -328,16 +366,9 @@ export function makeReadRefs(ts, checker, canonicalPath) {
       while (stack.length) {
         const node = stack.pop();
         if (ts.isIdentifier(node) && node !== decl.name && node.text === decl.name.text && checker.getSymbolAtLocation(node) === symbol) {
-          let use = node;
-          while (use.parent !== undefined && passes(use.parent)) use = use.parent;
-          const next = constOf(use);
-          const into = next === null ? pushedInto(use) : null;
-          if (next !== null) todo.push({ decl: next, levels });
-          else if (into !== null) todo.push({ decl: into, levels: levels + 1 });
-          else {
-            const t = checker.getContextualType(use);
-            if (t !== undefined) found.push(...down([t], levels));
-          }
+          // A USE CLIMBS AS AN OBJECT DOES (rows 90, #107): `const list = [first, ..]` makes `first` an element of `list`, one level down.
+          const { n: top, levels: inside } = climb(node);
+          found.push(...typesAt(top, levels + inside, todo));
         }
         ts.forEachChild(node, (c) => { stack.push(c); });
       }
