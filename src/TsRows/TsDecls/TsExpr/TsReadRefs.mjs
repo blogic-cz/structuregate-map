@@ -214,12 +214,18 @@ export function makeReadRefs(ts, checker, canonicalPath) {
    * the property's SPELLING. `{name, file, line}` is the declaration's NAME line, as every read's `target` is (a library's file kept); `target_id` is the row there (`TsRefs.mjs::rollupRefIds`).
    * A union contextual type asks the arms that DECLARE the name: ONE declaration place is the target, several name none (the template rule). An object with no contextual type, and a property the
    * type does not declare (an excess one, a computed name), have none. A sign in front of a number is stepped through.
+   * A FUNCTION FILLS A MEMBER TOO (rows 83, #105): an arrow or function expression that is the property's value, or a method written in the object
+   * (`{ Message() { .. } }`, which is its own property), names the member as a literal does - `TsWalk.mjs::declareInline` stamps it on the `functions` row.
+   * Parentheses, `as` and `satisfies` around the value are stepped through: `(x)`, `'a' as const` and `fn satisfies F` fill the member `x`, `'a'` and `fn` do.
    */
+  const wraps = (n) => ts.isPrefixUnaryExpression(n) || ts.isParenthesizedExpression(n) || ts.isAsExpression(n)
+    || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(n));
   function fieldTarget(node) {
     let child = node;
-    while (child.parent !== undefined && ts.isPrefixUnaryExpression(child.parent)) child = child.parent;
-    const prop = child.parent;
-    if (prop === undefined || !ts.isPropertyAssignment(prop) || prop.initializer !== child) return null;
+    while (child.parent !== undefined && wraps(child.parent)) child = child.parent;
+    const method = ts.isMethodDeclaration(node) && node.parent !== undefined && ts.isObjectLiteralExpression(node.parent);
+    const prop = method ? node : child.parent;
+    if (prop === undefined || !(method || (ts.isPropertyAssignment(prop) && prop.initializer === child))) return null;
     if (!(ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name) || ts.isNumericLiteral(prop.name))) return null;
     const type = checker.getContextualType(prop.parent);
     if (type === undefined) return null;
