@@ -38,6 +38,7 @@ pub struct Options {
     pub ts_node_modules: Vec<String>,
     pub ts_config: Option<String>,
     pub sql_config: Option<String>,
+    pub cs_config: Option<String>,
     /// `--sql-parse <file|->`: one SQL text parsed and printed as JSON, nothing else; `--dialect` says which SQL it is.
     pub sql_parse: Option<String>,
     pub dialect: Option<String>,
@@ -180,6 +181,7 @@ pub fn parse(args: &[String]) -> Result<Parsed, String> {
             "--ts-node-modules" => o.ts_node_modules.push(full(&next()?)),
             "--ts-config" => o.ts_config = Some(full(&next()?)),
             "--sql-config" => o.sql_config = Some(full(&next()?)),
+            "--cs-config" => o.cs_config = Some(full(&next()?)),
             "--sql-parse" => {
                 let source = next()?;
                 o.sql_parse = Some(if source == "-" { source } else { full(&source) });

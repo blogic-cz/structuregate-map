@@ -15,7 +15,7 @@ pub(super) fn pass(name: &str, work: impl FnOnce()) {
 pub(super) fn tally(into: &mut Collector, db: &str) {
     let Ok(conn) = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return };
     for table in crate::rows::schema::listable_tables(&conn).unwrap_or_default() {
-        if !into.database.contains_key(&table) || ["sql_links", "sql_seeds", "sql_column_refs", "duplicate_types", "doc_facts", "doc_links", "http_endpoints", "http_calls", "http_links", "dispatch"].contains(&table.as_str()) {
+        if !into.database.contains_key(&table) || ["sql_links", "sql_seeds", "sql_column_refs", "duplicate_types", "doc_facts", "doc_links", "http_endpoints", "http_calls", "http_links", "dispatch", "enum_type_links"].contains(&table.as_str()) {
             let rows = crate::rows::schema::count_of(&conn, &table);
             into.database.insert(table, rows);
         }
@@ -54,6 +54,25 @@ pub(super) fn duplicates(into: &mut Collector, db: &str) {
         Ok(0) => {}
         Ok(n) => into.notes.push(format!("{n} type name(s) are declared in more than one place (duplicate_types)")),
         Err(why) => into.errors.push(format!("DUPLICATES were not written — {why}")),
+    }
+}
+
+/// A CLASS CHOSEN BY AN ENUM MEMBER'S NAME, under a declared convention - see `rows/dispatch/enumtypes.rs` (#113).
+pub(super) fn enum_types(into: &mut Collector, db: &str, specs: &[crate::rows::dispatch::csconfig::EnumTypes]) {
+    let written = rusqlite::Connection::open(db).and_then(|mut conn| {
+        let tx = conn.transaction()?;
+        let made = crate::rows::dispatch::enumtypes::write(&tx, specs)?;
+        tx.commit()?;
+        Ok(made)
+    });
+    match written {
+        Ok((n, notes)) => {
+            if n > 0 {
+                into.notes.push(format!("{n} enum member link(s) to the classes their names select (enum_type_links)"));
+            }
+            into.notes.extend(notes);
+        }
+        Err(why) => into.errors.push(format!("ENUM TYPE LINKS were not written — {why}")),
     }
 }
 

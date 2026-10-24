@@ -124,6 +124,12 @@ fn edges(db: &Connection) -> Result<BTreeSet<(String, String)>> {
             add(pairs(&format!("SELECT DISTINCT file, \"{column}\" FROM \"{table}\" WHERE file IS NOT NULL AND \"{column}\" IS NOT NULL"))?);
         }
     }
+    // A CLASS AN ENUM MEMBER'S NAME SELECTS (#113): a file referencing the member depends on the class's file.
+    if !columns(db, "enum_type_links").is_empty() && columns(db, "refs").iter().any(|c| c == "symbol") {
+        add(pairs(
+            "SELECT DISTINCT r.file, l.type_file FROM refs r JOIN enum_type_links l ON l.member_symbol = r.symbol              WHERE r.file IS NOT NULL AND l.type_file IS NOT NULL",
+        )?);
+    }
     if ["http_links", "http_calls", "http_endpoints"].iter().all(|t| !columns(db, t).is_empty()) {
         add(pairs(
             "SELECT DISTINCT c.file, e.file FROM http_links l JOIN http_calls c ON c.id = l.call JOIN http_endpoints e ON e.id = l.endpoint \

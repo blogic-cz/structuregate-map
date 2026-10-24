@@ -46,11 +46,8 @@ before concluding a method is dead.
   `.razor`/`.cshtml`, compiled as the C# the Razor compiler generates and walked as the MARKUP file at its
   own lines), `errors`, `semantic`.
 * `http_endpoints`: every attribute-routed action (`[Route]`/`[Http*]`), one row per class route - see SKILL.md.
-* `dispatch` (derived after every half, rewritten whole): which handler a mediator call runs - `call` joins `calls.id`,
-  `file`, `line`, `func`, `kind` (`request` for a `Send`, `notification` for a `Publish`), `message` (the argument's
-  STATIC type), `handler` (`<class>.Handle`), `handler_file`, `handler_line`. One row per class whose closed base
-  `IRequestHandler<T, ..>` / `INotificationHandler<T>` names exactly that type - a message typed by an interface or a
-  base class, or with no handler, has none.
+* `dispatch` and `enum_type_links` - WHICH CODE RUNS where the call names no class (a mediator's handler, a class picked by an
+  enum member's name): [csharp-runs.md](csharp-runs.md).
 * `razor_renders`: a component that renders another (`component` the full type name, `tag`, `attributes`).
 * `handlers` adds `guard` (the `when` filter), `finally` and `symbol` (the bound exception type).
 * **`enums` and `switch_cases` are SHARED with the TypeScript half**, in its shape, so one query reads both
