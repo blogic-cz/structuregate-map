@@ -196,6 +196,8 @@ export declare function immerOn<State, Creators extends readonly ActionCreator[]
 import { createAction } from '@ngrx/store';
 export const tick = createAction('[Demo] tick');
 export const plan = createAction('[Demo] plan');
+export const each = createAction('[Demo] each');
+export const either = createAction('[Demo] either');
 export const bumped = createAction('[Demo] bumped');
 export const quiet = createAction('[Demo] quiet');
 '@
@@ -209,18 +211,24 @@ export function viaPlan(callback: (b: Bag) => void, bag: Bag) { callback(bag); }
 export function bump(bag: Bag) { bag.count++; }
 export function peek(bag: Bag) { return bag.count; }
 export function log(n: number) { return n; }
+export const pick = (callback: (g: Line) => void, bag: Bag, first: boolean) => {
+  const line = first ? bag.lines.find((l) => l.id === 1) : bag.lines.find((l) => l.id === 2);
+  if (line) { callback(line); }
+};
 '@
         'apps/shop/src/bag.reducer.ts' = @'
 import { createReducer } from '@ngrx/store';
 import { immerOn } from 'ngrx-immer/store';
 import * as bag from './bag.actions';
-import { Bag, bump, log, peek, setLine, viaPlan } from './bag.helpers';
+import { Bag, bump, log, peek, pick, setLine, viaPlan } from './bag.helpers';
 export interface S { cart: Bag; }
 const initial: S = { cart: { lines: [], count: 0 } };
 export const bagReducer = createReducer(initial,
   immerOn(bag.tick, (s) => { setLine((g) => (g.active = true), 1, s.cart); }),
   immerOn(bag.plan, (s) => { viaPlan((b) => setLine((g) => (g.active = false), 2, b), s.cart); }),
   immerOn(bag.bumped, (s) => { bump(s.cart); }),
+  immerOn(bag.each, (s) => { s.cart.lines.forEach((l) => (l.id = 0)); }),
+  immerOn(bag.either, (s) => { pick((g) => (g.active = true), s.cart, true); }),
   immerOn(bag.quiet, (s) => { log(1); peek(s.cart); }));
 '@
     }
@@ -232,5 +240,8 @@ export const bagReducer = createReducer(initial,
     Assert-Line $h 'h=bag.plan | cart.lines.active'
     Assert-Line $h 'h=bag.bumped | cart.count'
     Assert-Line $h 'h=bag.quiet | -'
+    # (rows 100) a `forEach` callback writes through its element; a ternary of one path is that path.
+    Assert-Line $h 'h=bag.each | cart.lines.id'
+    Assert-Line $h 'h=bag.either | cart.lines.active'
 }
 }

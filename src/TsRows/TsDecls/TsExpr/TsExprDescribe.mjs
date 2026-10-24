@@ -39,6 +39,8 @@ function writtenPaths(node, prefix, out) {
 }
 
 /** A method that changes the list, set or map it is called on - on a draft, a write to that property. */
+/** A method that hands each element to its callback's first parameter. */
+const ITERATORS = new Set(['forEach', 'map', 'filter', 'find', 'findIndex', 'some', 'every', 'flatMap']);
 const MUTATORS = new Set(['push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin',
   'set', 'add', 'delete', 'clear']);
 
@@ -78,6 +80,11 @@ export function draftWrites(ts, fn, declOf = null) {
       }
       if (ts.isElementAccessExpression(e)) return pathOf(e.expression);
       if (ts.isCallExpression(e) && ts.isPropertyAccessExpression(e.expression)) return pathOf(e.expression.expression);
+      // A TERNARY (rows 100) is a path when its arms are the same one: `c ? a.find(..)?.client : b.find(..)?.client` over one list is that list's `client`.
+      if (ts.isConditionalExpression(e)) {
+        const [yes, no] = [pathOf(e.whenTrue), pathOf(e.whenFalse)];
+        return yes !== null && no !== null && yes.join('.') === no.join('.') ? yes : null;
+      }
       return null;
     };
     const note = (e) => {
@@ -111,6 +118,13 @@ export function draftWrites(ts, fn, declOf = null) {
         note(n.expression);
       } else if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && MUTATORS.has(n.expression.name.text)) {
         note(n.expression.expression);
+      }
+      // A CALLBACK AN ITERATING METHOD HANDS EACH ELEMENT (rows 100): `s.list.forEach((x) => (x.done = 1))` writes `list.done` - the element is the list's
+      // path, an index being no segment - so the callback is walked with its first parameter bound to it.
+      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && ITERATORS.has(n.expression.name.text) && isFn(n.arguments[0])) {
+        const over = pathOf(n.expression.expression);
+        const param = n.arguments[0].parameters?.[0]?.name;
+        if (over !== null && param !== undefined && ts.isIdentifier(param)) walk(n.arguments[0], new Map([[param.text, over]]), new Map());
       }
       if (ts.isCallExpression(n)) {
         const bound = ts.isIdentifier(n.expression) ? fns.get(n.expression.text) : undefined;
