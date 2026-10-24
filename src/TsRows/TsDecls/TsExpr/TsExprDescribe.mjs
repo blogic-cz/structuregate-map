@@ -48,47 +48,80 @@ const MUTATORS = new Set(['push', 'pop', 'shift', 'unshift', 'splice', 'sort', '
  * first parameter. A path is the property names from it - an index is not a segment (`s.items[i].done = 1` is `items.done`) -
  * and a method call on the way (`s.items.find(..)`) is the element it hands back. A LOCAL initialised from such a path
  * (`const t = s.response.find(..)`) IS that path: `t.active = 1` writes `response.active`. Keys only, as `writtenPaths`.
+ *
+ * THROUGH THE HELPERS IT CALLS (rows 99): `setValue((g) => (g.fees = x), id, s.response)` hands the draft's `response` to a helper that finds an
+ * element under it and calls the callback with that element - so the handler writes `response.contracts.fees`. A call whose callee is a function
+ * the tree declares with a body (`declOf`, the checker's declaration) is walked with each parameter bound to its argument - a draft path, or a
+ * function written inline or bound already - and a call of a parameter bound to a function walks that function the same way. A function already
+ * walked with the same bindings is not walked again, which ends recursion; no depth is counted.
  */
-export function draftWrites(ts, fn) {
+export function draftWrites(ts, fn, declOf = null) {
   const first = fn.parameters?.[0]?.name;
   if (first === undefined || !ts.isIdentifier(first)) return [];
   // BY KIND RANGE: `ts.SyntaxKind[kind]` answers an ALIAS name for the first and last of a range (`FirstAssignment` for `=`).
   const isAssignment = (k) => k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment;
-  const aliases = new Map();
+  const isFn = (n) => n != null && (ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n));
   const out = [];
-  const pathOf = (e) => {
-    if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e)
-      || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(e))) return pathOf(e.expression);
-    if (ts.isIdentifier(e)) return e.text === first.text ? [] : aliases.get(e.text) ?? null;
-    if (ts.isPropertyAccessExpression(e)) {
-      const base = pathOf(e.expression);
-      return base === null ? null : [...base, e.name.text];
-    }
-    if (ts.isElementAccessExpression(e)) return pathOf(e.expression);
-    if (ts.isCallExpression(e) && ts.isPropertyAccessExpression(e.expression)) return pathOf(e.expression.expression);
-    return null;
+  const walked = new Set();
+  const walk = (f, paths, fns) => {
+    const key = `${f.getSourceFile().fileName}#${f.pos}|${[...paths].map(([n, p]) => `${n}=${p.join('.')}`).join(',')}|${[...fns].map(([n, g]) => `${n}=${g.pos}`).join(',')}`;
+    if (walked.has(key) || f.body === undefined) return;
+    walked.add(key);
+    const aliases = new Map(paths);
+    const pathOf = (e) => {
+      if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e)
+        || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(e))) return pathOf(e.expression);
+      if (ts.isIdentifier(e)) return aliases.get(e.text) ?? null;
+      if (ts.isPropertyAccessExpression(e)) {
+        const base = pathOf(e.expression);
+        return base === null ? null : [...base, e.name.text];
+      }
+      if (ts.isElementAccessExpression(e)) return pathOf(e.expression);
+      if (ts.isCallExpression(e) && ts.isPropertyAccessExpression(e.expression)) return pathOf(e.expression.expression);
+      return null;
+    };
+    const note = (e) => {
+      const path = pathOf(e);
+      if (path !== null && path.length) out.push(path.join('.'));
+    };
+    /** A call into a function: its parameters bound to the arguments that are draft paths or functions. */
+    const enter = (callee, args) => {
+      const ps = new Map();
+      const gs = new Map();
+      callee.parameters.forEach((p, i) => {
+        const arg = args[i];
+        if (arg === undefined || !ts.isIdentifier(p.name)) return;
+        const path = pathOf(arg);
+        if (path !== null) ps.set(p.name.text, path);
+        else if (isFn(arg)) gs.set(p.name.text, arg);
+        else if (ts.isIdentifier(arg) && fns.has(arg.text)) gs.set(p.name.text, fns.get(arg.text));
+      });
+      if (ps.size) walk(callee, ps, gs);
+    };
+    const visit = (n) => {
+      if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined) {
+        const path = pathOf(n.initializer);
+        if (path !== null) aliases.set(n.name.text, path);
+      } else if (ts.isBinaryExpression(n) && isAssignment(n.operatorToken.kind)) {
+        note(n.left);
+      } else if ((ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n))
+        && (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken)) {
+        note(n.operand);
+      } else if (ts.isDeleteExpression(n)) {
+        note(n.expression);
+      } else if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && MUTATORS.has(n.expression.name.text)) {
+        note(n.expression.expression);
+      }
+      if (ts.isCallExpression(n)) {
+        const bound = ts.isIdentifier(n.expression) ? fns.get(n.expression.text) : undefined;
+        const callee = bound ?? (declOf === null ? null : declOf(n.expression));
+        if (isFn(callee)) enter(callee, n.arguments);
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(f.body);
   };
-  const note = (e) => {
-    const path = pathOf(e);
-    if (path !== null && path.length) out.push(path.join('.'));
-  };
-  const visit = (n) => {
-    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined) {
-      const path = pathOf(n.initializer);
-      if (path !== null) aliases.set(n.name.text, path);
-    } else if (ts.isBinaryExpression(n) && isAssignment(n.operatorToken.kind)) {
-      note(n.left);
-    } else if ((ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n))
-      && (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken)) {
-      note(n.operand);
-    } else if (ts.isDeleteExpression(n)) {
-      note(n.expression);
-    } else if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && MUTATORS.has(n.expression.name.text)) {
-      note(n.expression.expression);
-    }
-    ts.forEachChild(n, visit);
-  };
-  visit(fn.body);
+  walk(fn, new Map([[first.text, []]]), new Map());
   return [...new Set(out)];
 }
 

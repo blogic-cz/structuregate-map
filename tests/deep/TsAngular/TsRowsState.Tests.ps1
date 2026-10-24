@@ -181,4 +181,56 @@ export class ListEffects {
     $n = Invoke-TsRowsQ $made.Db "SELECT 'n=' || count(*) AS r FROM state_effects"
     Assert-Line $n 'n=3'
 }
+# (rows 99) AN IMMER HANDLER WRITES THROUGH THE HELPERS IT CALLS (`TsExprDescribe.mjs::draftWrites`): `setLine((g) => (g.active = x), id, s.cart)` hands the draft's `cart`
+# to a helper (another file) that finds a line under its `bag.lines` and calls the callback with it - so the handler writes `cart.lines.active`; a helper handing
+# a callback on to a second helper (`viaPlan`) is walked the same way, and a helper that mutates its parameter directly (`bump`) writes `cart.count`.
+# THE CONTROL: a helper given no draft path (`log(1)`) writes nothing, and one that only reads it (`peek(s.cart)`) writes nothing.
+Test-Case 'tsrows: an immer handler writes through the helpers it hands its draft to' {
+    $files = @{
+        'node_modules/ngrx-immer/package.json' = '{"name":"ngrx-immer","version":"1.0.0"}'
+        'node_modules/ngrx-immer/store/index.d.ts' = @'
+import { ActionCreator, ReducerTypes } from '@ngrx/store';
+export declare function immerOn<State, Creators extends readonly ActionCreator[]>(...args: [...creators: Creators, reducer: (state: State, action: any) => void]): ReducerTypes<State, Creators>;
+'@
+        'apps/shop/src/bag.actions.ts' = @'
+import { createAction } from '@ngrx/store';
+export const tick = createAction('[Demo] tick');
+export const plan = createAction('[Demo] plan');
+export const bumped = createAction('[Demo] bumped');
+export const quiet = createAction('[Demo] quiet');
+'@
+        'apps/shop/src/bag.helpers.ts' = @'
+export interface Line { id: number; active: boolean; }
+export interface Bag { lines: Line[]; count: number; }
+export const setLine = (callback: (g: Line) => void, id: number, bag: Bag | null) => {
+  if (bag) { const line = bag.lines.find((l) => l.id === id); if (line) { callback(line); } }
+};
+export function viaPlan(callback: (b: Bag) => void, bag: Bag) { callback(bag); }
+export function bump(bag: Bag) { bag.count++; }
+export function peek(bag: Bag) { return bag.count; }
+export function log(n: number) { return n; }
+'@
+        'apps/shop/src/bag.reducer.ts' = @'
+import { createReducer } from '@ngrx/store';
+import { immerOn } from 'ngrx-immer/store';
+import * as bag from './bag.actions';
+import { Bag, bump, log, peek, setLine, viaPlan } from './bag.helpers';
+export interface S { cart: Bag; }
+const initial: S = { cart: { lines: [], count: 0 } };
+export const bagReducer = createReducer(initial,
+  immerOn(bag.tick, (s) => { setLine((g) => (g.active = true), 1, s.cart); }),
+  immerOn(bag.plan, (s) => { viaPlan((b) => setLine((g) => (g.active = false), 2, b), s.cart); }),
+  immerOn(bag.bumped, (s) => { bump(s.cart); }),
+  immerOn(bag.quiet, (s) => { log(1); peek(s.cart); }));
+'@
+    }
+    $made = New-TsRowsDb (New-TsRowsWorkspace $files)
+    Assert-Exit $made.Result 0
+    $h = Invoke-TsRowsQ $made.Db ("SELECT 'h=' || h.action_source || ' | ' || coalesce((SELECT group_concat(w.value) " +
+        "FROM state_handlers__writes w WHERE w.owner = h.id AND w.value IS NOT NULL), '-') AS r FROM state_handlers h")
+    Assert-Line $h 'h=bag.tick | cart.lines.active'
+    Assert-Line $h 'h=bag.plan | cart.lines.active'
+    Assert-Line $h 'h=bag.bumped | cart.count'
+    Assert-Line $h 'h=bag.quiet | -'
+}
 }
