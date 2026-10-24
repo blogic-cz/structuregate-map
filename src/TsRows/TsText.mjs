@@ -88,7 +88,7 @@ function enclosingLabel(ts, sf, pos) {
  * A bare `'en'` says nothing. `'en'` as the `locale` property of a call to `setLanguage` says what it is,
  * and `context`/`property` are how that is published without anyone having to re-read the source.
  */
-export function collectStrings(ts, store, node, owner, propName, evalNode, fieldTarget, enumNameHole) {
+export function collectStrings(ts, store, node, owner, propName, evalNode, fieldTarget, enumNameHole, pathRefs) {
   const text = (n) => n.getText();
   // THE MEMBER AN OBJECT LITERAL'S VALUE FILLS (rows 81, #104): `target` is `{name, file, line}` where the checker says the property is declared, replacing the empty text a
   // literal in a property carries (`TsReadRefs.mjs::fieldTarget`). A checker refusal leaves the row without one, never without the row.
@@ -106,6 +106,11 @@ export function collectStrings(ts, store, node, owner, propName, evalNode, field
       return { hole_refs: holeRefs, expands: built };
     } catch { return {}; }
   };
+  // A PROPERTY PATH (rows 98, #109): `path_refs`, one `{name, file, line}` per segment it resolves from its configured root, and `path_complete`. Only for a string
+  // filling a member `propertyPaths` names; a checker refusal leaves the row without them.
+  const pathOf = (n) => {
+    try { return pathRefs ? pathRefs(n) ?? {} : {}; } catch { return {}; }
+  };
   const field = (n) => {
     try { const target = fieldTarget ? fieldTarget(n) : null; return target ? { target } : {}; } catch { return {}; }
   };
@@ -115,7 +120,7 @@ export function collectStrings(ts, store, node, owner, propName, evalNode, field
     if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
       store.add('string_literals', 'sl', {
         ...owner, value: n.text, context: parentKind(ts, n),
-        property: propertyContext(ts, n, propName), ...literalUse(ts, n, text), ...field(n), ...locationOf(n),
+        property: propertyContext(ts, n, propName), ...literalUse(ts, n, text), ...field(n), ...pathOf(n), ...locationOf(n),
       });
     } else if (ts.isNumericLiteral(n)) {
       store.add('number_literals', 'nl', { ...owner, ...numberOf(ts, n, text), ...literalUse(ts, n, text), ...field(n), ...locationOf(n) });

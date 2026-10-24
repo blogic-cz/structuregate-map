@@ -150,6 +150,15 @@ export function rollupRefIds(store) {
       if (hit !== undefined) row.target_id = hit;
     }
   }
+  // A PROPERTY PATH'S SEGMENTS NAME THEIR ROWS (rows 98, #109): each `path_refs` entry is the declaration at its place - `id`, the `members` or `type_members` row.
+  for (const row of store.table('string_literals')) {
+    if (!Array.isArray(row.path_refs)) continue;
+    for (const ref of row.path_refs) {
+      const key = ref?.element ? null : placeKey(ref);
+      const hit = key === null ? undefined : placed.get(key);
+      if (hit !== undefined) ref.id = hit;
+    }
+  }
   // `external` IS THE SPELLING (a specifier not starting with `.`); whether the import lands IN THE TREE is
   // `in_tree`, which most consumers meant by it: a tsconfig alias is external and in the tree.
   for (const row of store.table('imports')) {

@@ -61,7 +61,7 @@ export function makeFileId(store, feRoot, projectId) {
  * program and in its own), and extracting it once per program duplicated its declarations - one element
  * then reported the same directive several times. The first program to reach a file owns it.
  */
-export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted, only = null, rereads = null }) {
+export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted, only = null, rereads = null, propertyPaths = [] }) {
   const inAnyProgram = new Set();
   // WHAT EACH FILE READ OUTSIDE ITSELF, and what it shows - see `TsSetup/TsReads.mjs`.
   const log = makeReadLog(ts, fe);
@@ -314,7 +314,8 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
         diag.note('dynamic_import_scan_failed');
       }
       try {
-        collectStrings(ts, store, sf, { file: fid }, propName, evalNode, readRefs.fieldTarget, readRefs.enumNameHole);
+        collectStrings(ts, store, sf, { file: fid }, propName, evalNode, readRefs.fieldTarget, readRefs.enumNameHole,
+          propertyPaths.length ? (n) => readRefs.pathRefs(n, propertyPaths) : null);
       } catch {
         diag.note('string_scan_failed');
       }

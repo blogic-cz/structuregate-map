@@ -163,7 +163,12 @@ Beside the shared tables it adds the FRAMEWORK tables:
   the component the call sits in (route `ts_call`), and from every template reading the field or getter that holds the
   result (`field_binding`); a prefix built at run time is not read. `i18n_refs` carries it as a row with `prefix`
   and `kind = 'dictionary_call'`, and no `key`. A dictionary call handed on to another function is not followed. `i18nCarriers` (template pipes/elements carrying a key) and the
-  other cell contracts: [typescript-refs.md](typescript-refs.md).
+  other cell contracts: [typescript-refs.md](typescript-refs.md). `propertyPaths` (rows 98) names the members whose strings are
+  property PATHS and where each path starts: `[{"member": "ValidationRuleSet.PropertyName", "root": "this"}, {"member": "HueRule.Path",
+  "root": {"argument": 0}}]` - `this` the class the string is written in, `{argument: n}` the n-th argument of the call its object is handed
+  to. A string filling such a member (its `target`) carries `path_refs`, one `{name, file, line, id}` per segment resolved through declared
+  types (`element` for a numeric one), and `path_complete`; a segment naming nothing ends it. None configured, none resolved; a spec of
+  another shape is a `property_path_spec_invalid` diagnostic.
 
 Three outputs are options, off by default: `--ts-html <dir>` (one JSON per template, the tree in document
 order), `--map-row-fts` (`row_fts`: which row ANYWHERE mentions a word), `--map-atlas <dir>` (projects,
