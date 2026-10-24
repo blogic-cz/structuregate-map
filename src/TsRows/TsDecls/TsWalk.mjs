@@ -202,7 +202,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     });
     const rows = makeBodyRows({
       ts, store, evalNode, evalCell, describe, declFileOf: classRows.declFileOf, declareInline, declareClass, propName,
-      shapeAt: shapes.remember, bindingFacts, resolveArg: readRefs.resolveArg, targetLine: readRefs.targetLine,
+      shapeAt: shapes.remember, bindingFacts, resolveArg: readRefs.resolveArg, targetLine: readRefs.targetLine, fieldTarget: readRefs.fieldTarget,
       injectAt: (call, ownerId, classId) => classRows.injectAt(call, ownerId, fileId(call.getSourceFile().fileName), classId),
     });
     bodies.collect = rows.collectBody;

@@ -146,7 +146,7 @@ $targetColumns = @(
     @{ t = 'number_literals'; c = @('target_id'); text = 't.value' },
     @{ t = 'template_literals'; c = @('target_id'); text = "''" },
     @{ t = 'functions'; c = @('target_id'); text = "coalesce(t.name, '')" },
-    @{ t = 'calls'; c = @('target_id', 'callee_id'); text = 't.callee' }
+    @{ t = 'calls'; c = @('target_id', 'callee_id', 'fills_id'); text = 't.callee' }
 )
 function Test-Column([string]$Build, [string]$Db, [string]$Table, [string]$Column) {
     $r = Get-Lines $Build $Db "SELECT 'c' || '$sep' || count(*) FROM pragma_table_info('$Table') WHERE name = '$Column'"

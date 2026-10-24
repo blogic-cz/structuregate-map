@@ -305,4 +305,30 @@ Test-Case 'tsrows: a string filling a configured member is resolved as a propert
     Assert-Line $r 'pr=hue.owner.name|-|-'
     Assert-Line (Invoke-TsRowsQ $made.Db "SELECT 'bad=' || name AS r FROM diagnostics WHERE kind = 'property_path_spec_invalid'") 'bad=NoDot'
 }
+# (rows 103, #112) A CALL IN AN OBJECT LITERAL'S PROPERTY NAMES THE MEMBER ITS RESULT FILLS (`TsBody.mjs::emitCall`): `{ message: this.label('k') }` in a method typed
+# `HueResult` - `calls.fills` is `HueResult.message` (result.ts:1) and `fills_id` its `type_members` row; the call's own `target` stays its callee. THE CONTROLS: a call
+# in an object nothing types, and one that is no property value, fill nothing.
+Test-Case 'tsrows: a call in an object literal names the member its result fills (#112)' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/result.ts' = "export type HueResult = { message?: string; level?: number };`n"
+        'apps/shop/src/widget.ts' = "import { HueResult } from './result';`n" +
+            "export class Widget {`n" +
+            "  label(key: string): string { return key.toUpperCase(); }`n" +
+            "  check(): HueResult {`n" +
+            "    return { message: this.label('hue.alpha.required'), level: 1 };`n" +
+            "  }`n" +
+            "  loose() { return { message: this.label('hue.loose') }; }`n" +
+            "  bare(): string { return this.label('hue.bare'); }`n" +
+            "}`n"
+    }
+    $made = New-TsRowsDb $tree -Shared
+    Assert-Exit $made.Result 0
+    $f = { param($role) Get-TsRootFieldSql 'calls__fills' 'c.id' $role }
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'fills=' || c.line || '|' || coalesce($(& $f 'name'), '-') || '@' || coalesce($(& $f 'line'), '-') || '|' || " +
+        "coalesce((SELECT 'tm ' || t.name FROM type_members t WHERE t.id = c.fills_id), '-') || '|' || coalesce($(Get-TsRootFieldSql 'calls__target' 'c.id' 'name'), '-') AS v " +
+        "FROM calls c JOIN files f ON f.id = c.file AND f.path LIKE '%widget.ts' WHERE c.callee = 'this.label'")
+    Assert-Line $r 'fills=5|message@1|tm message|label'
+    Assert-Line $r 'fills=7|-@-|-|label'
+    Assert-Line $r 'fills=8|-@-|-|label'
+}
 }
