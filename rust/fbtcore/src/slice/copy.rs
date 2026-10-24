@@ -23,7 +23,10 @@ fn quoted(names: &[String]) -> String {
 }
 
 /// The rows, written. The closure tables left out (`left`) unless `closure`: the slice's list of what it does not hold.
-pub fn write(base: &str, out_db: &str, kept: &BTreeSet<String>, closure: bool) -> Result<Vec<String>> {
+/// The node columns a LEAN slice leaves out: expression and value TREES, which a review that asks who calls, reads or links what does not read.
+const TREE_COLUMNS: [&str; 5] = ["value", "condition", "condition_expr", "discriminant_expr", "label_exprs"];
+
+pub fn write(base: &str, out_db: &str, kept: &BTreeSet<String>, closure: bool, lean: bool) -> Result<Vec<String>> {
     for suffix in ["", "-wal", "-shm", "-journal"] {
         let _ = std::fs::remove_file(format!("{out_db}{suffix}"));
     }
@@ -47,6 +50,13 @@ pub fn write(base: &str, out_db: &str, kept: &BTreeSet<String>, closure: bool) -
     // left out, table and node tables, unless `--slice-closure` asks for it.
     let owner = |name: &str| name[..name.find("__").unwrap_or(name.len())].to_string();
     let closed = |name: &str| !closure && crate::rows::tsderive::CLOSURE_TABLES.contains(&owner(name).as_str());
+    // A LEAN SLICE (`--slice-lean`, #114) leaves out the expression trees - the `expressions` table and its node tables - and every node table of
+    // a value or condition TREE (`TREE_COLUMNS`); most of a large map is those rows and their indexes, and a review reads references, not trees.
+    let treed = |name: &str| {
+        // `_meta`'s list values are its own node table, no tree.
+        lean && owner(name) != "_meta" && (owner(name) == "expressions" || name.split_once("__").is_some_and(|(_, column)| TREE_COLUMNS.contains(&column)))
+    };
+    let closed = |name: &str| closed(name) || treed(name);
     let text = |name: &str| closed(name) || virtuals.iter().any(|v| name == v || name.starts_with(&format!("{v}_")));
     let mut whole: HashSet<String> = HashSet::new();
     let mut nodes: Vec<String> = Vec::new();
@@ -88,16 +98,16 @@ pub fn write(base: &str, out_db: &str, kept: &BTreeSet<String>, closure: bool) -
             .with_context(|| format!("copy {name}"))?;
     }
     db.execute_batch("ALTER TABLE main.files ADD COLUMN sliced; UPDATE main.files SET sliced = (id IN (SELECT id FROM temp.slice_keep));")?;
-    let indexes: Vec<String> = {
-        let mut stmt = db.prepare("SELECT sql FROM b.sqlite_master WHERE type = 'index' AND sql IS NOT NULL")?;
-        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    let indexes: Vec<(String, String, String)> = {
+        let mut stmt = db.prepare("SELECT sql, tbl_name, name FROM b.sqlite_master WHERE type = 'index' AND sql IS NOT NULL")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
     let made: HashSet<String> = tables.iter().filter(|(n, _)| !text(n)).map(|(n, _)| n.clone()).collect();
-    for sql in indexes {
-        // An index of a table the slice left out (full text) is not made.
-        let on = sql.split(" ON ").nth(1).map(|t| t.split('(').next().unwrap_or("").trim().trim_matches('"').to_string()).unwrap_or_default();
-        if made.contains(&on) {
+    for (sql, on, index) in indexes {
+        // An index of a table the slice left out is not made; nor, in a lean slice, a node table's `role` and `value` indexes - its owner index joins it.
+        let secondary = lean && on.contains("__") && (index.ends_with("_role") || index.ends_with("_value"));
+        if made.contains(&on) && !secondary {
             db.execute_batch(&sql)?;
         }
     }

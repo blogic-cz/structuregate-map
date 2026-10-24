@@ -57,6 +57,18 @@ Test-Case 'tsrows: a slice keeps the listed file and the files whose links point
     $closed = Join-Path $at 'closed.sqlite'
     Assert-Exit (Invoke-Gate --map-slice $made.Db --slice-files 'apps/shop/src/total.ts' --slice-closure --map-sqlite $closed) 0
     Assert-Equal (& $count $closed "SELECT count(*) FROM key_reach") (& $count $made.Db "SELECT count(*) FROM key_reach") '--slice-closure keeps it whole'
+    # (#114) A LEAN SLICE leaves out the expression and value trees and the node tables' secondary indexes; the references stay, joinable.
+    $lean = Join-Path $at 'lean.sqlite'
+    Assert-Exit (Invoke-Gate --map-slice $made.Db --slice-files 'apps/shop/src/total.ts' --slice-lean --map-sqlite $lean) 0
+    Assert-Equal (& $count $made.Db "SELECT count(*) FROM sqlite_master WHERE name = 'expressions'") '1' 'the base map holds the trees'
+    Assert-Equal (& $count $lean "SELECT count(*) FROM sqlite_master WHERE name = 'expressions' OR name LIKE 'expressions\_\_%' ESCAPE '\' OR (name LIKE '%\_\_value' ESCAPE '\' AND name <> '_meta__value')") '0' 'the trees are left out'
+    Assert-Equal (& $count $lean "SELECT count(*) FROM calls") (& $count $one "SELECT count(*) FROM calls") 'the calls stay'
+    Assert-Equal (& $count $lean "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'calls__target'") '1' 'a reference node table stays'
+    Assert-Equal (& $count $lean "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND tbl_name LIKE '%\_\_%' ESCAPE '\' AND (name LIKE '%\_role' ESCAPE '\' OR name LIKE '%\_value' ESCAPE '\')") '0' 'no secondary node index'
+    Assert-Equal (& $count $one "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND tbl_name = 'calls__target' AND name LIKE '%\_value' ESCAPE '\'") '1' 'a full slice keeps them'
+    Assert-Line (Invoke-TsRowsQ $lean "SELECT 'lean=' || value AS r FROM _meta WHERE key = 'slice:lean'") 'lean=1'
+    # `_meta`'s own list values are no tree: the base's structured keys survive a lean slice.
+    Assert-Equal (& $count $lean "SELECT count(*) FROM _meta__value WHERE owner = 'spec:typescript'") (& $count $made.Db "SELECT count(*) FROM _meta__value WHERE owner = 'spec:typescript'") 'the base meta lists stay'
 }
 
 # A SLICE SAYS SO, AND IS NO CACHE: every query notes it on stderr, a map run refuses to write into it, and a path the base map does not hold fails.

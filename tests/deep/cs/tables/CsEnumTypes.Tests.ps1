@@ -64,6 +64,39 @@ Test-Case 'csenumtypes: with a default namespace every other class is an overrid
     Assert-Line $r 'l=Welcome|override|Acme|Demo.Templates.Emails.Acme.Welcome'
 }
 
+# (#115) THROUGH A GENERIC BASE: `ReportBase<TModel>`'s symbol keeps its parameter and its subclass names it closed (`ReportBase<object>`); compared without
+# their arguments, `SalesSummary` derives from `Demo.Mail.MailBase` through it. `StockList` derives from the base directly.
+Test-Case 'csenumtypes: a class deriving through a generic base links' {
+    $tree = Use-Tree @{
+        'Demo.csproj' = $script:CsEnumTypesProject
+        'Ids.cs' = "namespace Demo.Core;`npublic enum ReportIDs { SalesSummary, StockList }`n"
+        'Base.cs' = "namespace Demo.Mail;`npublic abstract class MailBase { }`n"
+        'ReportBase.cs' = "namespace Demo.Templates;`npublic class ReportBase<TModel> : Demo.Mail.MailBase { }`n"
+        'Sales.cs' = "namespace Demo.Templates.Reports;`npublic class SalesSummary : Demo.Templates.ReportBase<object> { }`n"
+        'Stock.cs' = "namespace Demo.Templates.Reports;`npublic class StockList : Demo.Mail.MailBase { }`n"
+        'cs.json' = '{ "typesByEnumName": [ { "enum": "Demo.Core.ReportIDs", "base": "Demo.Mail.MailBase", "namespace": "Templates.Reports" } ] }'
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db --cs-config (Join-Path $tree 'cs.json')) 0
+    $r = Get-CsEnumTypesRows $db "SELECT 'l=' || member || '|' || kind || '|' || coalesce(type_symbol, '-') AS l FROM enum_type_links"
+    Assert-Line $r 'l=SalesSummary|default|Demo.Templates.Reports.SalesSummary'
+    Assert-Line $r 'l=StockList|default|Demo.Templates.Reports.StockList'
+}
+
+# (#115) A BASE THE COMPILER COULD NOT BIND (no reference to its assembly) is stored as its bare name: never matched to the configured base, but said.
+Test-Case 'csenumtypes: an unresolved base links nothing and the note says it is unresolved' {
+    $tree = Use-Tree @{
+        'Demo.csproj' = $script:CsEnumTypesProject
+        'Ids.cs' = "namespace Demo.Core;`npublic enum ReportIDs { StockList }`n"
+        'Stock.cs' = "using Lib.Widgets;`nnamespace Demo.Templates.Reports;`npublic class StockList : WidgetBase { }`n"
+        'cs.json' = '{ "typesByEnumName": [ { "enum": "Demo.Core.ReportIDs", "base": "Lib.Widgets.WidgetBase", "namespace": "Templates.Reports" } ] }'
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    $run = Invoke-Gate --root $tree --ext .cs --map-sqlite $db --cs-config (Join-Path $tree 'cs.json')
+    Assert-Line $run '1 class(es) name an UNRESOLVED base `WidgetBase`'
+    Assert-Line (Get-CsEnumTypesRows $db "SELECT 'l=' || member || '|' || kind AS l FROM enum_type_links") 'l=StockList|none'
+}
+
 # NO CONVENTION, NO LINK: equal names alone link nothing, and the table is empty.
 Test-Case 'csenumtypes: without a declared convention equal names link nothing' {
     $files = $script:CsEnumTypesFiles.Clone()

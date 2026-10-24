@@ -11,7 +11,8 @@
 //! `http_links` or `sql_links` row), `--slice-hops` deep (default 1), never by a name searched for. THE ROWS
 //! (`copy.rs`): every per-file table's rows of those files with their node rows, every whole-program table whole, so
 //! no graph or link table is truncated - the translation-key closure (`CLOSURE_TABLES`) is left out unless `--slice-closure`,
-//! listed in `_meta` `slice:left-out`. THE MARK: `_meta` `partial` = 1, `slice:files`, `slice:hops`,
+//! listed in `_meta` `slice:left-out`. `--slice-lean` also leaves out the expression and value trees and the node tables' `role`/`value`
+//! indexes (#114), `_meta` `slice:lean` = 1. THE MARK: `_meta` `partial` = 1, `slice:files`, `slice:hops`,
 //! `slice:base`; `files.sliced` says which files are in it. `--map-query` says so on every question, and the deep map
 //! refuses to write into a slice (`is_slice`).
 
@@ -25,8 +26,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 /// The slice, cut and written; the exit code (0, or 2 with the reason said).
-pub fn run(base: &str, files: &str, hops: usize, closure: bool, out_db: &str, out: &mut Out) -> i64 {
-    match cut(base, files, hops, closure, out_db) {
+pub fn run(base: &str, files: &str, hops: usize, closure: bool, lean: bool, out_db: &str, out: &mut Out) -> i64 {
+    match cut(base, files, hops, closure, lean, out_db) {
         Ok((kept, of)) => {
             out.line(format!("slice     {kept} of {of} file(s), {hops} hop(s) from the listed ones -> {out_db}"));
             0
@@ -38,7 +39,7 @@ pub fn run(base: &str, files: &str, hops: usize, closure: bool, out_db: &str, ou
     }
 }
 
-fn cut(base: &str, files: &str, hops: usize, closure: bool, out_db: &str) -> Result<(usize, usize)> {
+fn cut(base: &str, files: &str, hops: usize, closure: bool, lean: bool, out_db: &str) -> Result<(usize, usize)> {
     if !Path::new(base).is_file() {
         bail!("no base map at {base} - build it with --map-sqlite first");
     }
@@ -55,7 +56,7 @@ fn cut(base: &str, files: &str, hops: usize, closure: bool, out_db: &str) -> Res
     let kept = links::dependents(&db, &ids, hops)?;
     let of: usize = db.query_row("SELECT count(*) FROM files", [], |r| r.get::<_, i64>(0))? as usize;
     drop(db);
-    let left = copy::write(base, out_db, &kept, closure)?;
+    let left = copy::write(base, out_db, &kept, closure, lean)?;
     let target = Connection::open(out_db)?;
     let paths: Vec<String> = {
         let mut stmt = target.prepare("SELECT path FROM files WHERE sliced = 1 ORDER BY path")?;
@@ -64,6 +65,9 @@ fn cut(base: &str, files: &str, hops: usize, closure: bool, out_db: &str) -> Res
     };
     crate::rows::meta::put(&target, "partial", "1")?;
     crate::rows::meta::put(&target, "slice:hops", &hops.to_string())?;
+    if lean {
+        crate::rows::meta::put(&target, "slice:lean", "1")?;
+    }
     crate::rows::meta::put(&target, "slice:base", &std::fs::canonicalize(base)?.to_string_lossy().replace('\\', "/"))?;
     crate::rows::meta::put(&target, "slice:of", &of.to_string())?;
     crate::rows::meta::put_value(&target, "slice:files", &serde_json::json!(paths))?;

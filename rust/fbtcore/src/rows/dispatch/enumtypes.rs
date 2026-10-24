@@ -72,11 +72,13 @@ pub fn write(conn: &Connection, specs: &[EnumTypes]) -> rusqlite::Result<(usize,
         let names: Vec<String> = members.value(&owner, &held)?.as_array().into_iter().flatten().filter_map(|m| m["name"].as_str().map(str::to_string)).collect();
         // THE CLASSES DERIVING FROM `base`, through the classes in between - a visited set, never a depth.
         let mut derived: HashSet<String> = HashSet::new();
-        let mut front = vec![spec.base.clone()];
+        // GENERIC ARGUMENTS DROPPED ON BOTH SIDES (#115): a generic class's symbol keeps its parameters (`Demo.ReportBase<TModel>`) where a
+        // derived class's base names it closed (`Demo.ReportBase<System.Object>`) - compared as written, nothing below a generic base linked.
+        let mut front = vec![plain(&spec.base).to_string()];
         while let Some(at) = front.pop() {
             for c in classes.iter().filter(|c| c.bases.iter().any(|b| *b == at)) {
                 if derived.insert(c.symbol.clone()) {
-                    front.push(c.symbol.clone());
+                    front.push(plain(&c.symbol).to_string());
                 }
             }
         }
@@ -86,7 +88,12 @@ pub fn write(conn: &Connection, specs: &[EnumTypes]) -> rusqlite::Result<(usize,
             .filter(|c| c.symbol.rsplit_once('.').is_some_and(|(ns, _)| ns.contains(&spec.namespace)))
             .collect();
         if candidates.is_empty() {
-            notes.push(format!("typesByEnumName: no class derives from {} in a namespace holding \"{}\"", spec.base, spec.namespace));
+            // A BASE THE COMPILER COULD NOT BIND is stored as its bare written name (an error type): never matched to the configured one -
+            // that would be a guess - but counted, so the note says to restore or build rather than leave the convention looking wrong.
+            let simple = plain(&spec.base).rsplit('.').next().unwrap_or("");
+            let unbound = classes.iter().filter(|c| c.bases.iter().any(|b| b == simple)).count();
+            let why = if unbound > 0 { format!("; {unbound} class(es) name an UNRESOLVED base `{simple}` - restore or build the project so it binds") } else { String::new() };
+            notes.push(format!("typesByEnumName: no class derives from {} in a namespace holding \"{}\"{why}", spec.base, spec.namespace));
         }
         for name in &names {
             let member_symbol = format!("{}.{name}", spec.enum_symbol);
