@@ -114,6 +114,26 @@ export function draftWrites(ts, fn, declOf = null) {
       if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined) {
         const path = pathOf(n.initializer);
         if (path !== null) aliases.set(n.name.text, path);
+      } else if (ts.isVariableDeclaration(n) && ts.isObjectBindingPattern(n.name) && n.initializer !== undefined) {
+        // A DESTRUCTURED LOCAL (rows 104) is its property's path: `const { info } = x` makes `info` the path `x.info`.
+        const path = pathOf(n.initializer);
+        if (path !== null) {
+          for (const element of n.name.elements) {
+            const property = element.propertyName ?? element.name;
+            if (ts.isIdentifier(element.name) && (ts.isIdentifier(property) || ts.isStringLiteral(property)) && element.dotDotDotToken === undefined) {
+              aliases.set(element.name.text, [...path, property.text]);
+            }
+          }
+        }
+      } else if (ts.isForOfStatement(n) && ts.isVariableDeclarationList(n.initializer) && n.initializer.declarations.length === 1
+        && ts.isIdentifier(n.initializer.declarations[0].name)) {
+        // A `for...of` VARIABLE (rows 104) is an element of the list it walks - the list's path, an index being no segment.
+        const path = pathOf(n.expression);
+        if (path !== null) aliases.set(n.initializer.declarations[0].name.text, path);
+      } else if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(n.left)) {
+        // A LOCAL ASSIGNED A PATH LATER (rows 104: `let c; if (..) { c = s.list.find(..); }`) becomes that path; assigning a local writes nothing.
+        const path = pathOf(n.right);
+        if (path !== null) aliases.set(n.left.text, path);
       } else if (ts.isBinaryExpression(n) && isAssignment(n.operatorToken.kind)) {
         note(n.left);
       } else if ((ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n))
