@@ -227,23 +227,27 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     const prop = method ? node : child.parent;
     if (prop === undefined || !(method || (ts.isPropertyAssignment(prop) && prop.initializer === child))) return null;
     if (!(ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name) || ts.isNumericLiteral(prop.name))) return null;
-    // PUSHED INTO AN UN-ANNOTATED ARRAY (rows 88): the checker's contextual type is only that array's inferred element type; the type the array takes later answers instead.
+    // PUSHED INTO AN UN-ANNOTATED ARRAY (rows 88), or returned from a `then`/`catch` or `map`/`flatMap` callback (rows 95): the checker's contextual type there MAY be the
+    // one it inferred from this very value - its places are then this literal's own, and none is a member. So it is still asked first (#110: an explicit
+    // `map<Rule[]>(..)` makes it the declared one), its literal-declared places dropped, and only when nothing is left does the type taken later answer.
     const contextual = checker.getContextualType(prop.parent);
-    // (rows 95) so is a value a `then`/`catch` or `map`/`flatMap` callback returns: the checker's type there is inferred from the value itself.
     const top = climb(prop.parent).n;
-    const type = pushedInto(top) === null && settledBy(top) === null && mappedBy(top) === null ? contextual : undefined;
-    const later = type === undefined ? laterTypes(prop.parent) : [];
-    if (type === undefined && !later.length) return null;
+    const inferred = pushedInto(top) !== null || settledBy(top) !== null || mappedBy(top) !== null;
     const name = prop.name.text;
-    const places = new Map();
-    for (const arm of (type === undefined ? later : [type]).flatMap((t) => (t.isUnion() ? t.types : [t]))) {
-      const [first] = checker.getPropertyOfType(arm, name)?.declarations ?? [];
-      if (first === undefined) continue;
-      // A TYPE INFERRED FROM ANOTHER LITERAL is no declared member (an un-annotated array nothing types later): its property is that literal's, and names nothing here.
-      if (type === undefined && first.parent !== undefined && ts.isObjectLiteralExpression(first.parent)) continue;
-      const place = at(first);
-      places.set(`${place.file}#${place.line}`, place);
-    }
+    const placesOf = (types, declaredOnly) => {
+      const places = new Map();
+      for (const arm of types.flatMap((t) => (t.isUnion() ? t.types : [t]))) {
+        const [first] = checker.getPropertyOfType(arm, name)?.declarations ?? [];
+        if (first === undefined) continue;
+        // A TYPE INFERRED FROM A LITERAL is no declared member: its property is that literal's own, and names nothing here.
+        if (declaredOnly && first.parent !== undefined && ts.isObjectLiteralExpression(first.parent)) continue;
+        const place = at(first);
+        places.set(`${place.file}#${place.line}`, place);
+      }
+      return places;
+    };
+    let places = contextual !== undefined ? placesOf([contextual], inferred) : new Map();
+    if (contextual === undefined || (inferred && places.size === 0)) places = placesOf(laterTypes(prop.parent), true);
     return places.size === 1 ? { name, ...[...places.values()][0] } : null;
   }
 

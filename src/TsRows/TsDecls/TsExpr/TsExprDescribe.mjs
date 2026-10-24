@@ -85,6 +85,11 @@ export function draftWrites(ts, fn, declOf = null) {
         const [yes, no] = [pathOf(e.whenTrue), pathOf(e.whenFalse)];
         return yes !== null && no !== null && yes.join('.') === no.join('.') ? yes : null;
       }
+      // A FALLBACK (rows 101): `a ?? null`, `a || []` is `a`'s path - unless the other side is ANOTHER path, which the value may be instead.
+      if (ts.isBinaryExpression(e) && (e.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken || e.operatorToken.kind === ts.SyntaxKind.BarBarToken)) {
+        const [left, right] = [pathOf(e.left), pathOf(e.right)];
+        return left !== null && (right === null || right.join('.') === left.join('.')) ? left : null;
+      }
       return null;
     };
     const note = (e) => {
