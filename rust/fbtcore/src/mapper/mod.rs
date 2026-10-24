@@ -102,6 +102,11 @@ pub(crate) fn run_json(input: Value, cs: CsMap, deep: Deep, free: Free) -> Value
 }
 
 fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
+    // A SLICE IS NO CACHE (#111): refused before anything opens it - a run that rebuilt or refreshed it would read its missing rows as
+    // files unchanged with nothing in them.
+    if let Some(db) = input.map_sqlite.as_deref().filter(|db| crate::slice::is_slice(std::path::Path::new(db))) {
+        return json!({ "error": format!("{db} is a partial map cut by --map-slice; map into a fresh database or the full map it was cut from") });
+    }
     // THE SCRIPTS EACH HALF IS STARTED WITH, staged out of this library: `language -> path`, or why not.
     let (mut scripts, mut stage_errors) = (HashMap::new(), HashMap::new());
     for set in crate::embedded::for_map(input.map_sqlite.is_some()) {

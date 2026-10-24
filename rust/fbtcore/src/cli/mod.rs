@@ -138,6 +138,14 @@ fn asked(call: &Call, callbacks: Callbacks) -> Value {
         let exit = lens::run(db, &o.map_query_args, &mut out);
         return answer(out, exit, true);
     }
+    if let Some(base) = &o.map_slice {
+        let (Some(files), Some(into)) = (&o.slice_files, &o.map_sqlite) else {
+            out.error("structuregate: --map-slice <base> takes --slice-files <file|@list> and --map-sqlite <out>".into());
+            return answer(out, 2, true);
+        };
+        let exit = crate::slice::run(base, files, o.slice_hops.unwrap_or(1), into, &mut out);
+        return answer(out, exit, true);
+    }
     if let Some(source) = &o.sql_parse {
         let exit = sqlparse::run(source, o.dialect.as_deref().unwrap_or("tsql"), callbacks.deep, callbacks.free, &mut out);
         return answer(out, exit, true);

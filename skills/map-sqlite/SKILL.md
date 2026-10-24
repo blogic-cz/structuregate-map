@@ -193,6 +193,9 @@ database is built and refreshed: [../buildmap/outputs.md](../buildmap/outputs.md
   other table the same). `--cat FILE` still prints the file - read from DISK under the recorded roots, so an edit
   since the build shows; `--text` exits 1 saying the map holds no text (use `--grep TEXT` or `--find NAME` over the
   rows); `SELECT .. FROM file_text` fails with no such table. `--map-row-fts` is unaffected (it reads rows).
+* **A SLICE (`--map-slice`, #111) is a partial map**: `_meta` `partial = 1`, `files.sliced` = 1 on the files it holds -
+  the listed ones and their dependents through resolved links - every whole-program table whole, no text. A row it
+  lacks may be in a file outside it, not absent from the tree; `--map-query` says so on stderr. Never map into it.
 * **A row id means nothing outside one build.** `x:41` is the 41st expression THIS extraction emitted. Join
   with it inside a session; never store it. Nine prefixes (`f`, `c`, `x`, `fn`, `br`, `p`, `k`, `e`, `i`)
   are shared between the C# and Angular halves.
