@@ -1,0 +1,57 @@
+<#
+    A CLASS CHOSEN BY AN ENUM MEMBER'S NAME (#113, `rust/fbtcore/src/rows/dispatch/enumtypes.rs`): under a convention declared in
+    `structuregate.cs.json` (`typesByEnumName`, read by `rows/dispatch/csconfig.rs`), every member of the enum links to the classes
+    deriving from the base - through the classes in between - in the namespace, named as the member; a class in a `prefixes`
+    namespace is an override. `enum_type_links` holds it, and `--map-slice` follows it from a file referencing the member.
+
+    Its helpers are its own - `-Only CsEnumTypes` runs this suite alone.
+#>
+
+$script:CsEnumTypesProject = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+$script:CsEnumTypesFiles = @{
+    'Demo.csproj' = $script:CsEnumTypesProject
+    'ReportIDs.cs' = "namespace Demo.Core;`npublic enum ReportIDs { SalesSummary, StockList, Ghost }`n"
+    'ReportBase.cs' = "namespace Demo.Templates;`npublic abstract class ReportBase { }`n"
+    'Reports/SalesSummary.cs' = "namespace Demo.Templates.Reports;`npublic class SalesSummary : Demo.Templates.ReportBase { }`n"
+    'Reports/Pdf/SalesSummary.cs' = "namespace Demo.Templates.Reports.Pdf;`npublic class SalesSummary : Demo.Templates.ReportBase { }`n"
+    'Reports/Mid.cs' = "namespace Demo.Templates.Reports;`npublic abstract class MidBase : Demo.Templates.ReportBase { }`npublic class StockList : MidBase { }`n"
+    'Other/StockList.cs' = "namespace Demo.Other;`npublic class StockList : Demo.Templates.ReportBase { }`n"
+    'Sender.cs' = "namespace Demo.Core;`npublic class Sender`n{`n    public object Send() => Pick(ReportIDs.SalesSummary);`n    private object Pick(ReportIDs id) => id;`n}`n"
+    'cs.json' = '{ "typesByEnumName": [ { "enum": "Demo.Core.ReportIDs", "base": "Demo.Templates.ReportBase", "namespace": "Templates.Reports", "prefixes": ["Pdf"] }, { "enum": "Demo.Core.Missing", "base": "Demo.Templates.ReportBase" } ] }'
+}
+
+function Get-CsEnumTypesRows([string]$Db, [string]$Sql) {
+    $r = Invoke-Gate --map-query $Db --width 0 --sql $Sql
+    Assert-Exit $r 0
+    return $r
+}
+
+Test-Case 'csenumtypes: an enum member links to the classes a declared convention selects by its name' {
+    $tree = Use-Tree $script:CsEnumTypesFiles
+    $db = Join-Path $tree 'map.sqlite'
+    $run = Invoke-Gate --root $tree --ext .cs --map-sqlite $db --cs-config (Join-Path $tree 'cs.json')
+    Assert-Exit $run 0
+    $r = Get-CsEnumTypesRows $db "SELECT 'l=' || member || '|' || kind || '|' || coalesce(prefix, '-') || '|' || coalesce(type_symbol, '-') AS l FROM enum_type_links"
+    Assert-Line $r 'l=SalesSummary|default|-|Demo.Templates.Reports.SalesSummary'
+    Assert-Line $r 'l=SalesSummary|override|Pdf|Demo.Templates.Reports.Pdf.SalesSummary'
+    # THROUGH A CLASS IN BETWEEN; a same-named class OUTSIDE the namespace is not it; a member nothing answers is listed, not dropped.
+    Assert-Line $r 'l=StockList|default|-|Demo.Templates.Reports.StockList'
+    Assert-NoLine $r 'Demo.Other.StockList'
+    Assert-Line $r 'l=Ghost|none|-|-'
+    # A CONVENTION THAT MATCHES NOTHING is said.
+    Assert-Line $run 'typesByEnumName: no enum Demo.Core.Missing in the map'
+    # THE SLICE FOLLOWS IT: a file referencing the member depends on the class its name selects.
+    $slice = Join-Path $tree 'slice.sqlite'
+    Assert-Exit (Invoke-Gate --map-slice $db --slice-files 'Reports/SalesSummary.cs' --map-sqlite $slice) 0
+    Assert-Line (Get-CsEnumTypesRows $slice "SELECT 'in=' || path AS r FROM files WHERE sliced = 1") 'in=Sender.cs'
+}
+
+# NO CONVENTION, NO LINK: equal names alone link nothing, and the table is empty.
+Test-Case 'csenumtypes: without a declared convention equal names link nothing' {
+    $files = $script:CsEnumTypesFiles.Clone()
+    $files.Remove('cs.json')
+    $tree = Use-Tree $files
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    Assert-Line (Get-CsEnumTypesRows $db "SELECT 'n=' || count(*) AS n FROM enum_type_links") 'n=0'
+}

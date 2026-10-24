@@ -1,0 +1,66 @@
+//! WHAT THE C# CODE DECIDES AT RUN TIME AND SAYS NOWHERE - `structuregate.cs.json`, beside the exe or at `--cs-config` (#113).
+//!
+//! `typesByEnumName`: a class chosen at run time by the NAME of an enum member - a dictionary filled by reflection from
+//! `Type.Name` of the types deriving from a base in a namespace, and looked up with `member.ToString()`. No parse tree
+//! holds that lookup's meaning, so the consumer declares it: `[{ "enum": "Demo.Core.ReportIDs", "base": "Demo.Templates.ReportBase",
+//! "namespace": "Templates.Reports", "prefixes": ["Pdf"], "ignoreCase": true }]` - `prefixes` the last namespace segments whose
+//! classes are OVERRIDES of a member's default (`$"{prefix}.{name}"`), `ignoreCase` the dictionary's comparer. Read here,
+//! joined over the finished rows by `enumtypes.rs` beside it; its stamp keys the passes over them.
+
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::path::Path;
+
+/// One declared convention.
+#[derive(Clone, Debug)]
+pub struct EnumTypes {
+    pub enum_symbol: String,
+    pub base: String,
+    pub namespace: String,
+    pub prefixes: Vec<String>,
+    pub ignore_case: bool,
+}
+
+/// The conventions, the stamp the passes are keyed by (`none` without a file), and what was wrong with the file.
+pub struct CsConfig {
+    pub types_by_enum_name: Vec<EnumTypes>,
+    pub stamp: String,
+    pub problems: Vec<String>,
+}
+
+pub fn read(given: Option<&str>, base_dir: &str) -> CsConfig {
+    let path = given.map(String::from).unwrap_or_else(|| Path::new(base_dir).join("structuregate.cs.json").to_string_lossy().into_owned());
+    let mut out = CsConfig { types_by_enum_name: Vec::new(), stamp: "none".into(), problems: Vec::new() };
+    if !Path::new(&path).is_file() {
+        if given.is_some() {
+            out.problems.push(format!("{path} does not exist"));
+        }
+        return out;
+    }
+    let text = match std::fs::read(&path) {
+        Ok(bytes) => String::from_utf8_lossy(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes)).into_owned(),
+        Err(e) => {
+            out.problems.push(format!("{path} could not be read - {e}"));
+            return out;
+        }
+    };
+    out.stamp = Sha256::digest(text.as_bytes()).iter().take(8).map(|b| format!("{b:02X}")).collect();
+    let root: Value = match serde_json::from_str(&crate::mapper::deep::sqlconfig::lenient(&text)) {
+        Ok(root) => root,
+        Err(e) => {
+            out.problems.push(format!("{path} is not JSON - {e}"));
+            return out;
+        }
+    };
+    for spec in root["typesByEnumName"].as_array().into_iter().flatten() {
+        let field = |k: &str| spec[k].as_str().unwrap_or("").trim().to_string();
+        let (enum_symbol, base, namespace) = (field("enum"), field("base"), field("namespace"));
+        if enum_symbol.is_empty() || base.is_empty() {
+            out.problems.push(format!("{path}: a typesByEnumName entry needs \"enum\" and \"base\" - {spec}"));
+            continue;
+        }
+        let prefixes = spec["prefixes"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+        out.types_by_enum_name.push(EnumTypes { enum_symbol, base, namespace, prefixes, ignore_case: spec["ignoreCase"].as_bool().unwrap_or(false) });
+    }
+    out
+}

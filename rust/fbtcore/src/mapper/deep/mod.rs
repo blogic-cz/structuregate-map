@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
-use passes::{atlas, dispatch, documented, duplicates, http, pass, search, seeds, tally};
+use passes::{atlas, dispatch, documented, duplicates, enum_types, http, pass, search, seeds, tally};
 
 /// What the deep halves are launched with - the options that reach them, and the scripts the caller staged.
 pub struct Deep {
@@ -53,6 +53,8 @@ pub struct Deep {
     pub reread: Vec<String>,
     /// `--sql-config`, for the caller's SQL half; beside the exe when it is not given.
     pub sql_config: Option<String>,
+    /// `--cs-config`: what the C# code decides at run time (`csconfig.rs`); `structuregate.cs.json` beside the exe when it is not given.
+    pub cs_config: Option<String>,
     /// `--facts-config`, for the facts pass; `structuregate.facts.json` beside the exe when it is not given.
     pub facts_config: Option<String>,
     /// Where the exe is: `structuregate.sql.json` is looked for beside it when `--sql-config` is not given.
@@ -353,10 +355,16 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
     }
     clock.add("sql", since(timed));
     let facts_stamp = facts.as_ref().map_or("none", |f| f.stamp.as_str());
+    // WHAT THE C# CODE DECIDES AT RUN TIME (#113): its conventions key the passes as the SQL config does.
+    let cs = crate::rows::dispatch::csconfig::read(deep.cs_config.as_deref(), &deep.base_dir);
+    for problem in &cs.problems {
+        into.errors.push(format!("CS CONFIG {problem}"));
+    }
+    let config_stamp = format!("{}|{}", config["stamp"].as_str().unwrap_or("none"), cs.stamp);
     // THE PASSES OVER THE FINISHED ROWS, not run again over the same rows - see derived.rs.
     let timed = Instant::now();
     let keying = crate::trace::stage("deep: key the passes over the finished rows");
-    let key = match derived::key(db, config["stamp"].as_str().unwrap_or("none"), facts_stamp, &deep.build, deep.row_fts, deep.atlas_dir.as_deref()) {
+    let key = match derived::key(db, &config_stamp, facts_stamp, &deep.build, deep.row_fts, deep.atlas_dir.as_deref()) {
         Ok(key) => Some(key),
         Err(why) => {
             into.notes.push(format!("the passes over the finished rows run every time: they could not be keyed - {why}"));
@@ -383,6 +391,7 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
     pass("pass: http links", || http(into, db, &deep.build));
     pass("pass: mediator dispatch", || dispatch(into, db));
     pass("pass: duplicate types", || duplicates(into, db));
+    pass("pass: enum type links", || enum_types(into, db, &cs.types_by_enum_name));
     if let Some(facts) = &facts {
         pass("pass: document facts", || documented(into, db, facts));
     }

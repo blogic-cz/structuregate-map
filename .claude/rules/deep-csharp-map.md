@@ -193,3 +193,9 @@ new, rows version, `--map-exclude`. `_meta.last_refresh` (`refresh.rs`) is rewri
 A REFERENCED PROJECT UNDER A `--skip` FOLDER (below a root, never above it) is bound through its build's `bin/**/<Name>.dll`
 when one exists (`CsInputs/CsSkipped.cs`), not compiled from source - that was seconds of a large consumer's refresh for rows nobody asked
 for. Without a build it is compiled as before, so a skip never costs a mapped file its binding.
+
+WHAT THE CODE DECIDES AT RUN TIME IS DECLARED, NEVER INFERRED FROM ITS SHAPE (#113, `rows/dispatch/csconfig.rs`, `rows/dispatch/enumtypes.rs`): a
+class picked by an enum member's NAME through a reflection dictionary links only under `typesByEnumName` in `structuregate.cs.json`
+(beside the exe, or `--cs-config`), whose stamp keys the passes over the finished rows like the SQL config's. Recognizing the lookup in
+code was rejected: every spelling of it (a `foreach` filling the dictionary, `nameof`, a prefixed override key) would need its own
+recognizer, and one it missed would fail in silence.

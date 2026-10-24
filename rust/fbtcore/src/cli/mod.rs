@@ -245,6 +245,6 @@ fn map_input(o: &Options, call: &Call) -> Value {
         "map_check": o.map_check, "baseline_path": o.map_baseline, "update_baseline": o.update_map_baseline,
         "map_plugins": o.map_plugins, "ts_host": o.ts_host, "py_host": o.py_host, "ps_host": o.ps_host,
         "ts_node_modules": o.ts_node_modules, "ts_config": o.ts_config, "ts_html": o.ts_html,
-        "map_row_fts": o.map_row_fts, "map_no_text": o.map_no_text, "map_atlas_dir": o.map_atlas_dir, "map_exclude": o.map_exclude, "map_reread": o.map_reread, "sql_config": o.sql_config, "facts_config": o.facts_config, "base_dir": call.base_dir, "build": call.build,
+        "map_row_fts": o.map_row_fts, "map_no_text": o.map_no_text, "map_atlas_dir": o.map_atlas_dir, "map_exclude": o.map_exclude, "map_reread": o.map_reread, "sql_config": o.sql_config, "cs_config": o.cs_config, "facts_config": o.facts_config, "base_dir": call.base_dir, "build": call.build,
     })
 }

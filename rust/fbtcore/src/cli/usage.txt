@@ -84,6 +84,11 @@ structuregate — structure rules, enforced where they cannot be skipped.
   --sql-config <file>   `structuregate.sql.json` for the deep SQL map: which .sqlproj is which
                         database, and which DbContext, connection name and method reaches it.
                         Found beside the exe when not given; absent links only unique names.
+  --cs-config <file>    `structuregate.cs.json`: what the C# code decides at run time. typesByEnumName
+                        [{enum, base, namespace, prefixes, ignoreCase}] - a class picked by an enum
+                        member's NAME (a reflection dictionary over Type.Name) - links each member to
+                        the classes deriving from base in that namespace (enum_type_links). Found
+                        beside the exe when not given; without it no name links anything.
   --sql-parse <file|->  PARSE ONE SQL TEXT and print what the deep SQL map would hold for it, as
                         JSON on stdout - statements, objects, refs, column_refs, clauses, joins,
                         functions, ctes, nodes and diagnostics - with no tree, no database file and

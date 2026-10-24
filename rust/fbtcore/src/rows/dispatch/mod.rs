@@ -12,6 +12,9 @@
 //! variance rules, which the rows do not state. An argument typed by its interface (`IRequest<R> q`) has no exact handler
 //! and is no row. Type texts compare as Roslyn writes them; a message named by a keyword (`string`) matches nothing.
 
+pub mod csconfig;
+pub mod enumtypes;
+
 use super::dups::{has_columns, owner_sql, scalar_sql, text, Column};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{params, Connection};
