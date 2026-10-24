@@ -6,7 +6,8 @@
 //! (`enums.members`, by the enum's `symbol`) links to every class that DERIVES from `base` - its `classes.bases`, followed
 //! through the classes in between, generic arguments dropped - whose namespace holds `namespace`, and whose name is the
 //! member's (`ignoreCase`: as the dictionary's comparer says). A class whose LAST namespace segment is one of `prefixes`
-//! is an `override` (`$"{prefix}.{name}"`), any other the `default`. A member no class answers is a row with no type
+//! is an `override` (`$"{prefix}.{name}"`), any other the `default` - or, with `default` given, a class whose namespace holds
+//! that text is the default and every other an override keyed by its last segment. A member no class answers is a row with no type
 //! (`kind = 'none'`), so a gap is listed rather than silent. `--map-slice` follows a link from a file that references the
 //! member (`refs.symbol`) to the class's file.
 
@@ -93,7 +94,12 @@ pub fn write(conn: &Connection, specs: &[EnumTypes]) -> rusqlite::Result<(usize,
             let mut any = false;
             for c in candidates.iter().filter(|c| c.symbol.rsplit('.').next().is_some_and(same)) {
                 let segment = c.symbol.rsplit('.').nth(1).unwrap_or("");
-                let prefix = spec.prefixes.iter().find(|p| if spec.ignore_case { p.eq_ignore_ascii_case(segment) } else { *p == segment });
+                // `default` GIVEN: a class whose namespace holds it is the default, any other an override by its last segment.
+                // Otherwise an override is a class whose last segment `prefixes` lists.
+                let prefix: Option<&str> = match &spec.default {
+                    Some(text) => (!c.symbol.rsplit_once('.').is_some_and(|(ns, _)| ns.contains(text.as_str()))).then_some(segment),
+                    None => spec.prefixes.iter().find(|p| if spec.ignore_case { p.eq_ignore_ascii_case(segment) } else { *p == segment }).map(String::as_str),
+                };
                 let kind = if prefix.is_some() { "override" } else { "default" };
                 add.execute(params![spec.enum_symbol, name, member_symbol, kind, prefix, c.symbol, c.file, lines.get(&c.symbol)])?;
                 written += 1;
