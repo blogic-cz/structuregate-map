@@ -68,6 +68,7 @@ pub struct Options {
     pub map_slice: Option<String>,
     pub slice_files: Option<String>,
     pub slice_hops: Option<usize>,
+    pub slice_closure: bool,
     /// `--trace <file>`: what `STRUCTUREGATE_TRACE` names, on the command line; `--trace-detail` asks for every span.
     pub trace: Option<String>,
     pub trace_detail: bool,
@@ -244,6 +245,7 @@ pub fn parse(args: &[String]) -> Result<Parsed, String> {
             }
             "--map-slice" => o.map_slice = Some(full(&next()?)),
             "--slice-files" => o.slice_files = Some(next()?),
+            "--slice-closure" => o.slice_closure = true,
             "--slice-hops" => {
                 let n = next()?;
                 o.slice_hops = Some(n.parse().map_err(|_| format!("--slice-hops takes a number of hops, not {n}"))?);

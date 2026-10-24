@@ -22,7 +22,8 @@ fn quoted(names: &[String]) -> String {
     names.iter().map(|c| format!("\"{}\"", c.replace('"', "\"\""))).collect::<Vec<_>>().join(", ")
 }
 
-pub fn write(base: &str, out_db: &str, kept: &BTreeSet<String>) -> Result<()> {
+/// The rows, written. The closure tables left out (`left`) unless `closure`: the slice's list of what it does not hold.
+pub fn write(base: &str, out_db: &str, kept: &BTreeSet<String>, closure: bool) -> Result<Vec<String>> {
     for suffix in ["", "-wal", "-shm", "-journal"] {
         let _ = std::fs::remove_file(format!("{out_db}{suffix}"));
     }
@@ -42,7 +43,11 @@ pub fn write(base: &str, out_db: &str, kept: &BTreeSet<String>) -> Result<()> {
     };
     // THE FULL-TEXT TABLES AND THEIR SHADOWS: a virtual table and every `<name>_*` table it keeps.
     let virtuals: Vec<String> = tables.iter().filter(|(_, sql)| sql.trim_start().to_uppercase().starts_with("CREATE VIRTUAL")).map(|(n, _)| n.clone()).collect();
-    let text = |name: &str| virtuals.iter().any(|v| name == v || name.starts_with(&format!("{v}_")));
+    // THE TRANSLATION-KEY CLOSURE (`CLOSURE_TABLES`) is a whole-program table a review does not read, and on a large tree most of a slice:
+    // left out, table and node tables, unless `--slice-closure` asks for it.
+    let owner = |name: &str| name[..name.find("__").unwrap_or(name.len())].to_string();
+    let closed = |name: &str| !closure && crate::rows::tsderive::CLOSURE_TABLES.contains(&owner(name).as_str());
+    let text = |name: &str| closed(name) || virtuals.iter().any(|v| name == v || name.starts_with(&format!("{v}_")));
     let mut whole: HashSet<String> = HashSet::new();
     let mut nodes: Vec<String> = Vec::new();
     for (name, sql) in &tables {
@@ -98,5 +103,6 @@ pub fn write(base: &str, out_db: &str, kept: &BTreeSet<String>) -> Result<()> {
     }
     db.execute_batch("COMMIT; DETACH DATABASE b;")?;
     crate::rows::meta::put(&db, crate::rows::cells::text::KEY, "0")?;
-    Ok(())
+    let left: Vec<String> = tables.iter().map(|(n, _)| n.clone()).filter(|n| !n.contains("__") && closed(n)).collect();
+    Ok(left)
 }

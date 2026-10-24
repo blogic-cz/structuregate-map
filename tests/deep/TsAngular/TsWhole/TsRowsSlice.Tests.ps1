@@ -50,6 +50,13 @@ Test-Case 'tsrows: a slice keeps the listed file and the files whose links point
     Assert-Equal (& $count $one "SELECT count(*) FROM http_calls WHERE url = '/api/loner'") '0' 'an unsliced file keeps its rows out'
     Assert-Equal (& $count $one "SELECT count(*) FROM ts_deps") (& $count $made.Db "SELECT count(*) FROM ts_deps") 'a whole-program table is whole'
     Assert-Line (Invoke-TsRowsQ $one "SELECT 'meta=' || key || '|' || value AS r FROM _meta WHERE key IN ('partial', 'slice:hops')") 'meta=partial|1'
+    # THE TRANSLATION-KEY CLOSURE is left out by default - table and node tables - and said so; `--slice-closure` keeps it whole.
+    Assert-Equal (& $count $made.Db "SELECT count(*) FROM sqlite_master WHERE name = 'key_reach'") '1' 'the base map holds the closure'
+    Assert-Equal (& $count $one "SELECT count(*) FROM sqlite_master WHERE name LIKE 'key\_reach%' ESCAPE '\'") '0' 'the closure is left out'
+    Assert-Line (Invoke-Gate --map-query $one --sql "SELECT 1") 'left out (--slice-closure keeps them): '
+    $closed = Join-Path $at 'closed.sqlite'
+    Assert-Exit (Invoke-Gate --map-slice $made.Db --slice-files 'apps/shop/src/total.ts' --slice-closure --map-sqlite $closed) 0
+    Assert-Equal (& $count $closed "SELECT count(*) FROM key_reach") (& $count $made.Db "SELECT count(*) FROM key_reach") '--slice-closure keeps it whole'
 }
 
 # A SLICE SAYS SO, AND IS NO CACHE: every query notes it on stderr, a map run refuses to write into it, and a path the base map does not hold fails.
