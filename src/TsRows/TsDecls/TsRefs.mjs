@@ -150,6 +150,13 @@ export function rollupRefIds(store) {
       if (hit !== undefined) row.target_id = hit;
     }
   }
+  // A CALL'S RESULT NAMES THE MEMBER IT FILLS (rows 103, #112): `fills_id` is the row at `fills`' place, as a literal's `target_id` is.
+  for (const row of store.table('calls')) {
+    const ref = asRef(row.fills);
+    const key = ref === null ? null : placeKey(ref);
+    const hit = key === null ? undefined : placed.get(key);
+    if (hit !== undefined) row.fills_id = hit;
+  }
   // A PROPERTY PATH'S SEGMENTS NAME THEIR ROWS (rows 98, #109): each `path_refs` entry is the declaration at its place - `id`, the `members` or `type_members` row.
   for (const row of store.table('string_literals')) {
     if (!Array.isArray(row.path_refs)) continue;

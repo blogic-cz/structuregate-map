@@ -17,7 +17,7 @@ import { locationOf } from './TsNodes.mjs';
 import { catchFacts, chainOf } from './TsCatch.mjs';
 import { loopFacts, loopKind } from './TsLoops.mjs';
 
-export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName, shapeAt, bindingFacts, injectAt, resolveArg, targetLine }) {
+export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName, shapeAt, bindingFacts, injectAt, resolveArg, targetLine, fieldTarget }) {
   /**
    * THE BRANCH OR CASE A STATEMENT SITS IN IS PART OF WHAT THE STATEMENT MEANS.
    *
@@ -167,6 +167,11 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       const ref = resolveArg(a);
       if (ref !== null) argRefs.push({ position, ...ref });
     });
+    // THE MEMBER THE CALL'S RESULT FILLS (rows 103, #112): `{ message: this.label('k') }` typed `HueResult` writes the call into `HueResult.message` -
+    // `fills` `{name, file, line}`, as a literal there has its `target` (`TsReadRefs.mjs::fieldTarget`), and `fills_id` the row at that place
+    // (`TsRefs.mjs::rollupRefIds`). A call's own `target` is its CALLEE, so the member is a column of its own. A checker refusal leaves none.
+    let fills = null;
+    try { fills = fieldTarget ? fieldTarget(node) : null; } catch { fills = null; }
     rowsWritten += 1;
     const id = store.add('calls', 'cl', {
       ...inCase(),
@@ -174,7 +179,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       callee: callee.getText(),
       method: ts.isPropertyAccessExpression(callee) ? callee.name.text : callee.getText(),
       new: ts.isNewExpression(node),
-      target, args, ...(argRefs.length ? { arg_refs: argRefs } : {}), ...locationOf(node),
+      target, args, ...(argRefs.length ? { arg_refs: argRefs } : {}), ...(fills ? { fills } : {}), ...locationOf(node),
     });
     // A CHAINED CALL NAMES THE CALL IT IS MADE ON (`receiver_call`): `a.b(1).then(f)` is two rows starting at one
     // place, and a join on that place is ambiguous on a chain of three. The outer row is minted first - the walk
