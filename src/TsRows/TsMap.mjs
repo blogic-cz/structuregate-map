@@ -37,6 +37,7 @@ import { rollupRouteTree } from './TsRouteTree.mjs';
 import { rollupRouteKeys } from './TsRouteKeys.mjs';
 import { rollupRemoteRoutes } from './TsFederation.mjs';
 import { rollupInputUsage } from './TsInputUsage.mjs';
+import { rollupTemplateFills } from './TsTplFills.mjs';
 import { ASIDE, claimsBack, makeScopes, rollupModuleScope, setAsideOutOfScope, withAside } from './TsModuleScope.mjs';
 import { rollupPipeRefs } from './TsPipeRefs.mjs';
 import { rollupStateGraph } from './TsNgrx.mjs';
@@ -335,23 +336,27 @@ async function main() {
   // 86: a framework `keyvalue` hands `{ key, value }` over what a framework pipe EMITS (`x$ | async | keyvalue`, `wrapped`), over an array (its element) and over a class or
   //     interface with no base (the union of its fields' types), as Angular's overloads type them (`TsTpl/TsTplHops.mjs::keyValueOf`).
   // 87: #106 - a literal or function in an object of an UN-ANNOTATED `const` (through its array literals) names the member it fills by the type the const takes LATER: every use's
-  //     contextual type (a typed `return`, a parameter, a typed variable), indexed down the array levels, an alias const followed (`TsExpr/TsReadRefs.mjs::laterTypes`).
-  // 88: an object (or a const holding one) pushed into an un-annotated array with `push`/`unshift` takes the type the array takes later, one level down (`TsReadRefs.mjs::pushedInto`).
+  //     contextual type (a typed `return`, a parameter, a typed variable), indexed down the array levels, an alias const followed (`TsExpr/TsLaterTypes.mjs::laterTypes`).
+  // 88: an object (or a const holding one) pushed into an un-annotated array with `push`/`unshift` takes the type the array takes later, one level down (`TsLaterTypes.mjs::pushedInto`).
   // 89: a `template_literals` row in an object literal's property has `target` and `target_id` of the member it fills, as a string there has (`TsText.mjs::collectStrings`).
   // 90: #107 - the climb to the type a value takes later crosses `Array`'s `filter`/`slice`/`sort`/`reverse`/`concat` (the RESULT is typed), a const that is an element of another
-  //     un-annotated array, and a property value whose object is typed later (`TsExpr/TsReadRefs.mjs::climb`, `typesAt`, `propertyTypes`).
+  //     un-annotated array, and a property value whose object is typed later (`TsExpr/TsLaterTypes.mjs::climb`, `typesAt`, `propertyTypes`).
   // 91: the climb crosses `&&`/`||`/`??` operands and a ternary's arms, and a value returned from a function with no declared return type takes what its calls in the same file take
-  //     (`TsExpr/TsReadRefs.mjs::returnedFrom`, `callersOf`).
+  //     (`TsExpr/TsLaterTypes.mjs::returnedFrom`, `callersOf`).
   // 92: `io.type` is the type the member's `members` row has - inferred for an un-annotated property, a setter's parameter type - not the annotation alone (`TsDecls/TsClassRows.mjs`).
   // 93: a tag several components match in a template NO component owns is `selector_ambiguous_without_scope`, not `selector_ambiguous_in_scope` (`TsDerive/TsModuleScope.mjs`).
-  // 94: a value a `Promise` `then`/`catch` callback returns takes what the call's own type awaits (`TsExpr/TsReadRefs.mjs::settledBy`).
-  // 95: a value an `Array` `map`/`flatMap` callback returns is an element of what the call takes, and a spread in an array literal keeps its elements' level (`TsExpr/TsReadRefs.mjs::mappedBy`, `climb`).
+  // 94: a value a `Promise` `then`/`catch` callback returns takes what the call's own type awaits (`TsExpr/TsLaterTypes.mjs::settledBy`).
+  // 95: a value an `Array` `map`/`flatMap` callback returns is an element of what the call takes, and a spread in an array literal keeps its elements' level (`TsExpr/TsLaterTypes.mjs::mappedBy`, `climb`).
   // 96: `module_ref_from_dependency` is one row per name and file, not one per scope that asked (`TsDerive/TsModuleScope.mjs`).
   // 97: #108 - a template literal's hole that indexes an enum by a value (`${Hue[x]}`, a member NAME) is a `hole_refs` entry naming the enum, and a literal whose every hole
   //     is one lists the strings it builds in `expands` (`TsText.mjs::collectStrings`, `TsExpr/TsReadRefs.mjs::enumNameHole`).
   // 98: #109 - `propertyPaths` (`structuregate.ts.json`) names members whose strings are property paths and the root they start from; such a string carries `path_refs`
   //     (a segment each, with its row `id`) and `path_complete` (`TsExpr/TsReadRefs.mjs::pathRefs`).
-  // 105: a value put in a class member declared without a type (its initializer, or `this.x = ..`) takes what the member's reads take (`TsReadRefs.mjs::untypedMember`).
+  // 107: a value returned from a class member nothing in the program types carries `returned_from` (`TsReadRefs.mjs::fieldReturned`), and takes the member the input declares
+  //     where its template binds the member's call (`[rules]="rules()"`): `target_via` 'template' (`TsDerive/TsInputs/TsTplFills.mjs`).
+  // 106: a value returned from a function with no return type and no caller in its file takes the function's inferred return type when its returns fold into a
+  //     named one - a literal absorbed by subtype reduction (`TsLaterTypes.mjs::foldedReturn`).
+  // 105: a value put in a class member declared without a type (its initializer, or `this.x = ..`) takes what the member's reads take (`TsLaterTypes.mjs::untypedMember`).
   // 104: the immer draft walk takes a destructured local, a local assigned a path later and a `for...of` variable as their paths (`draftWrites`).
   // 103: #112 - a call in an object literal's property names the member its result fills: `calls.fills` {name, file, line} and `fills_id` (`TsBody.mjs::emitCall`).
   // 102: #110 - inside a pushed/promise/map callback value the checker's contextual type is asked FIRST, only its literal-declared places dropped; the later type answers when none is left (`fieldTarget`).
@@ -360,7 +365,7 @@ async function main() {
   // 99: an immer handler's `writes` follow the helpers it hands its draft to, and the callbacks they call (`TsExpr/TsExprDescribe.mjs::draftWrites`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 105, build: args.build,
+    config: config.file, data: config.data, rows: 107, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
@@ -737,6 +742,9 @@ async function main() {
   const inputs = rollupInputUsage(store);
   emit('MAP-NOTE', `the typescript half bound ${inputs.bound} input(s) across ${inputs.declared} declared, `
     + `${inputs.unused} never bound`);
+  // A VALUE ONLY A TEMPLATE TYPES names the member the bound input declares (rows 107) - after the bindings are matched to their inputs.
+  const fills = rollupTemplateFills(store);
+  if (fills.filled) emit('MAP-NOTE', `the typescript half named the member of ${fills.filled} value(s) a template binding types`);
 
   // THE STATE GRAPH, from the evaluated values of the consts that declare it.
   const stateGraph = rollupStateGraph(store);

@@ -150,6 +150,15 @@ export function rollupRefIds(store) {
       if (hit !== undefined) row.target_id = hit;
     }
   }
+  // A VALUE A TEMPLATE MAY TYPE (rows 107): `returned_from_id` is the member row at `returned_from`'s place - the method its object is returned from (`TsDerive/TsInputs/TsTplFills.mjs`).
+  for (const table of ['string_literals', 'number_literals', 'template_literals', 'functions']) {
+    for (const row of store.table(table)) {
+      const ref = asRef(row.returned_from);
+      const key = ref === null ? null : placeKey(ref);
+      const hit = key === null ? undefined : placed.get(key);
+      if (hit !== undefined) row.returned_from_id = hit;
+    }
+  }
   // A CALL'S RESULT NAMES THE MEMBER IT FILLS (rows 103, #112): `fills_id` is the row at `fills`' place, as a literal's `target_id` is.
   for (const row of store.table('calls')) {
     const ref = asRef(row.fills);

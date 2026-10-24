@@ -179,7 +179,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     // ONE IN AN OBJECT LITERAL'S PROPERTY NAMES THE MEMBER IT FILLS (rows 83, #105): `target` `{name, file, line}`, as a literal there carries (`TsReadRefs.mjs::fieldTarget`),
     // and `target_id` the row at that place (`TsRefs.mjs::rollupRefIds`). A checker refusal leaves the row without one, never without the row.
     const filled = (node) => {
-      try { const target = readRefs.fieldTarget(node); return target ? { target } : {}; } catch { return {}; }
+      try { return readRefs.fieldFacts(node); } catch { return {}; }
     };
     // A FUNCTION DECLARED IN A BODY (`function inner() {..}`) is named by its declaration (rows 84): a bare `inner(..)` binds it by its place (`TsRefs.mjs::rollupRefIds`).
     const declareInline = (node, parentId) => store.add('functions', 'fn', {
@@ -314,7 +314,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
         diag.note('dynamic_import_scan_failed');
       }
       try {
-        collectStrings(ts, store, sf, { file: fid }, propName, evalNode, readRefs.fieldTarget, readRefs.enumNameHole,
+        collectStrings(ts, store, sf, { file: fid }, propName, evalNode, readRefs.fieldFacts, readRefs.enumNameHole,
           propertyPaths.length ? (n) => readRefs.pathRefs(n, propertyPaths) : null);
       } catch {
         diag.note('string_scan_failed');
