@@ -216,10 +216,10 @@ function Resolve-Import([string]$Rel, $Expression, [string]$Root, [hashtable]$Kn
             $tail = $found.Value.Replace('\', '/').TrimStart('.', '/')
             $suffix = [System.IO.Path]::GetExtension($tail).ToLowerInvariant()
             if ($suffix -ne '.ps1' -and $suffix -ne '.psm1' -and $suffix -ne '.psd1') { continue }
-            $matched = @()
-            foreach ($candidate in $Known.Keys) {
-                if ($candidate -eq $tail -or $candidate.EndsWith('/' + $tail)) { $matched += $candidate }
-            }
+            # ONLY THE FILES OF THAT NAME can end with the tail (`$script:KnownByName`, built once): scanning every mapped file for
+            # every computed path was files x paths on a large tree.
+            $named = $script:KnownByName[$tail.Substring($tail.LastIndexOf('/') + 1)]
+            $matched = @(if ($named) { foreach ($candidate in $named) { if ($candidate -eq $tail -or $candidate.EndsWith('/' + $tail)) { $candidate } } })
             if ($matched.Count -eq 1) {
                 Write-Record 'MAP-PATH' $Rel $matched[0]
                 return
@@ -383,21 +383,33 @@ function Read-File([string]$Rel, [string]$AbsolutePath, [string]$Root, [hashtabl
 }
 
 function Read-ListFile([string]$Path) {
-    $read = @()
+    # A LIST, not `$read += ,`: appending to an array copies it - one row per file of the tree made reading the list quadratic.
+    $read = [System.Collections.Generic.List[object]]::new()
     foreach ($raw in [System.IO.File]::ReadAllLines($Path)) {
         if ($raw.Trim().Length -eq 0) { continue }
         $parts = $raw.Split("`t")
         if ($parts.Count -lt 2) { continue }
-        $read += , @($parts[0].Trim(), $parts[1].Trim())
+        $read.Add(@($parts[0].Trim(), $parts[1].Trim()))
     }
-    return , $read
+    return , $read.ToArray()
 }
 
 $rows = Read-ListFile $ListFile
 $rootFull = [System.IO.Path]::GetFullPath($Root)
 # EVERY FILE OF THE MAP resolves a dot-source, parsed this run or answered from the caller's cache.
 $known = @{}
-foreach ($row in $(if ($KnownFile) { Read-ListFile $KnownFile } else { $rows })) { $known[$row[0]] = $true }
+# ASSIGNED, never piped through `$( )` or `@( )`: a subexpression unwraps a list of ONE row into that row's two strings (the known files were
+# single characters), and `@( )` wraps the whole list as one row. A plain assignment keeps `Read-ListFile`'s array as it is, one row or many.
+$knownRows = $rows
+if ($KnownFile) { $knownRows = Read-ListFile $KnownFile }
+foreach ($row in $knownRows) { $known[$row[0]] = $true }
+# THE MAPPED FILES BY THEIR NAME: a computed dot-source is matched against those of its literal's name alone (`Resolve-Import`).
+$script:KnownByName = @{}
+foreach ($rel in $known.Keys) {
+    $name = $rel.Substring($rel.LastIndexOf('/') + 1)
+    if (-not $script:KnownByName.ContainsKey($name)) { $script:KnownByName[$name] = [System.Collections.Generic.List[string]]::new() }
+    $script:KnownByName[$name].Add($rel)
+}
 
 foreach ($row in $rows) {
     try {

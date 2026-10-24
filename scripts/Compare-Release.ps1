@@ -13,6 +13,9 @@
       CHANGED  restricted both times, differently - read each one
       GAINED   unrestricted before, restricted now
       gates    every `gate_values` row, matched by the gate's file, line, column and source (ids shift)
+      targets  every literal, function and call that names a declaration (`target_id`, `callee_id`), matched by its file,
+               line, column and text: one that bound before and binds nothing now is LOST - exit 1 (v2.8.36 lost
+               literals' members inside `map<T>(..)` callbacks with every key and gate equal)
 
     Both maps are written to `-Out` (a temp folder by default), never into the tree. `-OldDb`/`-NewDb` reuse a
     map already built - the old one is the same for every candidate of one release. `-AllowLoss` exits 0 on a
@@ -68,14 +71,15 @@ function New-Map([string]$Build, [string]$Db) {
 $sep = '|~|'
 function Get-Lines([string]$Build, [string]$Db, [string]$Sql) {
     $text = Invoke-Build $Build @('--map-query', $Db, '--width', '0', '--limit', '0', '--sql', $Sql)
-    $rows = @()
+    # A LIST, not `$rows += ,`: appending to an array copies it, and the calls table made one run of this script take 25 minutes.
+    $rows = [System.Collections.Generic.List[object]]::new()
     $body = $false
     foreach ($line in @($text)) {
         $t = "$line".Trim()
         if (-not $body) { if ($t.StartsWith('---')) { $body = $true }; continue }
-        if ($t.Contains($sep)) { $rows += , $t.Split([string[]]@($sep), [System.StringSplitOptions]::None) }
+        if ($t.Contains($sep)) { $rows.Add($t.Split([string[]]@($sep), [System.StringSplitOptions]::None)) }
     }
-    return , $rows
+    return , $rows.ToArray()
 }
 
 # A MAP FROM BEFORE NODE ROWS (schema 10 and older) holds `always_values` and `values_json` as JSON TEXT, read whole
@@ -132,6 +136,43 @@ function Get-Gates([string]$Build, [string]$Db) {
     return $map
 }
 
+# WHAT A ROW BINDS TO, BY WHERE IT IS (the targets check). A key restriction is not the only thing a release can lose: v2.8.36 dropped the
+# member target of literals inside `map<T>(..)` callbacks while every key and gate stayed equal, and a rising total hid it. Every row that
+# names a declaration - a literal's or function's `target_id`, a call's `target_id` and `callee_id` - is keyed by its file, line, column and
+# text (ids shift between two builds of one tree), and a row that bound before and binds nothing now is LOST. A table or column a map lacks
+# is skipped there; two rows at one place are told apart by their order.
+$targetColumns = @(
+    @{ t = 'string_literals'; c = @('target_id'); text = 't.value' },
+    @{ t = 'number_literals'; c = @('target_id'); text = 't.value' },
+    @{ t = 'template_literals'; c = @('target_id'); text = "''" },
+    @{ t = 'functions'; c = @('target_id'); text = "coalesce(t.name, '')" },
+    @{ t = 'calls'; c = @('target_id', 'callee_id'); text = 't.callee' }
+)
+function Test-Column([string]$Build, [string]$Db, [string]$Table, [string]$Column) {
+    $r = Get-Lines $Build $Db "SELECT 'c' || '$sep' || count(*) FROM pragma_table_info('$Table') WHERE name = '$Column'"
+    return $r.Count -gt 0 -and $r[0][1] -ne '0'
+}
+function Get-Targets([string]$Build, [string]$Db) {
+    $map = @{}
+    foreach ($spec in $targetColumns) {
+        if (-not (Test-Column $Build $Db $spec.t 'line')) { continue }
+        $col = if (Test-Column $Build $Db $spec.t 'col') { 't.col' } else { "''" }
+        foreach ($column in $spec.c) {
+            # A COLUMN NO ROW FILLED IS NOT CREATED: its rows are there, unbound - never "gone".
+            $bound = if (Test-Column $Build $Db $spec.t $column) { "(t.$column IS NOT NULL AND t.$column <> '')" } else { '0' }
+            $sql = "SELECT '$($spec.t).$column' || '$sep' || coalesce(f.path, '') || ':' || t.line || ':' || coalesce($col, '') || ' ' || coalesce($($spec.text), '') " +
+                "|| '$sep' || $bound FROM $($spec.t) t LEFT JOIN files f ON f.id = t.file ORDER BY t.rowid"
+            foreach ($r in (Get-Lines $Build $Db $sql)) {
+                $key = "$($r[0]) $($r[1])"
+                $n = 1
+                while ($map.ContainsKey("$key #$n")) { $n++ }
+                $map["$key #$n"] = $r[2] -eq '1'
+            }
+        }
+    }
+    return $map
+}
+
 if (-not $OldDb) { $OldDb = Join-Path $Out 'old.sqlite'; New-Map $Old $OldDb }
 if (-not $NewDb) { $NewDb = Join-Path $Out 'new.sqlite'; New-Map $New $NewDb }
 
@@ -161,13 +202,25 @@ foreach ($g in ($oldGates.Keys + $newGates.Keys | Sort-Object -Unique)) {
     if ($o -ne $n) { $gateDiff.Add("$g`n    old $(if ($o) { $o } else { '(none)' })`n    new $(if ($n) { $n } else { '(none)' })") }
 }
 
-foreach ($part in @(@('lost', $lost), @('changed', $changed), @('gained', $gained), @('gates', $gateDiff))) {
+$oldTargets = Get-Targets $Old $OldDb
+$newTargets = Get-Targets $New $NewDb
+$targetsLost = [System.Collections.Generic.List[string]]::new()
+$targetsGained = 0
+foreach ($t in $oldTargets.Keys) {
+    if ($oldTargets[$t] -and -not $newTargets[$t]) { $targetsLost.Add($(if ($newTargets.ContainsKey($t)) { $t } else { "$t (row gone)" })) }
+}
+foreach ($t in $newTargets.Keys) { if ($newTargets[$t] -and -not $oldTargets[$t]) { $targetsGained++ } }
+
+foreach ($part in @(@('lost', $lost), @('changed', $changed), @('gained', $gained), @('gates', $gateDiff), @('targets-lost', ($targetsLost | Sort-Object)))) {
     Set-Content -LiteralPath (Join-Path $Out "$($part[0]).txt") -Value ($part[1] -join "`n") -Encoding utf8
 }
 Write-Host ("compare-release: keys {0} -> {1}; LOST {2}, changed {3}, gained {4}, route moved {5}; gate_values differing {6}" -f `
     $oldKeys.Count, $newKeys.Count, $lost.Count, $changed.Count, $gained.Count, $routes, $gateDiff.Count)
-Write-Host "compare-release: details in $Out (lost.txt changed.txt gained.txt gates.txt)"
+Write-Host ("compare-release: bound rows LOST {0}, gained {1} (string/number/template literals, functions, calls)" -f $targetsLost.Count, $targetsGained)
+Write-Host "compare-release: details in $Out (lost.txt changed.txt gained.txt gates.txt targets-lost.txt)"
 foreach ($l in ($lost | Select-Object -First 20)) { Write-Host "  LOST $l" }
 if ($lost.Count -gt 20) { Write-Host "  ... $($lost.Count - 20) more in lost.txt" }
-if ($lost.Count -and -not $AllowLoss) { exit 1 }
+foreach ($l in ($targetsLost | Sort-Object | Select-Object -First 20)) { Write-Host "  TARGET LOST $l" }
+if ($targetsLost.Count -gt 20) { Write-Host "  ... $($targetsLost.Count - 20) more in targets-lost.txt" }
+if (($lost.Count -or $targetsLost.Count) -and -not $AllowLoss) { exit 1 }
 exit 0
