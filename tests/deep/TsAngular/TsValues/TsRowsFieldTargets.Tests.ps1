@@ -158,7 +158,7 @@ Test-Case 'tsrows: a function in an object literal names the member of its conte
     Assert-Line $l 'alpha=Field@2:rule.ts:tm Field@2'
     Assert-Line $l 'beta=Field@2:rule.ts:tm Field@2'
 }
-# (rows 87, #106) AN UN-ANNOTATED CONST TAKES ITS TYPE LATER (`TsReadRefs.mjs::laterTypes`): `const list = [..]; return list;` in a method typed `HueRule[]`, a const handed to a parameter
+# (rows 87, #106) AN UN-ANNOTATED CONST TAKES ITS TYPE LATER (`TsLaterTypes.mjs::laterTypes`): `const list = [..]; return list;` in a method typed `HueRule[]`, a const handed to a parameter
 # typed `HueRule`, and a const that only another const aliases before the return - each object's literal and function name the member they fill, as with an annotation.
 # THE CONTROL: a const pushed into another un-annotated array takes that array's INFERRED literal type, whose `Message` is the other literal's own property - no member, so none.
 $script:TsFieldLater = @{
@@ -227,6 +227,11 @@ $script:TsFieldLater = @{
         "  stored = [{ Field: 'psi2', Message: 'hue.held.init' }];`n" +
         "  wireHeld(): void { this.holder = this.heldRules(); checkAll(this.holder as HueRule[]); checkAll(this.stored); }`n" +
         "  private heldRules() { return [{ Field: 'tau', Message: 'hue.held.assigned' }]; }`n" +
+        "  typedRule(): HueRule { return { Field: 'one', Message: 'hue.folded.typed' }; }`n" +
+        "  either(on: boolean) { if (on) { return this.typedRule(); } return { Field: 'two', Message: 'hue.folded.literal' }; }`n" +
+        "  typedList(): HueRule[] { return []; }`n" +
+        "  eitherList(on: boolean) { return on ? this.typedList() : [{ Field: 'three', Message: 'hue.folded.list' }]; }`n" +
+        "  standing(on: boolean) { if (on) { return this.typedRule(); } return { Field: 4, Message: 'hue.folded.standing' }; }`n" +
         "  loose(): number {`n" +
         "    const free = { Field: 'eps', Message: 'hue.eps.loose' };`n" +
         "    const other = [{ Field: 'zeta', Message: 'hue.zeta.loose' }];`n" +
@@ -270,6 +275,12 @@ Test-Case 'tsrows: a literal in an un-annotated const names the member of the ty
     # (rows 105) THROUGH A MEMBER DECLARED WITHOUT A TYPE: assigned (`this.holder = this.heldRules()`) or initialised (`stored = [..]`), it takes what its reads take.
     Assert-Line $r 'hue.held.assigned=Message@3:rule.ts:tm Message@3'
     Assert-Line $r 'hue.held.init=Message@3:rule.ts:tm Message@3'
+    # (rows 106) RETURNS FOLDED INTO A NAMED TYPE: no return type and no caller, but the other return is a `HueRule` (or `HueRule[]`) and the literal is absorbed
+    # into it by subtype reduction. THE CONTROL: a literal that is no `HueRule` (`Field: 4`) stays an arm of its own, and names nothing.
+    Assert-Line $r 'hue.folded.literal=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'two=Field@2:rule.ts:tm Field@2'
+    Assert-Line $r 'hue.folded.list=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'hue.folded.standing=-@-:-:-'
     # (rows 94) SETTLED BY A PROMISE CALLBACK: `plainRule()` is returned from `then` callbacks (and through `bySettings`' const) in a method typed `Promise<HueRule>`,
     # so its object is the `HueRule` the call awaits. THE CONTROL: a promise nothing types (`loosePromise`, no return type, no caller) gives none.
     Assert-Line $r 'hue.sigma.plain=Message@3:rule.ts:tm Message@3'
@@ -339,5 +350,87 @@ Test-Case 'tsrows: a call in an object literal names the member its result fills
     Assert-Line $r 'fills=5|message@1|tm message|label'
     Assert-Line $r 'fills=7|-@-|-|label'
     Assert-Line $r 'fills=8|-@-|-|label'
+}
+
+# (rows 107) A VALUE ONLY A TEMPLATE TYPES (`TsReadRefs.mjs::fieldReturned`, `TsDerive/TsInputs/TsTplFills.mjs`): a method with no return type and no caller in the program, its
+# call bound in the template - `[rules]="listRules(true)"`, `[one]="oneRule()"` - names the member the bound input's type declares, `Message` found on the base the
+# interface extends. THE CONTROLS: an input typed `unknown`, and a method no template calls, name nothing. THEN A PARTIAL RUN: the input's type changes in its own
+# file, the host's file is not read again, and the target the last run set is gone - a row handed back never keeps an answer whose input has moved.
+Test-Case 'tsrows: a value returned from a method a template binds names the member the input declares (rows 107)' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/rule.ts' = "export interface HueBase { Field: string; Message: string; }`nexport interface HueRule extends HueBase { Extra?: number; }`n"
+        'apps/shop/src/rules.component.ts' = "import { Component, Input } from '@angular/core';`nimport { HueRule } from './rule';`n" +
+            "@Component({ selector: 'demo-rules', standalone: true, template: '' })`n" +
+            "export class RulesComponent { @Input() rules: HueRule[] = []; @Input() one?: HueRule; @Input() loose: unknown; }`n"
+        'apps/shop/src/use.ts' = "import { Component } from '@angular/core';`nimport { RulesComponent } from './rules.component';`n" +
+            "@Component({ selector: 'app-host', standalone: true, imports: [RulesComponent],`n" +
+            "  template: '<demo-rules [rules]=`"listRules(true)`" [one]=`"oneRule()`" [loose]=`"looseRules()`"></demo-rules>' })`n" +
+            "export class HostComponent {`n" +
+            "  listRules(on: boolean) { return [{ Field: 'a', Message: on ? 'hue.tpl.list' : 'hue.tpl.off' }, { Field: 'a2', Message: 'hue.tpl.list2' }]; }`n" +
+            "  oneRule() { return { Field: 'b', Message: 'hue.tpl.one' }; }`n" +
+            "  looseRules() { return [{ Field: 'c', Message: 'hue.tpl.loose' }]; }`n" +
+            "  orphan() { return [{ Field: 'd', Message: 'hue.tpl.orphan' }]; }`n" +
+            "}`n"
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $sql = Get-TsFieldTargetSql 'string_literals' 'value'
+    $r = Invoke-Gate --map-query $made.Db --limit 0 --sql $sql
+    Assert-Exit $r 0
+    Assert-Line $r 'hue.tpl.list2=Message@1:rule.ts:tm Message@1'
+    Assert-Line $r 'a2=Field@1:rule.ts:tm Field@1'
+    Assert-Line $r 'hue.tpl.one=Message@1:rule.ts:tm Message@1'
+    Assert-Line $r 'hue.tpl.loose=-@-:-:-'
+    Assert-Line $r 'hue.tpl.orphan=-@-:-:-'
+    # The answer's files are READ by the host's file: the reads every row's names are proved against still hold.
+    $meta = Invoke-Gate --map-query $made.Db --sql "SELECT 'reads=' || value FROM _meta WHERE key = 'reads:typescript'"
+    Assert-Line $meta 'reads=proven'
+    # PARTIAL RUN 1: the member leaves the base type, in a file the host does not import - the host is read again as its reader, and names nothing.
+    $rule = Join-Path $tree 'apps/shop/src/rule.ts'
+    Set-Content -LiteralPath $rule -Value "export interface HueBase { Field: string; }`nexport interface HueRule extends HueBase { Extra?: number; }`n" -NoNewline
+    Assert-Exit (New-TsRowsDb $tree).Result 0
+    $r = Invoke-Gate --map-query $made.Db --limit 0 --sql $sql
+    Assert-Line $r 'hue.tpl.list2=-@-:-:-'
+    Assert-Line $r 'hue.tpl.one=-@-:-:-'
+    Assert-Line $r 'a2=Field@1:rule.ts:tm Field@1'
+    # PARTIAL RUN 2: the member is back, and the input that bound `listRules()` is now `unknown[]` - the target the last run set there is gone.
+    Set-Content -LiteralPath $rule -Value "export interface HueBase { Field: string; Message: string; }`nexport interface HueRule extends HueBase { Extra?: number; }`n" -NoNewline
+    $path = Join-Path $tree 'apps/shop/src/rules.component.ts'
+    Set-Content -LiteralPath $path -Value ((Get-Content -LiteralPath $path -Raw).Replace('@Input() rules: HueRule[] = [];', '@Input() rules: unknown[] = [];')) -NoNewline
+    Assert-Exit (New-TsRowsDb $tree).Result 0
+    $r = Invoke-Gate --map-query $made.Db --limit 0 --sql $sql
+    Assert-Line $r 'hue.tpl.list2=-@-:-:-'
+    Assert-Line $r 'hue.tpl.one=Message@1:rule.ts:tm Message@1'
+}
+
+# (rows 107) A BASE CLASS'S METHOD BOUND IN A SUBCLASS'S TEMPLATE, in another file: the binding names the member, and when the binding goes the target goes with it.
+# (A component's file moving reads every file again - it can move what a template resolves - so no row of the base is handed back here; the drop of every
+# `target_via: 'template'` before `TsTplFills.mjs` answers again is what keeps one that ever is from holding a stale answer.)
+Test-Case 'tsrows: a base method bound in a subclass template names the member, and loses it with the binding (rows 107)' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/rule.ts' = "export interface HueRule { Field: string; Message: string; }`n"
+        'apps/shop/src/rules.component.ts' = "import { Component, Input } from '@angular/core';`nimport { HueRule } from './rule';`n" +
+            "@Component({ selector: 'demo-rules', standalone: true, template: '' })`n" +
+            "export class RulesComponent { @Input() rules: HueRule[] = []; }`n"
+        'apps/shop/src/use.ts' = "export class BaseHost {`n" +
+            "  baseRules() { return [{ Field: 'e', Message: 'hue.tpl.base' }]; }`n" +
+            "}`n"
+        'apps/shop/src/sub.component.ts' = "import { Component } from '@angular/core';`nimport { BaseHost } from './use';`nimport { RulesComponent } from './rules.component';`n" +
+            "@Component({ selector: 'app-sub', standalone: true, imports: [RulesComponent],`n" +
+            "  template: '<demo-rules [rules]=`"baseRules()`"></demo-rules>' })`n" +
+            "export class SubHost extends BaseHost {}`n"
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $sql = Get-TsFieldTargetSql 'string_literals' 'value'
+    $r = Invoke-Gate --map-query $made.Db --limit 0 --sql $sql
+    Assert-Line $r 'hue.tpl.base=Message@1:rule.ts:tm Message@1'
+    $sub = Join-Path $tree 'apps/shop/src/sub.component.ts'
+    Set-Content -LiteralPath $sub -Value ((Get-Content -LiteralPath $sub -Raw).Replace('[rules]="baseRules()"', '')) -NoNewline
+    Assert-Equal $false ((Get-Content -LiteralPath $sub -Raw).Contains('baseRules'))
+    $again = Invoke-Gate --root $tree --map-sqlite $made.Db --ts-node-modules $script:TsRowsModules
+    Assert-Exit $again 0
+    $r = Invoke-Gate --map-query $made.Db --limit 0 --sql $sql
+    Assert-Line $r 'hue.tpl.base=-@-:-:-'
 }
 }

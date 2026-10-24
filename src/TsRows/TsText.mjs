@@ -88,10 +88,10 @@ function enclosingLabel(ts, sf, pos) {
  * A bare `'en'` says nothing. `'en'` as the `locale` property of a call to `setLanguage` says what it is,
  * and `context`/`property` are how that is published without anyone having to re-read the source.
  */
-export function collectStrings(ts, store, node, owner, propName, evalNode, fieldTarget, enumNameHole, pathRefs) {
+export function collectStrings(ts, store, node, owner, propName, evalNode, fieldFacts, enumNameHole, pathRefs) {
   const text = (n) => n.getText();
   // THE MEMBER AN OBJECT LITERAL'S VALUE FILLS (rows 81, #104): `target` is `{name, file, line}` where the checker says the property is declared, replacing the empty text a
-  // literal in a property carries (`TsReadRefs.mjs::fieldTarget`). A checker refusal leaves the row without one, never without the row.
+  // literal in a property carries (`TsReadRefs.mjs::fieldTarget`); with none, `returned_from` when a template may type it (rows 107, `fieldReturned`). A checker refusal leaves the row without one, never without the row.
   // A HOLE THAT NAMES AN ENUM MEMBER (rows 97, #108): `hole_refs` is one entry per hole - the enum a `${Hue[x]}` looks a member NAME up in, else null - and when
   // EVERY hole is one, `expands` lists each string the literal can build (`palette.Red.caption`, `palette.Blue.caption`), in the enums' member order.
   // A checker refusal leaves the row without them, never without the row.
@@ -112,7 +112,7 @@ export function collectStrings(ts, store, node, owner, propName, evalNode, field
     try { return pathRefs ? pathRefs(n) ?? {} : {}; } catch { return {}; }
   };
   const field = (n) => {
-    try { const target = fieldTarget ? fieldTarget(n) : null; return target ? { target } : {}; } catch { return {}; }
+    try { return fieldFacts ? fieldFacts(n) : {}; } catch { return {}; }
   };
   const walk = (n) => {
     // `use`/`callee`/`target` are the vocabulary every half shares (TsLiterals.mjs); `context` stays this
