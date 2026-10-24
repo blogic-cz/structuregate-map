@@ -143,7 +143,7 @@ fn asked(call: &Call, callbacks: Callbacks) -> Value {
             out.error("structuregate: --map-slice <base> takes --slice-files <file|@list> and --map-sqlite <out>".into());
             return answer(out, 2, true);
         };
-        let exit = crate::slice::run(base, files, o.slice_hops.unwrap_or(1), o.slice_closure, into, &mut out);
+        let exit = crate::slice::run(base, files, o.slice_hops.unwrap_or(1), o.slice_closure, o.slice_lean, into, &mut out);
         return answer(out, exit, true);
     }
     if let Some(source) = &o.sql_parse {

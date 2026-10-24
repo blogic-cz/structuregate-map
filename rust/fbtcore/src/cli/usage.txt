@@ -206,7 +206,9 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         http_links, sql_links) - --slice-hops N deep (default 1); every per-file row of
                         those, every whole-program table whole except the translation-key closure
                         (key_reach, render_path, gate_values, gate_features: --slice-closure keeps
-                        it), no full text. Nothing is re-extracted:
+                        it), no full text. --slice-lean leaves out the expression and value trees
+                        (expressions, *__value, conditions) and the node tables' role/value indexes:
+                        references, calls, arguments and links stay. Nothing is re-extracted:
                         refresh the full map first. `_meta` partial = 1 and files.sliced mark it,
                         --map-query says so on every question, and no map run writes into a slice.
   --map-sqlite <file>   the DEEP map, as SQLite - WITH --map, or on its own, which writes the rows
