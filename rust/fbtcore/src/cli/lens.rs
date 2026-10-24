@@ -28,6 +28,10 @@ pub fn run(db: &str, arguments: &[String], out: &mut Out) -> i64 {
     if let Some(note) = crate::query::fresh::note(Path::new(db)) {
         out.error(note);
     }
+    // A SLICE SAYS SO ON EVERY QUESTION (#111): a row missing from it may be in a file outside it.
+    if let Some(note) = crate::slice::note(Path::new(db)) {
+        out.error(note);
+    }
     match crate::query::render(Path::new(db), &ask) {
         Err(e) => {
             out.error(format!("structuregate: the query failed — {e:#}"));

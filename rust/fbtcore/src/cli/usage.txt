@@ -194,6 +194,14 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         row), --width N (a cell is cut at 70 characters with ...[+N chars]; 0:
                         every cell whole - --find's file column is never cut). A note on stderr
                         says when the tree moved on since the map was written.
+  --map-slice <base>    CUT A PARTIAL MAP out of a full deep map (a pull-request review's): with
+                        --slice-files <file|@list> (map paths, one a line) and --map-sqlite <out>.
+                        Kept: the listed files and their DEPENDENTS - the files whose rows a resolved
+                        link points into them (a call's or literal's target, an import, C# file_refs,
+                        http_links, sql_links) - --slice-hops N deep (default 1); every per-file row of
+                        those, every whole-program table whole, no full text. Nothing is re-extracted:
+                        refresh the full map first. `_meta` partial = 1 and files.sliced mark it,
+                        --map-query says so on every question, and no map run writes into a slice.
   --map-sqlite <file>   the DEEP map, as SQLite - WITH --map, or on its own, which writes the rows
                         and skips the whole-tree re-parse the graph needs (what a per-turn hook
                         runs; it exits 1 by itself if a half could not run). The JSON map is

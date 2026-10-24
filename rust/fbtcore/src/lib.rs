@@ -51,6 +51,7 @@ mod tree;
 mod rows;
 mod rsmap;
 mod session;
+mod slice;
 mod sources;
 mod sqlpg;
 mod trace;

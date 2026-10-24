@@ -64,6 +64,10 @@ pub struct Options {
     pub map_sqlite: Option<String>,
     pub map_query: Option<String>,
     pub map_query_args: Vec<String>,
+    /// `--map-slice <base>`: cut a partial map out of a full one (`slice/`), the files `--slice-files` names and their dependents `--slice-hops` deep.
+    pub map_slice: Option<String>,
+    pub slice_files: Option<String>,
+    pub slice_hops: Option<usize>,
     /// `--trace <file>`: what `STRUCTUREGATE_TRACE` names, on the command line; `--trace-detail` asks for every span.
     pub trace: Option<String>,
     pub trace_detail: bool,
@@ -237,6 +241,12 @@ pub fn parse(args: &[String]) -> Result<Parsed, String> {
                 // error, it is the lens's business.
                 o.map_query_args = args[i + 1..].to_vec();
                 i = args.len();
+            }
+            "--map-slice" => o.map_slice = Some(full(&next()?)),
+            "--slice-files" => o.slice_files = Some(next()?),
+            "--slice-hops" => {
+                let n = next()?;
+                o.slice_hops = Some(n.parse().map_err(|_| format!("--slice-hops takes a number of hops, not {n}"))?);
             }
             "--trace-report" => o.trace_report = Some(full(&next()?)),
             "--claude-hook" => o.claude_hook = Some(next()?),
