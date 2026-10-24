@@ -199,6 +199,9 @@ export const plan = createAction('[Demo] plan');
 export const each = createAction('[Demo] each');
 export const either = createAction('[Demo] either');
 export const fallback = createAction('[Demo] fallback');
+export const destructured = createAction('[Demo] destructured');
+export const later = createAction('[Demo] later');
+export const looped = createAction('[Demo] looped');
 export const bumped = createAction('[Demo] bumped');
 export const quiet = createAction('[Demo] quiet');
 '@
@@ -230,6 +233,9 @@ export const bagReducer = createReducer(initial,
   immerOn(bag.bumped, (s) => { bump(s.cart); }),
   immerOn(bag.each, (s) => { s.cart.lines.forEach((l) => (l.id = 0)); }),
   immerOn(bag.either, (s) => { pick((g) => (g.active = true), s.cart, true); }),
+  immerOn(bag.destructured, (s) => { const { cart } = s; cart.count = 1; }),
+  immerOn(bag.later, (s) => { let line; if (s.cart.count) { line = s.cart.lines.find((l) => l.id === 1); } else { line = s.cart.lines.find((l) => l.id === 2); } if (line) { line.active = true; } }),
+  immerOn(bag.looped, (s) => { for (const l of s.cart.lines) { l.id = 0; } }),
   immerOn(bag.fallback, (s) => { const t = (s.cart.lines || []).find((l) => l.id === 3) ?? null; if (t) { t.active = false; } }),
   immerOn(bag.quiet, (s) => { log(1); peek(s.cart); }));
 '@
@@ -247,5 +253,9 @@ export const bagReducer = createReducer(initial,
     Assert-Line $h 'h=bag.either | cart.lines.active'
     # (rows 101) a fallback (`|| []`, `?? null`) keeps the path it falls back from.
     Assert-Line $h 'h=bag.fallback | cart.lines.active'
+    # (rows 104) a destructured local, a local assigned a path later, and a `for...of` variable are their paths; assigning the local itself writes nothing.
+    Assert-Line $h 'h=bag.destructured | cart.count'
+    Assert-Line $h 'h=bag.later | cart.lines.active'
+    Assert-Line $h 'h=bag.looped | cart.lines.id'
 }
 }
