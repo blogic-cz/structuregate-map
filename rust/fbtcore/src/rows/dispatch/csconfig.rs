@@ -4,7 +4,8 @@
 //! `Type.Name` of the types deriving from a base in a namespace, and looked up with `member.ToString()`. No parse tree
 //! holds that lookup's meaning, so the consumer declares it: `[{ "enum": "Demo.Core.ReportIDs", "base": "Demo.Templates.ReportBase",
 //! "namespace": "Templates.Reports", "prefixes": ["Pdf"], "ignoreCase": true }]` - `prefixes` the last namespace segments whose
-//! classes are OVERRIDES of a member's default (`$"{prefix}.{name}"`), `ignoreCase` the dictionary's comparer. Read here,
+//! classes are OVERRIDES of a member's default (`$"{prefix}.{name}"`), or `default` the namespace text the default classes hold
+//! (`".Standard"`: every other class an override, its last namespace segment the prefix), `ignoreCase` the dictionary's comparer. Read here,
 //! joined over the finished rows by `enumtypes.rs` beside it; its stamp keys the passes over them.
 
 use serde_json::Value;
@@ -18,6 +19,9 @@ pub struct EnumTypes {
     pub base: String,
     pub namespace: String,
     pub prefixes: Vec<String>,
+    /// `default`: the namespace text a DEFAULT class's namespace holds (`.Standard`); given, every other class is an override
+    /// keyed by its last namespace segment, whatever it is - the customers need not be listed in `prefixes`.
+    pub default: Option<String>,
     pub ignore_case: bool,
 }
 
@@ -60,7 +64,8 @@ pub fn read(given: Option<&str>, base_dir: &str) -> CsConfig {
             continue;
         }
         let prefixes = spec["prefixes"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
-        out.types_by_enum_name.push(EnumTypes { enum_symbol, base, namespace, prefixes, ignore_case: spec["ignoreCase"].as_bool().unwrap_or(false) });
+        let default = Some(field("default")).filter(|d| !d.is_empty());
+        out.types_by_enum_name.push(EnumTypes { enum_symbol, base, namespace, prefixes, default, ignore_case: spec["ignoreCase"].as_bool().unwrap_or(false) });
     }
     out
 }

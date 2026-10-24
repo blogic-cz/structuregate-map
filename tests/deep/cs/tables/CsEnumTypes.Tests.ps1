@@ -46,6 +46,24 @@ Test-Case 'csenumtypes: an enum member links to the classes a declared conventio
     Assert-Line (Get-CsEnumTypesRows $slice "SELECT 'in=' || path AS r FROM files WHERE sliced = 1") 'in=Sender.cs'
 }
 
+# (#113 follow-up) `default` GIVEN: a class in a namespace holding `.Standard` is the default, every other an override keyed by its last
+# namespace segment - customers need not be listed. `Acme` is listed nowhere and is an override all the same.
+Test-Case 'csenumtypes: with a default namespace every other class is an override by its last segment' {
+    $tree = Use-Tree @{
+        'Demo.csproj' = $script:CsEnumTypesProject
+        'Ids.cs' = "namespace Demo.Core;`npublic enum MailIDs { Welcome }`n"
+        'Base.cs' = "namespace Demo.Mail;`npublic abstract class MailBase { }`n"
+        'Standard.cs' = "namespace Demo.Templates.Emails.Standard;`npublic class Welcome : Demo.Mail.MailBase { }`n"
+        'Acme.cs' = "namespace Demo.Templates.Emails.Acme;`npublic class Welcome : Demo.Mail.MailBase { }`n"
+        'cs.json' = '{ "typesByEnumName": [ { "enum": "Demo.Core.MailIDs", "base": "Demo.Mail.MailBase", "namespace": "Templates.Emails", "default": ".Standard" } ] }'
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db --cs-config (Join-Path $tree 'cs.json')) 0
+    $r = Get-CsEnumTypesRows $db "SELECT 'l=' || member || '|' || kind || '|' || coalesce(prefix, '-') || '|' || type_symbol AS l FROM enum_type_links"
+    Assert-Line $r 'l=Welcome|default|-|Demo.Templates.Emails.Standard.Welcome'
+    Assert-Line $r 'l=Welcome|override|Acme|Demo.Templates.Emails.Acme.Welcome'
+}
+
 # NO CONVENTION, NO LINK: equal names alone link nothing, and the table is empty.
 Test-Case 'csenumtypes: without a declared convention equal names link nothing' {
     $files = $script:CsEnumTypesFiles.Clone()
