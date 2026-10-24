@@ -223,6 +223,10 @@ $script:TsFieldLater = @{
         "  flatOne(): HueRule[] { return ['a'].flatMap((x) => ({ Field: x, Message: 'hue.chi.one' })); }`n" +
         "  spread(): HueRule[] { const base = [{ Field: 'psi', Message: 'hue.psi.base' }]; return [...base, ...[{ Field: 'omega', Message: 'hue.omega.spread' }]]; }`n" +
         "  typedMap(): void { checkLoose(['a'].map<HueRule[]>((f) => [{ Field: f, Message: 'hue.kappa.typed' }]).flat()); }`n" +
+        "  holder = [] as unknown[];`n" +
+        "  stored = [{ Field: 'psi2', Message: 'hue.held.init' }];`n" +
+        "  wireHeld(): void { this.holder = this.heldRules(); checkAll(this.holder as HueRule[]); checkAll(this.stored); }`n" +
+        "  private heldRules() { return [{ Field: 'tau', Message: 'hue.held.assigned' }]; }`n" +
         "  loose(): number {`n" +
         "    const free = { Field: 'eps', Message: 'hue.eps.loose' };`n" +
         "    const other = [{ Field: 'zeta', Message: 'hue.zeta.loose' }];`n" +
@@ -235,7 +239,9 @@ $script:TsFieldLater = @{
 Test-Case 'tsrows: a literal in an un-annotated const names the member of the type it takes later (#106)' {
     $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsFieldLater) -Shared
     Assert-Exit $made.Result 0
-    $r = Invoke-TsRowsQ $made.Db (Get-TsFieldTargetSql 'string_literals' 'value')
+    # EVERY ROW: the lens stops at 50 by default, and this fixture holds more.
+    $r = Invoke-Gate --map-query $made.Db --limit 0 --sql (Get-TsFieldTargetSql 'string_literals' 'value')
+    Assert-Exit $r 0
     Assert-Line $r 'hue.alpha.required=Message@3:rule.ts:tm Message@3'
     Assert-Line $r 'alpha=Field@2:rule.ts:tm Field@2'
     Assert-Line $r 'hue.gamma.arg=Message@3:rule.ts:tm Message@3'
@@ -261,6 +267,9 @@ Test-Case 'tsrows: a literal in an un-annotated const names the member of the ty
     Assert-Line $r 'hue.omicron.implied=Message@3:rule.ts:tm Message@3'
     Assert-Line $r 'hue.pi.implied=Message@3:rule.ts:tm Message@3'
     Assert-Line $r 'hue.rho.orphan=-@-:-:-'
+    # (rows 105) THROUGH A MEMBER DECLARED WITHOUT A TYPE: assigned (`this.holder = this.heldRules()`) or initialised (`stored = [..]`), it takes what its reads take.
+    Assert-Line $r 'hue.held.assigned=Message@3:rule.ts:tm Message@3'
+    Assert-Line $r 'hue.held.init=Message@3:rule.ts:tm Message@3'
     # (rows 94) SETTLED BY A PROMISE CALLBACK: `plainRule()` is returned from `then` callbacks (and through `bySettings`' const) in a method typed `Promise<HueRule>`,
     # so its object is the `HueRule` the call awaits. THE CONTROL: a promise nothing types (`loosePromise`, no return type, no caller) gives none.
     Assert-Line $r 'hue.sigma.plain=Message@3:rule.ts:tm Message@3'

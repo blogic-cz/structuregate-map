@@ -343,6 +343,9 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     }
     const held = propertyTypes(top);
     if (held !== null) return down(held, levels);
+    // A MEMBER DECLARED WITHOUT A TYPE (rows 105): what it holds takes what its reads take.
+    const member = untypedMember(top);
+    if (member !== null) return memberLaterOf(member, levels);
     // ASKED BEFORE THE CHECKER: inside a `then` callback its contextual type is the one it INFERRED from this very value, which names no member.
     const settled = settledBy(top);
     if (settled !== null) return down(awaited(typesAt(climb(settled).n, 0, null)), levels);
@@ -355,6 +358,42 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     if (t !== undefined) return down([t], levels);
     const fn = returnedFrom(top);
     return fn === null ? [] : callersOf(fn, levels);
+  };
+  /** THE CLASS MEMBER A VALUE IS PUT IN WHEN THE MEMBER DECLARES NO TYPE (rows 105): `private rules = [{ .. }]` (its initializer) or `this.rules = x` (an
+   *  assignment) - its type is only what the checker inferred from that value, and the type it takes is where its reads go (`memberLaterOf`). Null otherwise. */
+  const untypedMember = (n) => {
+    const p = n.parent;
+    let decl;
+    if (p !== undefined && ts.isPropertyDeclaration(p) && p.initializer === n) decl = p;
+    else if (p !== undefined && ts.isBinaryExpression(p) && p.right === n && p.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      && ts.isPropertyAccessExpression(p.left) && p.left.expression.kind === ts.SyntaxKind.ThisKeyword) {
+      decl = checker.getSymbolAtLocation(p.left.name)?.valueDeclaration;
+    }
+    return decl !== undefined && ts.isPropertyDeclaration(decl) && decl.type === undefined && ts.isIdentifier(decl.name)
+      && decl.parent !== undefined && ts.isClassLike(decl.parent) ? decl : null;
+  };
+  /** WHAT A MEMBER'S READS TAKE: every `this.<member>` in its class that is no assignment target, climbed and asked as a value is, `levels` down. Memoized per
+   *  member and depth, empty while asked. */
+  const memberLaterOf = (decl, levels) => {
+    const memo = laterMemo.get(decl) ?? new Map();
+    laterMemo.set(decl, memo);
+    if (memo.has(levels)) return memo.get(levels);
+    memo.set(levels, []);
+    const symbol = checker.getSymbolAtLocation(decl.name);
+    const found = [];
+    const stack = symbol === undefined ? [] : [decl.parent];
+    while (stack.length) {
+      const node = stack.pop();
+      if (ts.isPropertyAccessExpression(node) && node.expression.kind === ts.SyntaxKind.ThisKeyword && node.name.text === decl.name.text
+        && checker.getSymbolAtLocation(node.name) === symbol
+        && !(node.parent !== undefined && ts.isBinaryExpression(node.parent) && node.parent.left === node && node.parent.operatorToken.kind === ts.SyntaxKind.EqualsToken)) {
+        const { n: top, levels: inside } = climb(node);
+        found.push(...typesAt(top, levels + inside, null));
+      }
+      ts.forEachChild(node, (c) => { stack.push(c); });
+    }
+    memo.set(levels, found);
+    return found;
   };
   /** A VALUE A `then`/`catch` CALLBACK RETURNS settles the promise that call makes (rows 94): `p.then((r) => this.rule())` in a method typed `Promise<Rule>` hands
    *  `this.rule()` the `Rule` the call's own type awaits. `Promise`'s own method (checked by its declaration), the callback an anonymous function among its
