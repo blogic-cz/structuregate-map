@@ -271,4 +271,34 @@ Test-Case 'tsrows: a literal in an un-annotated const names the member of the ty
     Assert-Line $r 'hue.psi.base=Message@3:rule.ts:tm Message@3'
     Assert-Line $r 'hue.omega.spread=Message@3:rule.ts:tm Message@3'
 }
+# (rows 98, #109) A PROPERTY PATH IS RESOLVED ONLY WHERE `propertyPaths` SAYS SO (`TsReadRefs.mjs::pathRefs`): `HueRule.Path` from the call's argument 0 - `'Owner.Name'`
+# handed with `this.form` is `Form.Owner` then `Person.Name` - and `HueRule.Field` from `this`, the class it is written in (`form.Owner.Name` on `Widget`). An unknown
+# segment ends the chain (`path_complete` 0). THE CONTROLS: `Message` is in no spec, and a spec of the wrong shape is noted and skipped.
+Test-Case 'tsrows: a string filling a configured member is resolved as a property path from its root (#109)' {
+    $tree = New-TsRowsWorkspace @{
+        'structuregate.ts.json' = '{"propertyPaths":[{"member":"HueRule.Path","root":{"argument":0}},{"member":"HueRule.Field","root":"this"},{"member":"NoDot","root":"this"}]}'
+        'apps/shop/src/model.ts' = "export interface Person { Name: string; }`nexport interface Form { Owner: Person; }`n"
+        'apps/shop/src/rule.ts' = "export interface HueRule { Path?: string; Field?: string; Message: string; }`n" +
+            "export function check<T>(model: T, rules: HueRule[]): boolean { return rules.length > 0 && !!model; }`n"
+        'apps/shop/src/widget.ts' = "import { Form } from './model';`nimport { HueRule, check } from './rule';`n" +
+            "export class Widget {`n" +
+            "  form: Form = { Owner: { Name: '' } };`n" +
+            "  ok = check(this.form, [{ Path: 'Owner.Name', Message: 'hue.owner.name' }] as HueRule[]);`n" +
+            "  rules: HueRule[] = [{ Field: 'form.Owner.Name', Message: 'hue.field' }, { Field: 'form.Owner.Gone', Message: 'hue.gone' }];`n" +
+            "}`n"
+    }
+    $made = New-TsRowsDb $tree -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'pr=' || s.value || '|' || coalesce(s.path_complete, '-') || '|' || coalesce((SELECT group_concat(n.value || '@' || l.value || ':' || " +
+        "coalesce((SELECT 'tm ' || t.name FROM type_members t WHERE t.id = i.value), '-'), ' > ') FROM string_literals__path_refs h " +
+        "JOIN string_literals__path_refs n ON n.owner = h.owner AND n.parent = h.n AND n.role = 'name' " +
+        "JOIN string_literals__path_refs l ON l.owner = h.owner AND l.parent = h.n AND l.role = 'line' " +
+        "LEFT JOIN string_literals__path_refs i ON i.owner = h.owner AND i.parent = h.n AND i.role = 'id' " +
+        "WHERE h.owner = s.id AND h.parent = 0 ORDER BY h.ord), '-') AS r FROM string_literals s JOIN files f ON f.id = s.file AND f.path LIKE '%widget.ts'")
+    Assert-Line $r 'pr=Owner.Name|1|Owner@2:tm Owner > Name@1:tm Name'
+    Assert-Line $r 'pr=form.Owner.Name|1|form@4:- > Owner@2:tm Owner > Name@1:tm Name'
+    Assert-Line $r 'pr=form.Owner.Gone|0|form@4:- > Owner@2:tm Owner'
+    Assert-Line $r 'pr=hue.owner.name|-|-'
+    Assert-Line (Invoke-TsRowsQ $made.Db "SELECT 'bad=' || name AS r FROM diagnostics WHERE kind = 'property_path_spec_invalid'") 'bad=NoDot'
+}
 }

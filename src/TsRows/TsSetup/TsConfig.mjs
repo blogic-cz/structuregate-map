@@ -82,3 +82,22 @@ export function names(config, key) {
   const value = config.data?.[key];
   return Array.isArray(value) ? value.filter((v) => typeof v === 'string') : [];
 }
+
+/**
+ * WHICH STRINGS ARE PROPERTY PATHS, AND FROM WHERE (rows 98, #109): application knowledge, so an INPUT - `propertyPaths`, each
+ * `{ member: 'Type.Member', root: 'this' | { argument: n } }`, as `{type, member, root: {kind, index?}}`. A string filling that member is resolved segment
+ * by segment from the root's type (`TsExpr/TsReadRefs.mjs::pathRefs`); none given, none resolved. A spec of another shape is handed to `invalid` by its
+ * member text and skipped, never guessed into one.
+ */
+export function propertyPaths(config, invalid) {
+  const out = [];
+  for (const spec of Array.isArray(config.data?.propertyPaths) ? config.data.propertyPaths : []) {
+    const member = typeof spec?.member === 'string' ? spec.member : '';
+    const cut = member.lastIndexOf('.');
+    const root = spec?.root === 'this' ? { kind: 'this' }
+      : Number.isInteger(spec?.root?.argument) && spec.root.argument >= 0 ? { kind: 'argument', index: spec.root.argument } : null;
+    if (cut <= 0 || cut === member.length - 1 || root === null) { invalid(member); continue; }
+    out.push({ type: member.slice(0, cut), member: member.slice(cut + 1), root });
+  }
+  return out;
+}

@@ -490,5 +490,73 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     return names.length ? { name: symbol.getName(), ...at(decls[0]), kind: 'enum_name', names } : null;
   }
 
-  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember, resolveArg, targetLine, fieldTarget, enumNameHole };
+  /**
+   * A STRING THAT IS A PROPERTY PATH (rows 98, #109): `'Owner.Name'` filling a member `propertyPaths` names (`{type, member, root}`) is resolved segment by segment
+   * from the ROOT's type - `this`, the class the literal is written in, or `{argument: n}`, the n-th argument of the call the literal's object is handed to - as
+   * a declared type says: each segment the ONE declaration place its owner's arms give the name (a union naming several stops), a numeric segment an element.
+   * `{path_refs, path_complete}`: the segments that resolved, and whether all did. Null when the literal fills no configured member, or its root has no type.
+   */
+  function pathRefs(node, specs) {
+    const prop = node.parent;
+    if (prop === undefined || !ts.isPropertyAssignment(prop) || prop.initializer !== node || !ts.isObjectLiteralExpression(prop.parent)) return null;
+    const filled = fieldTarget(node);
+    if (filled === null) return null;
+    const holderOf = (types) => types.flatMap((t) => (t.isUnion() ? t.types : [t])).flatMap((t) => {
+      const [first] = checker.getPropertyOfType(t, filled.name)?.declarations ?? [];
+      if (first === undefined) return [];
+      const holder = first.parent !== undefined && ts.isTypeLiteralNode(first.parent) ? first.parent.parent : first.parent;
+      return holder?.name !== undefined && ts.isIdentifier(holder.name) ? [holder.name.text] : [];
+    });
+    const top = climb(prop.parent).n;
+    const contextual = pushedInto(top) === null && settledBy(top) === null && mappedBy(top) === null ? checker.getContextualType(prop.parent) : undefined;
+    const owners = holderOf(contextual !== undefined ? [contextual] : laterTypes(prop.parent));
+    const spec = specs.find((s) => s.member === filled.name && owners.includes(s.type));
+    if (spec === undefined) return null;
+    const root = rootType(prop.parent, spec.root);
+    if (root === null) return null;
+    const refs = [];
+    let current = [root.type];
+    const segments = node.text.split('.');
+    for (const segment of segments) {
+      const arms = current.flatMap((t) => (t.isUnion() ? t.types : [t]));
+      if (segment !== '' && [...segment].every((c) => c >= '0' && c <= '9')) {
+        current = arms.flatMap((t) => { const e = checker.getIndexTypeOfType(t, ts.IndexKind.Number); return e === undefined ? [] : [e]; });
+        if (!current.length) break;
+        refs.push({ name: segment, element: true });
+        continue;
+      }
+      const found = new Map();
+      for (const t of arms) {
+        const member = checker.getPropertyOfType(t, segment);
+        const [decl] = member?.declarations ?? [];
+        if (decl === undefined) continue;
+        const place = at(decl);
+        found.set(`${place.file}#${place.line}`, { place, member });
+      }
+      if (found.size !== 1) break;
+      const [{ place, member }] = [...found.values()];
+      refs.push({ name: segment, ...place });
+      current = [checker.getNonNullableType(checker.getTypeOfSymbolAtLocation(member, root.at))];
+    }
+    return { path_refs: refs, path_complete: refs.length === segments.length };
+  }
+  /** THE TYPE A PATH STARTS FROM: `this` - the instance type of the class the object is written in - or the n-th argument of the call the object (out of its
+   *  array literals, parentheses, `as` and `satisfies`) is handed to. `{type, at}`, or null. */
+  function rootType(object, root) {
+    if (root.kind === 'this') {
+      let cls = object.parent;
+      while (cls !== undefined && !ts.isClassDeclaration(cls) && !ts.isClassExpression(cls)) cls = cls.parent;
+      const symbol = cls?.name !== undefined ? checker.getSymbolAtLocation(cls.name) : undefined;
+      return symbol === undefined ? null : { type: checker.getDeclaredTypeOfSymbol(symbol), at: cls };
+    }
+    let n = object;
+    while (n.parent !== undefined && (passes(n.parent) || ts.isArrayLiteralExpression(n.parent) || ts.isAsExpression(n.parent)
+      || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(n.parent)))) n = n.parent;
+    const call = n.parent;
+    if (call === undefined || !ts.isCallExpression(call) || !call.arguments.includes(n)) return null;
+    const arg = call.arguments[root.index];
+    return arg === undefined ? null : { type: checker.getTypeAtLocation(arg), at: arg };
+  }
+
+  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember, resolveArg, targetLine, fieldTarget, enumNameHole, pathRefs };
 }

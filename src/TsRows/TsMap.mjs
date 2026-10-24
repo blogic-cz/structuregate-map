@@ -25,7 +25,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { canonicalPath, relativeTo } from './TsPaths.mjs';
-import { directories, loadConfig, names } from './TsConfig.mjs';
+import { directories, loadConfig, names, propertyPaths as readPropertyPaths } from './TsConfig.mjs';
 import { compare as compareRegistry, registryFromRows } from './TsRegistry.mjs';
 import { rollupGateChains } from './TsGateChain.mjs';
 import { rollupTemplateReads } from './TsTplReads.mjs';
@@ -349,9 +349,11 @@ async function main() {
   // 96: `module_ref_from_dependency` is one row per name and file, not one per scope that asked (`TsDerive/TsModuleScope.mjs`).
   // 97: #108 - a template literal's hole that indexes an enum by a value (`${Hue[x]}`, a member NAME) is a `hole_refs` entry naming the enum, and a literal whose every hole
   //     is one lists the strings it builds in `expands` (`TsText.mjs::collectStrings`, `TsExpr/TsReadRefs.mjs::enumNameHole`).
+  // 98: #109 - `propertyPaths` (`structuregate.ts.json`) names members whose strings are property paths and the root they start from; such a string carries `path_refs`
+  //     (a segment each, with its row `id`) and `path_complete` (`TsExpr/TsReadRefs.mjs::pathRefs`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 97, build: args.build,
+    config: config.file, data: config.data, rows: 98, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
@@ -533,8 +535,10 @@ async function main() {
 
   // WHICH FILES THIS RUN READS AGAIN beyond the ones that changed - see `TsSetup/TsReads.mjs`.
   const rereads = (partial && planned.cut) ? startRereads({ ts, fe, store, state, planned, now, only: affected }) : null;
+  // WHICH STRINGS ARE PROPERTY PATHS, AND FROM WHERE (rows 98, #109) - application knowledge, an input (`TsConfig.mjs::propertyPaths`).
+  const propertyPaths = readPropertyPaths(config, (name) => diag.note('property_path_spec_invalid', { name }));
   const { inAnyProgram, registry, components } = timed('typescript: walk every project', '', () => walkProjects({
-    ts, store, fe, nodeModules: found.nodeModules, projects, diag, noted: new Set(),
+    ts, store, fe, nodeModules: found.nodeModules, projects, diag, noted: new Set(), propertyPaths,
     // WHICH FILES THIS RUN OPENS. Every other file in the program is still WALKED for its ids and
     // its program membership - a declaration in it is what the ones being re-extracted resolve
     // against - but nothing is extracted from it, because its rows are already loaded.
