@@ -158,7 +158,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
     if (target?.name === 'immerOn' && String(target.file).includes('/ngrx-immer/') && handler !== undefined
       && (ts.isArrowFunction(handler) || ts.isFunctionExpression(handler))) {
       const value = args[args.length - 1];
-      const written = draftWrites(ts, handler);
+      const written = draftWrites(ts, handler, declOf);
       if (written.length && value !== null && typeof value === 'object') value.$writes = [...new Set([...(value.$writes ?? []), ...written])];
     }
     return {
@@ -170,6 +170,20 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       ...(target ? { $target: target } : {}),
       ...(target && owner ? { $owner: owner } : {}),
     };
+  }
+
+  /** THE FUNCTION A CALL RUNS, where the tree declares it with a body (rows 99, `draftWrites`): a function, a method, or a `const` holding an arrow or function
+   *  expression - the checker's declaration, an import followed to it. Null for a library's, or anything else. */
+  function declOf(callee) {
+    try {
+      const at = ts.isPropertyAccessExpression(callee) ? callee.name : callee;
+      let symbol = checker.getSymbolAtLocation(at);
+      if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+      const d = symbol?.valueDeclaration;
+      if (d === undefined) return null;
+      if ((ts.isFunctionDeclaration(d) || ts.isMethodDeclaration(d)) && d.body !== undefined) return d;
+      return ts.isVariableDeclaration(d) && d.initializer !== undefined && (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer)) ? d.initializer : null;
+    } catch { return null; }
   }
 
   function evalNode(node) {
