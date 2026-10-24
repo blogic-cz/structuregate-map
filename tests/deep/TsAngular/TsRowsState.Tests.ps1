@@ -198,6 +198,7 @@ export const tick = createAction('[Demo] tick');
 export const plan = createAction('[Demo] plan');
 export const each = createAction('[Demo] each');
 export const either = createAction('[Demo] either');
+export const fallback = createAction('[Demo] fallback');
 export const bumped = createAction('[Demo] bumped');
 export const quiet = createAction('[Demo] quiet');
 '@
@@ -229,6 +230,7 @@ export const bagReducer = createReducer(initial,
   immerOn(bag.bumped, (s) => { bump(s.cart); }),
   immerOn(bag.each, (s) => { s.cart.lines.forEach((l) => (l.id = 0)); }),
   immerOn(bag.either, (s) => { pick((g) => (g.active = true), s.cart, true); }),
+  immerOn(bag.fallback, (s) => { const t = (s.cart.lines || []).find((l) => l.id === 3) ?? null; if (t) { t.active = false; } }),
   immerOn(bag.quiet, (s) => { log(1); peek(s.cart); }));
 '@
     }
@@ -243,5 +245,7 @@ export const bagReducer = createReducer(initial,
     # (rows 100) a `forEach` callback writes through its element; a ternary of one path is that path.
     Assert-Line $h 'h=bag.each | cart.lines.id'
     Assert-Line $h 'h=bag.either | cart.lines.active'
+    # (rows 101) a fallback (`|| []`, `?? null`) keeps the path it falls back from.
+    Assert-Line $h 'h=bag.fallback | cart.lines.active'
 }
 }

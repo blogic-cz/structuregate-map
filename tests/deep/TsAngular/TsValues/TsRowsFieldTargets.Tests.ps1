@@ -170,8 +170,9 @@ $script:TsFieldLater = @{
         "  Children?: HueRule[];`n" +
         "}`n" +
         "export function check(r: HueRule): void { void r; }`n" +
-        "export function checkAll(r: HueRule[]): void { void r; }`n"
-    'apps/shop/src/use.ts' = "import { HueRule, check, checkAll } from './rule';`n" +
+        "export function checkAll(r: HueRule[]): void { void r; }`n" +
+        "export function checkLoose(r: unknown): void { void r; }`n"
+    'apps/shop/src/use.ts' = "import { HueRule, check, checkAll, checkLoose } from './rule';`n" +
         "export class Widget {`n" +
         "  strict = false;`n" +
         "  rules(): HueRule[] {`n" +
@@ -221,6 +222,7 @@ $script:TsFieldLater = @{
         "  flat(): HueRule[] { return ['a'].flatMap((x) => [{ Field: x, Message: 'hue.chi.flat' }]); }`n" +
         "  flatOne(): HueRule[] { return ['a'].flatMap((x) => ({ Field: x, Message: 'hue.chi.one' })); }`n" +
         "  spread(): HueRule[] { const base = [{ Field: 'psi', Message: 'hue.psi.base' }]; return [...base, ...[{ Field: 'omega', Message: 'hue.omega.spread' }]]; }`n" +
+        "  typedMap(): void { checkLoose(['a'].map<HueRule[]>((f) => [{ Field: f, Message: 'hue.kappa.typed' }]).flat()); }`n" +
         "  loose(): number {`n" +
         "    const free = { Field: 'eps', Message: 'hue.eps.loose' };`n" +
         "    const other = [{ Field: 'zeta', Message: 'hue.zeta.loose' }];`n" +
@@ -270,6 +272,8 @@ Test-Case 'tsrows: a literal in an un-annotated const names the member of the ty
     Assert-Line $r 'hue.chi.one=Message@3:rule.ts:tm Message@3'
     Assert-Line $r 'hue.psi.base=Message@3:rule.ts:tm Message@3'
     Assert-Line $r 'hue.omega.spread=Message@3:rule.ts:tm Message@3'
+    # (rows 102, #110) an explicit type argument (`map<HueRule[]>`) is the callback's DECLARED contextual type - asked first, it names the member though what the call takes names nothing.
+    Assert-Line $r 'hue.kappa.typed=Message@3:rule.ts:tm Message@3'
 }
 # (rows 98, #109) A PROPERTY PATH IS RESOLVED ONLY WHERE `propertyPaths` SAYS SO (`TsReadRefs.mjs::pathRefs`): `HueRule.Path` from the call's argument 0 - `'Owner.Name'`
 # handed with `this.form` is `Form.Owner` then `Person.Name` - and `HueRule.Field` from `this`, the class it is written in (`form.Owner.Name` on `Widget`). An unknown
