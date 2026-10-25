@@ -51,6 +51,8 @@ pub(super) struct ListSource<'r, 'a> {
     pub(super) unpacked: &'r HashMap<String, Vec<Option<String>>>,
     /// The config's `i18nDictionaryCalls`: a call of one handed to a callee's parameter is every key under its prefix there.
     pub(super) dict: &'r [String],
+    /// `shape_members` id -> the value the property is written with, for the ones a template input reads (`shape_values`).
+    pub(super) shaped: &'r HashMap<String, Value>,
 }
 
 /// Function id -> the names an array pattern in its first parameter binds, by index (`functions.params[0].bindings`).

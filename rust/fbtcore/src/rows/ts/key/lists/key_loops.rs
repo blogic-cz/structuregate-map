@@ -211,7 +211,8 @@ impl Loops {
         let parent: HashMap<String, String> = functions.iter().filter_map(|f| Some((id_of(f, "id")?, text(f, "parent")?))).collect();
         let unpacked = super::key_lists::unpacked(store);
         let dict = store.option_list("i18n_dictionary_calls");
-        let src = ListSource { rows: &rows, by_member: &by_member, params: &params, pushes: &pushes, parent: &parent, unpacked: &unpacked, dict: &dict };
+        let shaped = super::shape_values::bound_shape_values(store);
+        let src = ListSource { rows: &rows, by_member: &by_member, params: &params, pushes: &pushes, parent: &parent, unpacked: &unpacked, dict: &dict, shaped: &shaped };
         let mut owner: HashMap<String, Option<String>> = HashMap::new();
         let mut lists: HashMap<String, Vec<Element>> = HashMap::new();
         let mut members_valued: HashSet<String> = HashSet::new();
