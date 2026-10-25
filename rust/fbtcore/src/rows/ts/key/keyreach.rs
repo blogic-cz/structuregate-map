@@ -125,6 +125,8 @@ pub struct Closure {
     pub gate_value_rows: usize,
     /// `control_options` rows: the option keys form controls are offered (#117).
     pub option_rows: usize,
+    /// `key_builds` rows: the template literal and enum behind each expanded key (#123).
+    pub build_rows: usize,
 }
 
 const ROUTES: &[&str] = &[
@@ -316,6 +318,12 @@ pub fn build_closure(
     for row in options {
         store.emit("control_options", row);
     }
+    // WHICH TEMPLATE LITERAL BUILDS EACH KEY, over which enum (#123).
+    let builds = super::key_builds::rows(store);
+    let build_rows = builds.len();
+    for row in builds {
+        store.emit("key_builds", row);
+    }
     store.release();
     crate::give_back();
     crate::trace::metrics_mark!("closure: released");
@@ -439,6 +447,7 @@ pub fn build_closure(
         gate_feature_rows: gf_rows,
         gate_value_rows: gv_rows,
         option_rows,
+        build_rows,
     };
     (stats, Derived { trace })
 }

@@ -302,7 +302,27 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     if (!decls.length) return null;
     const names = decls.flatMap((d) => d.members.filter((m) => typeof checker.getConstantValue(m) === 'number').map((m) => (ts.isIdentifier(m.name) || ts.isStringLiteral(m.name) ? m.name.text : m.name.getText())));
     // No numeric member, no reverse mapping: a string enum yields no names, so the hole names no enum.
-    return names.length ? { name: symbol.getName(), ...at(decls[0]), kind: 'enum_name', names } : null;
+    return names.length ? { name: symbol.getName(), ...at(decls[0]), kind: 'enum_name', names, members: names } : null;
+  }
+
+  /**
+   * A HOLE TYPED BY AN ENUM (rows 111, #123): `${r.status}` over `status: Demo` yields one of the enum's member VALUES - `{name, file, line, kind: 'enum_value',
+   * names, members}`, `names` what the hole writes (each member's value as a string, declaration order) and `members` the member each one is. A union of one
+   * enum's members is those members; anything else - a number, a string, two enums - is null.
+   */
+  function enumValueHole(expr) {
+    const type = checker.getTypeAtLocation(expr);
+    const arms = type.isUnion() ? type.types : [type];
+    if (!arms.length || arms.some((t) => (t.flags & ts.TypeFlags.EnumLiteral) === 0)) return null;
+    const members = arms.map((t) => t.symbol?.declarations?.find((d) => ts.isEnumMember(d))).filter((d) => d !== undefined);
+    const owners = [...new Set(members.map((m) => m.parent))];
+    if (members.length !== arms.length || owners.length !== 1) return null;
+    const decl = owners[0];
+    // IN DECLARATION ORDER, as `enumNameHole` lists them: the type's arms come in the checker's order.
+    const held = new Set(members);
+    const named = decl.members.filter((m) => held.has(m)).map((m) => ({ member: ts.isIdentifier(m.name) || ts.isStringLiteral(m.name) ? m.name.text : m.name.getText(), value: checker.getConstantValue(m) }));
+    if (named.some((m) => m.value === undefined)) return null;
+    return { name: decl.name.text, ...at(decl), kind: 'enum_value', names: named.map((m) => String(m.value)), members: named.map((m) => m.member) };
   }
 
   /**
@@ -373,5 +393,5 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     return arg === undefined ? null : { type: checker.getTypeAtLocation(arg), at: arg };
   }
 
-  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember, resolveArg, targetLine, fieldTarget, fieldFacts, enumNameHole, pathRefs };
+  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember, resolveArg, targetLine, fieldTarget, fieldFacts, enumNameHole, enumValueHole, pathRefs };
 }

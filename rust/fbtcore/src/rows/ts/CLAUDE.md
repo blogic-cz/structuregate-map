@@ -28,6 +28,8 @@ requires and which enum members it still permits.
   literal names no member, so no `gate_values` row can carry it. `ways_of` drops every (ref, path) through one
   before anything folds: no live way left is `n_paths 0` - the key renders for nobody - and its roots go too. A style
   gate whose value hides on every side (`style_hides.when = always`, `[style.display]="'none'"`) is dead the same way (#54).
+- **`key_builds` IS WHICH TEMPLATE LITERAL BUILDS A KEY** (#123, `key/key_builds.rs`): one row per (key, literal, hole), each hole's text and, for a
+  hole `hole_refs` types by an enum, the `enums` row and member; a typed hole no member fills builds no such key. Emitted before `release`.
 - **`control_options` IS WHAT A FORM CONTROL IS OFFERED** (#117, `key/lists/key_options.rs`): a node binding a value (an input `x` and
   an output `xChange` over one expression, or `ngModel`/`formControl`/`formControlName`) offers every key an element's property holds
   in a list another input of it is bound to (`key_inputs::bound_list`, over the lists `Loops` finds - shared, `Store::shared("loops")`).

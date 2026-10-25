@@ -87,8 +87,8 @@ Test-Case 'tsrows literals: a returned name stays an identifier, and one a destr
 }
 # (rows 97, #108) A HOLE THAT NAMES AN ENUM MEMBER (`TsText.mjs::collectStrings`, `TsReadRefs.mjs::enumNameHole`): `${Hue[this.hue]}` indexes the enum by a value, so it
 # yields a member NAME - `hole_refs` names `Hue` (hue.ts:1, `kind` enum_name) and `expands` lists `palette.Red.caption`, `palette.Blue.caption`. Two such holes build every
-# pair. THE CONTROLS: a string index (`Hue['Red']`... spelled through a string-typed key) and a hole of anything else name no enum; a literal with one plain hole has
-# `hole_refs` but no `expands`; a string enum has no reverse mapping, so it yields no names.
+# pair. THE CONTROLS: a hole of anything else names no enum, and a literal with one plain hole has `hole_refs` but no `expands`. A STRING INDEX is no name lookup -
+# it reads the member itself - so since rows 112 (#123) it is a hole TYPED by the enum, `kind` enum_value, writing the member's VALUE (`w.a`, `w.b`; `n.1`).
 Test-Case 'tsrows: a template literal hole that indexes an enum by value names it and lists the strings it builds (#108)' {
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/hue.ts' = "export enum Hue { Red = 1, Blue = 2 }`nexport enum Size { Small, Large }`nexport enum Word { A = 'a', B = 'b' }`n"
@@ -111,7 +111,10 @@ Test-Case 'tsrows: a template literal hole that indexes an enum by value names i
     Assert-Line $ex 'ex=4|palette.Blue.caption'
     foreach ($p in 'p.Red.Small', 'p.Red.Large', 'p.Blue.Small', 'p.Blue.Large') { Assert-Line $ex "ex=5|$p" }
     Assert-NoLine $ex 'ex=6|'
-    Assert-NoLine $ex 'ex=8|'
+    Assert-Line $ex 'ex=8|w.a'
+    Assert-Line $ex 'ex=8|w.b'
+    Assert-Line $ex 'ex=9|n.1'
+    Assert-NoLine $ex 'ex=9|n.2'
     $refs = Invoke-TsRowsQ $made.Db ("SELECT 'hr=' || t.line || '|' || h.ord || '|' || coalesce((SELECT value FROM template_literals__hole_refs n WHERE n.owner = t.id AND n.parent = h.n AND n.role = 'name'), '-') || '|' || " +
         "coalesce((SELECT value FROM template_literals__hole_refs n WHERE n.owner = t.id AND n.parent = h.n AND n.role = 'kind'), '-') AS r " +
         "FROM template_literals t JOIN template_literals__hole_refs h ON h.owner = t.id AND h.parent = 0 JOIN files f ON f.id = t.file AND f.path LIKE '%widget.ts'")
@@ -119,7 +122,7 @@ Test-Case 'tsrows: a template literal hole that indexes an enum by value names i
     Assert-Line $refs 'hr=6|0|Hue|enum_name'
     Assert-Line $refs 'hr=6|1|-|-'
     Assert-NoLine $refs 'hr=7|'
-    Assert-NoLine $refs 'hr=8|'
-    Assert-NoLine $refs 'hr=9|'
+    Assert-Line $refs 'hr=8|0|Word|enum_value'
+    Assert-Line $refs 'hr=9|0|Hue|enum_value'
 }
 }

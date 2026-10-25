@@ -101,7 +101,7 @@ impl FromIterator<String> for KeySet {
 
 /// The texts a key's holes hold when `pieces` (a template literal's literal parts) spell it:
 /// every piece in order, every hole at least one character. The first way to split it.
-fn segments(key: &str, pieces: &[&str]) -> Option<Vec<String>> {
+pub(super) fn segments(key: &str, pieces: &[&str]) -> Option<Vec<String>> {
     fn rest(key: &str, pieces: &[&str], out: &mut Vec<String>) -> bool {
         let [piece, more @ ..] = pieces else { return key.is_empty() };
         if more.is_empty() {
