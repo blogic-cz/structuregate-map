@@ -36,6 +36,8 @@ requires and which enum members it still permits.
   A DICTIONARY the caller hands a callee's parameter (an `i18nDictionaryCalls` call) labels every element property reading that
   parameter by any index (`$param_index`, alone or a side of `??`/`||`) with every key under its prefix, and a spread of `.map(cb)`
   holding such a property is cb's one returned object (`ListSource::handed`): `convertToItems(Hue, t.getTranslationDictionary('enums.hue'))`.
+  A read landing on an OBJECT LITERAL'S PROPERTY (`vm.criteria.options` over a selector's projector: a `shape_members` row) is what that
+  property is written with, found up the nested shapes to the `returns`/`assignments`/`locals`/`consts`/`members` row holding the root (`key/fields/shape_values.rs`).
 - **THE CLOSURE TABLES DECLARE UNIQUE KEYS**, so a pass that files a row twice fails the insert instead of
   publishing a plausible duplicate.
 - **NO REGEX: the dead-key trace is character walks** (`sourcescan.rs`, `sourcetrace.rs`). It decides whether

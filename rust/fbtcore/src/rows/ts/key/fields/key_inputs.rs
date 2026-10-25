@@ -119,6 +119,17 @@ pub(super) fn bound_list(tree: &Value, lists: &HashMap<String, Vec<Element>>, sr
     if let Some(items) = lists.get(&row) {
         return Some((row, items.clone()));
     }
+    // A PROPERTY OF AN OBJECT LITERAL (`vm.criteria.options` over a selector's projector, `shape_values`): what it is written with.
+    if let Some(value) = src.shaped.get(&row) {
+        let items = match value {
+            Value::Array(xs) => xs.iter().map(|x| Element::written(x.clone(), Vec::new())).collect(),
+            other => {
+                let (items, owner) = src.callee_lists(Some(other))?;
+                items.into_iter().map(|i| Element::returned(i, &owner)).collect()
+            }
+        };
+        return Some((row, items));
+    }
     let items = src.member_lists(&row)?.into_iter().map(|v| Element::returned(v, &row)).collect();
     Some((row, items))
 }

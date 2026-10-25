@@ -58,7 +58,16 @@ $script:KeyOptionsFiles = @{
         "    this.grades = convertToItems(Grade, this.dictionary.getTranslationDictionary('grade'));`n" +
         "    this.bare = convertToItems(Grade);`n" +
         "  }`n}`n"
-    'apps/shop/src/assets/locales/en.json' = '{"hue":{"red":"Red","blue":"Blue"},"size":{"small":"S","large":"L"},"shown":{"only":"O"},"tier":{"gold":"G"},"grade":{"Gold":"G","Silver":"S"}}'
+    'apps/shop/src/view.component.ts' = "import { Component } from '@angular/core';`n" +
+        "import { RadioListComponent } from './radio.component';`n" +
+        "export function yesNo() { return [{ value: true, label: 'answer.yes' }, { value: false, label: 'answer.no' }]; }`n" +
+        "@Component({ selector: 'app-view', standalone: true, imports: [RadioListComponent],`n" +
+        "  template: '<radio-list [items]=`"view.criteria.answers`" [(value)]=`"model.answer`"></radio-list>' })`n" +
+        "export class ViewComponent {`n" +
+        "  model = { answer: true };`n" +
+        "  view = { title: 'x', criteria: { answers: yesNo() } };`n" +
+        "}`n"
+    'apps/shop/src/assets/locales/en.json' = '{"hue":{"red":"Red","blue":"Blue"},"size":{"small":"S","large":"L"},"shown":{"only":"O"},"tier":{"gold":"G"},"grade":{"Gold":"G","Silver":"S"},"answer":{"yes":"Y","no":"N"}}'
 }
 
 # THE CONTROL AND ITS LABELS: `hues` is a const table a helper rebuilds into items (`Object.entries(t).map(([value, label]) => ..)`), `sizes` a list
@@ -84,6 +93,12 @@ Test-Case 'tsrows: a form control names the option keys it is offered, with the 
     Assert-Line $g 'grade=model.grade|label|grade.Gold|convertToItems'
     Assert-Line $g 'grade=model.grade|label|grade.Silver|convertToItems'
     Assert-NoLine $g 'model.bare'
+    # A PROPERTY OF A VIEW MODEL'S OBJECT LITERAL (`view.criteria.answers`, as a selector's `vm.criteria.x` does): the read lands on the literal's
+    # `shape_members` row, and the list is what that property is written with - here a call of `yesNo()` (`shape_values`).
+    $v = Invoke-Gate --map-query $made.Db --width 0 --limit 0 --sql ("SELECT 'view=' || o.value || '|' || o.property || '|' || o.key || '|' || coalesce(f.name, '-') AS v " +
+        "FROM control_options o LEFT JOIN functions f ON f.id = o.callee WHERE o.value = 'model.answer'")
+    Assert-Line $v 'view=model.answer|label|answer.yes|yesNo'
+    Assert-Line $v 'view=model.answer|label|answer.no|yesNo'
     # COUNTED, not looked for in the line above: a row with no value binding would concatenate to NULL and print as nothing.
     $none = Invoke-Gate --map-query $made.Db --sql "SELECT 'shown=' || count(*) AS n FROM control_options WHERE key = 'shown.only'"
     Assert-Line $none 'shown=0'
