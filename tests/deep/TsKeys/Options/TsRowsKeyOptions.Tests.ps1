@@ -67,13 +67,30 @@ $script:KeyOptionsFiles = @{
         "  model = { answer: true };`n" +
         "  view = { title: 'x', criteria: { answers: yesNo() } };`n" +
         "}`n"
-    'apps/shop/src/assets/locales/en.json' = '{"hue":{"red":"Red","blue":"Blue"},"size":{"small":"S","large":"L"},"shown":{"only":"O"},"tier":{"gold":"G"},"grade":{"Gold":"G","Silver":"S"},"answer":{"yes":"Y","no":"N"}}'
+    'apps/shop/src/pick.component.ts' = "import { Component, EventEmitter, Input, Output } from '@angular/core';`n" +
+        "@Component({ selector: 'pick-list', standalone: true, template: '' })`n" +
+        "export class PickListComponent<T> {`n  @Input() model: { ItemID: T; Label: string }[] = [];`n  @Input() value!: T;`n  @Output() valueChange = new EventEmitter<T>();`n}`n"
+    'apps/shop/src/enum.service.ts' = "import { Injectable } from '@angular/core';`n@Injectable({ providedIn: 'root' })`nexport class EnumService {`n" +
+        "  toItems(e: object, dict: { [key: string]: string }) {`n" +
+        "    return Object.keys(e).filter((k) => isNaN(Number(k))).map((name) => ({ ItemID: (e as any)[name], Label: dict[name] }));`n  }`n" +
+        "  pairs(e: object, dict: { [key: string]: string }) { return Object.entries(e).map(([name, value]) => ({ ItemID: value, Label: dict[name] })); }`n}`n"
+    'apps/shop/src/ranked.component.ts' = "import { Component } from '@angular/core';`nimport { Grade } from './grade';`n" +
+        "import { DictionaryService } from './dictionary.service';`nimport { EnumService } from './enum.service';`nimport { PickListComponent } from './pick.component';`n" +
+        "@Component({ selector: 'app-ranked', standalone: true, imports: [PickListComponent],`n" +
+        "  template: '<pick-list [(value)]=`"state.rank`" [model]=`"ranks`"></pick-list><pick-list [(value)]=`"state.pair`" [model]=`"pairs`"></pick-list><pick-list [(value)]=`"state.bare`" [model]=`"bare`"></pick-list>' })`n" +
+        "export class RankedComponent {`n" +
+        "  state = { rank: Grade.Gold, pair: Grade.Gold, bare: Grade.Gold };`n" +
+        "  ranks = this.enums.toItems(Grade, this.dictionary.getTranslationDictionary('rank'));`n" +
+        "  pairs = this.enums.pairs(Grade, this.dictionary.getTranslationDictionary('rank'));`n" +
+        "  bare = this.enums.toItems(Grade, {});`n" +
+        "  constructor(private enums: EnumService, private dictionary: DictionaryService) {}`n}`n"
+    'apps/shop/src/assets/locales/en.json' = '{"hue":{"red":"Red","blue":"Blue"},"size":{"small":"S","large":"L"},"shown":{"only":"O"},"tier":{"gold":"G"},"grade":{"Gold":"G","Silver":"S"},"answer":{"yes":"Y","no":"N"},"rank":{"Gold":"G","Silver":"S"}}'
 }
 
 # THE CONTROL AND ITS LABELS: `hues` is a const table a helper rebuilds into items (`Object.entries(t).map(([value, label]) => ..)`), `sizes` a list
 # written in place; each `<radio-list>` binds its value two-way beside them. The route is ids: the bindings, the field (`holder`) and the helper (`callee`).
 # THE CONTROL: a list bound where nothing binds a value offers nothing - `shown.only` still renders, through the child's loop, but in no control.
-Test-Case 'tsrows: a form control names the option keys it is offered, with the route they took (#117)' {
+Test-Case 'tsrows: a form control names the option keys it is offered, with the route they took (#117, #118)' {
     $made = New-TsRowsDb (New-TsRowsWorkspace $script:KeyOptionsFiles) -Shared
     Assert-Exit $made.Result 0
     $r = Invoke-Gate --map-query $made.Db --width 0 --limit 0 --sql ("SELECT 'opt=' || c.name || '|' || o.value || '|' || o.input || '.' || o.property || '|' || o.key || '|' || " +
@@ -99,6 +116,16 @@ Test-Case 'tsrows: a form control names the option keys it is offered, with the 
         "FROM control_options o LEFT JOIN functions f ON f.id = o.callee WHERE o.value = 'model.answer'")
     Assert-Line $v 'view=model.answer|label|answer.yes|yesNo'
     Assert-Line $v 'view=model.answer|label|answer.no|yesNo'
+    # A HELPER THAT MAPS STRAIGHT OUT OF THE ENUM (#118): `Object.keys(e).filter(..).map((name) => ({ Label: dict[name] }))` returned as it is, a
+    # service method called in a field initializer, the list input named `model`. THE CONTROL: the same helper handed no dictionary call offers nothing.
+    $m = Invoke-Gate --map-query $made.Db --width 0 --limit 0 --sql ("SELECT 'rank=' || o.value || '|' || o.input || '.' || o.property || '|' || o.key || '|' || coalesce(f.name, m.name, '-') AS m " +
+        "FROM control_options o LEFT JOIN functions f ON f.id = o.callee LEFT JOIN members m ON m.id = o.callee WHERE o.value LIKE 'state.%'")
+    Assert-Line $m 'rank=state.rank|model.Label|rank.Gold|toItems'
+    Assert-Line $m 'rank=state.rank|model.Label|rank.Silver|toItems'
+    Assert-Line $m 'rank=state.pair|model.Label|rank.Gold|pairs'
+    Assert-Line $m 'rank=state.pair|model.Label|rank.Silver|pairs'
+    $bare = Invoke-Gate --map-query $made.Db --sql "SELECT 'bare=' || count(*) AS n FROM control_options WHERE value = 'state.bare'"
+    Assert-Line $bare 'bare=0'
     # COUNTED, not looked for in the line above: a row with no value binding would concatenate to NULL and print as nothing.
     $none = Invoke-Gate --map-query $made.Db --sql "SELECT 'shown=' || count(*) AS n FROM control_options WHERE key = 'shown.only'"
     Assert-Line $none 'shown=0'
