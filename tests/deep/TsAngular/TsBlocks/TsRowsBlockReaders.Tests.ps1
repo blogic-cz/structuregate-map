@@ -1,7 +1,7 @@
 <#
     The BLOCK form read where the asterisk form already was: an `@switch` case restricts its switch's
     dimension as `*ngSwitchCase` does (`rust/fbtcore/src/rows/ts/gate/gate_switch.rs`), an `@for` over a list of
-    objects is a loop whose item's property reads are key sites and per-element config (`key/key_loops.rs`), and
+    objects is a loop whose item's property reads are key sites and per-element config (`key/lists/key_loops.rs`), and
     an `@if … as` / `*ngIf … as` alias is typed from its condition (`src/TsRows/TsTpl/TsTplReads.mjs`). The pinned
     `@angular/compiler@17` parses every block used here. Its helpers are `TsRows.Helpers.ps1`.
 #>

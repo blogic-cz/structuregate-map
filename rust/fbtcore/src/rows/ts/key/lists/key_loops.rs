@@ -42,9 +42,9 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 /// property -> key -> (element index, way), per loop.
-type Elements = IndexMap<String, IndexMap<String, Vec<(usize, Vec<String>)>>>;
+pub(super) type Elements = IndexMap<String, IndexMap<String, Vec<(usize, Vec<String>)>>>;
 
-fn element_keys(items: &[Element], keys: &KeySet, i18n: &[String], reader: &Returned<'_, '_>) -> Elements {
+pub(super) fn element_keys(items: &[Element], keys: &KeySet, i18n: &[String], reader: &Returned<'_, '_>) -> Elements {
     let mut out: Elements = IndexMap::new();
     for (i, item) in items.iter().enumerate() {
         let Some(object) = item.value.as_object() else { continue };
@@ -114,6 +114,11 @@ impl Element {
         Element { value, chain, from_call: false, owner: None }
     }
 
+    /// The member or function the element came out of, when a call handed it over.
+    pub(super) fn owner(&self) -> Option<&str> {
+        self.owner.as_deref()
+    }
+
     /// The element as a child receives it through one render edge (`key_inputs`): a way holds it only on a path through it.
     pub(super) fn through_edge(mut self, edge: &str) -> Element {
         self.chain.push(format!("edge:{edge}"));
@@ -165,6 +170,8 @@ pub struct Loop {
 /// field written from outside.
 pub struct Loops {
     pub list: Vec<Loop>,
+    /// The lists form controls are handed beside their value binding (`key_options`), found over the same lists.
+    pub options: Vec<super::key_options::Offered>,
     by_node: HashMap<String, usize>,
     parent: HashMap<String, String>,
     declared: HashMap<String, Vec<String>>,
@@ -172,11 +179,12 @@ pub struct Loops {
 
 impl Loops {
     pub fn new(store: &Store<'_>) -> Loops {
-        let mut out = Loops { list: Vec::new(), by_node: HashMap::new(), parent: HashMap::new(), declared: HashMap::new() };
+        let mut out = Loops { list: Vec::new(), options: Vec::new(), by_node: HashMap::new(), parent: HashMap::new(), declared: HashMap::new() };
         let gates = store.table("gates");
         let nodes = store.table("template_nodes");
         let block = |n: &Row| text(n, "kind").as_deref() == Some("ForLoopBlock");
-        if !gates.iter().any(|g| text(g, "name").as_deref() == Some("ngForOf")) && !nodes.iter().any(block) {
+        let controls = super::key_options::value_bindings(store);
+        if !gates.iter().any(|g| text(g, "name").as_deref() == Some("ngForOf")) && !nodes.iter().any(block) && controls.is_empty() {
             return out;
         }
         for n in nodes.iter() {
@@ -201,7 +209,9 @@ impl Loops {
         let functions = store.table("functions");
         let pushes = super::key_pushes::pushes(&calls, &members, &functions);
         let parent: HashMap<String, String> = functions.iter().filter_map(|f| Some((id_of(f, "id")?, text(f, "parent")?))).collect();
-        let src = ListSource { rows: &rows, by_member: &by_member, params: &params, pushes: &pushes, parent: &parent };
+        let unpacked = super::key_lists::unpacked(store);
+        let dict = store.option_list("i18n_dictionary_calls");
+        let src = ListSource { rows: &rows, by_member: &by_member, params: &params, pushes: &pushes, parent: &parent, unpacked: &unpacked, dict: &dict };
         let mut owner: HashMap<String, Option<String>> = HashMap::new();
         let mut lists: HashMap<String, Vec<Element>> = HashMap::new();
         let mut members_valued: HashSet<String> = HashSet::new();
@@ -279,6 +289,8 @@ impl Loops {
         // A LIST EVERY PARENT HANDS TO AN `@Input` is the child's (`key_inputs`).
         let handed = super::key_inputs::input_lists(store, &lists, &src, &branches);
         lists.extend(handed);
+        // WHAT A FORM CONTROL IS OFFERED: the lists bound beside its value binding (`key_options`).
+        out.options = super::key_options::offered(store, &controls, &lists, &src, &branches);
         // THE LOOP AND ITS COLLECTION, two ways: an `ngForOf` gate on the `*ngFor` wrapper, its expression the collection;
         // an `@for` block, which is no gate - its collection is the `block_ForLoopBlock` expression on its own node.
         // Either node declares the item as its `$implicit` variable.
@@ -463,7 +475,7 @@ fn declares(node: &Row, variable: &str) -> bool {
 pub fn loop_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
     let mut out = Vec::new();
     let mut nodes_hit = 0;
-    let loops = Loops::new(store);
+    let loops = store.shared("loops", Loops::new);
     if loops.list.is_empty() {
         return (out, nodes_hit);
     }

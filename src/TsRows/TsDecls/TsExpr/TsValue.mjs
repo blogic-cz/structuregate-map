@@ -146,7 +146,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       }
       const isChainLink = !!evaluated && typeof evaluated === 'object' && !Array.isArray(evaluated)
         && evaluated.$receiver !== undefined;
-      if (Array.isArray(evaluated) || isChainLink) receiver = evaluated;
+      if (Array.isArray(evaluated) || isChainLink || objectTable(node.expression.expression)) receiver = evaluated;
       else if (!!evaluated && typeof evaluated === 'object' && !Array.isArray(evaluated)) {
         const id = evaluated.$expr_id ?? evaluated.$cond_expr;
         if (typeof id === 'string') receiverExpr = id;
@@ -170,6 +170,15 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       ...(target ? { $target: target } : {}),
       ...(target && owner ? { $owner: owner } : {}),
     };
+  }
+
+  /** A TABLE READ AS A LIST (rows 109, #117): `Object.entries(t)` / `Object.values(t)` - the builtin, by its declaration on `ObjectConstructor` - is
+   *  kept as the receiver of the call chained on it, so `Object.entries(table).map(([value, label]) => ({ value, label }))` says what it maps
+   *  over, and a reader can hand it the table a caller passes (`rust/fbtcore/src/rows/ts/key/lists/key_lists.rs`). Any other non-array receiver is not. */
+  function objectTable(n) {
+    if (!ts.isCallExpression(n) || !ts.isPropertyAccessExpression(n.expression) || !['entries', 'values'].includes(n.expression.name.text)) return false;
+    return (checker.getSymbolAtLocation(n.expression.name)?.declarations ?? [])
+      .some((d) => d.parent !== undefined && ts.isInterfaceDeclaration(d.parent) && d.parent.name.text === 'ObjectConstructor');
   }
 
   /** THE FUNCTION A CALL RUNS, where the tree declares it with a body (rows 99, `draftWrites`): a function, a method, or a `const` holding an arrow or function

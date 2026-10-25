@@ -142,7 +142,7 @@ An `Fn` tree names its `params` and its `rest` parameter.
   nearest base's (`TsRefs.mjs::ownMember`).
 
 - **A spread call argument keeps what it spreads** (rows 44, `TsBody.mjs::emitCall`): `list.push(...this.make())` carries `$spread`, the
-  evaluated expression, beside the argument's own text - `key/key_lists.rs` reads the callee's list through it.
+  evaluated expression, beside the argument's own text - `key/lists/key_lists.rs` reads the callee's list through it.
 
 - **The rows join by id, not by position** (rows 33): a `$fn` call argument, return value, local value, or one an assignment or a member's initializer holds (in place or inside an object, rows 44) names its `functions` row (`$fn_id`,
   `TsWalk.mjs::linkFunctions` - a `const` arrow's row sits at the NAME, its tree at the arrow), and a chained call

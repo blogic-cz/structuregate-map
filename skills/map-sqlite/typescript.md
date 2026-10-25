@@ -41,7 +41,7 @@ Beside the shared tables it adds the FRAMEWORK tables:
 | templates | `templates` `template_nodes` `bindings` `renders` `renders_out_of_scope` `render_graph` `component_reach` `selector_index` |
 | routing and gates | `routes` `route_keys` `gates` `gate_values` `gate_index` |
 | NgRx | `state_actions` `state_handlers` `state_selectors` `state_effects` |
-| the closure, derived LAST from every other table | `render_path` `key_reach` `gate_features` (+ `gate_values`): where a translation key can be travelled to from a routed root, what gates every way in, which capability each gate requires |
+| the closure, derived LAST from every other table | `render_path` `key_reach` `gate_features` (+ `gate_values`): where a translation key can be travelled to from a routed root, what gates every way in, which capability each gate requires; `control_options`: which option keys each form control is offered ([typescript-refs.md](typescript-refs.md)) |
 
 * **`components.class`** is the class row (`c:...`) that `routes.component_id`, `render_graph.from_class`
   and `renders` point at. `renders` holds the edges Angular instantiates, each with its `scope` (`declared`,

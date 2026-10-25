@@ -1,6 +1,6 @@
 <#
     A key reaches the template through shapes the field readers once skipped (`key/fields/key_follow.rs`,
-    `Returned::through`, `key/key_lists.rs`): a constant object indexed by a variable, a list a method fills with
+    `Returned::through`, `key/lists/key_lists.rs`): a constant object indexed by a variable, a list a method fills with
     `.push(..)` and returns (or a component's own field list it pushes to), a template literal's hole, a local
     holding the call and a string method chained on it. A constant never indexed and a list nobody returns stay
     unlinked. Its helpers are `TsRows.Helpers.ps1`.

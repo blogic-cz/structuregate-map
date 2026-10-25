@@ -2,7 +2,7 @@
     A return that WRAPS a translate call hands its key to the field holding the call
     (`rust/fbtcore/src/rows/ts/key/fields/key_follow.rs`, `Returned::through`): an object's property value, a
     `+` chain's part, the argument of `Promise.resolve`; a list's element property is a site only where an `*ngFor`
-    reads it (`key/key_loops.rs`); a `filter`/`slice` of a list hands back what its receiver does. The argument of any
+    reads it (`key/lists/key_loops.rs`); a `filter`/`slice` of a list hands back what its receiver does. The argument of any
     other call renders nothing in the field.
     Its helpers are `TsRows.Helpers.ps1`.
 #>

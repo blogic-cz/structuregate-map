@@ -1,6 +1,6 @@
 <#
     Lists of class instances a parent builds and a child's table renders, and the hand-overs around them
-    (`rust/fbtcore/src/rows/ts/key/key_lists.rs`, `key/fields/key_inputs.rs`, `key/fields/key_handed.rs`,
+    (`rust/fbtcore/src/rows/ts/key/lists/key_lists.rs`, `key/fields/key_inputs.rs`, `key/fields/key_handed.rs`,
     `key/fields/key_classes.rs`, `key/fields/key_then.rs`). Its helpers are `TsRows.Helpers.ps1`.
 #>
 

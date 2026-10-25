@@ -137,6 +137,13 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
         && values.length > 0 && values.length <= 256 && values.every((v) => typeof v === 'string')) {
         return { ...api.unresolved(node), $indexed: values };
       }
+      // AN INDEX INTO THE FUNCTION'S OWN PARAMETER (rows 110, #117): `translations?.[x.name]` - which table it reads, the caller
+      // decides, so `$param_index` names the parameter and a reader holding a call's arguments puts the caller's in its place
+      // (`rust/fbtcore/src/rows/ts/key/lists/key_lists.rs::handed`).
+      const held = ts.isIdentifier(node.expression) ? symbolAt(node.expression)?.valueDeclaration : undefined;
+      if (held !== undefined && ts.isParameter(held) && ts.isIdentifier(held.name)) {
+        return { ...api.unresolved(node), $param_index: held.name.text };
+      }
     }
     return api.unresolved(node);
   }

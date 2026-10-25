@@ -1,5 +1,5 @@
 <#
-    More shapes a key reaches the template through (`key/fields/key_follow.rs`, `key/key_lists.rs`,
+    More shapes a key reaches the template through (`key/fields/key_follow.rs`, `key/lists/key_lists.rs`,
     `key/fields/key_methods.rs`): a `+=` on a returned local, an `await` and a `.then` callback of a call, a list
     copied by `slice` / a spread / a `map` that keeps its parameter, a constant ARRAY read by an unknown index, and an
     arrow PROPERTY the template calls. Each has a negative beside it: a `+=` on a local nobody returns, a `.then`
