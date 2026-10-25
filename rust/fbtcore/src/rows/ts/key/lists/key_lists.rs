@@ -108,7 +108,19 @@ impl ListSource<'_, '_> {
             return Some((items, callee));
         }
         let args = args?;
-        Some((self.table_lists(&callee, args)?, callee))
+        let items = self.table_lists(&callee, args).or_else(|| self.mapped_lists(&callee, args))?;
+        Some((items, callee))
+    }
+
+    /// Each handed dictionary by the parameter it lands in - None when the call hands none.
+    fn dictionaries(&self, callee: &str, args: &[Value]) -> Option<HashMap<&str, Value>> {
+        let names = self.params.get(callee)?;
+        let dicts: HashMap<&str, Value> = names
+            .iter()
+            .zip(args)
+            .filter_map(|(n, a)| Some((n.as_str(), super::key_follow::dictionary(a, self.dict)?)))
+            .collect();
+        (!dicts.is_empty()).then_some(dicts)
     }
 
     /// A DICTIONARY THE CALLER HANDS IN, INDEXED BY THE ELEMENTS (rows 110, #117): `convertToItems(Hue,
@@ -118,15 +130,7 @@ impl ListSource<'_, '_> {
     /// A spread of a `.map(cb)` whose one returned object holds such a property is that object: the elements the
     /// receiver yields are not read, only what each of them is labelled with. Anything else stays as it was.
     fn handed(&self, callee: &str, items: Vec<Value>, args: &[Value]) -> Vec<Value> {
-        let Some(names) = self.params.get(callee) else { return items };
-        let dicts: HashMap<&str, Value> = names
-            .iter()
-            .zip(args)
-            .filter_map(|(n, a)| Some((n.as_str(), super::key_follow::dictionary(a, self.dict)?)))
-            .collect();
-        if dicts.is_empty() {
-            return items;
-        }
+        let Some(dicts) = self.dictionaries(callee, args) else { return items };
         items
             .into_iter()
             .map(|item| {
@@ -134,6 +138,16 @@ impl ListSource<'_, '_> {
                 relabelled(built, &dicts).unwrap_or(item)
             })
             .collect()
+    }
+
+    /// A LIST MAPPED STRAIGHT OUT OF ITS RECEIVER, LABELLED FROM A HANDED DICTIONARY (#118): every return of `callee` is a
+    /// `.map(cb)` - `Object.entries(e).map(([name, v]) => ({ label: dict[name] }))`, `Object.keys(e).filter(..).map(..)` -
+    /// whose one returned object reads a dictionary the call hands in (`handed`). Each return is one element, that object
+    /// with the dictionary's keys in place of the read; what the receiver yields is not read, as for a pushed spread. None
+    /// when any return is anything else, or reads no handed dictionary.
+    fn mapped_lists(&self, callee: &str, args: &[Value]) -> Option<Vec<Value>> {
+        let dicts = self.dictionaries(callee, args)?;
+        self.by_member.get(callee)?.iter().map(|r| relabelled(self.mapped_object(r.get("value")?)?, &dicts)).collect()
     }
 
     /// The one object a `.map(cb)` call's callback returns, `cb` the function its first argument names.
