@@ -9,7 +9,7 @@
 //! no class answers is `kind = 'none'`. `--map-slice` follows a link from the call's file to the class's (`type_file`).
 
 use super::csconfig::NameTypes;
-use super::enumtypes::{candidates, classes, lines, selected, Keying};
+use super::enumtypes::{candidates, classes, lines, selected, Class, Keying};
 use crate::rows::dups::{has_columns, text};
 use rusqlite::{params, Connection};
 
@@ -26,6 +26,19 @@ fn bare(symbol: &str) -> String {
         }
     }
     out
+}
+
+/// The classes a name selects: as `enumtypes::selected` matches a member's name - or, when none answers and the name is the
+/// dictionary's OWN key of an override (#125, `Include("Acme.Footer", ..)`: an override is stored as `<prefix>.<Name>`), the one
+/// override of `Name` whose prefix is `<prefix>`.
+fn choose<'c>(candidates: &[&'c Class], value: &str, keying: &Keying<'_>) -> Vec<(&'static str, Option<String>, &'c Class)> {
+    let plain = selected(candidates, value, keying);
+    if !plain.is_empty() {
+        return plain;
+    }
+    let Some((prefix, name)) = value.rsplit_once('.') else { return plain };
+    let same = |a: &str| if keying.ignore_case { a.eq_ignore_ascii_case(prefix) } else { a == prefix };
+    selected(candidates, name, keying).into_iter().filter(|(kind, p, _)| *kind == "override" && p.as_deref().is_some_and(same)).collect()
 }
 
 /// The table, rewritten whole; the notes on conventions that matched nothing.
@@ -82,7 +95,7 @@ pub fn write(conn: &Connection, specs: &[NameTypes]) -> rusqlite::Result<(usize,
             }
             for (value, via) in values {
                 let mut any = false;
-                for (kind, prefix, c) in value.as_deref().map(|v| selected(&candidates, v, &keying)).unwrap_or_default() {
+                for (kind, prefix, c) in value.as_deref().map(|v| choose(&candidates, v, &keying)).unwrap_or_default() {
                     add.execute(params![spec.method, call, file, line, spec.parameter, value, via, kind, prefix, c.symbol, c.file, lines.get(&c.symbol)])?;
                     written += 1;
                     any = true;
