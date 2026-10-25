@@ -46,3 +46,22 @@ Test-Case 'csnametypes: a name a call hands a declared lookup links to the class
     $in = Invoke-Gate --map-query $slice --width 0 --sql "SELECT 'in=' || path AS r FROM files WHERE sliced = 1"
     Assert-Line $in 'in=Body.cs'
 }
+
+# (#124) A METHOD OF A GENERIC CLASS: a call is stored closed (`TemplateBase<System.Object>.Include`), and the convention may name it bare or open -
+# generic argument lists are ignored on both sides, at every level.
+Test-Case 'csnametypes: a method declared on a generic class links its calls, however the convention spells it (#124)' {
+    $tree = Use-Tree @{
+        'Demo.csproj' = $script:CsNameTypesFiles['Demo.csproj']
+        'TemplateBase.cs' = "namespace Demo.Services;`npublic abstract class TemplateBase<TModel>`n{`n    public TModel? Model { get; set; }`n    public string Include(string name, object? model) => name;`n}`n"
+        'Standard/Parts.cs' = "namespace Demo.Templates.Emails.Standard;`npublic class Header : Demo.Services.TemplateBase<object> { }`n" +
+            "public class Body : Demo.Services.TemplateBase<object>`n{`n    public string Render() => Include(`"Header`", Model);`n}`n"
+        'bare.json' = '{ "typesByName": [ { "method": "Demo.Services.TemplateBase.Include", "parameter": "name", "base": "Demo.Services.TemplateBase", "namespace": "Templates.Emails", "default": ".Standard" } ] }'
+        'open.json' = '{ "typesByName": [ { "method": "Demo.Services.TemplateBase<TModel>.Include", "parameter": "name", "base": "Demo.Services.TemplateBase<TModel>", "namespace": "Templates.Emails", "default": ".Standard" } ] }'
+    }
+    foreach ($config in 'bare.json', 'open.json') {
+        $db = Join-Path $tree "$config.sqlite"
+        Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db --cs-config (Join-Path $tree $config)) 0
+        $r = Invoke-Gate --map-query $db --width 0 --sql "SELECT 'g=' || line || '|' || value || '|' || via || '|' || kind || '|' || coalesce(type_symbol, '-') AS l FROM name_type_links"
+        Assert-Line $r 'g=5|Header|literal|default|Demo.Templates.Emails.Standard.Header'
+    }
+}

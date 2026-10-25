@@ -13,6 +13,21 @@ use super::enumtypes::{candidates, classes, lines, selected, Keying};
 use crate::rows::dups::{has_columns, text};
 use rusqlite::{params, Connection};
 
+/// A symbol without any generic argument list, at any level (#124): `Demo.TemplateBase<System.Object>.Include<T>` is
+/// `Demo.TemplateBase.Include` - a call of a generic class's method is stored CLOSED, the convention names it open or bare.
+fn bare(symbol: &str) -> String {
+    let (mut out, mut nesting) = (String::with_capacity(symbol.len()), 0usize);
+    for c in symbol.chars() {
+        match c {
+            '<' => nesting += 1,
+            '>' => nesting = nesting.saturating_sub(1),
+            _ if nesting == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
 /// The table, rewritten whole; the notes on conventions that matched nothing.
 pub fn write(conn: &Connection, specs: &[NameTypes]) -> rusqlite::Result<(usize, Vec<String>)> {
     crate::rows::cells::drop_children(conn, "name_type_links").map_err(|e| rusqlite::Error::InvalidParameterName(format!("{e:#}")))?;
@@ -36,13 +51,17 @@ pub fn write(conn: &Connection, specs: &[NameTypes]) -> rusqlite::Result<(usize,
         let (candidates, note) = candidates(&classes, &spec.base, &spec.namespace, "typesByName");
         notes.extend(note);
         let keying = Keying { prefixes: &spec.prefixes, default: spec.default.as_deref(), ignore_case: spec.ignore_case };
-        // A GENERIC METHOD'S SYMBOL carries its arguments (`Render<T>`): compared without them.
+        // GENERIC ARGUMENTS IGNORED ON BOTH SIDES (#124): a generic method's (`Render<T>`) and its class's - `TemplateBase<System.Object>.Include`
+        // is how a call of `TemplateBase<TModel>.Include` is stored. Narrowed by the method's name in SQL, matched bare here.
+        let wanted = bare(&spec.method);
+        let name = wanted.rsplit('.').next().unwrap_or("").to_string();
         let mut stmt = conn.prepare(
-            "SELECT c.id, c.file, c.line, a.const, a.const_kind, a.symbol FROM calls c JOIN arguments a ON a.call = c.id AND a.name = ?2 \
-             JOIN files f ON f.id = c.file WHERE f.lang = 'csharp' AND (c.symbol = ?1 OR c.symbol LIKE ?1 || '<%') ORDER BY c.file, c.line, c.id",
+            "SELECT c.id, c.file, c.line, a.const, a.const_kind, a.symbol, c.symbol FROM calls c JOIN arguments a ON a.call = c.id AND a.name = ?2 \
+             JOIN files f ON f.id = c.file WHERE f.lang = 'csharp' AND c.symbol LIKE '%' || ?1 || '%' ORDER BY c.file, c.line, c.id",
         )?;
         let calls: Vec<(String, String, String, String, String, String)> = stmt
-            .query_map(params![spec.method, spec.parameter], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, text(r, 4)?, text(r, 5)?)))?
+            .query_map(params![name, spec.parameter], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, text(r, 4)?, text(r, 5)?, text(r, 6)?)))?
+            .filter_map(|r| r.map(|(id, file, line, constant, kind, symbol, callee)| (bare(&callee) == wanted).then_some((id, file, line, constant, kind, symbol))).transpose())
             .collect::<rusqlite::Result<_>>()?;
         if calls.is_empty() {
             notes.push(format!("typesByName: no call of {} hands a `{}` argument", spec.method, spec.parameter));
@@ -76,4 +95,14 @@ pub fn write(conn: &Connection, specs: &[NameTypes]) -> rusqlite::Result<(usize,
         }
     }
     Ok((written, notes))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_symbol_is_compared_without_any_generic_argument_list() {
+        assert_eq!(super::bare("Demo.TemplateBase<System.Object>.Include"), "Demo.TemplateBase.Include");
+        assert_eq!(super::bare("Demo.TemplateBase<TModel>.Include<Dictionary<string, int>>"), "Demo.TemplateBase.Include");
+        assert_eq!(super::bare("Demo.Plain.Include"), "Demo.Plain.Include");
+    }
 }
