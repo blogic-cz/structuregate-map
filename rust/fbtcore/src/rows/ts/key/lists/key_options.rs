@@ -107,7 +107,7 @@ pub(super) fn offered(store: &Store<'_>, controls: &HashMap<String, (String, Str
     }
     let expressions = store.table("expressions");
     let trees = binding_trees(&expressions);
-    let paths = super::key_inputs::path_lists(store, branches);
+    let paths = super::key_inputs::path_lists(store, branches, src);
     let mut out = Vec::new();
     for b in store.table("bindings").iter().filter(|b| text(b, "kind").as_deref() == Some("input")) {
         let (Some(id), Some(node), Some(input)) = (id_of(b, "id"), text(b, "node"), text(b, "name")) else { continue };

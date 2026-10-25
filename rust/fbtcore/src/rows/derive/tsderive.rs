@@ -25,7 +25,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// THE TABLES THE CLOSURE DERIVES, stated here because this side writes them and node never sees one.
-pub const CLOSURE_TABLES: &[&str] = &["render_path", "gate_features", "gate_values", "key_reach", "control_options", "key_builds"];
+pub const CLOSURE_TABLES: &[&str] = &["render_path", "gate_features", "gate_values", "key_reach", "control_options", "key_builds", "key_node_ways"];
 
 /// The `_meta` key a derivation is recorded under: the build that derived, and what it needs that no row holds.
 const RECORD: &str = "rederive:typescript";

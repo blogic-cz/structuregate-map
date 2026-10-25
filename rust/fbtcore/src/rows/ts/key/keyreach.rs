@@ -321,6 +321,10 @@ pub fn build_closure(
     // WHICH TEMPLATE LITERAL BUILDS EACH KEY, over which enum (#123).
     let builds = super::key_builds::rows(store);
     let build_rows = builds.len();
+    // WHICH WAY EACH NODE WAS REACHED (#126): route, binding and the literal that built the key there.
+    for row in super::key_node_ways::rows(store, &routes, &builds) {
+        store.emit("key_node_ways", row);
+    }
     for row in builds {
         store.emit("key_builds", row);
     }

@@ -87,7 +87,83 @@ $script:KeyOptionsFiles = @{
         "  pairs = this.enums.pairs(Grade, this.dictionary.getTranslationDictionary('rank'));`n" +
         "  bare = this.enums.toItems(Grade, {});`n" +
         "  constructor(private enums: EnumService, private dictionary: DictionaryService) {}`n}`n"
-    'apps/shop/src/assets/locales/en.json' = '{"hue":{"red":"Red","blue":"Blue"},"size":{"small":"S","large":"L"},"shown":{"only":"O"},"tier":{"gold":"G"},"grade":{"Gold":"G","Silver":"S"},"answer":{"yes":"Y","no":"N"},"spelled":{"out":"W"},"crossed":{"over":"C"},"rank":{"Gold":"G","Silver":"S"}}'
+    # AN ENUM HELPER CHAINED (#117 follow-up): a library's `for..in` list (`enumToList`), a helper spreading its `.map(..)`, a second
+    # helper mapping the first - and a caller's `.filter(..)`/`.map(..)` on top of any of them.
+    'apps/shop/src/ui/object.utils.ts' = "export const enumToList = <T extends object>(e: T): { name: string; value: T[keyof T] }[] => {`n" +
+        "  const result: { name: string; value: T[keyof T] }[] = [];`n" +
+        "  for (const item in e) {`n    result.push({ name: (e as any)[item], value: item as T[keyof T] });`n  }`n  return result;`n};`n"
+    'apps/shop/src/select-items.ts' = "import { enumToList } from './ui/object.utils';`n" +
+        "export const toSelect = <T extends object>(e: T, translations?: { [key: string]: string }, empty?: boolean): { label: string; value: unknown }[] => {`n" +
+        "  const out: { label: string; value: unknown }[] = [];`n  if (empty) {`n    out.push({ label: '---', value: null });`n  }`n" +
+        "  out.push(...enumToList(e).map((x) => ({ label: translations?.[x.name] ?? x.name, value: x.value })));`n  return out;`n};`n" +
+        "export const toRadio = <T extends object>(e: T, translations?: { [key: string]: string }): { ItemID: unknown; Label: string }[] => {`n" +
+        "  return toSelect(e, translations).map((x) => ({ ItemID: x.value, Label: x.label }));`n};`n"
+    'apps/shop/src/tone.component.ts' = "import { Component, OnInit } from '@angular/core';`nimport { DictionaryService } from './dictionary.service';`n" +
+        "import { enumToList } from './ui/object.utils';`nimport { toRadio, toSelect } from './select-items';`n" +
+        "import { RadioListComponent } from './radio.component';`nimport { PickListComponent } from './pick.component';`n" +
+        "export enum Tone { Warm = 'Warm', Cool = 'Cool' }`n" +
+        "@Component({ selector: 'app-tone', standalone: true, imports: [RadioListComponent, PickListComponent],`n" +
+        "  template: '<radio-list [items]=`"tones`" [(value)]=`"pick.tone`"></radio-list><pick-list [(value)]=`"pick.kind`" [model]=`"kinds`"></pick-list>' +`n" +
+        "    '<radio-list [items]=`"months`" [(value)]=`"pick.month`"></radio-list><radio-list [items]=`"plain`" [(value)]=`"pick.plain`"></radio-list>' +`n" +
+        "    '<radio-list [items]=`"rates`" [(value)]=`"pick.rate`"></radio-list><radio-list [items]=`"steps`" [(value)]=`"pick.step`"></radio-list>' +`n" +
+        "    '<pick-list [(value)]=`"pick.answer`" [model]=`"criteria.answers`"></pick-list>' })`n" +
+        "export class ToneComponent implements OnInit {`n" +
+        "  pick = { tone: '', kind: '', month: '', plain: '', rate: '', step: '', answer: '' };`n" +
+        "  tones = toSelect(Tone, this.dictionary.getTranslationDictionary('tone')).filter((x) => x.value !== Tone.Cool);`n" +
+        "  plain = toSelect(Tone).filter((x) => x.value !== Tone.Cool);`n" +
+        "  kinds: { ItemID: unknown; Label: string }[] = [];`n" +
+        "  months: { label: string; value: string }[] = [];`n" +
+        "  rates = this.rateOptions();`n" +
+        "  steps = this.stepOptions();`n" +
+        "  criteria!: { answers: { ItemID: unknown; Label: string }[] };`n" +
+        "  constructor(private dictionary: DictionaryService) {}`n" +
+        "  private rateOptions() {`n    return toSelect(Tone, this.dictionary.getTranslationDictionary('rate'));`n  }`n" +
+        "  private stepOptions() {`n    return [{ label: 'step.none', value: '' as unknown }].concat(toSelect(Tone, this.dictionary.getTranslationDictionary('step')).map((x) => ({ ...x, value: x.value })));`n  }`n" +
+        "  ngOnInit() {`n" +
+        "    this.criteria = { answers: toRadio(Tone, this.dictionary.getTranslationDictionary('answer')) };`n" +
+        "    this.kinds = toRadio(Tone).filter((x) => x.ItemID !== Tone.Cool).map((x) => ({ ItemID: x.ItemID, Label: ``kind.`${x.Label}`` }));`n" +
+        "    this.months = enumToList(this.dictionary.getTranslationDictionary('month')).map((x, i) => ({ label: x.name, value: String(i + 1) }));`n" +
+        "  }`n}`n"
+    # A LABELS TABLE THE CLASS READS THROUGH `this` (#117 follow-up): template literals over the class's own fields, up to a base's.
+    'apps/shop/src/fee-base.ts' = "export abstract class FeeBase {`n  rootKey = 'fee';`n}`n"
+    'apps/shop/src/fee.component.ts' = "import { Component, OnInit } from '@angular/core';`nimport { FeeBase } from './fee-base';`n" +
+        "import { PickListComponent } from './pick.component';`n" +
+        "@Component({ selector: 'app-fee', standalone: true, imports: [PickListComponent],`n" +
+        "  template: '<pick-list [(value)]=`"fee.kind`" [model]=`"feeOptions`"></pick-list><pick-list [(value)]=`"fee.moved`" [model]=`"movedOptions`"></pick-list>' })`n" +
+        "export class FeeComponent extends FeeBase implements OnInit {`n" +
+        "  fee = { kind: 0, moved: 0 };`n" +
+        "  feeResource = ```${this.rootKey}.plan``;`n" +
+        "  moved = 'fee';`n" +
+        "  labels = { plan: { prepaid: ```${this.feeResource}.prepaid``, express: ```${this.feeResource}.express`` } };`n" +
+        "  feeOptions: { ItemID: number; Label: string }[] = [];`n" +
+        "  movedOptions: { ItemID: number; Label: string }[] = [];`n" +
+        "  ngOnInit() {`n" +
+        "    this.moved = 'other';`n" +
+        "    this.feeOptions = [{ ItemID: 1, Label: this.labels.plan.prepaid }, { ItemID: 2, Label: this.labels.plan.express }];`n" +
+        "    this.movedOptions = [{ ItemID: 1, Label: ```${this.moved}.plan.prepaid`` }];`n" +
+        "  }`n}`n"
+    # A PIPE THAT RELABELS THE LIST FROM A DICTIONARY THE TEMPLATE NAMES (#117 follow-up).
+    'apps/shop/src/labelled.pipe.ts' = "import { Pipe, PipeTransform } from '@angular/core';`nimport { DictionaryService } from './dictionary.service';`n" +
+        "@Pipe({ name: 'labelled', standalone: true })`nexport class LabelledPipe implements PipeTransform {`n" +
+        "  constructor(private dictionary: DictionaryService) {}`n" +
+        "  transform(items: { label: string; value: unknown }[], path: string): { label: string; value: unknown }[] {`n" +
+        "    if (items.length === 0) {`n      return [];`n    }`n" +
+        "    const dict = this.dictionary.getTranslationDictionary(path);`n" +
+        "    return items.map((item) => ({ ...item, label: dict[item.label] ?? '' }));`n  }`n}`n"
+    'apps/shop/src/shade.component.ts' = "import { Component, Input } from '@angular/core';`nimport { Tone } from './tone.component';`nimport { toSelect } from './select-items';`n" +
+        "import { LabelledPipe } from './labelled.pipe';`nimport { RadioListComponent } from './radio.component';`n" +
+        "@Component({ selector: 'app-shade', standalone: true, imports: [RadioListComponent, LabelledPipe],`n" +
+        "  template: '<radio-list [items]=`"shades.items | labelled : shades.path`" [(value)]=`"shade.a`"></radio-list>' +`n" +
+        "    '<radio-list [items]=`"toned | labelled : \'kind\'`" [(value)]=`"shade.b`"></radio-list><radio-list [items]=`"toned | labelled : free`" [(value)]=`"shade.c`"></radio-list>' +`n" +
+        "    '<radio-list [items]=`"view.hues.items | labelled : view.hues.path`" [(value)]=`"shade.d`"></radio-list>' })`n" +
+        "export class ShadeComponent {`n" +
+        "  @Input() free = '';`n" +
+        "  shade = { a: '', b: '', c: '', d: '' };`n" +
+        "  view = { hues: { items: toSelect(Tone), path: 'step' } };`n" +
+        "  shades = { items: toSelect(Tone), path: 'rate' };`n" +
+        "  toned = toSelect(Tone);`n" +
+        "}`n"
+    'apps/shop/src/assets/locales/en.json' = '{"hue":{"red":"Red","blue":"Blue"},"size":{"small":"S","large":"L"},"shown":{"only":"O"},"tier":{"gold":"G"},"grade":{"Gold":"G","Silver":"S"},"answer":{"yes":"Y","no":"N","Warm":"W","Cool":"C"},"spelled":{"out":"W"},"crossed":{"over":"C"},"rank":{"Gold":"G","Silver":"S"},"tone":{"Warm":"W","Cool":"C"},"kind":{"Warm":"W","Cool":"C"},"month":{"Jan":"J","Feb":"F"},"rate":{"Warm":"W","Cool":"C"},"step":{"none":"-","Warm":"W","Cool":"C"},"fee":{"plan":{"prepaid":"P","express":"E"}}}'
 }
 
 # THE CONTROL AND ITS LABELS: `hues` is a const table a helper rebuilds into items (`Object.entries(t).map(([value, label]) => ..)`), `sizes` a list
@@ -143,6 +219,60 @@ Test-Case 'tsrows: a form control names the option keys it is offered, with the 
     Assert-Line $k 'reach=hue.red|field_binding|1'
     Assert-Line $k 'reach=hue.blue|field_binding|1'
     Assert-Line $k 'reach=shown.only|field_binding|1'
+}
+
+# AN ENUM HELPER UNDER A CALLER'S CHAIN (#117 follow-up): `toSelect(Tone, dict).filter(..)` keeps the helper's elements - a filter keeps a
+# subset, so every key any of them holds; `.map((x) => ({ label: x.name }))` over a list is one element per element of it, `x.name` the
+# element's `name` - here the dictionary's values a `for..in` helper copies (`enumToList(dict)`), every key under its prefix; a helper
+# mapping another (`toRadio` over `toSelect`) and a template literal over the element (`kind.${x.Label}`). THE CONTROL: the same chain
+# handed no dictionary offers nothing.
+Test-Case 'tsrows: a control offers the keys of an enum helper a caller filters or maps (#117)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:KeyOptionsFiles) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --limit 0 --sql "SELECT 'tone=' || value || '|' || input || '.' || property || '|' || key AS t FROM control_options WHERE value LIKE 'pick.%'"
+    Assert-Line $r 'tone=pick.tone|items.label|tone.Warm'
+    Assert-Line $r 'tone=pick.tone|items.label|tone.Cool'
+    Assert-Line $r 'tone=pick.month|items.label|month.Jan'
+    Assert-Line $r 'tone=pick.month|items.label|month.Feb'
+    Assert-Line $r 'tone=pick.kind|model.Label|kind.Warm'
+    Assert-Line $r 'tone=pick.kind|model.Label|kind.Cool'
+    Assert-NoLine $r 'pick.plain'
+    # A METHOD RETURNING THE HELPER'S CALL is its list; `[..].concat(..)` the receiver's and the argument's; a property of a field object a
+    # method writes with a call (`this.criteria = { answers: toRadio(..) }`) is that call's list.
+    Assert-Line $r 'tone=pick.rate|items.label|rate.Warm'
+    Assert-Line $r 'tone=pick.rate|items.label|rate.Cool'
+    Assert-Line $r 'tone=pick.step|items.label|step.none'
+    Assert-Line $r 'tone=pick.step|items.label|step.Warm'
+    Assert-Line $r 'tone=pick.answer|model.Label|answer.Warm'
+    Assert-Line $r 'tone=pick.answer|model.Label|answer.Cool'
+}
+
+# A LABELS TABLE READ THROUGH `this` (#117 follow-up): `{ Label: this.labels.plan.prepaid }` over `labels = { plan: { prepaid: `${this.feeResource}.prepaid` } }`,
+# `feeResource = `${this.rootKey}.plan`` and the base class's `rootKey = 'fee'` is `fee.plan.prepaid`. THE CONTROL: a field the class also
+# writes later (`this.moved = 'other'`) is no constant, so its template spells nothing.
+Test-Case 'tsrows: a control offers the keys a labels table spells through the class fields (#117)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:KeyOptionsFiles) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --limit 0 --sql "SELECT 'fee=' || value || '|' || input || '.' || property || '|' || key AS t FROM control_options WHERE value LIKE 'fee.%'"
+    Assert-Line $r 'fee=fee.kind|model.Label|fee.plan.prepaid'
+    Assert-Line $r 'fee=fee.kind|model.Label|fee.plan.express'
+    Assert-NoLine $r 'fee.moved'
+}
+
+# A PIPE REBUILDING THE BOUND LIST (#117 follow-up): `items | labelled : path` over `transform(items, path)` returning `items.map((item) => ({ ...item,
+# label: dict[item.label] ?? '' }))`, `dict` a `const` of `getTranslationDictionary(path)` - the template's `path` a literal or an object literal's
+# property - labels every element with every key under it. THE CONTROL: a path the template reads from an input spells nothing.
+Test-Case 'tsrows: a control offers the keys a pipe relabels its list with (#117)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:KeyOptionsFiles) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --limit 0 --sql "SELECT 'shade=' || value || '|' || input || '.' || property || '|' || key AS t FROM control_options WHERE value LIKE 'shade.%'"
+    Assert-Line $r 'shade=shade.a|items.label|rate.Warm'
+    Assert-Line $r 'shade=shade.a|items.label|rate.Cool'
+    Assert-Line $r 'shade=shade.b|items.label|kind.Warm'
+    Assert-Line $r 'shade=shade.b|items.label|kind.Cool'
+    # A VIEW MODEL HOLDING BOTH the list and its path, two levels down: each read of the binding is the property it lands on.
+    Assert-Line $r 'shade=shade.d|items.label|step.Warm'
+    Assert-NoLine $r 'shade.c'
 }
 
 }

@@ -97,6 +97,11 @@ export function rollupRefIds(store) {
     const id = idOf(asRef(row.resolved));
     if (id !== null) row.resolved_id = id;
   }
+  // THE ENUM A SWITCH TESTS (rows 114, #127, `TsExpr/TsStatements/TsCases.mjs`): its `enums` row.
+  for (const row of store.table('switch_cases')) {
+    const id = idOf(asRef(row.discriminant_enum));
+    if (id !== null) row.discriminant_enum_id = id;
+  }
   // A CALL'S TARGET IS FOUND BY ITS PLACE, never by its name (rows 80, 81): `target.line` is the declaration the checker named (`TsExpr/TsReadRefs.mjs::targetLine`), and the row at that file, line and
   // name is `target_id` - a function, a method, a class, the member of a type or an object literal, a local, a module const. The name key above bound a bare `getAmounts(..)` to a same-named METHOD of the
   // class around a local `const getAmounts`, and `Alpha.getAge(..)`, a property, to a `function getAge` of the file. A place with no row has NO id: falling back to the name was the bug.

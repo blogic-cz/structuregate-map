@@ -29,17 +29,18 @@ requires and which enum members it still permits.
   before anything folds: no live way left is `n_paths 0` - the key renders for nobody - and its roots go too. A style
   gate whose value hides on every side (`style_hides.when = always`, `[style.display]="'none'"`) is dead the same way (#54).
 - **`key_builds` IS WHICH TEMPLATE LITERAL BUILDS A KEY** (#123, `key/key_builds.rs`): one row per (key, literal, hole), each hole's text and, for a
-  hole `hole_refs` types by an enum, the `enums` row and member; a typed hole no member fills builds no such key. Emitted before `release`.
+  hole `hole_refs` types by an enum, the `enums` row and member; a typed hole no member fills builds no such key. `key_node_ways` (#126, `key/routes/key_node_ways.rs`): per `key_reach.nodes` node, each way's route, binding and building literal (`typed` from `key_builds`). Both emitted before `release`.
 - **`control_options` IS WHAT A FORM CONTROL IS OFFERED** (#117, `key/lists/key_options.rs`): a node binding a value (an input `x` and
   an output `xChange` over one expression, or `ngModel`/`formControl`/`formControlName`) offers every key an element's property holds
   in a list another input of it is bound to (`key_inputs::bound_list`, over the lists `Loops` finds - shared, `Store::shared("loops")`).
-  A const table a helper rebuilds (`Object.entries(p).map(([k, v]) => ({ .. }))`, `Object.values`) is one element per entry, the
-  caller's argument handed in (`key_lists::ListSource::table_lists`) - which also places those keys in `key_reach` through the child.
-  A DICTIONARY the caller hands a callee's parameter (an `i18nDictionaryCalls` call) labels every element property reading that
-  parameter by any index (`$param_index`, alone or a side of `??`/`||`) with every key under its prefix, and a spread of `.map(cb)`
-  holding such a property is cb's one returned object (`ListSource::handed`): `convertToItems(Hue, t.getTranslationDictionary('enums.hue'))`.
+  A const table a helper rebuilds (`Object.entries(p).map(([k, v]) => ({ .. }))`, `Object.values`) is one element per entry, the caller's
+  argument handed in (`key_lists::ListSource::table_lists`) - which also places those keys in `key_reach` through the child. A DICTIONARY the
+  caller hands a callee's parameter (an `i18nDictionaryCalls` call) labels every element property reading that parameter by any index (`$param_index`,
+  alone or a side of `??`/`||`) with every key under its prefix, a spread `.map(cb)` holding one being cb's object (`ListSource::handed`).
   A read landing on an OBJECT LITERAL'S PROPERTY (`vm.criteria.options` over a selector's projector: a `shape_members` row) is what that
   property is written with, found up the nested shapes to the `returns`/`assignments`/`locals`/`consts`/`members` row holding the root (`key/fields/shape_values.rs`).
+  A `.filter`/`.slice`/`.concat`/`.map(cb)` on a list is read through (`ListSource::chained`, `cb`'s parameter reads per element), a `this.labels.x`
+  read or template literal of `this.` fields no one assigns is folded (`key_this.rs`), and a PIPE is its `transform`'s returns (`key_pipes.rs`).
 - **THE CLOSURE TABLES DECLARE UNIQUE KEYS**, so a pass that files a row twice fails the insert instead of
   publishing a plausible duplicate.
 - **NO REGEX: the dead-key trace is character walks** (`sourcescan.rs`, `sourcetrace.rs`). It decides whether

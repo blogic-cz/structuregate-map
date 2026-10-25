@@ -49,6 +49,25 @@ pub struct FieldSite {
     pub node: Option<String>,
     /// The branch chains the field is written under, one per write — see `key_branches`.
     pub ways: Vec<Vec<String>>,
+    /// The binding the template reads the field through, and the member (or method) read (#126).
+    pub via: Via,
+}
+
+/// WHERE A NODE SITE'S KEY CAME IN (#126, `key_node_ways`): the `bindings` row of the template expression placing it, and the member
+/// (or method) that expression reads the key from, when the site knows them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Via {
+    pub binding: Option<String>,
+    pub reads: Option<String>,
+}
+
+/// One way a key is placed at one node: its route, the site's `Via`, and the template literals its ways name (`tpl:<tree>`, the
+/// literal's `expressions` id) - which a field's or method's site drops from its ways, so `reads` answers for those.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NodeVia {
+    pub route: String,
+    pub via: Via,
+    pub builds: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -62,6 +81,8 @@ pub struct Route {
     pub sites: IndexMap<Option<String>, Vec<Vec<String>>>,
     pub refs: usize,
     pub nodes: IndexSet<String>,
+    /// Node -> every way the key was placed there (#126); read only for the nodes still in `nodes`.
+    pub node_via: IndexMap<String, Vec<NodeVia>>,
     /// Per component: the rank of the route its sites came from, and what they cost (`put_ways`).
     held: IndexMap<Option<String>, Held>,
 }
@@ -83,15 +104,15 @@ impl Routes {
     }
 
     fn put(&mut self, key: &str, route: &str, comp: Option<String>, gates: Vec<String>, node: Option<&str>) {
-        self.put_ways(key, route, comp, gates, &[], node);
+        self.put_ways(key, route, comp, gates, &[], node, &Via::default());
     }
 
     /// A SITE INSIDE AN `<ng-template>` ONLY OUTLETS RENDER (#36, `key_outlets`) is one way per outlet, each
     /// crossed with the site's own ways; anywhere else it is `put_ways` unchanged.
     #[allow(clippy::too_many_arguments)]
-    fn put_sited(&mut self, outlets: &Outlets, key: &str, route: &str, comp: Option<String>, gates: Vec<String>, ways: &[Vec<String>], node: Option<&str>) {
+    fn put_sited(&mut self, outlets: &Outlets, key: &str, route: &str, comp: Option<String>, gates: Vec<String>, ways: &[Vec<String>], node: Option<&str>, via: &Via) {
         let Some(through) = node.and_then(|n| outlets.rewrite(n, &gates)) else {
-            return self.put_ways(key, route, comp, gates, ways, node);
+            return self.put_ways(key, route, comp, gates, ways, node, via);
         };
         let mut all: Vec<Vec<String>> = Vec::new();
         for base in &through {
@@ -105,7 +126,7 @@ impl Routes {
                 if !all.contains(&one) { all.push(one); }
             }
         }
-        self.put_ways(key, route, comp, Vec::new(), &all, node);
+        self.put_ways(key, route, comp, Vec::new(), &all, node, via);
     }
 
     /// ONE POSITION, AS MANY WAYS AS IT WAS WRITTEN IN: the site's own gates joined to each
@@ -118,6 +139,7 @@ impl Routes {
         gates: Vec<String>,
         ways: &[Vec<String>],
         node: Option<&str>,
+        via: &Via,
     ) {
         if key.is_empty() {
             return;
@@ -153,6 +175,15 @@ impl Routes {
         // expression. Joined without this, every carrier ref would count twice and
         // `n_refs`/`n_paths` would double for no new way in.
         if let Some(node) = node.filter(|n| !n.is_empty()) {
+            // EVERY WAY IN IS KEPT FOR THE NODE (#126), the second site of one node included: its route, binding and literals.
+            let builds: IndexSet<String> = ways.iter().flatten()
+                .filter_map(|l| Some(l.strip_prefix("tpl:")?.split_once('=')?.0.to_string()))
+                .collect();
+            let one = NodeVia { route: route.to_string(), via: via.clone(), builds: builds.into_iter().collect() };
+            let list = hit.node_via.entry(node.to_string()).or_default();
+            if !list.contains(&one) {
+                list.push(one);
+            }
             if hit.nodes.contains(node) {
                 return;
             }
@@ -282,13 +313,16 @@ pub fn key_routes(
         ways
     };
 
+    // THE BINDING A TEMPLATE ROW'S EXPRESSION IS (#126).
+    let via_of = |row: &Row| Via { binding: present(row, "expression").and_then(|x| row_of.get(&x).and_then(|e| present(e, "binding"))), reads: None };
+
     // 1. A carrier on a template node.
     for r in store.table("i18n_refs").iter() {
         let (Some(key), Some(node)) = (text(r, "key"), present(r, "node")) else {
             continue;
         };
         let Some(n) = node_by_id.get(&node) else { continue };
-        routes.put_sited(&outlets, &key, "template", text(n, "component"), gate_chain(n), &arm_ways(r, &key), Some(&node));
+        routes.put_sited(&outlets, &key, "template", text(n, "component"), gate_chain(n), &arm_ways(r, &key), Some(&node), &via_of(r));
     }
 
     // 2. A string inside a template expression, on the same kind of node.
@@ -299,7 +333,7 @@ pub fn key_routes(
             continue;
         }
         let Some(n) = node_by_id.get(&node) else { continue };
-        routes.put_sited(&outlets, &value, "template_string", text(n, "component"), gate_chain(n), &arm_ways(s, &value), Some(&node));
+        routes.put_sited(&outlets, &value, "template_string", text(n, "component"), gate_chain(n), &arm_ways(s, &value), Some(&node), &via_of(s));
     }
 
     let components = store.table("components");
@@ -347,7 +381,7 @@ pub fn key_routes(
             }
             if let Some(list) = components_by_file.get(&text(r, "file")) {
                 for c in list {
-                    routes.put_ways(&key, "ts_call", text(c, "id"), Vec::new(), &ways, None);
+                    routes.put_ways(&key, "ts_call", text(c, "id"), Vec::new(), &ways, None, &Via::default());
                 }
             }
         }
@@ -364,25 +398,26 @@ pub fn key_routes(
             pipe_of_file.entry(file).or_default().insert(name);
         }
     }
-    let mut uses: IndexMap<String, Vec<(&Row, String)>> = IndexMap::new();
+    let mut uses: IndexMap<String, Vec<(&Row, String, Via)>> = IndexMap::new();
     for e in expressions.iter() {
         let Some(n) = present(e, "node").and_then(|x| node_by_id.get(&x).copied()) else { continue };
         for name in e.get("pipes").and_then(|p| p.as_array()).into_iter().flatten().filter_map(|v| v.as_str()) {
-            uses.entry(name.to_string()).or_default().push((n, present(n, "id").unwrap_or_default()));
+            let via = Via { binding: present(e, "binding"), reads: None };
+            uses.entry(name.to_string()).or_default().push((n, present(n, "id").unwrap_or_default(), via));
         }
     }
     for (pair, ways) in &lit_ways {
         let Some((key, file)) = pair.rsplit_once(' ') else { continue };
         for name in pipe_of_file.get(file).into_iter().flatten() {
-            for (n, id) in uses.get(name).into_iter().flatten() {
-                routes.put_sited(&outlets, key, "pipe", text(n, "component"), gate_chain(n), ways, Some(id));
+            for (n, id, via) in uses.get(name).into_iter().flatten() {
+                routes.put_sited(&outlets, key, "pipe", text(n, "component"), gate_chain(n), ways, Some(id), via);
             }
         }
     }
 
     // 4. A field binding is a position, one hop past the literal.
     for f in fields {
-        routes.put_sited(&outlets, &f.key, "field_binding", f.comp.clone(), f.gates.clone(), &f.ways, f.node.as_deref());
+        routes.put_sited(&outlets, &f.key, "field_binding", f.comp.clone(), f.gates.clone(), &f.ways, f.node.as_deref(), &f.via);
     }
 
     // 4b. A LIST A PARENT HANDS TO A CHILD'S `@Input` RENDERS IN THE CHILD (#50, `key_inputs`): each `edge:<render>` a
@@ -445,7 +480,7 @@ pub fn key_routes(
             // THE BRANCHES THE LITERAL IS ASSIGNED UNDER, one way per place it sits in the file.
             let empty = Vec::new();
             let ways = file.as_ref().and_then(|f| lit_ways.get(&format!("{value} {f}"))).unwrap_or(&empty);
-            routes.put_ways(&value, "literal", cid, gates, ways, None);
+            routes.put_ways(&value, "literal", cid, gates, ways, None, &Via::default());
         }
     }
     // 5b. A key only a TEMPLATE LITERAL builds (`menu.${name}.label`) is the same
@@ -465,7 +500,7 @@ pub fn key_routes(
         };
         for cid in ids {
             if seen_literal.insert(format!("{key} {}", cid.clone().unwrap_or_else(|| "None".to_string()))) {
-                routes.put_ways(key, "literal", cid, Vec::new(), ways, None);
+                routes.put_ways(key, "literal", cid, Vec::new(), ways, None, &Via::default());
             }
         }
     }

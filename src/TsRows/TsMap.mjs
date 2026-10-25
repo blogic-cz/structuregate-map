@@ -353,6 +353,10 @@ async function main() {
   //     is one lists the strings it builds in `expands` (`TsText.mjs::collectStrings`, `TsExpr/TsReadRefs.mjs::enumNameHole`).
   // 98: #109 - `propertyPaths` (`structuregate.ts.json`) names members whose strings are property paths and the root they start from; such a string carries `path_refs`
   //     (a segment each, with its row `id`) and `path_complete` (`TsExpr/TsReadRefs.mjs::pathRefs`).
+  // 114: #127 - a `switch_cases` row names the switched enum (`discriminant_type`, `discriminant_enum` + `discriminant_enum_id`) and what each label selects
+  //     (`label_symbols` `Enum.Member`, `label_values` the constant), from the checker (`TsExpr/TsStatements/TsCases.mjs`), as the C# half's.
+  // 113: #117 - a `filter`/`slice`/`map` chained on a call of a function the tree declares keeps that call as its `$receiver` (`TsExpr/TsValue.mjs::treeList`), and
+  //     `$param_index` reads its parameter through a cast or parentheses (`(e as any)[item]`, `TsExpr/TsValueRefs.mjs`).
   // 112: #123 - a template literal's hole TYPED by an enum is a `hole_refs` entry too (`kind: 'enum_value'`, `TsReadRefs.mjs::enumValueHole`), and every entry lists `names` (what it yields) and `members`.
   // 111: #120 - the `.ts` files no program reaches are walked through one more program per project (`TsSetup/TsOutside.mjs`), `reachable` 0, no `projects` row.
   // 110: #117 - an element access whose object is the enclosing function's own parameter carries `$param_index`, the parameter's name (`TsExpr/TsValueRefs.mjs`).
@@ -371,7 +375,7 @@ async function main() {
   // 99: an immer handler's `writes` follow the helpers it hands its draft to, and the callbacks they call (`TsExpr/TsExprDescribe.mjs::draftWrites`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 112, build: args.build,
+    config: config.file, data: config.data, rows: 114, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

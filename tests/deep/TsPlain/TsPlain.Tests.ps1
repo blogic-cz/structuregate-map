@@ -263,4 +263,21 @@ Test-Case 'tsplain: a file whose header says a tool wrote it is generated (#116)
     Assert-Line $r 'gen=src/hand.ts|0'
 }
 
+# A SWITCH IS ONE ROW PER CASE GROUP (#127), as the Angular half's: an empty clause falls into the next, `is_default` marks the group a `default`
+# joins. No checker in this half, so no `discriminant_type` and no symbol - a literal label's constant only.
+Test-Case 'tsplain: a switch writes one switch_cases row per case group, with the constant of each literal label' {
+    $tree = Use-Tree @{
+        'src/labels.ts' = "export enum Hue { Red = 1, Blue = 2 }`nexport function label(h: Hue, w: string): string {`n  switch (h) {`n    case Hue.Red:`n" +
+            "    case Hue.Blue: return 'x';`n    default: return '?';`n  }`n}`nexport function code(w: string): number {`n  switch (w) {`n    case 'a': return 1;`n    case -2: return 2;`n  }`n  return 0;`n}`n"
+    }
+    Invoke-TsPlainMap $tree | Out-Null
+    $r = Get-TsPlainRows $tree ("SELECT 'sc=' || s.line || '|' || s.func || '|' || s.discriminant_source || '|' || s.is_default || '|' || " +
+        "coalesce((SELECT group_concat(v, ',') FROM (SELECT l.value || '=' || v.value AS v FROM switch_cases__labels l JOIN switch_cases__label_values v " +
+        "ON v.owner = l.owner AND v.parent = 0 AND v.ord = l.ord WHERE l.owner = s.id AND l.parent = 0 ORDER BY l.ord)), '-') AS r FROM switch_cases s")
+    Assert-Line $r 'sc=5|label|h|0|Hue.Red=,Hue.Blue='
+    Assert-Line $r 'sc=6|label|h|1|-'
+    Assert-Line $r 'sc=11|code|w|0|''a''=a'
+    Assert-Line $r 'sc=12|code|w|0|-2=-2'
+}
+
 }

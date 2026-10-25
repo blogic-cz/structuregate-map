@@ -116,6 +116,17 @@ function pairs(ts, flat) {
     return out;
 }
 
+/** The constant a literal `case` label compares with - a string's text, a number's value - or '' for any other label. */
+function literalLabel(ts, label) {
+    const K = ts.SyntaxKind;
+    if (label.kind === K.StringLiteral || label.kind === K.NoSubstitutionTemplateLiteral) return label.text;
+    if (label.kind === K.NumericLiteral) return String(Number(label.text));
+    if (label.kind === K.PrefixUnaryExpression && label.operator === K.MinusToken && label.operand.kind === K.NumericLiteral) {
+        return String(-Number(label.operand.text));
+    }
+    return '';
+}
+
 /** What a branch TESTS - the condition, the iterated value, the switched value; nothing for a `try`, whose
  *  caught name is `handlers.name`. */
 function tested(ts, node) {
@@ -195,6 +206,26 @@ export function readFile(ts, rows, file) {
         return { file: fileId, cls: cls ? cls.name : '', func: fn ? fn.name : '' };
     };
     const qual = (name) => [...stack.map((s) => s.name), name].join('.');
+    // ONE `switch_cases` ROW PER CASE GROUP (#127), as the Angular half writes it - an empty clause falls through to the next that has
+    // statements. No checker here: `label_symbols` is '' (never a guess from the text) and `label_values` only a literal label's constant.
+    const switchRows = (node) => {
+        let labels = [];
+        let values = [];
+        let sawDefault = false;
+        for (const clause of node.caseBlock.clauses) {
+            if (clause.kind === ts.SyntaxKind.DefaultClause) sawDefault = true;
+            else {
+                labels.push(src(clause.expression));
+                values.push(literalLabel(ts, clause.expression));
+            }
+            if (!clause.statements.length) continue;
+            rows.add('switch_cases', 'sc', { ...where(), line: line(clause), end_line: endLine(clause), discriminant_source: src(node.expression),
+                labels, label_symbols: labels.map(() => ''), label_values: values, is_default: sawDefault ? 1 : 0 });
+            labels = [];
+            values = [];
+            sawDefault = false;
+        }
+    };
 
     const importRows = (node) => {
         const spec = node.moduleSpecifier.text;
@@ -418,6 +449,7 @@ export function readFile(ts, rows, file) {
                 attrs: node.attributes.properties.map((p) => (p.name ? src(p.name) : '...')) });
         }
 
+        if (kind === K.SwitchStatement) switchRows(node);
         if (kindOf.branch.has(kind)) {
             const test = tested(ts, node);
             rows.add('branches', 'br', { ...where(), line: line(node), end_line: endLine(node),

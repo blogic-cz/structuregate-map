@@ -140,7 +140,12 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
       // AN INDEX INTO THE FUNCTION'S OWN PARAMETER (rows 110, #117): `translations?.[x.name]` - which table it reads, the caller
       // decides, so `$param_index` names the parameter and a reader holding a call's arguments puts the caller's in its place
       // (`rust/fbtcore/src/rows/ts/key/lists/key_lists.rs::handed`).
-      const held = ts.isIdentifier(node.expression) ? symbolAt(node.expression)?.valueDeclaration : undefined;
+      // A CAST OR PARENTHESES AROUND IT (`(e as any)[item]`, rows 113) change no table: the parameter under them is read.
+      let object = node.expression;
+      while (ts.isParenthesizedExpression(object) || ts.isAsExpression(object) || ts.isNonNullExpression(object) || ts.isTypeAssertionExpression(object)) {
+        object = object.expression;
+      }
+      const held = ts.isIdentifier(object) ? symbolAt(object)?.valueDeclaration : undefined;
       if (held !== undefined && ts.isParameter(held) && ts.isIdentifier(held.name)) {
         return { ...api.unresolved(node), $param_index: held.name.text };
       }

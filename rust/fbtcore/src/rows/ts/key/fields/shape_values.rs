@@ -14,7 +14,7 @@ use super::store::{Row, Store};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-/// The `shape_members` rows a template input binding reads (its outermost read), each with the value it is written with.
+/// The `shape_members` rows a template input binding reads (every read of one), each with the value it is written with.
 pub(super) fn bound_shape_values(store: &Store<'_>) -> HashMap<String, Value> {
     let mut wanted: HashSet<String> = HashSet::new();
     for e in store.table("expressions").iter() {
@@ -22,9 +22,8 @@ pub(super) fn bound_shape_values(store: &Store<'_>) -> HashMap<String, Value> {
             continue;
         }
         let Some(ast) = e.get("ast").filter(|a| !a.is_null()) else { continue };
-        if let Some(row) = read_rows(super::astreads::unwrap(ast)).into_iter().next().filter(|r| r.starts_with("sm:")) {
-            wanted.insert(row);
-        }
+        // EVERY READ OF ONE: a pipe's argument (`vm.hues | labelled : vm.huePath`) is a second read of the same view model.
+        wanted.extend(read_rows(super::astreads::unwrap(ast)).into_iter().filter(|r| r.starts_with("sm:")));
     }
     if wanted.is_empty() {
         return HashMap::new();

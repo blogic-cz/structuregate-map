@@ -15,6 +15,7 @@ import { dynamicImportRow, importRow } from './TsImports.mjs';
 import { jsdocOf, locationOf as nodeLocation, makeSymbolAt } from './TsNodes.mjs';
 import { makeAngularRows } from './TsAngular.mjs';
 import { makeBodyRows } from './TsBody.mjs';
+import { makeCaseFacts } from './TsCases.mjs';
 import { makeBindingFacts } from './TsBindings.mjs';
 import { makeClassRows } from './TsClassRows.mjs';
 import { makeDeclRows } from './TsDeclRows.mjs';
@@ -213,6 +214,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     const rows = makeBodyRows({
       ts, store, evalNode, evalCell, describe, declFileOf: classRows.declFileOf, declareInline, declareClass, propName,
       shapeAt: shapes.remember, bindingFacts, resolveArg: readRefs.resolveArg, targetLine: readRefs.targetLine, fieldTarget: readRefs.fieldTarget,
+      caseFacts: makeCaseFacts(ts, checker, (d) => relativeTo(fe, canonicalPath(d.getSourceFile().fileName))),
       injectAt: (call, ownerId, classId) => classRows.injectAt(call, ownerId, fileId(call.getSourceFile().fileName), classId),
     });
     bodies.collect = rows.collectBody;

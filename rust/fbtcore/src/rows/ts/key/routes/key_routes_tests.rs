@@ -129,6 +129,7 @@ fn a_field_binding_ties_with_the_template_routes() {
         gates: vec!["g:7".to_string()],
         node: Some("n:9".to_string()),
         ways: Vec::new(),
+        via: Default::default(),
     }];
     let routes = run(carrier_tables(), &fields);
     assert_eq!(routes["a.b"].sites.len(), 2, "the field site joins rather than masks");

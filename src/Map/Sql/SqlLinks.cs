@@ -23,7 +23,11 @@ internal static partial class SqlLinks
 {
     private sealed record Link(string Kind, string File, long Line, string From, string Cls, string Func,
         string Entity, string Member, string Action, string Database, string Schema, string Name, string Column,
-        string Object, string ColumnId, string Status, string Detail);
+        string Object, string ColumnId, string Status, string Detail)
+    {
+        /// <summary>What a fluent mapping says of an `ef_column`'s column (#128, `SqlLinksEfFacets`); null for every other link.</summary>
+        public Fluent? Facets { get; init; }
+    }
 
     public static void Run(MapCollector collected, string db, SqlConfig config)
     {
@@ -246,7 +250,8 @@ internal static partial class SqlLinks
     private static string? Write(string db, List<Link> links)
     {
         var script = new StringBuilder("BEGIN; DROP TABLE IF EXISTS sql_links; CREATE TABLE sql_links (id, kind, file, line, from_id, cls, func, "
-            + "entity, member, action, database, schema, name, column, object, column_id, status, detail);\n");
+            + "entity, member, action, database, schema, name, column, object, column_id, status, detail, "
+            + "precision, scale, max_length, required, column_type, conversion);\n");
         for (var start = 0; start < links.Count; start += 400)
         {
             script.Append("INSERT INTO sql_links VALUES ");
@@ -261,6 +266,10 @@ internal static partial class SqlLinks
                 script.Append(',').Append(l.Line);
                 foreach (var cell in new[] { l.From, l.Cls, l.Func, l.Entity, l.Member, l.Action, l.Database, l.Schema,
                     l.Name, l.Column, l.Object, l.ColumnId, l.Status, l.Detail }) script.Append(',').Append(Quote(cell));
+                // A FACET THE MAPPING DOES NOT SET IS NULL, never '' - "no max length" is not "max length ''".
+                var f = l.Facets;
+                foreach (var cell in new[] { f?.Precision, f?.Scale, f?.MaxLength, f?.Required, f?.ColumnType, f?.Conversion })
+                    script.Append(',').Append(string.IsNullOrEmpty(cell) ? "NULL" : Quote(cell));
                 script.Append(')');
             }
             script.Append(";\n");

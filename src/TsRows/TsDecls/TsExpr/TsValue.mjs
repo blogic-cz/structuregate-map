@@ -146,7 +146,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       }
       const isChainLink = !!evaluated && typeof evaluated === 'object' && !Array.isArray(evaluated)
         && evaluated.$receiver !== undefined;
-      if (Array.isArray(evaluated) || isChainLink || objectTable(node.expression.expression)) receiver = evaluated;
+      if (Array.isArray(evaluated) || isChainLink || objectTable(node.expression.expression) || treeList(node.expression)) receiver = evaluated;
       else if (!!evaluated && typeof evaluated === 'object' && !Array.isArray(evaluated)) {
         const id = evaluated.$expr_id ?? evaluated.$cond_expr;
         if (typeof id === 'string') receiverExpr = id;
@@ -179,6 +179,15 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
     if (!ts.isCallExpression(n) || !ts.isPropertyAccessExpression(n.expression) || !['entries', 'values'].includes(n.expression.name.text)) return false;
     return (checker.getSymbolAtLocation(n.expression.name)?.declarations ?? [])
       .some((d) => d.parent !== undefined && ts.isInterfaceDeclaration(d.parent) && d.parent.name.text === 'ObjectConstructor');
+  }
+
+  /** A LIST A TREE FUNCTION RETURNS, FILTERED OR MAPPED (rows 113, #117): `toItems(Hue, dict).filter(..)` or `.map(cb)` keeps the call it
+   *  is made on as its `$receiver` when that call runs a function the tree declares with a body (`declOf`), so a reader can follow the
+   *  helper's own list (`rust/fbtcore/src/rows/ts/key/lists/key_lists.rs::chained`). A library's call, or any other method, is not kept. */
+  function treeList(access) {
+    if (!['filter', 'slice', 'map'].includes(access.name.text)) return false;
+    const inner = access.expression;
+    return ts.isCallExpression(inner) && declOf(inner.expression) !== null;
   }
 
   /** THE FUNCTION A CALL RUNS, where the tree declares it with a body (rows 99, `draftWrites`): a function, a method, or a `const` holding an arrow or function

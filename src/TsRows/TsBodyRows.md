@@ -1,7 +1,7 @@
 # Body rows the 1:1 audit found missing (rows 70)
 
 Loops, bare expression statements and `++`/`--` had no row of their own. The case for all three is
-`tests/deep/TsAngular/TsValues/TsRowsLoopRows.Tests.ps1`; the code is `TsDecls/TsExpr/TsLoops.mjs` and `TsDecls/TsBody.mjs`
+`tests/deep/TsAngular/TsValues/TsRowsLoopRows.Tests.ps1`; the code is `TsDecls/TsExpr/TsStatements/TsLoops.mjs` and `TsDecls/TsBody.mjs`
 (`collectLoop`, `collectStatement`, `emitUpdate`).
 
 - **A loop is a `loops` row** (`lp:`): `kind` (`for`, `for_of`, `for_in`, `while`, `do`), `await` (only when true, `for await`), `variables` (the names its

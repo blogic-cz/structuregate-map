@@ -85,6 +85,10 @@ pub mod key_lists;
 pub mod key_loops;
 #[path = "key/lists/key_options.rs"]
 pub mod key_options;
+#[path = "key/lists/key_this.rs"]
+pub mod key_this;
+#[path = "key/lists/key_pipes.rs"]
+pub mod key_pipes;
 #[path = "key/key_builds.rs"]
 pub mod key_builds;
 #[path = "key/fields/shape_values.rs"]
@@ -105,6 +109,8 @@ pub mod key_returned;
 pub mod key_outlets;
 #[path = "key/routes/key_routes.rs"]
 pub mod key_routes;
+#[path = "key/routes/key_node_ways.rs"]
+pub mod key_node_ways;
 #[path = "key/routes/key_unread.rs"]
 pub mod key_unread;
 #[path = "key/routes/key_called.rs"]

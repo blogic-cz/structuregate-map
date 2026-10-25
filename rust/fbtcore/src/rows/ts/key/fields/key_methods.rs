@@ -145,7 +145,8 @@ pub(super) fn method_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
                 }
                 for (key, ways) in method_keys(&method, &args, &at, reader, &branches) {
                     hit_nodes.insert(node_id.clone());
-                    out.push(FieldSite { key, comp: text(n, "component"), node: Some(node_id.clone()), gates: gates_of(n), ways });
+                    let via = super::key_routes::Via { binding: id_of(e, "binding"), reads: Some(method.clone()) };
+                    out.push(FieldSite { key, comp: text(n, "component"), node: Some(node_id.clone()), gates: gates_of(n), ways, via });
                 }
             }
         }

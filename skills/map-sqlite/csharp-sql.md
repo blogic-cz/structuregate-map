@@ -63,7 +63,7 @@ before concluding a method is dead.
   `label_symbols` what each binds to, `label_values` its constant (an enum member's number), `guard` the
   `when`, `is_default`. Every row INSIDE a section or an arm (a `returns`, a call, a literal, a nested switch's
   cases) carries `case` = that `switch_cases.id`, as a TypeScript row does: `return 1;` under `case Extra:` is
-  what the method returns for Extra, not always. `branches.condition` (the test as a node tree, no `condition_expr`): [csharp-conditions.md](csharp-conditions.md).
+  what the method returns for Extra, not always. A TypeScript row of the Angular half carries `discriminant_type` (the switched enum's NAME, or the checker's type text), `discriminant_enum_id` (its `enums` row), `label_symbols` (`Hue.Red`) and `label_values` from the checker (#127); the plain half's has `labels`, `is_default` and a literal label's `label_values` only. `branches.condition` (the test as a node tree, no `condition_expr`): [csharp-conditions.md](csharp-conditions.md).
 * **`members`, `locals` and `comments` are shared too**, C# rows told apart by `files.lang`.
   - `members`: one row per property, field (each declarator), `const`, event and indexer, with `kind`, `symbol` (the name
     `refs.symbol` uses, so a use joins its declaration), `class_symbol`, `type` (resolved) and `type_text`,
@@ -111,8 +111,10 @@ no tree: [sql-statements.md](sql-statements.md).
 Two tables are DERIVED after both halves and rewritten whole each run:
 
 * **`sql_links`** joins C# to the database. `kind`: `ef_table` (a `ToTable(name, schema)` call → the table,
-  `entity` the mapped class), `ef_column` (each column → the entity property of the same name, or
-  `no property`), `ef_trigger` (`HasTrigger`), `sql_text` (a SQL string in C# - Dapper `SqlMapper.*`,
+  `entity` the mapped class), `ef_column` (each column → the entity property of the same name - or the one
+  `Property(x => x.P).HasColumnName("C")` maps to it - or `no property`; on that column's own `Property` call line,
+  else the `ToTable` line; `precision`, `scale`, `max_length`, `required` (1/0), `column_type`, `conversion` as the
+  call's chain sets them, NULL where it sets none - EF's default, #128), `ef_trigger` (`HasTrigger`), `sql_text` (a SQL string in C# - Dapper `SqlMapper.*`,
   `CommandDefinition`, EF `FromSqlRaw`/`ExecuteSqlRaw`/`SqlQueryRaw` → each object it touches), `sql_ref`
   (a view/proc/trigger/script statement → its object, in ITS OWN database), `sql_include` (`:r` → file).
   `status`: `bound`; `ambiguous` (several databases have it and no `default` decides - `database` is empty,

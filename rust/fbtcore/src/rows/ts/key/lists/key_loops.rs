@@ -98,7 +98,7 @@ pub(super) fn element_keys(items: &[Element], keys: &KeySet, i18n: &[String], re
 pub struct Element {
     pub value: Value,
     chain: Vec<String>,
-    from_call: bool,
+    pub(super) from_call: bool,
     /// The member or function whose return the element came out of: where a call inside it resolves its locals.
     owner: Option<String>,
 }
@@ -142,7 +142,11 @@ fn elements(value: &Value, src: &ListSource<'_, '_>, chain: &[String]) -> Option
                 })
                 .collect(),
         ),
-        other => src.callee_lists(Some(other)).map(|(items, owner)| of(items, owner).collect()),
+        // A CHAIN ON A LIST (`toItems(Hue, dict).filter(..)`, `key_lists::ListSource::chained`): its elements, none of one callee's.
+        other => src.callee_lists(Some(other)).map(|(items, owner)| of(items, owner).collect()).or_else(|| {
+            let items = src.chained(other, &mut Vec::new())?;
+            Some(items.into_iter().map(|value| Element { value, chain: chain.to_vec(), from_call: true, owner: None }).collect())
+        }),
     }
 }
 
@@ -212,7 +216,8 @@ impl Loops {
         let unpacked = super::key_lists::unpacked(store);
         let dict = store.option_list("i18n_dictionary_calls");
         let shaped = super::shape_values::bound_shape_values(store);
-        let src = ListSource { rows: &rows, by_member: &by_member, params: &params, pushes: &pushes, parent: &parent, unpacked: &unpacked, dict: &dict, shaped: &shaped };
+        let pipes = super::key_pipes::Pipes::new(store);
+        let src = ListSource { rows: &rows, by_member: &by_member, params: &params, pushes: &pushes, parent: &parent, unpacked: &unpacked, dict: &dict, shaped: &shaped, pipes: &pipes };
         let mut owner: HashMap<String, Option<String>> = HashMap::new();
         let mut lists: HashMap<String, Vec<Element>> = HashMap::new();
         let mut members_valued: HashSet<String> = HashSet::new();
@@ -287,6 +292,8 @@ impl Loops {
                 lists.entry(id).or_default().extend(more);
             }
         }
+        // A `this.` READ IN AN ELEMENT THE CLASS WRITES is the field it names, folded (`key_this`): `{ Label: this.labels.fees.entry }`.
+        super::key_this::ThisFields::new(store).fold_lists(&mut lists, &owner);
         // A LIST EVERY PARENT HANDS TO AN `@Input` is the child's (`key_inputs`).
         let handed = super::key_inputs::input_lists(store, &lists, &src, &branches);
         lists.extend(handed);
@@ -545,7 +552,7 @@ pub fn loop_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
                                 way
                             })
                             .collect();
-                        out.push(FieldSite { key: key.clone(), comp: text(n, "component"), node: Some(id.clone()), gates: gates.clone(), ways });
+                        out.push(FieldSite { key: key.clone(), comp: text(n, "component"), node: Some(id.clone()), gates: gates.clone(), ways, via: super::key_routes::Via { binding: id_of(e, "binding"), reads: None } });
                     }
                 }
             }
