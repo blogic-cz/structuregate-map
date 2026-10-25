@@ -98,7 +98,7 @@ internal static partial class SqlLinks
                 foreach (var (column, id) in columns.GetValueOrDefault(hit.Id) ?? [])
                 {
                     // A COLUMN THE MAPPING NAMES (#128) is its `Property` call's line and property, with what the call's chain sets.
-                    var said = fluent.GetValueOrDefault(entity)?.GetValueOrDefault(column);
+                    var said = (fluent.GetValueOrDefault($"{Str(row[1])}|{Str(row[3])}|{Str(row[4])}|{entity}") ?? fluent.GetValueOrDefault(entity))?.GetValueOrDefault(column);
                     var member = Member(entity, said?.Property ?? column);
                     links.Add(new Link("ef_column", Str(row[1]), said?.Line ?? Num(row[2]), Str(row[0]), Str(row[3]), Str(row[4]), entity, member, "",
                         hit.Database, schema, table, column, hit.Id, id, member.Length > 0 ? "bound" : "no property",

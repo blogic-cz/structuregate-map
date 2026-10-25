@@ -29,6 +29,12 @@ namespace Microsoft.EntityFrameworkCore.Metadata.Builders
 namespace Microsoft.EntityFrameworkCore
 {
     using Microsoft.EntityFrameworkCore.Metadata.Builders;
+    public class ModelBuilder { public ModelBuilder Entity<T>(System.Action<EntityTypeBuilder<T>> build) => this; }
+    public class DbContext { protected virtual void OnModelCreating(ModelBuilder modelBuilder) { } }
+}
+namespace Microsoft.EntityFrameworkCore
+{
+    using Microsoft.EntityFrameworkCore.Metadata.Builders;
     public static class RelationalEntityTypeBuilderExtensions
     {
         public static EntityTypeBuilder<T> ToTable<T>(this EntityTypeBuilder<T> builder, string name, string schema) => builder;
@@ -74,4 +80,73 @@ Test-Case 'sqlefacets: an ef_column link sits on its Property call and carries t
     Assert-Line $r 'v=Kind|14|Demo.Order.Kind|bound|-|-|-|-|nvarchar(10)|string'
     # A BARE `Property` call: its own line, every facet NULL - EF's defaults, which the SQL column may not match.
     Assert-Line $r 'v=Note|15|Demo.Order.Note|bound|-|-|-|-|-|-'
+}
+
+# (#129) A CHAIN DOWN THE PAGE, `OnModelCreating` LAMBDAS, AND ONE ENTITY MAPPED TWICE: the facets of a chain written over several lines; of two
+# `entity.Property(e => e.FirstName)` calls in one method, the one nearest above the facet; and each mapping its own `Property` calls, never
+# the other file's.
+Test-Case 'sqlefacets: a multi-line chain, a model-builder lambda and a second mapping keep their own facets (#129)' {
+    $files = @{
+        'Db/Db.sqlproj' = '<Project DefaultTargets="Build"><ItemGroup><Build Include="Tables.sql" /></ItemGroup></Project>'
+        'Db/Tables.sql' = "CREATE TABLE [Sales].[Customers] ([CustomerID] INT NOT NULL PRIMARY KEY, [FirstName] NVARCHAR(200) NOT NULL, [Code] VARCHAR(20) NOT NULL)`nGO`n" +
+            "CREATE TABLE [Sales].[Agents] ([AgentID] INT NOT NULL PRIMARY KEY, [FirstName] NVARCHAR(512) NULL)`n"
+        'App/App.csproj' = $script:SqlEfFacetsFiles['App/App.csproj']
+        'App/StandIns.cs' = $script:SqlEfFacetsFiles['App/StandIns.cs']
+        'App/CustomerMapping.cs' = @'
+namespace Demo
+{
+    using Microsoft.EntityFrameworkCore;
+    using Microsoft.EntityFrameworkCore.Metadata.Builders;
+    public class Customer { public int CustomerID { get; set; } public string FirstName { get; set; } public string Code { get; set; } }
+    public class Agent { public int AgentID { get; set; } public string FirstName { get; set; } }
+    public class CustomerMapping
+    {
+        public void Configure(EntityTypeBuilder<Customer> builder)
+        {
+            builder.ToTable("Customers", "Sales");
+            builder.Property(x => x.FirstName)
+                .IsRequired()
+                .HasMaxLength(200);
+            builder.Property(x => x.Code).IsRequired().HasMaxLength(20);
+        }
+    }
+}
+'@
+        'App/DemoContext.cs' = @'
+namespace Demo
+{
+    using Microsoft.EntityFrameworkCore;
+    public class DemoContext : DbContext
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<Customer>(entity =>
+            {
+                entity.ToTable("Customers", "Sales");
+                entity.Property(e => e.FirstName)
+                    .IsRequired()
+                    .HasMaxLength(200);
+                entity.Property(e => e.Code).HasMaxLength(20);
+            });
+            modelBuilder.Entity<Agent>(entity =>
+            {
+                entity.ToTable("Agents", "Sales");
+                entity.Property(e => e.FirstName).HasMaxLength(512);
+            });
+        }
+    }
+}
+'@
+    }
+    $tree = Use-Tree $files
+    $db = Join-Path $tree 'links.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext '.cs,.sql' --map-sqlite $db) 0
+    $r = Invoke-Gate --map-query $db --width 0 --limit 0 --sql ("SELECT 'v=' || f.path || '|' || l.line || '|' || l.member || '|' || coalesce(l.max_length, '-') || '|' || coalesce(l.required, '-') AS v " +
+        "FROM sql_links l JOIN files f ON f.id = l.file WHERE l.kind = 'ef_column' AND l.column <> 'CustomerID' AND l.column <> 'AgentID'")
+    Assert-Exit $r 0
+    Assert-Line $r 'v=App/CustomerMapping.cs|12|Demo.Customer.FirstName|200|1'
+    Assert-Line $r 'v=App/CustomerMapping.cs|15|Demo.Customer.Code|20|1'
+    Assert-Line $r 'v=App/DemoContext.cs|11|Demo.Customer.FirstName|200|1'
+    Assert-Line $r 'v=App/DemoContext.cs|14|Demo.Customer.Code|20|-'
+    Assert-Line $r 'v=App/DemoContext.cs|19|Demo.Agent.FirstName|512|-'
 }

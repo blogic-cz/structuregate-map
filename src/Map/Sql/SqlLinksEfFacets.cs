@@ -18,7 +18,8 @@ internal static partial class SqlLinks
 
     private static readonly string[] FacetCalls = ["HasMaxLength", "IsRequired", "HasPrecision", "HasColumnType", "HasConversion", "HasColumnName"];
 
-    /// <summary>Entity -> column (as the mapping names it, any case) -> what its `Property` call says.</summary>
+    /// <summary>`file|class|method|entity` - and the entity alone, when one mapping configures it - -> column (as the mapping names it,
+    /// any case) -> what its `Property` call says.</summary>
     private static Dictionary<string, Dictionary<string, Fluent>> FluentColumns(string db)
     {
         var properties = new List<(string Scope, string Source, string Entity, long Line, string Property)>();
@@ -30,10 +31,10 @@ internal static partial class SqlLinks
             var property = Str(row[8]) is "const" or "folded" ? Str(row[7]) : LambdaMember(Str(row[6]));
             var entity = BuilderEntity(Str(row[5]));
             if (property.Length == 0 || entity.Length == 0) continue;
-            properties.Add(($"{Str(row[0])}|{Str(row[1])}|{Str(row[2])}", Str(row[4]), entity, Num(row[3]), property));
+            properties.Add(($"{Str(row[0])}|{Str(row[1])}|{Str(row[2])}", Tight(Str(row[4])), entity, Num(row[3]), property));
         }
         var facets = new Dictionary<int, Dictionary<string, List<string>>>();
-        foreach (var row in Query(db, "SELECT c.id, c.file, c.cls, c.func, c.symbol, c.source, a.position, a.const, a.source FROM calls c "
+        foreach (var row in Query(db, "SELECT c.id, c.file, c.cls, c.func, c.symbol, c.source, a.position, a.const, a.source, c.line FROM calls c "
             + "LEFT JOIN arguments a ON a.call = c.id WHERE c.symbol GLOB 'Microsoft.EntityFrameworkCore.*' "
             + "ORDER BY c.file, c.line, c.id, a.position") ?? [])
         {
@@ -41,13 +42,16 @@ internal static partial class SqlLinks
             if (!FacetCalls.Contains(callee)) continue;
             var scope = $"{Str(row[1])}|{Str(row[2])}|{Str(row[3])}";
             var source = Str(row[5]);
-            // THE CHAIN IT HANGS OFF: the longest `Property(..)` source this call's source extends.
+            var tight = Tight(source);
+            var line = Num(row[9]);
+            // THE CHAIN IT HANGS OFF (#129): a `Property(..)` source this call's extends, whitespace aside - a chain goes on down the page -
+            // and of those the nearest one starting on or before it: `entity.Property(e => e.Name)` is written once per entity of a method.
             var owner = -1;
             for (var i = 0; i < properties.Count; i++)
             {
                 var p = properties[i];
-                if (p.Scope == scope && source.StartsWith(p.Source + ".", StringComparison.Ordinal)
-                    && (owner < 0 || p.Source.Length > properties[owner].Source.Length)) owner = i;
+                if (p.Scope != scope || p.Line > line || !tight.StartsWith(p.Source + ".", StringComparison.Ordinal)) continue;
+                if (owner < 0 || p.Line > properties[owner].Line || (p.Line == properties[owner].Line && p.Source.Length > properties[owner].Source.Length)) owner = i;
             }
             if (owner < 0) continue;
             if (!facets.TryGetValue(owner, out var said)) facets[owner] = said = new(StringComparer.Ordinal);
@@ -57,6 +61,7 @@ internal static partial class SqlLinks
             if (callee == "HasConversion" && args.Count == 0) args.Add(TypeArgument(source, "HasConversion"));
         }
         var mapped = new Dictionary<string, Dictionary<string, Fluent>>(StringComparer.Ordinal);
+        var scopes = new HashSet<(string Entity, string Scope)>();
         for (var i = 0; i < properties.Count; i++)
         {
             var p = properties[i];
@@ -64,12 +69,23 @@ internal static partial class SqlLinks
             string Arg(string call, int at) => said.TryGetValue(call, out var a) && a.Count > at ? a[at] : "";
             var required = said.ContainsKey("IsRequired") ? (Arg("IsRequired", 0) is "false" or "False" ? "0" : "1") : "";
             var column = Arg("HasColumnName", 0) is { Length: > 0 } renamed ? renamed : p.Property;
-            if (!mapped.TryGetValue(p.Entity, out var columns)) mapped[p.Entity] = columns = new(StringComparer.OrdinalIgnoreCase);
-            columns.TryAdd(column, new Fluent(p.Line, p.Property, Arg("HasPrecision", 0), Arg("HasPrecision", 1), Arg("HasMaxLength", 0), required,
-                Arg("HasColumnType", 0), Arg("HasConversion", 0)));
+            var fluent = new Fluent(p.Line, p.Property, Arg("HasPrecision", 0), Arg("HasPrecision", 1), Arg("HasMaxLength", 0), required,
+                Arg("HasColumnType", 0), Arg("HasConversion", 0));
+            // BY THE MAPPING THAT WROTE IT (#129): one entity configured in a class and again in `OnModelCreating` is two mappings.
+            foreach (var key in new[] { $"{p.Scope}|{p.Entity}", p.Entity })
+            {
+                if (!mapped.TryGetValue(key, out var columns)) mapped[key] = columns = new(StringComparer.OrdinalIgnoreCase);
+                columns.TryAdd(column, fluent);
+            }
+            scopes.Add((p.Entity, p.Scope));
         }
+        // AN ENTITY ONE MAPPING CONFIGURES may set its columns in another method than its `ToTable`; one two mappings configure may not.
+        foreach (var entity in scopes.GroupBy(s => s.Entity).Where(g => g.Count() > 1).Select(g => g.Key)) mapped.Remove(entity);
         return mapped;
     }
+
+    /// <summary>A call's source with every whitespace character dropped, so a chain written down the page compares as one line.</summary>
+    private static string Tight(string source) => string.Concat(source.Where(c => !char.IsWhiteSpace(c)));
 
     /// <summary>The method a call's symbol names: its last name, past any type arguments written after it
     /// (`PropertyBuilder&lt;int&gt;.HasConversion&lt;string&gt;` is `HasConversion`).</summary>

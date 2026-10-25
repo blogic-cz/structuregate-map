@@ -182,11 +182,16 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
   }
 
   /** A LIST A TREE FUNCTION RETURNS, FILTERED OR MAPPED (rows 113, #117): `toItems(Hue, dict).filter(..)` or `.map(cb)` keeps the call it
-   *  is made on as its `$receiver` when that call runs a function the tree declares with a body (`declOf`), so a reader can follow the
+   *  is made on as its `$receiver` when that call runs a function the tree declares with a body (`declOf`), or the parameter it is made on, so a reader can follow the
    *  helper's own list (`rust/fbtcore/src/rows/ts/key/lists/key_lists.rs::chained`). A library's call, or any other method, is not kept. */
   function treeList(access) {
     if (!['filter', 'slice', 'map'].includes(access.name.text)) return false;
     const inner = access.expression;
+    // ...OR ON THE FUNCTION'S OWN PARAMETER (rows 115): `options.map(..)` keeps `options`, so a reader holding the call's arguments puts the handed list there.
+    if (ts.isIdentifier(inner)) {
+      const decl = symbolAt(inner)?.valueDeclaration;
+      return decl !== undefined && ts.isParameter(decl);
+    }
     return ts.isCallExpression(inner) && declOf(inner.expression) !== null;
   }
 

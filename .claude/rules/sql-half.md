@@ -100,7 +100,7 @@ memory, which would be a second implementation to disagree with the map.
 change: an EF `ToTable` call already carries table, schema and entity type, and a Dapper call's SQL is already
 folded into `arguments.const`. Kinds: `ef_table`, `ef_column` (each column to the entity property of the same
 name, bases included, or `no property`; a fluent `Property(..)` call names its line, `HasColumnName` its column, and its
-chain the facets - `SqlLinksEfFacets.cs`, matched by bound symbol and by the chain's source prefix), `ef_trigger`, `sql_text`, `sql_ref` (a view/proc/trigger/script
+chain the facets - `SqlLinksEfFacets.cs`, matched by bound symbol and by the chain's source prefix, whitespace aside, to the nearest `Property` call above, per mapping - file, class, method and entity, #129), `ef_trigger`, `sql_text`, `sql_ref` (a view/proc/trigger/script
 statement to its object in ITS OWN database), `sql_include`.
 
 **A NAME IS RESOLVED UNDER `structuregate.sql.json`, NEVER GUESSED** (`SqlResolver.cs`): the databases a site may
