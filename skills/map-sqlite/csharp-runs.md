@@ -16,7 +16,7 @@ Three derived tables of the deep map (`--map-sqlite`), each rewritten whole afte
   derives from `base` through any classes between; its namespace holds `namespace`. Equal names without a convention link nothing.
 * `name_type_links` (derived after every half, rewritten whole, #121): the same dictionary reached with a STRING - a method that takes
   the class's name - under `typesByName: [{method, parameter, base, namespace, prefixes, default, ignoreCase}]` in the same file. One
-  row per call of `method` (its symbol, generic arguments ignored), name and class: `method`, `call` (joins `calls.id`), `file`,
+  row per call of `method` (its symbol with every generic argument list ignored - the class's and the method's, #124: a call of `TemplateBase<TModel>.Include` is stored `TemplateBase<System.Object>.Include`, and the convention may name it either way), name and class: `method`, `call` (joins `calls.id`), `file`,
   `line`, `parameter`, `value` (the name), `via` (`literal`: the argument folds to a constant; `property`: it reads a property
   whose every constant is written in an object initializer or anonymous object of the tree - `p.PartName` over
   `new { PartName = "Header" }`, one row per value; `unresolved`: neither, `value` NULL), `kind`, `prefix`, `type_symbol`,
