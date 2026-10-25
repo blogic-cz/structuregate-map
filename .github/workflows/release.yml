@@ -47,7 +47,10 @@ jobs:
 
       # Deploy off: a runner has none of the consumers. The gate's own check is skipped because there is no
       # published gate in buildtools/ yet to run it - this publish is that gate.
+      # THE TAG IS THE GATE'S VERSION (#130): compiled in (`rows/keys/source.rs`) and written to every map's `_meta.gate_version`.
       - name: publish
+        env:
+          STRUCTUREGATE_VERSION: ${{ github.ref_name }}
         run: |
           New-Item -ItemType Directory -Force buildtools | Out-Null
           Copy-Item StructureGate.targets buildtools/

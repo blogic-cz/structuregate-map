@@ -15,7 +15,7 @@ pub(super) fn pass(name: &str, work: impl FnOnce()) {
 pub(super) fn tally(into: &mut Collector, db: &str) {
     let Ok(conn) = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return };
     for table in crate::rows::schema::listable_tables(&conn).unwrap_or_default() {
-        if !into.database.contains_key(&table) || ["sql_links", "sql_seeds", "sql_column_refs", "duplicate_types", "doc_facts", "doc_links", "http_endpoints", "http_calls", "http_links", "dispatch", "enum_type_links", "name_type_links"].contains(&table.as_str()) {
+        if !into.database.contains_key(&table) || ["sql_links", "sql_seeds", "sql_column_refs", "duplicate_types", "doc_facts", "doc_links", "http_endpoints", "http_calls", "http_links", "dispatch", "enum_type_links", "name_type_links", "entity_keys"].contains(&table.as_str()) {
             let rows = crate::rows::schema::count_of(&conn, &table);
             into.database.insert(table, rows);
         }
@@ -187,5 +187,33 @@ pub(super) fn atlas(into: &mut Collector, db: &str, dir: &str) {
                 receipt["boundaries"].as_i64().unwrap_or(0)
             )),
         },
+    }
+}
+
+/// A KEY FOR EVERY ENTITY, the same in every build (#130) - see `rows/keys/mod.rs`. After every other pass: it keys what they wrote.
+pub(super) fn entity_keys(into: &mut Collector, db: &str, roots: &[String]) {
+    let written = rusqlite::Connection::open(db).and_then(|mut conn| {
+        let tx = conn.transaction()?;
+        let n = crate::rows::keys::write(&tx, roots)?;
+        tx.commit()?;
+        Ok(n)
+    });
+    match written {
+        Ok(n) => into.notes.push(format!("{n} entit(ies) keyed for joins across builds (entity_keys)")),
+        Err(why) => into.errors.push(format!("ENTITY KEYS were not written — {why}")),
+    }
+}
+
+/// WHICH SOURCE THE MAP DESCRIBES (#130): each root's commit, branch and dirty flag, the gate's version and build - and `built_at`
+/// when the passes ran (`derived`). Written only where a value differs.
+pub(super) fn source_state(into: &mut Collector, db: &str, roots: &[String], build: &str, derived: bool) {
+    let written = rusqlite::Connection::open(db).and_then(|conn| {
+        if !crate::rows::meta::exists(&conn) {
+            return Ok(());
+        }
+        crate::rows::keys::source_state(&conn, roots, build, derived)
+    });
+    if let Err(why) = written {
+        into.notes.push(format!("the map's source state was not kept in _meta - {why}"));
     }
 }

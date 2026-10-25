@@ -21,6 +21,7 @@ pub mod cells;
 pub use cells::meta;
 pub use cells::text;
 pub mod fts;
+pub mod keys;
 // THE PARTIAL RUN'S OWN MACHINERY - what is handed back, which files depend on which, what each read - in a folder
 // by `#[path]`, so every `super::` in them still means `rows`.
 #[path = "partial/carry.rs"]
