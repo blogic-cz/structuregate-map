@@ -27,9 +27,9 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
 
@@ -57,7 +57,7 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item out/${{ matrix.rid }}/publish/${{ matrix.exe }}, StructureGate.targets dist/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: structuregate-${{ matrix.rid }}
           path: dist/*
@@ -70,12 +70,12 @@ jobs:
       # The skills and agents ride in the archive too: a consumer's junctions and agent links point at the
       # unpacked release on its machine, so no clone of this repo has to stay on disk for them to resolve.
       # EVERY TAG AND COMMIT: the notes are the commits since the tag before this one.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: repo
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: dist
 

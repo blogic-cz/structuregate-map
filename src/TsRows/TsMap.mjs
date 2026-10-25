@@ -58,6 +58,7 @@ import { emit, parseArgs, readCarry, readJson, revisionOf, writePayload } from '
 import { markReachable, runTemplatePass, walkProjects } from './TsWalk.mjs';
 import { timed } from './TsMetrics.mjs';
 import { forgetParses, prewarm } from './TsProgram.mjs';
+import { treeSources } from './TsOutside.mjs';
 import { stubSent, uncarriedRead, UNREAD_WHEN_CARRIED } from './TsCarried.mjs';
 
 /** A RUN THAT READ A STRUCTURE IT WAS HANDED BACK WITHOUT is asked again with every cell carried - see `TsCarried.mjs`. */
@@ -352,6 +353,7 @@ async function main() {
   //     is one lists the strings it builds in `expands` (`TsText.mjs::collectStrings`, `TsExpr/TsReadRefs.mjs::enumNameHole`).
   // 98: #109 - `propertyPaths` (`structuregate.ts.json`) names members whose strings are property paths and the root they start from; such a string carries `path_refs`
   //     (a segment each, with its row `id`) and `path_complete` (`TsExpr/TsReadRefs.mjs::pathRefs`).
+  // 111: #120 - the `.ts` files no program reaches are walked through one more program per project (`TsSetup/TsOutside.mjs`), `reachable` 0, no `projects` row.
   // 110: #117 - an element access whose object is the enclosing function's own parameter carries `$param_index`, the parameter's name (`TsExpr/TsValueRefs.mjs`).
   // 109: #117 - a call chained on the builtin `Object.entries`/`Object.values` keeps that call as its `$receiver` (`TsExpr/TsValue.mjs::objectTable`).
   // 108: #116 - `files.generated` is 1 when a comment heading the file carries a generator's marker, else 0 (`TsPlain/TsGenerated.mjs`), as the C# half's.
@@ -368,7 +370,7 @@ async function main() {
   // 99: an immer handler's `writes` follow the helpers it hands its draft to, and the callbacks they call (`TsExpr/TsExprDescribe.mjs::draftWrites`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 110, build: args.build,
+    config: config.file, data: config.data, rows: 111, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
@@ -554,6 +556,7 @@ async function main() {
   const propertyPaths = readPropertyPaths(config, (name) => diag.note('property_path_spec_invalid', { name }));
   const { inAnyProgram, registry, components } = timed('typescript: walk every project', '', () => walkProjects({
     ts, store, fe, nodeModules: found.nodeModules, projects, diag, noted: new Set(), propertyPaths,
+    sources: () => treeSources(fe, args.skipDirs, skipFiles),
     // WHICH FILES THIS RUN OPENS. Every other file in the program is still WALKED for its ids and
     // its program membership - a declaration in it is what the ones being re-extracted resolve
     // against - but nothing is extracted from it, because its rows are already loaded.

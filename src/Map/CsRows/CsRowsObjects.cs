@@ -117,6 +117,9 @@ internal sealed partial class CsRows
             AssignmentExpressionSyntax assigned =>
                 (CsFacts.Dotted(assigned.Left) is { Length: > 0 } written ? written : assigned.Left.ToString(),
                  (ExpressionSyntax?)assigned.Right),
+            // `new { PartName = "Header", model }` — named, or named by what it reads.
+            AnonymousObjectMemberDeclaratorSyntax member =>
+                (member.NameEquals?.Name.Identifier.ValueText ?? CsFacts.Dotted(member.Expression).Split('.')[^1], member.Expression),
             // `(code: "EU", name: x)` — a tuple element may be named too.
             ArgumentSyntax argument => (argument.NameColon?.Name.Identifier.ValueText ?? "", argument.Expression),
             ExpressionElementSyntax element => ("", element.Expression),
@@ -138,8 +141,19 @@ internal sealed partial class CsRows
             ("const", folded.Text),
             ("const_kind", folded.Kind),
             ("symbol", folded.Symbol),
-            ("type", CsSemantics.Type(model, value)));
+            ("type", CsSemantics.Type(model, value)),
+            // THE MEMBER THE SLOT FILLS, resolved (#121): `new Options { Region = .. }`'s `Demo.Options.Region`, an anonymous
+            // object's property - the symbol a later read of it binds, so what was written there is a join from that read.
+            ("member", Member(slot)));
     }
+
+    /// <summary>The member a slot fills, or "" for a slot that names none (an element, a tuple item, an index entry).</summary>
+    private string Member(SyntaxNode slot) => model is null ? "" : slot switch
+    {
+        AnonymousObjectMemberDeclaratorSyntax member => CsSemantics.DeclaredName(model, member),
+        AssignmentExpressionSyntax { Left: not ImplicitElementAccessSyntax } assigned => CsSemantics.Name(CsSemantics.Bound(model, assigned.Left)),
+        _ => "",
+    };
 
     /// <summary>
     /// The constructs, read off the tree. An initializer is taken from the creation that owns it rather than
@@ -161,6 +175,11 @@ internal sealed partial class CsRows
                 break;
             case CollectionExpressionSyntax collection:
                 Construct(collection, "collection", collection, collection.Elements);
+                break;
+            // `new { PartName = "Header" }` (#121): what an anonymous object holds is read back by its property's name, and
+            // only a row per member says what a later `p.PartName` was given.
+            case AnonymousObjectCreationExpressionSyntax anonymous:
+                Construct(anonymous, "anonymous", anonymous, anonymous.Initializers);
                 break;
             case BaseObjectCreationExpressionSyntax { Initializer: not null } created:
                 // The creation itself is a `calls` row; this is what it was filled with.

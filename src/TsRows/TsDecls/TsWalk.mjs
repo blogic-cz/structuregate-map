@@ -28,6 +28,7 @@ import { makeTypeResolver } from './TsTypeRef.mjs';
 import { makeTypeRows } from './TsTypeRows.mjs';
 import { collectComments, collectStrings, exportRow } from './TsText.mjs';
 import { createProgram, programFilePaths, projectSourceFiles } from './TsProgram.mjs';
+import { outsideProjects } from './TsOutside.mjs';
 import { emit } from './TsRunIo.mjs';
 import { makeReadLog, surfaceOf } from './TsReads.mjs';
 import { propReads } from './TsPropReads.mjs';
@@ -62,7 +63,7 @@ export function makeFileId(store, feRoot, projectId) {
  * program and in its own), and extracting it once per program duplicated its declarations - one element
  * then reported the same directive several times. The first program to reach a file owns it.
  */
-export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted, only = null, rereads = null, propertyPaths = [] }) {
+export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted, only = null, rereads = null, propertyPaths = [], sources = () => [] }) {
   const inAnyProgram = new Set();
   // WHAT EACH FILE READ OUTSIDE ITSELF, and what it shows - see `TsSetup/TsReads.mjs`.
   const log = makeReadLog(ts, fe);
@@ -70,8 +71,15 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
   // WHAT PASS 2 NEEDS: every selector-matchable declaration, and every component whose template it parses.
   const registry = [];
   const components = [];
-  for (const project of projects) {
-    const projectId = store.add('projects', 'p', {
+  // AFTER EVERY REAL PROGRAM, the files none of them reached (#120, `TsSetup/TsOutside.mjs`) - asked only once the last is walked.
+  function* everyProgram() {
+    yield* projects;
+    yield* outsideProjects(projects, sources().filter((abs) => !inAnyProgram.has(abs)), fe);
+  }
+  // AN OUTSIDE PROGRAM IS NO PROJECT: its files belong to the project it borrowed the config of, and `reachable` 0 says the rest.
+  const projectIds = new Map();
+  for (const project of everyProgram()) {
+    const projectId = project.roots ? (projectIds.get(project.name) ?? null) : store.add('projects', 'p', {
       name: project.name,
       dir: project.rel,
       project_type: project.projectType,
@@ -83,12 +91,13 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
       tsconfig_candidates: project.tsconfigCandidates.map((c) => relativeTo(fe, c)),
       targets: project.targets,
     });
+    projectIds.set(project.name, projectId);
 
     let program;
     let checker;
     try {
       ({ program, checker } = timed('typescript: build a program', project.tsconfig,
-        () => createProgram(ts, project.tsconfig, nodeModules, diag, noted)));
+        () => createProgram(ts, project.tsconfig, nodeModules, diag, noted, true, project.roots)));
       checker = log.wrap(checker);
     } catch (error) {
       diag.note('program_failed');
@@ -96,7 +105,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
       continue;
     }
 
-    for (const p of programFilePaths(program, fe)) inAnyProgram.add(canonicalPath(p));
+    if (!project.roots) for (const p of programFilePaths(program, fe)) inAnyProgram.add(canonicalPath(p));
     const files = projectSourceFiles(program, fe);
     if (!files.length) {
       // An empty program is indistinguishable from a project with no code, and it is how a wrong tsconfig
@@ -112,7 +121,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     // read is owned by this project or an earlier one, and all of that has been decided already.
     if (rereads) {
       rereads.project(files.filter((sf) => !extracted.has(canonicalPath(sf.fileName))), () => {
-        try { return createProgram(ts, project.tsconfig, nodeModules, diag, noted).program; } catch { return null; }
+        try { return createProgram(ts, project.tsconfig, nodeModules, diag, noted, true, project.roots).program; } catch { return null; }
       });
     }
     const fileId = makeFileId(store, fe, projectId);
@@ -406,7 +415,11 @@ export function markReachable(store, inAnyProgram, diag) {
     diag.note(inProgram ? 'declaration_file_not_walked' : 'ts_not_in_any_program', { file: f.path });
   }
   for (const f of store.table('files')) {
-    if (f.tier === 'core' || f.tier === 'boundary') f.reachable = true;
+    // A FILE ONLY AN OUTSIDE PROGRAM WALKED (#120) is parsed and still in no build: unreachable, and noted as before.
+    if (f.ext === 'ts' && f.tier === 'core' && !inAnyProgram.has(f.abs)) {
+      f.reachable = false;
+      diag.note('ts_not_in_any_program', { file: f.path });
+    } else if (f.tier === 'core' || f.tier === 'boundary') f.reachable = true;
     // EVERY ROW CARRIES A DETERMINATE ANSWER. A parsed file that was never tiered fell through both
     // branches and the key was simply ABSENT - a consumer reading `reachable` got `undefined`, which is
     // neither yes, no, nor "not applicable". `null` is the honest value: reachability is a program

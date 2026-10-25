@@ -217,8 +217,7 @@ impl Returned<'_, '_> {
     /// a template or an instance holds (`tooltip = { text: this.tipText }`) and calls with what only it knows.
     ///
     /// EVERY RETURN'S OWN KEY COUNTS, as a template-called method's does (`key_methods`): the template calls this function
-    /// itself, so `if (gone) { return 'a'; } return 'b';` renders either key. A call made FROM it still reads a callee's
-    /// several returns only through their calls.
+    /// itself, so `if (gone) { return 'a'; } return 'b';` renders either key - and so does a call made FROM it (#122).
     pub(in super::super) fn enter_member(&self, member: &str, out: &mut Found) {
         let mut seen = Seen::default();
         if self.one_return.contains_key(member) {
@@ -283,7 +282,13 @@ impl Returned<'_, '_> {
                 let links: Vec<String> = self.branches.chain_of(row).into_iter().filter(|b| self.branches.condition(b).is_some()).map(|b| format!("arg:{b}@")).collect();
                 let mut held = Found::new();
                 if let Some(ret) = row.get("value") {
-                    self.through(&self.bind(ret, &frame), &frame, seen, &mut held);
+                    let bound = self.bind(ret, &frame);
+                    // EACH RETURN'S OWN KEY TOO (#122), UNDER THAT RETURN'S OWN BRANCHES: `this.statusKey = this.keyOf()` over
+                    // `switch (s) { case A: return 'k.a'; .. }` holds every case's key, each under its case - as the `literal` route
+                    // placed it (`key_branches::literal_ways`). Read only through the calls in them, the field held none and its keys
+                    // reached no node; read with no chain, a key one case returns lost that case's restriction.
+                    value_keys(&bound, &self.branches.chain_of(row), self.keys, &mut found);
+                    self.through(&bound, &frame, seen, &mut held);
                 }
                 self.written(row, &frame, seen, &mut held);
                 found.extend(held.into_iter().map(|(key, chain)| (key, [links.clone(), chain].concat())));

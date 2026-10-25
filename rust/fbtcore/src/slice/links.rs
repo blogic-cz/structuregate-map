@@ -23,7 +23,9 @@ const ROW_LINKS: [(&str, &str); 8] = [
     ("sql_links", "object"),
     ("sql_links", "column_id"),
 ];
-const FILE_LINKS: [(&str, &str); 3] = [("imports", "resolved_file"), ("import_names", "declared_file"), ("file_refs", "target")];
+// `name_type_links` (#121): a call handing a class's name depends on the class's file.
+const FILE_LINKS: [(&str, &str); 4] =
+    [("imports", "resolved_file"), ("import_names", "declared_file"), ("file_refs", "target"), ("name_type_links", "type_file")];
 
 fn columns(db: &Connection, table: &str) -> Vec<String> {
     let Ok(mut stmt) = db.prepare("SELECT name FROM pragma_table_info(?1)") else { return vec![] };

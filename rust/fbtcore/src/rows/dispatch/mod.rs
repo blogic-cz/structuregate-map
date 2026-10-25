@@ -14,6 +14,7 @@
 
 pub mod csconfig;
 pub mod enumtypes;
+pub mod nametypes;
 
 use super::dups::{has_columns, owner_sql, scalar_sql, text, Column};
 use rusqlite::types::Value as SqlValue;

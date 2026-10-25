@@ -25,13 +25,16 @@ $script:KeyOptionsFiles = @{
     'apps/shop/src/widget.component.ts' = "import { Component } from '@angular/core';`n" +
         "import { hueLabels } from './hue-labels';`nimport { toItems } from './items';`nimport { RadioListComponent } from './radio.component';`n" +
         "@Component({ selector: 'app-widget', standalone: true, imports: [RadioListComponent],`n" +
-        "  template: '<radio-list [items]=`"hues`" [(value)]=`"model.hue`"></radio-list><radio-list [items]=`"sizes`" [(value)]=`"model.size`"></radio-list><radio-list [items]=`"shown`"></radio-list><radio-list [items]=`"tiers`" formControlName=`"tier`"></radio-list>' })`n" +
+        "  template: '<radio-list [items]=`"hues`" [(value)]=`"model.hue`"></radio-list><radio-list [items]=`"sizes`" [(value)]=`"model.size`"></radio-list><radio-list [items]=`"shown`"></radio-list><radio-list [items]=`"tiers`" formControlName=`"tier`"></radio-list>' +`n" +
+        "    '<radio-list [value]=`"model.hue`" (valueChange)=`"model.hue = `$event`" [items]=`"spelled`"></radio-list><radio-list [value]=`"model.hue`" (valueChange)=`"model.size = `$event`" [items]=`"crossed`"></radio-list>' })`n" +
         "export class WidgetComponent {`n" +
         "  model = { hue: '', size: '' };`n" +
         "  hues = toItems(hueLabels);`n" +
         "  sizes = [{ value: 's', label: 'size.small' }, { value: 'l', label: 'size.large' }];`n" +
         "  shown = [{ value: 'x', label: 'shown.only' }];`n" +
         "  tiers = [{ value: 't', label: 'tier.gold' }];`n" +
+        "  spelled = [{ value: 'w', label: 'spelled.out' }];`n" +
+        "  crossed = [{ value: 'c', label: 'crossed.over' }];`n" +
         "}`n"
     # THE WORKSPACE'S OWN CONFIG, with the dictionary call this tree's service is.
     'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["money"],"gateInputs":["disabled"],' +
@@ -84,7 +87,7 @@ $script:KeyOptionsFiles = @{
         "  pairs = this.enums.pairs(Grade, this.dictionary.getTranslationDictionary('rank'));`n" +
         "  bare = this.enums.toItems(Grade, {});`n" +
         "  constructor(private enums: EnumService, private dictionary: DictionaryService) {}`n}`n"
-    'apps/shop/src/assets/locales/en.json' = '{"hue":{"red":"Red","blue":"Blue"},"size":{"small":"S","large":"L"},"shown":{"only":"O"},"tier":{"gold":"G"},"grade":{"Gold":"G","Silver":"S"},"answer":{"yes":"Y","no":"N"},"rank":{"Gold":"G","Silver":"S"}}'
+    'apps/shop/src/assets/locales/en.json' = '{"hue":{"red":"Red","blue":"Blue"},"size":{"small":"S","large":"L"},"shown":{"only":"O"},"tier":{"gold":"G"},"grade":{"Gold":"G","Silver":"S"},"answer":{"yes":"Y","no":"N"},"spelled":{"out":"W"},"crossed":{"over":"C"},"rank":{"Gold":"G","Silver":"S"}}'
 }
 
 # THE CONTROL AND ITS LABELS: `hues` is a const table a helper rebuilds into items (`Object.entries(t).map(([value, label]) => ..)`), `sizes` a list
@@ -126,6 +129,11 @@ Test-Case 'tsrows: a form control names the option keys it is offered, with the 
     Assert-Line $m 'rank=state.pair|model.Label|rank.Silver|pairs'
     $bare = Invoke-Gate --map-query $made.Db --sql "SELECT 'bare=' || count(*) AS n FROM control_options WHERE value = 'state.bare'"
     Assert-Line $bare 'bare=0'
+    # A TWO-WAY BINDING AS SOME ANGULAR COMPILES IT (#118): the output is `model.hue = $event`, a write of the place the input reads -
+    # the same pair as `[(value)]`, matched by the place and not the text. THE CONTROL: an output storing `$event` in another place.
+    $w = Invoke-Gate --map-query $made.Db --width 0 --limit 0 --sql "SELECT 'spelled=' || value || '|' || key AS s FROM control_options WHERE key IN ('spelled.out', 'crossed.over')"
+    Assert-Line $w 'spelled=model.hue|spelled.out'
+    Assert-NoLine $w 'crossed.over'
     # COUNTED, not looked for in the line above: a row with no value binding would concatenate to NULL and print as nothing.
     $none = Invoke-Gate --map-query $made.Db --sql "SELECT 'shown=' || count(*) AS n FROM control_options WHERE key = 'shown.only'"
     Assert-Line $none 'shown=0'

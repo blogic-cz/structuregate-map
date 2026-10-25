@@ -158,7 +158,8 @@ export function prewarm(ts, projects, nodeModules) {
   }
 }
 
-export function createProgram(ts, tsconfigPath, nodeModules, diag, noted, checked = true) {
+// `roots` IN PLACE OF THE CONFIG'S OWN FILES: the files no program reached, under a project's options (`TsOutside.mjs`).
+export function createProgram(ts, tsconfigPath, nodeModules, diag, noted, checked = true, roots = null) {
   const configHost = {
     ...ts.sys,
     onUnRecoverableConfigFileDiagnostic: (d) => {
@@ -212,8 +213,9 @@ export function createProgram(ts, tsconfigPath, nodeModules, diag, noted, checke
     return r;
   });
 
-  const program = ts.createProgram({ rootNames: parsed.fileNames, options, host });
-  return { program, checker: checked ? program.getTypeChecker() : null, options, rootNames: parsed.fileNames };
+  const rootNames = roots ?? parsed.fileNames;
+  const program = ts.createProgram({ rootNames, options, host });
+  return { program, checker: checked ? program.getTypeChecker() : null, options, rootNames };
 }
 
 /**

@@ -22,13 +22,14 @@ before concluding a method is dead.
   `template` instead - node rows (`<table>__template`), each string it can be as literal text and `hole` pieces holding C# source.
 * **`refs`**: one row per bound identifier that is not a call - `kind` (`field`, `property`, `namedtype`,
   `method` as a group or delegate), `name`, `symbol`. "Which code reads this property" is this table - writes
-  (`x.P = ...`) and uses inside lambdas included. A member access the compiler could NOT bind (a lambda whose
+  (`x.P = ...`), uses inside lambdas and reads after `?.` included - `o?.Inner?.P` is `name` `o.Inner.P`, as `.` gives. A member access the compiler could NOT bind (a lambda whose
   type it could not infer, a file with compile errors) is a row with `kind = 'unbound'` and `symbol = ''`: a
   MAYBE, found by name - `WHERE symbol = 'Ns.T.P' OR (kind = 'unbound' AND name LIKE '%.P')`. `diagnostics`
   says why it did not bind.
-* **`objects`**: a construct - `kind` is `tuple`, `array`, `collection`, `initializer` - whose slots are
+* **`objects`**: a construct - `kind` is `tuple`, `array`, `collection`, `initializer`, `anonymous` (`new { A = 1 }`) - whose slots are
   `arguments` rows carrying an `object` id instead of a `call` id - `name` the member (`Region = ..`), the tuple
-  element, or an index entry's KEY (`["EU"] = 3` is `name = 'EU'`). `new Foo(x)` stays a CALL.
+  element, or an index entry's KEY (`["EU"] = 3` is `name = 'EU'`); `member` the member a named slot fills, resolved - the
+  symbol a later read of it has, so `arguments.member = refs.symbol` finds what was written there. `new Foo(x)` stays a CALL.
 * `decorators` are the attributes (`DllImport`, `Fact`, ...) - `target_kind` the declaration's kind (`class`, `method`,
   `parameter`, `field`, `const`, `event`, `enum_member` for `[ExternalId(7001)] Alpha`, `target` the member's name -
   one row per declarator of `int a, b;`); `arg_values` is the list (node rows) of what each argument folds to
@@ -46,8 +47,8 @@ before concluding a method is dead.
   `.razor`/`.cshtml`, compiled as the C# the Razor compiler generates and walked as the MARKUP file at its
   own lines), `errors`, `semantic`.
 * `http_endpoints`: every attribute-routed action (`[Route]`/`[Http*]`), one row per class route - see SKILL.md.
-* `dispatch` and `enum_type_links` - WHICH CODE RUNS where the call names no class (a mediator's handler, a class picked by an
-  enum member's name): [csharp-runs.md](csharp-runs.md).
+* `dispatch`, `enum_type_links` and `name_type_links` - WHICH CODE RUNS where the call names no class (a mediator's handler, a class
+  picked by an enum member's name or by a name string): [csharp-runs.md](csharp-runs.md).
 * `razor_renders`: a component that renders another (`component` the full type name, `tag`, `attributes`).
 * `handlers` adds `guard` (the `when` filter), `finally` and `symbol` (the bound exception type).
 * **`enums` and `switch_cases` are SHARED with the TypeScript half**, in its shape, so one query reads both

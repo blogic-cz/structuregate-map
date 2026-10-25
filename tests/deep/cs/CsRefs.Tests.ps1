@@ -306,3 +306,32 @@ Test-Case 'csrefs: an assembly a package adds from its own build targets is comp
     $bound = Invoke-Gate --map-query $built.Db --sql "SELECT 'symbol=' || symbol AS x FROM calls WHERE callee LIKE '%Cancel'" --width 200
     Assert-Line $bound 'symbol=System.Threading.CancellationTokenSource.Cancel'
 }
+
+Test-Case 'csrefs: a member read after ?. is a ref, named with its receiver as a . read is (#119)' {
+    # `o?.IsPaid` is a binding under a conditional access, not a member access: the walk passed only the latter on, so
+    # every read through `?.` - property, field, a chain of them - had no row and "who reads this member" missed it.
+    $tree = Use-Tree @{
+        'Demo.csproj' = $csproj
+        'Order.cs'    = "namespace Demo;" + $nl +
+                        "public class Inner { public bool IsReady { get; set; } public int Count; public bool Ok() => true; }" + $nl +
+                        "public class Order { public bool IsPaid { get; set; } public Inner? Inner { get; set; } }" + $nl +
+                        "public class OrderCheck" + $nl + "{" + $nl +
+                        "    public bool Plain(Order o) => o.IsPaid;" + $nl +
+                        "    public bool Conditional(Order? o) => o?.IsPaid == true;" + $nl +
+                        "    public bool Chain(Order? o) => o?.Inner?.IsReady == true;" + $nl +
+                        "    public int Field(Order? o) => o?.Inner.Count ?? 0;" + $nl +
+                        "    public bool Call(Inner? i) => i?.Ok() == true;" + $nl + "}" + $nl
+    }
+    $built = New-CsRefsDb $tree
+    $r = Invoke-Gate --map-query $built.Db --width 0 --limit 0 --sql "SELECT 'ref=' || line || '|' || name || '|' || symbol || '|' || kind AS r FROM refs WHERE kind IN ('property', 'field', 'method', 'unbound')"
+    Assert-Line $r 'ref=6|o.IsPaid|Demo.Order.IsPaid|property'
+    Assert-Line $r 'ref=7|o.IsPaid|Demo.Order.IsPaid|property'
+    Assert-Line $r 'ref=8|o.Inner|Demo.Order.Inner|property'
+    Assert-Line $r 'ref=8|o.Inner.IsReady|Demo.Inner.IsReady|property'
+    Assert-Line $r 'ref=9|o.Inner|Demo.Order.Inner|property'
+    Assert-Line $r 'ref=9|o.Inner.Count|Demo.Inner.Count|field'
+    # A CALL IS A `calls` ROW, as `i.Ok()` is: no ref beside it.
+    Assert-NoLine $r '|Demo.Inner.Ok|'
+    $c = Invoke-Gate --map-query $built.Db --width 0 --sql "SELECT 'call=' || line || '|' || symbol AS c FROM calls WHERE symbol LIKE '%.Ok'"
+    Assert-Line $c 'call=10|Demo.Inner.Ok'
+}

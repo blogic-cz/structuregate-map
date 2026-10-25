@@ -7,6 +7,10 @@
 //! classes are OVERRIDES of a member's default (`$"{prefix}.{name}"`), or `default` the namespace text the default classes hold
 //! (`".Standard"`: every other class an override, its last namespace segment the prefix), `ignoreCase` the dictionary's comparer. Read here,
 //! joined over the finished rows by `enumtypes.rs` beside it; its stamp keys the passes over them.
+//!
+//! `typesByName` (#121): the same dictionary reached with a STRING - a method taking the class's name as a parameter,
+//! `[{ "method": "Demo.Templates.TemplateBase.Include", "parameter": "name", "base": ..., "namespace": ..., "default": ".Standard",
+//! "ignoreCase": true }]` - `prefixes`/`default`/`ignoreCase` as above. Joined by `nametypes.rs`.
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -25,16 +29,29 @@ pub struct EnumTypes {
     pub ignore_case: bool,
 }
 
+/// One declared string lookup (#121): the method, the parameter that carries the name, and how the dictionary keys its classes.
+#[derive(Clone, Debug)]
+pub struct NameTypes {
+    pub method: String,
+    pub parameter: String,
+    pub base: String,
+    pub namespace: String,
+    pub prefixes: Vec<String>,
+    pub default: Option<String>,
+    pub ignore_case: bool,
+}
+
 /// The conventions, the stamp the passes are keyed by (`none` without a file), and what was wrong with the file.
 pub struct CsConfig {
     pub types_by_enum_name: Vec<EnumTypes>,
+    pub types_by_name: Vec<NameTypes>,
     pub stamp: String,
     pub problems: Vec<String>,
 }
 
 pub fn read(given: Option<&str>, base_dir: &str) -> CsConfig {
     let path = given.map(String::from).unwrap_or_else(|| Path::new(base_dir).join("structuregate.cs.json").to_string_lossy().into_owned());
-    let mut out = CsConfig { types_by_enum_name: Vec::new(), stamp: "none".into(), problems: Vec::new() };
+    let mut out = CsConfig { types_by_enum_name: Vec::new(), types_by_name: Vec::new(), stamp: "none".into(), problems: Vec::new() };
     if !Path::new(&path).is_file() {
         if given.is_some() {
             out.problems.push(format!("{path} does not exist"));
@@ -66,6 +83,17 @@ pub fn read(given: Option<&str>, base_dir: &str) -> CsConfig {
         let prefixes = spec["prefixes"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
         let default = Some(field("default")).filter(|d| !d.is_empty());
         out.types_by_enum_name.push(EnumTypes { enum_symbol, base, namespace, prefixes, default, ignore_case: spec["ignoreCase"].as_bool().unwrap_or(false) });
+    }
+    for spec in root["typesByName"].as_array().into_iter().flatten() {
+        let field = |k: &str| spec[k].as_str().unwrap_or("").trim().to_string();
+        let (method, parameter, base, namespace) = (field("method"), field("parameter"), field("base"), field("namespace"));
+        if method.is_empty() || parameter.is_empty() || base.is_empty() {
+            out.problems.push(format!("{path}: a typesByName entry needs \"method\", \"parameter\" and \"base\" - {spec}"));
+            continue;
+        }
+        let prefixes = spec["prefixes"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+        let default = Some(field("default")).filter(|d| !d.is_empty());
+        out.types_by_name.push(NameTypes { method, parameter, base, namespace, prefixes, default, ignore_case: spec["ignoreCase"].as_bool().unwrap_or(false) });
     }
     out
 }
