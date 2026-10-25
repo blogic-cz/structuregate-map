@@ -23,6 +23,7 @@ import { EXPRESSION_KINDS, MIN_BODY_STATEMENTS, MIN_EXPRESSION_LEAVES, alias, ca
 import { bindCall, bindingNames, dotted, facts, isFunctionLike, nameText } from './TsPlainFacts.mjs';
 import { catchFacts } from './TsCatch.mjs';
 import { literalUse, numberOf } from './TsLiterals.mjs';
+import { generatedHeader } from './TsGenerated.mjs';
 
 /** The tables, filled as the walk goes. Ids CONTINUE from the counters the store handed over: an id given
  *  out twice is a join that silently pulls an unrelated row. */
@@ -147,7 +148,7 @@ export function readFile(ts, rows, file) {
         path: rel, module: moduleOf(rel), sha, lines: text.split('\n').length,
         dialect: rel.endsWith('.ts') || rel.endsWith('.tsx') || rel.endsWith('.mts') || rel.endsWith('.cts')
             ? 'typescript' : 'javascript',
-        entry: isModule ? 0 : 1, doc: summary(ts, sf, text), errors, skipped: '',
+        entry: isModule ? 0 : 1, doc: summary(ts, sf, text), errors, skipped: '', generated: generatedHeader(ts, text),
     });
 
     // WHERE A SPECIFIER LEADS, and what that answer depended on.

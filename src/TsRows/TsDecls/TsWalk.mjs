@@ -31,6 +31,7 @@ import { createProgram, programFilePaths, projectSourceFiles } from './TsProgram
 import { emit } from './TsRunIo.mjs';
 import { makeReadLog, surfaceOf } from './TsReads.mjs';
 import { propReads } from './TsPropReads.mjs';
+import { generatedHeader } from './TsGenerated.mjs';
 import { shapeOf } from './TsShape.mjs';
 
 /**
@@ -324,6 +325,8 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
       } catch {
         diag.note('shape_scan_failed');
       }
+      // WRITTEN BY A TOOL (rows 108, #116): the generator's header, read as the C# half reads it (`TsGenerated.mjs`).
+      store.patch(fid, { generated: generatedHeader(ts, sf.text) });
       try {
         store.patch(fid, propReads(ts, sf));
       } catch {

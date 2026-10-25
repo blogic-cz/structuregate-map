@@ -352,6 +352,7 @@ async function main() {
   //     is one lists the strings it builds in `expands` (`TsText.mjs::collectStrings`, `TsExpr/TsReadRefs.mjs::enumNameHole`).
   // 98: #109 - `propertyPaths` (`structuregate.ts.json`) names members whose strings are property paths and the root they start from; such a string carries `path_refs`
   //     (a segment each, with its row `id`) and `path_complete` (`TsExpr/TsReadRefs.mjs::pathRefs`).
+  // 108: #116 - `files.generated` is 1 when a comment heading the file carries a generator's marker, else 0 (`TsPlain/TsGenerated.mjs`), as the C# half's.
   // 107: a value returned from a class member nothing in the program types carries `returned_from` (`TsReadRefs.mjs::fieldReturned`), and takes the member the input declares
   //     where its template binds the member's call (`[rules]="rules()"`): `target_via` 'template' (`TsDerive/TsInputs/TsTplFills.mjs`).
   // 106: a value returned from a function with no return type and no caller in its file takes the function's inferred return type when its returns fold into a
@@ -365,7 +366,7 @@ async function main() {
   // 99: an immer handler's `writes` follow the helpers it hands its draft to, and the callbacks they call (`TsExpr/TsExprDescribe.mjs::draftWrites`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 107, build: args.build,
+    config: config.file, data: config.data, rows: 108, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
