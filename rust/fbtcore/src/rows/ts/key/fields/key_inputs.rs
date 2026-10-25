@@ -81,7 +81,7 @@ pub(super) fn input_lists(store: &Store<'_>, lists: &HashMap<String, Vec<Element
             bound.entry((node, name)).or_default().extend(tree_of(&id));
         }
     }
-    let paths = path_lists(store, branches);
+    let paths = path_lists(store, branches, src);
     // landing ids -> every element a render edge's parent binds, tied to that edge
     let mut out: HashMap<String, Vec<Element>> = HashMap::new();
     for r in store.table("renders").iter() {
@@ -101,6 +101,10 @@ pub(super) fn input_lists(store: &Store<'_>, lists: &HashMap<String, Vec<Element
 /// The list a bound expression is, and the row it comes from: a bare read of a field with a known list, or of a getter -
 /// or a call of a method - whose every return is a list.
 pub(super) fn bound_list(tree: &Value, lists: &HashMap<String, Vec<Element>>, src: &ListSource<'_, '_>, paths: &Paths) -> Option<(String, Vec<Element>)> {
+    // A LIST A PIPE REBUILDS (`hues | labelled : path`, `key_pipes`): what its `transform` makes of the list it is applied to.
+    if tree.get("k").and_then(Value::as_str) == Some("Pipe") {
+        return src.pipes.piped(tree, src, |exp| bound_list(unwrap(exp), lists, src, paths));
+    }
     // `cfg.list`: a property of one of the class's own fields, no declaration of its own (`path_lists`).
     let holder = tree.get("receiver").filter(|r| is_read(r) && r.get("receiver").and_then(|i| i.get("k")).and_then(Value::as_str) == Some("Implicit"));
     if let (true, Some(row), Some(name)) = (is_read(tree), holder.and_then(|r| r.get("target")?.get("row")?.as_str()), tree.get("name").and_then(Value::as_str)) {
@@ -123,10 +127,10 @@ pub(super) fn bound_list(tree: &Value, lists: &HashMap<String, Vec<Element>>, sr
     if let Some(value) = src.shaped.get(&row) {
         let items = match value {
             Value::Array(xs) => xs.iter().map(|x| Element::written(x.clone(), Vec::new())).collect(),
-            other => {
-                let (items, owner) = src.callee_lists(Some(other))?;
-                items.into_iter().map(|i| Element::returned(i, &owner)).collect()
-            }
+            other => match src.callee_lists(Some(other)) {
+                Some((items, owner)) => items.into_iter().map(|i| Element::returned(i, &owner)).collect(),
+                None => src.chained(other, &mut Vec::new())?.into_iter().map(|x| Element::written(x, Vec::new())).collect(),
+            },
         };
         return Some((row, items));
     }
@@ -140,29 +144,44 @@ pub(super) type Paths = HashMap<(String, String), Option<Vec<Element>>>;
 /// A LIST HELD IN A PROPERTY OF A FIELD (`cfg = { list: [..] }`, `this.cfg.list = [..]`): the initializer's array and every
 /// plain `=` of an array the field's own class writes to it (`holder`), each under its write's branches. A write of
 /// anything else leaves the property unread - a list read in part would hand the child fewer elements than it can hold.
-pub(super) fn path_lists(store: &Store<'_>, branches: &Branches) -> Paths {
+pub(super) fn path_lists(store: &Store<'_>, branches: &Branches, src: &ListSource<'_, '_>) -> Paths {
     let mut out = Paths::new();
+    // A LIST VALUE: an array, or a call or chain the list readers follow (`{ answers: yesNo() }`, `key_lists::ListSource::chained`).
+    let list = |v: &Value| src.chained(v, &mut Vec::new());
     let members = store.table("members");
     let mut by_name: HashMap<(String, String), String> = HashMap::new();
+    let mut bare = std::collections::HashSet::new();
     for m in members.iter() {
         let (Some(id), Some(class), Some(name)) = (id_of(m, "id"), text(m, "class"), text(m, "name")) else { continue };
+        if m.get("value").is_none_or(Value::is_null) {
+            bare.insert(id.clone());
+        }
         if let Some(object) = m.get("value").and_then(Value::as_object).filter(|o| o.keys().all(|k| !k.starts_with('$'))) {
             for (k, v) in object {
-                let items = v.as_array().map(|xs| xs.iter().map(|x| Element::written(x.clone(), Vec::new())).collect());
+                let items = list(v).map(|xs| xs.into_iter().map(|x| Element::written(x, Vec::new())).collect());
                 out.insert((id.clone(), k.clone()), items);
             }
         }
         by_name.insert((class, name), id);
     }
     // A FIELD WRITTEN WHOLE (`this.cfg = { list: [..] }`) hands each property its own array; written as anything but an object
-    // literal, every property of it is unread.
+    // literal, every property of it is unread. One declared with no initializer (`cfg!: Cfg`) has the properties its writes spell.
+    fn object_of(a: &Row) -> Option<&serde_json::Map<String, Value>> {
+        a.get("value").and_then(Value::as_object).filter(|o| o.keys().all(|k| !k.starts_with('$')) && text(a, "operator").as_deref() == Some("="))
+    }
+    for a in store.table("assignments").iter().filter(|a| text(a, "scope").as_deref() == Some("this")) {
+        let (Some(field), Some(object)) = (id_of(a, "target_id").filter(|f| bare.contains(f)), object_of(a)) else { continue };
+        for prop in object.keys() {
+            out.entry((field.clone(), prop.clone())).or_insert_with(|| Some(Vec::new()));
+        }
+    }
     let fields: std::collections::HashSet<String> = out.keys().map(|(f, _)| f.clone()).collect();
     for a in store.table("assignments").iter().filter(|a| text(a, "scope").as_deref() == Some("this")) {
         let Some(field) = id_of(a, "target_id").filter(|f| fields.contains(f)) else { continue };
-        let object = a.get("value").and_then(Value::as_object).filter(|o| o.keys().all(|k| !k.starts_with('$')) && text(a, "operator").as_deref() == Some("="));
+        let object = object_of(a);
         for ((_, prop), slot) in out.iter_mut().filter(|((f, _), _)| *f == field) {
-            match (slot.as_mut(), object.map(|o| o.get(prop).and_then(Value::as_array))) {
-                (Some(items), Some(Some(xs))) => items.extend(xs.iter().map(|x| Element::written(x.clone(), branches.chain_of(a)))),
+            match (slot.as_mut(), object.map(|o| o.get(prop).and_then(list))) {
+                (Some(items), Some(Some(xs))) => items.extend(xs.into_iter().map(|x| Element::written(x, branches.chain_of(a)))),
                 _ => *slot = None,
             }
         }
@@ -170,10 +189,10 @@ pub(super) fn path_lists(store: &Store<'_>, branches: &Branches) -> Paths {
     for a in store.table("assignments").iter().filter(|a| text(a, "scope").as_deref() == Some("property")) {
         let (Some(class), Some(holder), Some(name)) = (text(a, "class"), text(a, "holder"), text(a, "target")) else { continue };
         let Some(field) = by_name.get(&(class, holder)) else { continue };
-        let list = a.get("value").and_then(Value::as_array).filter(|_| text(a, "operator").as_deref() == Some("="));
+        let written = a.get("value").filter(|_| text(a, "operator").as_deref() == Some("=")).and_then(list);
         let slot = out.entry((field.clone(), name)).or_insert_with(|| Some(Vec::new()));
-        match (slot.as_mut(), list) {
-            (Some(items), Some(xs)) => items.extend(xs.iter().map(|x| Element::written(x.clone(), branches.chain_of(a)))),
+        match (slot.as_mut(), written) {
+            (Some(items), Some(xs)) => items.extend(xs.into_iter().map(|x| Element::written(x, branches.chain_of(a)))),
             _ => *slot = None,
         }
     }

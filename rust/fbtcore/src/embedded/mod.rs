@@ -51,7 +51,7 @@ pub const TSROWS: Set = set!("tsrows-node":
     "TsRows/TsText.mjs", "TsRows/TsPlain/TsLiterals.mjs", "TsRows/TsPlain/TsGenerated.mjs", "TsRows/TsDecls/TsWalk.mjs",
     "TsRows/TsHtml.mjs",
     "TsRows/TsDecls/TsAngular.mjs", "TsRows/TsDecls/TsBody.mjs", "TsRows/TsDecls/TsCatch.mjs",
-    "TsRows/TsDecls/TsClassRows.mjs", "TsRows/TsDecls/TsExpr/TsLoops.mjs", "TsRows/TsDecls/TsExpr/TsShapes.mjs",
+    "TsRows/TsDecls/TsClassRows.mjs", "TsRows/TsDecls/TsExpr/TsStatements/TsLoops.mjs", "TsRows/TsDecls/TsExpr/TsStatements/TsCases.mjs", "TsRows/TsDecls/TsExpr/TsShapes.mjs",
     "TsRows/TsDecls/TsDeclRows.mjs", "TsRows/TsDecls/TsExpr/TsExprDescribe.mjs", "TsRows/TsDecls/TsExpr/TsExprNorm.mjs",
     "TsRows/TsDecls/TsExpr/TsExprSummary.mjs", "TsRows/TsDecls/TsExpr/TsReadRefs.mjs", "TsRows/TsDecls/TsExpr/TsLaterTypes.mjs", "TsRows/TsDecls/TsI18nCalls.mjs",
     "TsRows/TsDecls/TsModifiers.mjs", "TsRows/TsDecls/TsPropReads.mjs", "TsRows/TsDecls/TsLibPipes.mjs", "TsRows/TsDecls/TsRefs.mjs", "TsRows/TsDecls/TsTypeRef.mjs",

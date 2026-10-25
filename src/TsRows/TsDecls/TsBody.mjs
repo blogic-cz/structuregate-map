@@ -17,7 +17,7 @@ import { locationOf } from './TsNodes.mjs';
 import { catchFacts, chainOf } from './TsCatch.mjs';
 import { loopFacts, loopKind } from './TsLoops.mjs';
 
-export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName, shapeAt, bindingFacts, injectAt, resolveArg, targetLine, fieldTarget }) {
+export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName, shapeAt, bindingFacts, injectAt, resolveArg, targetLine, fieldTarget, caseFacts }) {
   /**
    * THE BRANCH OR CASE A STATEMENT SITS IN IS PART OF WHAT THE STATEMENT MEANS.
    *
@@ -424,14 +424,18 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
     const discriminantExpr = treeFor(node.expression, 'switch');
     walk(node.expression); // calls inside the discriminant belong to the ENCLOSING case
     const parent = currentCase;
+    // WHAT IS SWITCHED AND WHAT EACH LABEL SELECTS, by the checker (rows 114, `TsExpr/TsStatements/TsCases.mjs`).
+    const switched = caseFacts ? caseFacts.discriminant(node.expression) : {};
     let labels = [];
     let labelExprs = [];
+    let labelNodes = [];
     let sawDefault = false;
     for (const clause of node.caseBlock.clauses) {
       if (ts.isDefaultClause(clause)) sawDefault = true;
       else {
         labels.push(evalNode(clause.expression));
         labelExprs.push(treeFor(clause.expression, 'case'));
+        labelNodes.push(clause.expression);
         // A LABEL CAN CONTAIN CODE, and walking clauses by hand stops `forEachChild` from ever reaching it -
         // several labels lost their `calls` rows silently. Evaluated in the ENCLOSING scope, before any case.
         walk(clause.expression);
@@ -441,7 +445,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       const caseId = store.add('switch_cases', 'sc', {
         member: ownerId, class: classId, parent,
         discriminant, discriminant_expr: discriminantExpr, discriminant_source: node.expression.getText(),
-        labels, label_exprs: labelExprs, is_default: sawDefault, ...locationOf(clause),
+        labels, label_exprs: labelExprs, is_default: sawDefault, ...switched, ...(caseFacts ? caseFacts.labels(labelNodes) : {}), ...locationOf(clause),
       });
       currentCase = caseId;
       // RESTORED IN `finally`: this state lives in a closure built once per program, so an exception while
@@ -453,6 +457,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       }
       labels = [];
       labelExprs = [];
+      labelNodes = [];
       sawDefault = false;
     }
   }

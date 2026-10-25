@@ -354,6 +354,7 @@ pub fn field_sites(store: &Store<'_>) -> (Vec<FieldSite>, Stats) {
                     node: id_of(n, "id"),
                     gates: gates.clone(),
                     ways: ways.clone(),
+                    via: super::key_routes::Via { binding: id_of(e, "binding"), reads: Some(row.clone()) },
                 });
                 stats.sites += 1;
             }

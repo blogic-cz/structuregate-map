@@ -7,31 +7,6 @@ use super::store::{Row, Store};
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// The elements one `returns` value is a list of: an array literal, or `<list>.filter(..)` / `<list>.slice(..)` over
-/// one - the call the extractor reads the receiver of with its local already spelled - or `<list>.map(cb)` over one
-/// when `cb` hands its parameter back (`(b) => b`) or an object spreading it (`(b) => ({ ...b, x })`). A FILTER OR A
-/// SLICE KEEPS A SUBSET OF THE SAME ELEMENTS, so reading all of them is the union of what any call can show; a `map`
-/// building other elements (`(b) => ({ label: 'x' })`) and the rest are no list here, and a spread copy `[...list]` is
-/// the extractor's own array.
-fn list_of<'v>(value: &'v Value, by_member: &HashMap<String, Vec<&Row>>, params: &HashMap<String, Vec<String>>) -> Option<&'v Vec<Value>> {
-    match value {
-        Value::Array(xs) => Some(xs),
-        Value::Object(o) => {
-            let method = o.get("$call").and_then(Value::as_str)?.rsplit_once('.')?.1;
-            let keeps = match method {
-                "filter" | "slice" => true,
-                "map" => keeps_parameter(o.get("$args")?.as_array()?.first()?.get("$fn_id")?.as_str()?, by_member, params),
-                _ => false,
-            };
-            match o.get("$receiver") {
-                Some(Value::Array(xs)) if keeps => Some(xs),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
-
 /// Whether the callback `function` has one return handing back its first parameter, bare or as the spread of an object.
 fn keeps_parameter(function: &str, by_member: &HashMap<String, Vec<&Row>>, params: &HashMap<String, Vec<String>>) -> bool {
     let (Some(param), Some([ret])) = (params.get(function).and_then(|p| p.first()), by_member.get(function).map(Vec::as_slice)) else { return false };
@@ -53,6 +28,8 @@ pub(super) struct ListSource<'r, 'a> {
     pub(super) dict: &'r [String],
     /// `shape_members` id -> the value the property is written with, for the ones a template input reads (`shape_values`).
     pub(super) shaped: &'r HashMap<String, Value>,
+    /// The pipes a template applies to a bound list, by name (`key_pipes`).
+    pub(super) pipes: &'r super::key_pipes::Pipes,
 }
 
 /// Function id -> the names an array pattern in its first parameter binds, by index (`functions.params[0].bindings`).
@@ -76,16 +53,64 @@ pub(super) fn unpacked(store: &Store<'_>) -> HashMap<String, Vec<Option<String>>
 }
 
 impl ListSource<'_, '_> {
-    /// The elements one `.push(..)` adds: each argument, a `...` spread of a call replaced by what its callee returns.
+    /// The elements one `.push(..)` adds: each argument, a `...` spread of a call replaced by what its callee returns -
+    /// or of a chain on a list (`...toList(e).map(..)`, `chained`).
     pub(super) fn pushed(&self, push: &Row) -> Vec<(Value, Option<String>)> {
+        self.pushed_in(push, &mut Vec::new())
+    }
+
+    fn pushed_in(&self, push: &Row, seen: &mut Vec<String>) -> Vec<(Value, Option<String>)> {
         let mut out = Vec::new();
         for arg in push.get("args").and_then(Value::as_array).into_iter().flatten() {
-            match self.callee_lists(arg.get("$spread")) {
-                Some((items, owner)) => out.extend(items.into_iter().map(|i| (i, Some(owner.clone())))),
-                None => out.push((arg.clone(), None)),
+            let spread = arg.get("$spread");
+            if let Some((items, owner)) = self.callee_lists_in(spread, seen) {
+                out.extend(items.into_iter().map(|i| (i, Some(owner.clone()))));
+            } else if let Some(items) = spread.filter(|s| !s.is_array()).and_then(|s| self.chained(s, seen)) {
+                out.extend(items.into_iter().map(|i| (i, None)));
+            } else {
+                out.push((arg.clone(), None));
             }
         }
         out
+    }
+
+    /// THE ELEMENTS A CHAIN ON A LIST HOLDS (rows 113, #117): an array literal; a call of a function whose every return is a list
+    /// (`callee_lists`); `<list>.filter(..)`/`.slice(..)` - a subset of the same elements, so all of them are read, the union of what
+    /// any call can show; `<list>.concat(..)` - the receiver's and every argument's; `<list>.map(cb)` - every element of the list through
+    /// `cb`'s one return: the element itself when `cb` hands its parameter back (bare or spread), else the object it builds with each
+    /// read of the parameter's property (`x.name`) replaced by that element's (`through`). `<list>` is an array, another such chain,
+    /// or a call of a function whose every return is a list (`callee_lists`): `toItems(Hue, dict).filter(..)`. None for anything else -
+    /// a list read in part would hand the control fewer elements than it holds.
+    pub(super) fn chained(&self, value: &Value, seen: &mut Vec<String>) -> Option<Vec<Value>> {
+        let o = match value {
+            Value::Array(xs) => return Some(xs.clone()),
+            Value::Object(o) => o,
+            _ => return None,
+        };
+        // A CALL OF A FUNCTION RETURNING A LIST (`return toItems(Hue, dict);`) is its list.
+        let Some(receiver) = o.get("$receiver") else { return self.callee_lists_in(Some(value), seen).map(|(items, _)| items) };
+        let method = o.get("$call").and_then(Value::as_str)?.rsplit_once('.')?.1;
+        match method {
+            "filter" | "slice" => self.chained(receiver, seen),
+            // `[..].concat(a, b)`: the receiver's elements, then every argument's - each a list, or the whole is none.
+            "concat" => {
+                let mut items = self.chained(receiver, seen)?;
+                for arg in o.get("$args")?.as_array()? {
+                    items.extend(self.chained(arg, seen)?);
+                }
+                Some(items)
+            }
+            "map" => {
+                let callback = o.get("$args")?.as_array()?.first()?.get("$fn_id")?.as_str()?;
+                if keeps_parameter(callback, self.by_member, self.params) {
+                    return self.chained(receiver, seen);
+                }
+                let built = self.mapped_object(value)?;
+                let param = self.params.get(callback).and_then(|p| p.first())?.clone();
+                Some(self.chained(receiver, seen)?.iter().map(|element| through(built, &param, element)).collect())
+            }
+            _ => None,
+        }
     }
 
     /// THE ELEMENTS OF EVERY LIST A CALL'S CALLEE RETURNS, when every return of it is such a list, and the callee's
@@ -97,19 +122,32 @@ impl ListSource<'_, '_> {
     /// A RETURNED LOCAL IS ITS PUSHES TOO: `const out = []; out.push(new A()); return out;` - in a callback of the callee
     /// as well (`.then(() => out.push(..))`), which the run may finish later, but whose elements the list still holds.
     pub(super) fn callee_lists(&self, value: Option<&Value>) -> Option<(Vec<Value>, String)> {
+        self.callee_lists_in(value, &mut Vec::new())
+    }
+
+    /// `callee_lists` along a path of callees: one already on it (a helper reaching itself) reads nothing.
+    fn callee_lists_in(&self, value: Option<&Value>, seen: &mut Vec<String>) -> Option<(Vec<Value>, String)> {
         let target = value?.get("$target")?;
         let callee = self.rows.member_named(target).or_else(|| self.rows.function_named(target))?;
+        if seen.contains(&callee) {
+            return None;
+        }
+        seen.push(callee.clone());
+        let found = self.callee_items(value, &callee, seen);
+        seen.pop();
+        Some((found?, callee))
+    }
+
+    fn callee_items(&self, value: Option<&Value>, callee: &str, seen: &mut Vec<String>) -> Option<Vec<Value>> {
         let args = value?.get("$args").and_then(Value::as_array);
-        if let Some(items) = self.member_lists(&callee) {
-            let items = match args {
-                Some(args) => self.handed(&callee, items, args),
+        if let Some(items) = self.member_lists_in(callee, seen) {
+            return Some(match args {
+                Some(args) => self.handed(callee, items, args),
                 None => items,
-            };
-            return Some((items, callee));
+            });
         }
         let args = args?;
-        let items = self.table_lists(&callee, args).or_else(|| self.mapped_lists(&callee, args))?;
-        Some((items, callee))
+        self.table_lists(callee, args).or_else(|| self.mapped_lists(callee, args))
     }
 
     /// Each handed dictionary by the parameter it lands in - None when the call hands none.
@@ -214,14 +252,38 @@ impl ListSource<'_, '_> {
 
     /// The elements of every list `member` returns - a method, a getter, a function - when every return is one.
     pub(super) fn member_lists(&self, member: &str) -> Option<Vec<Value>> {
+        self.member_lists_in(member, &mut vec![member.to_string()])
+    }
+
+    fn member_lists_in(&self, member: &str, seen: &mut Vec<String>) -> Option<Vec<Value>> {
         let mut items = Vec::new();
         for r in self.by_member.get(member)? {
-            items.extend(list_of(r.get("value")?, self.by_member, self.params)?.iter().cloned());
+            items.extend(self.chained(r.get("value")?, seen)?);
             for p in super::key_instances::local_pushes(r, self.pushes, self.parent) {
-                items.extend(self.pushed(p).into_iter().map(|(i, _)| i));
+                items.extend(self.pushed_in(p, seen).into_iter().map(|(i, _)| i));
             }
         }
         Some(items)
+    }
+}
+
+/// `built` - the object a `.map(cb)` callback returns - for one element of the list: a read of the parameter's own property
+/// (`x.name`, `x?.name`) is the element's property and a bare read of the parameter the element, anywhere in the tree; a property
+/// the element lacks stays the read.
+pub(super) fn through(built: &Value, param: &str, element: &Value) -> Value {
+    match built {
+        Value::Object(o) => {
+            if let Some(text) = o.get("$expr").and_then(Value::as_str).filter(|_| o.contains_key("$kind")) {
+                if text == param {
+                    return element.clone();
+                }
+                let property = text.strip_prefix(param).and_then(|t| t.strip_prefix("?.").or_else(|| t.strip_prefix('.')));
+                return property.filter(|p| !p.contains(['.', '[', '('])).and_then(|p| element.get(p)).unwrap_or(built).clone();
+            }
+            Value::Object(o.iter().map(|(k, v)| (k.clone(), through(v, param, element))).collect())
+        }
+        Value::Array(xs) => Value::Array(xs.iter().map(|x| through(x, param, element)).collect()),
+        other => other.clone(),
     }
 }
 
@@ -278,28 +340,29 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn map_call(function: &str) -> Value {
-        json!({"$call": "boxes.map", "$args": [{"$fn_id": function}], "$receiver": [{"label": "k"}]})
-    }
-
-    fn callback(ret: Value) -> (HashMap<String, Vec<Row>>, HashMap<String, Vec<String>>) {
+    fn keeps(ret: Value) -> bool {
         let row = Row::Built(json!({"member": "fn:1", "value": ret}).as_object().cloned().expect("row"));
-        (HashMap::from([("fn:1".to_string(), vec![row])]), HashMap::from([("fn:1".to_string(), vec!["b".to_string()])]))
-    }
-
-    fn reads(ret: Value, call: &Value) -> bool {
-        let (rows, params) = callback(ret);
-        let by_member: HashMap<String, Vec<&Row>> = rows.iter().map(|(k, v)| (k.clone(), v.iter().collect())).collect();
-        list_of(call, &by_member, &params).is_some()
+        let by_member = HashMap::from([("fn:1".to_string(), vec![&row])]);
+        keeps_parameter("fn:1", &by_member, &HashMap::from([("fn:1".to_string(), vec!["b".to_string()])]))
     }
 
     #[test]
     fn a_map_handing_its_parameter_back_keeps_the_elements_and_one_building_new_ones_does_not() {
         let bare = json!({"$expr": "b", "$kind": "Identifier"});
-        assert!(reads(bare.clone(), &map_call("fn:1")));
-        assert!(reads(json!({"$spread": bare, "x": 1}), &map_call("fn:1")));
-        assert!(!reads(json!({"label": "x"}), &map_call("fn:1")), "an object of its own is another element");
-        assert!(!reads(json!({"$expr": "other", "$kind": "Identifier"}), &map_call("fn:1")), "a name that is not the parameter");
-        assert!(reads(bare, &json!({"$call": "boxes.slice", "$args": [], "$receiver": [{"label": "k"}]})));
+        assert!(keeps(bare.clone()));
+        assert!(keeps(json!({"$spread": bare, "x": 1})));
+        assert!(!keeps(json!({"label": "x"})), "an object of its own is another element");
+        assert!(!keeps(json!({"$expr": "other", "$kind": "Identifier"})), "a name that is not the parameter");
+    }
+
+    #[test]
+    fn a_mapped_object_reads_the_element_through_its_parameter() {
+        let read = |t: &str| json!({"$expr": t, "$kind": "PropertyAccessExpression"});
+        let built = json!({"label": read("x.name"), "value": read("x?.value"), "deep": read("x.name.length"), "other": read("y.name"),
+            "either": {"$logic": "??", "$operands": [read("x.missing"), read("x.name")]}});
+        let element = json!({"name": "demo.alpha", "value": 1});
+        assert_eq!(through(&built, "x", &element), json!({"label": "demo.alpha", "value": 1, "deep": read("x.name.length"), "other": read("y.name"),
+            "either": {"$logic": "??", "$operands": [read("x.missing"), "demo.alpha"]}}));
+        assert_eq!(through(&json!({"$expr": "x", "$kind": "Identifier"}), "x", &element), element);
     }
 }

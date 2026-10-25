@@ -79,6 +79,7 @@ internal static partial class SqlLinks
             return "";
         }
 
+        var fluent = FluentColumns(db);
         const string Arg = "(SELECT a.const FROM arguments a WHERE a.call = c.id AND a.position = {0} AND a.const_kind IN ('const', 'folded'))";
         foreach (var row in Query(db, "SELECT c.id, c.file, c.line, c.cls, c.func, c.type, " + string.Format(Arg, 0) + ", "
             + string.Format(Arg, 1) + " FROM calls c WHERE c.symbol GLOB 'Microsoft.EntityFrameworkCore.*.ToTable*'") ?? [])
@@ -96,10 +97,12 @@ internal static partial class SqlLinks
                 if (hit is null) continue;
                 foreach (var (column, id) in columns.GetValueOrDefault(hit.Id) ?? [])
                 {
-                    var member = Member(entity, column);
-                    links.Add(new Link("ef_column", Str(row[1]), Num(row[2]), Str(row[0]), Str(row[3]), Str(row[4]), entity, member, "",
+                    // A COLUMN THE MAPPING NAMES (#128) is its `Property` call's line and property, with what the call's chain sets.
+                    var said = fluent.GetValueOrDefault(entity)?.GetValueOrDefault(column);
+                    var member = Member(entity, said?.Property ?? column);
+                    links.Add(new Link("ef_column", Str(row[1]), said?.Line ?? Num(row[2]), Str(row[0]), Str(row[3]), Str(row[4]), entity, member, "",
                         hit.Database, schema, table, column, hit.Id, id, member.Length > 0 ? "bound" : "no property",
-                        member.Length > 0 ? "" : "no property of that name on the entity or its bases - a column EF does not map"));
+                        member.Length > 0 ? "" : "no property of that name on the entity or its bases - a column EF does not map") { Facets = said });
                 }
             }
         }

@@ -44,7 +44,7 @@ pub const LANG: &str = "typescript";
 pub(super) const LOOKUP_COLUMNS: &[(&str, &str)] = &[
     ("key_reach", "key"), ("key_reach", "route"), ("render_path", "component"), ("gate_values", "gate"),
     ("gate_values", "enum_name"), ("gate_features", "gate"), ("template_nodes", "depth"), ("string_literals", "context"),
-    ("translations", "locale"), ("comments", "context"), ("calls", "method"), ("control_options", "key"), ("control_options", "node"), ("key_builds", "key"), ("key_builds", "literal"),
+    ("translations", "locale"), ("comments", "context"), ("calls", "method"), ("control_options", "key"), ("control_options", "node"), ("key_builds", "key"), ("key_builds", "literal"), ("key_node_ways", "key"), ("key_node_ways", "node"),
 ];
 
 /// WHICH FILES ARE CARRIED AS TEXT. The same set node carries, stated in both places because
