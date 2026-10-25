@@ -17,7 +17,8 @@ $script:CsNameTypesFiles = @{
         "        var direct = Include(`"Footer`", model);`n" +
         "        var parts = new[] { new { PartName = `"Header`", Object = model } };`n" +
         "        var viaProperty = string.Concat(parts.Select(p => Include(p.PartName, p.Object)));`n" +
-        "        return direct + viaProperty + Include(`"Nowhere`", model) + Include(chosen, model);`n    }`n}`n"
+        "        return direct + viaProperty + Include(`"Nowhere`", model) + Include(chosen, model);`n    }`n" +
+        "    public string Pick(object model) => Include(`"Acme.Footer`", model) + Include(`"Nobody.Footer`", model) + Include(`"Acme.Header`", model);`n}`n"
     'cs.json' = '{ "typesByName": [ { "method": "Demo.Templates.TemplateBase.Include", "parameter": "name", "base": "Demo.Templates.TemplateBase", "namespace": "Templates.Emails", "default": ".Standard", "ignoreCase": true } ] }'
 }
 
@@ -37,6 +38,12 @@ Test-Case 'csnametypes: a name a call hands a declared lookup links to the class
     # A NAME NO CLASS ANSWERS, and an argument the map cannot follow, are listed rather than dropped.
     Assert-Line $r 'l=9|Nowhere|literal|none|-|-'
     Assert-Line $r 'l=9|-|unresolved|none|-|-'
+    # A NAME THAT IS THE DICTIONARY'S OWN KEY OF AN OVERRIDE (#125): `Acme.Footer` is that one class; a prefix no override has, or an override the
+    # class lacks, is none.
+    Assert-Line $r 'l=11|Acme.Footer|literal|override|Acme|Demo.Templates.Emails.Acme.Footer'
+    Assert-NoLine $r 'l=11|Acme.Footer|literal|default'
+    Assert-Line $r 'l=11|Nobody.Footer|literal|none|-|-'
+    Assert-Line $r 'l=11|Acme.Header|literal|none|-|-'
     # THE SLOT KNOWS WHAT IT FILLS: the anonymous property, as the read of it binds.
     $m = Invoke-Gate --map-query $db --width 0 --sql "SELECT 'slot=' || a.name || '|' || o.kind AS s FROM arguments a JOIN objects o ON o.id = a.object JOIN refs r ON r.symbol = a.member WHERE r.name = 'p.PartName'"
     Assert-Line $m 'slot=PartName|anonymous'

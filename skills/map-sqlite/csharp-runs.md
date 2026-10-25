@@ -20,7 +20,7 @@ Three derived tables of the deep map (`--map-sqlite`), each rewritten whole afte
   `line`, `parameter`, `value` (the name), `via` (`literal`: the argument folds to a constant; `property`: it reads a property
   whose every constant is written in an object initializer or anonymous object of the tree - `p.PartName` over
   `new { PartName = "Header" }`, one row per value; `unresolved`: neither, `value` NULL), `kind`, `prefix`, `type_symbol`,
-  `type_file`, `type_line` as `enum_type_links` has them.
+  `type_file`, `type_line` as `enum_type_links` has them. A name that IS an override's own key (`"Acme.Footer"`, #125) selects that one override - its prefix is a last namespace segment of a class of that name - when no class answers the name whole.
 
 A slice (`--map-slice`) follows `enum_type_links`: a file that references a member (`refs.symbol`) keeps the class files its name
 selects as dependents - and `name_type_links`: a call's file keeps the class files its name selects.
