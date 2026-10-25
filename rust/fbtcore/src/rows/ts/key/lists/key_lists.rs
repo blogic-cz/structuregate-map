@@ -7,13 +7,6 @@ use super::store::{Row, Store};
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// Whether the callback `function` has one return handing back its first parameter, bare or as the spread of an object.
-fn keeps_parameter(function: &str, by_member: &HashMap<String, Vec<&Row>>, params: &HashMap<String, Vec<String>>) -> bool {
-    let (Some(param), Some([ret])) = (params.get(function).and_then(|p| p.first()), by_member.get(function).map(Vec::as_slice)) else { return false };
-    let bare = |v: &Value| v.get("$kind").and_then(Value::as_str) == Some("Identifier") && v.get("$expr").and_then(Value::as_str) == Some(param.as_str());
-    ret.get("value").is_some_and(|v| bare(v) || v.get("$spread").is_some_and(bare))
-}
-
 /// Where a list's elements are read from: the callees' returns, the callbacks' parameters, and every `.push(..)` with the
 /// member each callback sits in.
 pub(super) struct ListSource<'r, 'a> {
@@ -100,14 +93,18 @@ impl ListSource<'_, '_> {
                 }
                 Some(items)
             }
+            // `.map(cb)`: the element itself when `cb` hands it back bare; else `cb`'s one object - a spread of the element (`{ ...x, label }`) its
+            // properties under the ones written beside it - with every read of the parameter put per element.
             "map" => {
                 let callback = o.get("$args")?.as_array()?.first()?.get("$fn_id")?.as_str()?;
-                if keeps_parameter(callback, self.by_member, self.params) {
-                    return self.chained(receiver, seen);
+                let [ret] = self.by_member.get(callback)?.as_slice() else { return None };
+                let (built, param) = (ret.get("value")?, self.params.get(callback)?.first()?);
+                let items = self.chained(receiver, seen)?;
+                if built.get("$kind").and_then(Value::as_str) == Some("Identifier") && built.get("$expr").and_then(Value::as_str) == Some(param.as_str()) {
+                    return Some(items);
                 }
-                let built = self.mapped_object(value)?;
-                let param = self.params.get(callback).and_then(|p| p.first())?.clone();
-                Some(self.chained(receiver, seen)?.iter().map(|element| through(built, &param, element)).collect())
+                built.as_object().filter(|b| b.keys().all(|k| !k.starts_with('$') || k == "$spread"))?;
+                Some(items.iter().map(|element| spread(through(built, param, element))).collect())
             }
             _ => None,
         }
@@ -147,7 +144,21 @@ impl ListSource<'_, '_> {
             });
         }
         let args = args?;
+        // A LIST THE CALLER HANDS IN, CHAINED ON BY THE CALLEE (`translated(options) { return options.map((o) => ({ ...o, label: t(..) })); }`):
+        // each return with its parameter receivers replaced by the arguments.
+        if let Some(items) = self.bound_lists(callee, args, seen) {
+            return Some(self.handed(callee, items, args));
+        }
         self.table_lists(callee, args).or_else(|| self.mapped_lists(callee, args))
+    }
+
+    fn bound_lists(&self, callee: &str, args: &[Value], seen: &mut Vec<String>) -> Option<Vec<Value>> {
+        let params = self.params.get(callee)?;
+        let mut items = Vec::new();
+        for r in self.by_member.get(callee)? {
+            items.extend(self.chained(&bind_receivers(r.get("value")?, params, args), seen)?);
+        }
+        Some(items)
     }
 
     /// Each handed dictionary by the parameter it lands in - None when the call hands none.
@@ -267,6 +278,30 @@ impl ListSource<'_, '_> {
     }
 }
 
+/// `value` with every `$receiver` that is a bare read of one of `params` (`options.map(..)` inside the callee) replaced by the argument
+/// handed at its position; any other receiver is kept.
+fn bind_receivers(value: &Value, params: &[String], args: &[Value]) -> Value {
+    match value {
+        Value::Object(o) => Value::Object(o.iter().map(|(k, v)| {
+            let bare = v.get("$kind").and_then(Value::as_str) == Some("Identifier");
+            let handed = v.get("$expr").and_then(Value::as_str).filter(|_| bare && k == "$receiver")
+                .and_then(|name| params.iter().position(|p| p == name)).and_then(|i| args.get(i));
+            (k.clone(), handed.cloned().unwrap_or_else(|| bind_receivers(v, params, args)))
+        }).collect()),
+        Value::Array(xs) => Value::Array(xs.iter().map(|x| bind_receivers(x, params, args)).collect()),
+        other => other.clone(),
+    }
+}
+
+/// An object spreading another: the spread's properties, then the ones written beside it (a spread of no plain object is dropped).
+pub(super) fn spread(object: Value) -> Value {
+    let Value::Object(mut o) = object else { return object };
+    let plain = o.get("$spread").and_then(Value::as_object).is_some_and(|b| b.keys().all(|k| !k.starts_with('$')));
+    let Some(Value::Object(mut out)) = o.remove("$spread").filter(|_| plain) else { return Value::Object(o) };
+    out.extend(o);
+    Value::Object(out)
+}
+
 /// `built` - the object a `.map(cb)` callback returns - for one element of the list: a read of the parameter's own property
 /// (`x.name`, `x?.name`) is the element's property and a bare read of the parameter the element, anywhere in the tree; a property
 /// the element lacks stays the read.
@@ -279,6 +314,15 @@ pub(super) fn through(built: &Value, param: &str, element: &Value) -> Value {
                 }
                 let property = text.strip_prefix(param).and_then(|t| t.strip_prefix("?.").or_else(|| t.strip_prefix('.')));
                 return property.filter(|p| !p.contains(['.', '[', '('])).and_then(|p| element.get(p)).unwrap_or(built).clone();
+            }
+            // A LABEL DECORATED AROUND THE ELEMENT'S OWN (`${x.label} %`): no prefix spells a key, so the text shown is the element's
+            // property's - its keys.
+            let pieces = o.get("$template").and_then(Value::as_array);
+            if let (Some(pieces), Some([hole])) = (pieces, o.get("$hole_values").and_then(Value::as_array).map(Vec::as_slice)) {
+                let read = through(hole, param, element);
+                if pieces.first().and_then(Value::as_str) == Some("") && read != *hole {
+                    return read;
+                }
             }
             Value::Object(o.iter().map(|(k, v)| (k.clone(), through(v, param, element))).collect())
         }
@@ -340,19 +384,13 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn keeps(ret: Value) -> bool {
-        let row = Row::Built(json!({"member": "fn:1", "value": ret}).as_object().cloned().expect("row"));
-        let by_member = HashMap::from([("fn:1".to_string(), vec![&row])]);
-        keeps_parameter("fn:1", &by_member, &HashMap::from([("fn:1".to_string(), vec!["b".to_string()])]))
-    }
-
     #[test]
-    fn a_map_handing_its_parameter_back_keeps_the_elements_and_one_building_new_ones_does_not() {
-        let bare = json!({"$expr": "b", "$kind": "Identifier"});
-        assert!(keeps(bare.clone()));
-        assert!(keeps(json!({"$spread": bare, "x": 1})));
-        assert!(!keeps(json!({"label": "x"})), "an object of its own is another element");
-        assert!(!keeps(json!({"$expr": "other", "$kind": "Identifier"})), "a name that is not the parameter");
+    fn a_spread_is_the_element_under_what_is_written_beside_it() {
+        let element = json!({"value": "a", "label": "A"});
+        assert_eq!(spread(json!({"$spread": element, "label": "fee.a"})), json!({"value": "a", "label": "fee.a"}));
+        assert_eq!(spread(json!({"$spread": {"$expr": "x", "$kind": "Identifier"}, "label": "k"})), json!({"label": "k"}), "an unread spread adds nothing");
+        let handed = bind_receivers(&json!({"$call": "options.map", "$receiver": {"$expr": "options", "$kind": "Identifier"}}), &["options".to_string()], &[json!([1])]);
+        assert_eq!(handed.get("$receiver"), Some(&json!([1])));
     }
 
     #[test]
@@ -364,5 +402,9 @@ mod tests {
         assert_eq!(through(&built, "x", &element), json!({"label": "demo.alpha", "value": 1, "deep": read("x.name.length"), "other": read("y.name"),
             "either": {"$logic": "??", "$operands": [read("x.missing"), "demo.alpha"]}}));
         assert_eq!(through(&json!({"$expr": "x", "$kind": "Identifier"}), "x", &element), element);
+        let decorated = json!({"$template": ["", " %"], "$hole_values": [read("x.name")]});
+        assert_eq!(through(&decorated, "x", &element), json!("demo.alpha"), "a label decorated around the element's is the element's");
+        let prefixed = json!({"$template": ["demo.", ""], "$hole_values": [read("x.name")]});
+        assert_eq!(through(&prefixed, "x", &element).get("$template"), prefixed.get("$template"), "a prefix still spells its own keys");
     }
 }

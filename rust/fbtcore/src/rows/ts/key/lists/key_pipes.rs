@@ -14,7 +14,7 @@
 
 use super::astreads::{is_read, read_rows};
 use super::key_fields::{id_of, text};
-use super::key_lists::{through, ListSource};
+use super::key_lists::{spread, through, ListSource};
 use super::key_loops::Element;
 use super::store::Store;
 use serde_json::Value;
@@ -113,15 +113,6 @@ impl Pipes {
         let either = matches!(v.get("$logic").and_then(Value::as_str), Some("??" | "||"));
         v.get("$operands").and_then(Value::as_array).filter(|_| either)?.iter().find_map(|o| self.dictionary_read(o, member, handed, dict))
     }
-}
-
-/// An object spreading another: the spread's properties, then the ones written beside it.
-fn spread(object: Value) -> Value {
-    let Value::Object(mut o) = object else { return object };
-    let plain = o.get("$spread").and_then(Value::as_object).is_some_and(|b| b.keys().all(|k| !k.starts_with('$')));
-    let Some(Value::Object(mut out)) = o.remove("$spread").filter(|_| plain) else { return Value::Object(o) };
-    out.extend(o);
-    Value::Object(out)
 }
 
 /// The string a pipe argument is: a literal, or a read of an object literal's property written with one (`shape_values`).

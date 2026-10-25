@@ -38,10 +38,11 @@ $script:KeyOptionsFiles = @{
         "}`n"
     # THE WORKSPACE'S OWN CONFIG, with the dictionary call this tree's service is.
     'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["money"],"gateInputs":["disabled"],' +
-        '"featureChecks":["FlagService.isOn"],"featureEnum":"FlagCodes","i18nDictionaryCalls":["getTranslationDictionary"]}'
+        '"featureChecks":["FlagService.isOn"],"featureEnum":"FlagCodes","i18nDictionaryCalls":["getTranslationDictionary"],"i18nCalls":["getTranslation"]}'
     'apps/shop/src/grade.ts' = "export enum Grade { Gold = 1, Silver = 2 }`n"
     'apps/shop/src/dictionary.service.ts' = "import { Injectable } from '@angular/core';`n@Injectable({ providedIn: 'root' })`n" +
-        "export class DictionaryService { getTranslationDictionary(prefix: string): { [key: string]: string } { return { [prefix]: prefix }; } }`n"
+        "export class DictionaryService { getTranslationDictionary(prefix: string): { [key: string]: string } { return { [prefix]: prefix }; }`n" +
+        "  getTranslation(key: string): string { return key; } }`n"
     'apps/shop/src/enum-items.ts' = "export function enumToArray(e: object) { return Object.entries(e).map(([name, value]) => ({ name, value })); }`n" +
         "export function convertToItems(enumObject: object, translations?: { [key: string]: string }, empty?: boolean) {`n" +
         "  const out: { label: string; value: unknown }[] = [];`n" +
@@ -106,14 +107,15 @@ $script:KeyOptionsFiles = @{
         "  template: '<radio-list [items]=`"tones`" [(value)]=`"pick.tone`"></radio-list><pick-list [(value)]=`"pick.kind`" [model]=`"kinds`"></pick-list>' +`n" +
         "    '<radio-list [items]=`"months`" [(value)]=`"pick.month`"></radio-list><radio-list [items]=`"plain`" [(value)]=`"pick.plain`"></radio-list>' +`n" +
         "    '<radio-list [items]=`"rates`" [(value)]=`"pick.rate`"></radio-list><radio-list [items]=`"steps`" [(value)]=`"pick.step`"></radio-list>' +`n" +
-        "    '<pick-list [(value)]=`"pick.answer`" [model]=`"criteria.answers`"></pick-list>' })`n" +
+        "    '<pick-list [(value)]=`"pick.answer`" [model]=`"criteria.answers`"></pick-list><radio-list [items]=`"rated`" [(value)]=`"pick.rated`"></radio-list>' })`n" +
         "export class ToneComponent implements OnInit {`n" +
-        "  pick = { tone: '', kind: '', month: '', plain: '', rate: '', step: '', answer: '' };`n" +
+        "  pick = { tone: '', kind: '', month: '', plain: '', rate: '', step: '', answer: '', rated: '' };`n" +
         "  tones = toSelect(Tone, this.dictionary.getTranslationDictionary('tone')).filter((x) => x.value !== Tone.Cool);`n" +
         "  plain = toSelect(Tone).filter((x) => x.value !== Tone.Cool);`n" +
         "  kinds: { ItemID: unknown; Label: string }[] = [];`n" +
         "  months: { label: string; value: string }[] = [];`n" +
         "  rates = this.rateOptions();`n" +
+        "  rated = toSelect(Tone, this.dictionary.getTranslationDictionary('rate')).map((x) => ({ ...x, label: ```${x.label} %`` }));`n" +
         "  steps = this.stepOptions();`n" +
         "  criteria!: { answers: { ItemID: unknown; Label: string }[] };`n" +
         "  constructor(private dictionary: DictionaryService) {}`n" +
@@ -163,7 +165,23 @@ $script:KeyOptionsFiles = @{
         "  shades = { items: toSelect(Tone), path: 'rate' };`n" +
         "  toned = toSelect(Tone);`n" +
         "}`n"
-    'apps/shop/src/assets/locales/en.json' = '{"hue":{"red":"Red","blue":"Blue"},"size":{"small":"S","large":"L"},"shown":{"only":"O"},"tier":{"gold":"G"},"grade":{"Gold":"G","Silver":"S"},"answer":{"yes":"Y","no":"N","Warm":"W","Cool":"C"},"spelled":{"out":"W"},"crossed":{"over":"C"},"rank":{"Gold":"G","Silver":"S"},"tone":{"Warm":"W","Cool":"C"},"kind":{"Warm":"W","Cool":"C"},"month":{"Jan":"J","Feb":"F"},"rate":{"Warm":"W","Cool":"C"},"step":{"none":"-","Warm":"W","Cool":"C"},"fee":{"plan":{"prepaid":"P","express":"E"}}}'
+    # A LIST THE PARENT TRANSLATES WITH A HELPER OVER ITS PARAMETER AND HANDS TO A CHILD'S `@Input` (#117 follow-up).
+    'apps/shop/src/fee-options.ts' = "export const plainFees = [{ value: 'flat', label: 'Flat' }, { value: 'rate', label: 'Rate' }];`n"
+    'apps/shop/src/fee-column.component.ts' = "import { Component, Input } from '@angular/core';`nimport { RadioListComponent } from './radio.component';`n" +
+        "@Component({ selector: 'fee-column', standalone: true, imports: [RadioListComponent], template: '<radio-list [items]=`"fees`" [(value)]=`"chosen`"></radio-list>' })`n" +
+        "export class FeeColumnComponent {`n  @Input() fees: { value: string; label: string }[] = [];`n  chosen = '';`n}`n"
+    'apps/shop/src/fee-list.component.ts' = "import { Component, OnInit } from '@angular/core';`nimport { DictionaryService } from './dictionary.service';`n" +
+        "import { plainFees } from './fee-options';`nimport { FeeColumnComponent } from './fee-column.component';`nimport { RadioListComponent } from './radio.component';`n" +
+        "@Component({ selector: 'app-fee-list', standalone: true, imports: [FeeColumnComponent, RadioListComponent],`n" +
+        "  template: '<fee-column [fees]=`"fees`"></fee-column><radio-list [items]=`"mapped`" [(value)]=`"pickMapped`"></radio-list>' })`n" +
+        "export class FeeListComponent implements OnInit {`n" +
+        "  fees: { value: string; label: string }[] = [];`n  mapped: { value: string; label: string }[] = [];`n  pickMapped = '';`n" +
+        "  constructor(private dictionary: DictionaryService) {}`n" +
+        "  ngOnInit() {`n    this.fees = this.translated(plainFees);`n" +
+        "    this.mapped = plainFees.map((o) => ({ ...o, label: this.dictionary.getTranslation(``feeKind.`${o.value}``) }));`n  }`n" +
+        "  private translated(options: { value: string; label: string }[]) {`n" +
+        "    return options.map((option) => ({ ...option, label: this.dictionary.getTranslation(``fee.`${option.value}``) }));`n  }`n}`n"
+    'apps/shop/src/assets/locales/en.json' = '{"hue":{"red":"Red","blue":"Blue"},"size":{"small":"S","large":"L"},"shown":{"only":"O"},"tier":{"gold":"G"},"grade":{"Gold":"G","Silver":"S"},"answer":{"yes":"Y","no":"N","Warm":"W","Cool":"C"},"spelled":{"out":"W"},"crossed":{"over":"C"},"rank":{"Gold":"G","Silver":"S"},"tone":{"Warm":"W","Cool":"C"},"kind":{"Warm":"W","Cool":"C"},"month":{"Jan":"J","Feb":"F"},"rate":{"Warm":"W","Cool":"C"},"step":{"none":"-","Warm":"W","Cool":"C"},"fee":{"plan":{"prepaid":"P","express":"E"},"flat":"F","rate":"R"},"feeKind":{"flat":"F","rate":"R"}}'
 }
 
 # THE CONTROL AND ITS LABELS: `hues` is a const table a helper rebuilds into items (`Object.entries(t).map(([value, label]) => ..)`), `sizes` a list
@@ -245,6 +263,8 @@ Test-Case 'tsrows: a control offers the keys of an enum helper a caller filters 
     Assert-Line $r 'tone=pick.step|items.label|step.Warm'
     Assert-Line $r 'tone=pick.answer|model.Label|answer.Warm'
     Assert-Line $r 'tone=pick.answer|model.Label|answer.Cool'
+    # A LABEL DECORATED AROUND THE ELEMENT'S OWN (`{ ...x, label: `${x.label} %` }`) shows the element's keys.
+    Assert-Line $r 'tone=pick.rated|items.label|rate.Warm'
 }
 
 # A LABELS TABLE READ THROUGH `this` (#117 follow-up): `{ Label: this.labels.plan.prepaid }` over `labels = { plan: { prepaid: `${this.feeResource}.prepaid` } }`,
@@ -273,6 +293,19 @@ Test-Case 'tsrows: a control offers the keys a pipe relabels its list with (#117
     # A VIEW MODEL HOLDING BOTH the list and its path, two levels down: each read of the binding is the property it lands on.
     Assert-Line $r 'shade=shade.d|items.label|step.Warm'
     Assert-NoLine $r 'shade.c'
+}
+
+# A LIST A PARENT BUILDS WITH A HELPER MAPPING ITS PARAMETER, HANDED TO A CHILD'S `@Input` (#117 follow-up): `this.fees = this.translated(plainFees)`
+# over `translated(options) { return options.map((option) => ({ ...option, label: t(`fee.${option.value}`) })); }` is each element of the handed list
+# with its label replaced, and the child's control offers those keys through `[fees]`; a `{ ...o, label }` map in place is the same.
+Test-Case 'tsrows: a control offers the keys of a list its parent translates and hands to its input (#117)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:KeyOptionsFiles) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --limit 0 --sql "SELECT 'fee=' || c.name || '|' || o.value || '|' || o.key AS t FROM control_options o JOIN components c ON c.id = o.component WHERE o.key LIKE 'fee.%' OR o.key LIKE 'feeKind.%'"
+    Assert-Line $r 'fee=FeeColumnComponent|chosen|fee.flat'
+    Assert-Line $r 'fee=FeeColumnComponent|chosen|fee.rate'
+    Assert-Line $r 'fee=FeeListComponent|pickMapped|feeKind.flat'
+    Assert-Line $r 'fee=FeeListComponent|pickMapped|feeKind.rate'
 }
 
 }
