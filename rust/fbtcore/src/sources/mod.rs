@@ -240,6 +240,11 @@ fn git_root(start: &Path) -> PathBuf {
     git(start, &["rev-parse", "--show-toplevel"]).into_iter().next().map(|top| native(Path::new(&top))).unwrap_or_else(|| start.to_path_buf())
 }
 
+/// Every non-empty line git prints for `args` in `cwd`; none when git is missing or fails (`rows::keys::source`, #130).
+pub(crate) fn git_lines(cwd: &Path, args: &[&str]) -> Vec<String> {
+    git(cwd, args)
+}
+
 /// `core.quotepath=off`, or git prints a non-ASCII path as C-style octal escapes inside quotes -
 /// `"docs/Caf\303\251.md"` - which matches nothing on disk, and a non-ASCII file name is silently dropped.
 fn git(cwd: &Path, args: &[&str]) -> Vec<String> {

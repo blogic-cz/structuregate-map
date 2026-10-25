@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
-use passes::{atlas, dispatch, documented, duplicates, enum_types, http, name_types, pass, search, seeds, tally};
+use passes::{atlas, dispatch, documented, duplicates, entity_keys, enum_types, http, name_types, pass, search, seeds, source_state, tally};
 
 /// What the deep halves are launched with - the options that reach them, and the scripts the caller staged.
 pub struct Deep {
@@ -373,7 +373,9 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
     };
     let replayed = key.as_ref().is_some_and(|k| derived::replay(into, db, k, deep.atlas_dir.as_deref()));
     drop(keying);
+    let roots = crate::rows::keys::roots_of(&deep.roots);
     if replayed {
+        pass("pass: source state", || source_state(into, db, &roots, &deep.build, false));
         crate::trace::set("structuregate.deep.derived_replayed", true);
         clock.add("passes over the finished rows (replayed)", since(timed));
         return Some(true);
@@ -396,6 +398,8 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
     if let Some(facts) = &facts {
         pass("pass: document facts", || documented(into, db, facts));
     }
+    pass("pass: entity keys", || entity_keys(into, db, &roots));
+    pass("pass: source state", || source_state(into, db, &roots, &deep.build, true));
     // AFTER EVERY HALF: an index over whichever half ran last would answer about a fraction of the map.
     if deep.row_fts {
         pass("pass: row search index", || search(into, db));
