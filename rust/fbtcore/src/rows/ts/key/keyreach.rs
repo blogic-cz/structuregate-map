@@ -123,6 +123,8 @@ pub struct Closure {
     pub traces: IndexMap<String, usize>,
     pub gate_feature_rows: usize,
     pub gate_value_rows: usize,
+    /// `control_options` rows: the option keys form controls are offered (#117).
+    pub option_rows: usize,
 }
 
 const ROUTES: &[&str] = &[
@@ -308,6 +310,12 @@ pub fn build_closure(
 
     // EVERY PASS THAT READS THE ROWS IS DONE: what follows folds what they derived. The tables they read, and
     // every tree decoded on the way, were held to the end and were most of the closure's peak.
+    // WHAT EACH FORM CONTROL IS OFFERED (#117), from the lists the loops were found over - before they go with the store.
+    let options = super::key_options::rows(store);
+    let option_rows = options.len();
+    for row in options {
+        store.emit("control_options", row);
+    }
     store.release();
     crate::give_back();
     crate::trace::metrics_mark!("closure: released");
@@ -425,6 +433,7 @@ pub fn build_closure(
         traces,
         gate_feature_rows: gf_rows,
         gate_value_rows: gv_rows,
+        option_rows,
     };
     (stats, Derived { trace })
 }

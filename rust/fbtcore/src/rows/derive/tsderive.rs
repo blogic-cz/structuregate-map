@@ -24,8 +24,8 @@ use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-/// THE FOUR TABLES THE CLOSURE DERIVES, stated here because this side writes them and node never sees one.
-pub const CLOSURE_TABLES: &[&str] = &["render_path", "gate_features", "gate_values", "key_reach"];
+/// THE TABLES THE CLOSURE DERIVES, stated here because this side writes them and node never sees one.
+pub const CLOSURE_TABLES: &[&str] = &["render_path", "gate_features", "gate_values", "key_reach", "control_options"];
 
 /// The `_meta` key a derivation is recorded under: the build that derived, and what it needs that no row holds.
 const RECORD: &str = "rederive:typescript";
@@ -140,6 +140,9 @@ fn record(receipt: &mut TsReceipt, stats: &keyreach::Closure) {
         "the typescript half resolved {} gate feature(s) and {} gate value restriction(s)",
         stats.gate_feature_rows, stats.gate_value_rows
     ));
+    if stats.option_rows > 0 {
+        receipt.notes.push(format!("the typescript half found {} option key(s) offered to form controls", stats.option_rows));
+    }
 }
 
 /// No record: called before a run deletes a row, so one that stops half way vouches for no derivation.

@@ -100,7 +100,7 @@ pub(super) fn input_lists(store: &Store<'_>, lists: &HashMap<String, Vec<Element
 
 /// The list a bound expression is, and the row it comes from: a bare read of a field with a known list, or of a getter -
 /// or a call of a method - whose every return is a list.
-fn bound_list(tree: &Value, lists: &HashMap<String, Vec<Element>>, src: &ListSource<'_, '_>, paths: &Paths) -> Option<(String, Vec<Element>)> {
+pub(super) fn bound_list(tree: &Value, lists: &HashMap<String, Vec<Element>>, src: &ListSource<'_, '_>, paths: &Paths) -> Option<(String, Vec<Element>)> {
     // `cfg.list`: a property of one of the class's own fields, no declaration of its own (`path_lists`).
     let holder = tree.get("receiver").filter(|r| is_read(r) && r.get("receiver").and_then(|i| i.get("k")).and_then(Value::as_str) == Some("Implicit"));
     if let (true, Some(row), Some(name)) = (is_read(tree), holder.and_then(|r| r.get("target")?.get("row")?.as_str()), tree.get("name").and_then(Value::as_str)) {
@@ -124,12 +124,12 @@ fn bound_list(tree: &Value, lists: &HashMap<String, Vec<Element>>, src: &ListSou
 }
 
 /// (field id, property) -> the elements of the list that property holds, None once a write is no list.
-type Paths = HashMap<(String, String), Option<Vec<Element>>>;
+pub(super) type Paths = HashMap<(String, String), Option<Vec<Element>>>;
 
 /// A LIST HELD IN A PROPERTY OF A FIELD (`cfg = { list: [..] }`, `this.cfg.list = [..]`): the initializer's array and every
 /// plain `=` of an array the field's own class writes to it (`holder`), each under its write's branches. A write of
 /// anything else leaves the property unread - a list read in part would hand the child fewer elements than it can hold.
-fn path_lists(store: &Store<'_>, branches: &Branches) -> Paths {
+pub(super) fn path_lists(store: &Store<'_>, branches: &Branches) -> Paths {
     let mut out = Paths::new();
     let members = store.table("members");
     let mut by_name: HashMap<(String, String), String> = HashMap::new();

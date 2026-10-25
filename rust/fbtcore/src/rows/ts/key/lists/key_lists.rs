@@ -47,6 +47,30 @@ pub(super) struct ListSource<'r, 'a> {
     pub(super) params: &'r HashMap<String, Vec<String>>,
     pub(super) pushes: &'r super::key_pushes::Pushes<'a>,
     pub(super) parent: &'r HashMap<String, String>,
+    /// Function id -> the names its first parameter's ARRAY pattern binds, by index (`([value, label]) => ..`).
+    pub(super) unpacked: &'r HashMap<String, Vec<Option<String>>>,
+    /// The config's `i18nDictionaryCalls`: a call of one handed to a callee's parameter is every key under its prefix there.
+    pub(super) dict: &'r [String],
+}
+
+/// Function id -> the names an array pattern in its first parameter binds, by index (`functions.params[0].bindings`).
+pub(super) fn unpacked(store: &Store<'_>) -> HashMap<String, Vec<Option<String>>> {
+    let mut out = HashMap::new();
+    for f in store.table("functions").iter() {
+        let (Some(id), Some(Value::Array(ps))) = (id_of(f, "id"), f.get("params")) else { continue };
+        let Some(Value::Array(binds)) = ps.first().and_then(|p| p.get("bindings")) else { continue };
+        let mut names: Vec<Option<String>> = Vec::new();
+        for b in binds {
+            let (Some(i), Some(name)) = (b.get("index").and_then(Value::as_u64), b.get("name").and_then(Value::as_str)) else { continue };
+            let i = i as usize;
+            if names.len() <= i {
+                names.resize(i + 1, None);
+            }
+            names[i] = Some(name.to_string());
+        }
+        out.insert(id, names);
+    }
+    out
 }
 
 impl ListSource<'_, '_> {
@@ -73,7 +97,103 @@ impl ListSource<'_, '_> {
     pub(super) fn callee_lists(&self, value: Option<&Value>) -> Option<(Vec<Value>, String)> {
         let target = value?.get("$target")?;
         let callee = self.rows.member_named(target).or_else(|| self.rows.function_named(target))?;
-        Some((self.member_lists(&callee)?, callee))
+        let args = value?.get("$args").and_then(Value::as_array);
+        if let Some(items) = self.member_lists(&callee) {
+            let items = match args {
+                Some(args) => self.handed(&callee, items, args),
+                None => items,
+            };
+            return Some((items, callee));
+        }
+        let args = args?;
+        Some((self.table_lists(&callee, args)?, callee))
+    }
+
+    /// A DICTIONARY THE CALLER HANDS IN, INDEXED BY THE ELEMENTS (rows 110, #117): `convertToItems(Hue,
+    /// t.getTranslationDictionary('enums.hue'))` over a callee that pushes `...convertEnumToArray(e).map((x) => ({ label:
+    /// translations?.[x.name] ?? x.name }))` - a property reading the parameter by any index (`$param_index`, alone or
+    /// as a side of `??`/`||`) is a key under the prefix the caller's dictionary call spells (`key_follow::dictionary`).
+    /// A spread of a `.map(cb)` whose one returned object holds such a property is that object: the elements the
+    /// receiver yields are not read, only what each of them is labelled with. Anything else stays as it was.
+    fn handed(&self, callee: &str, items: Vec<Value>, args: &[Value]) -> Vec<Value> {
+        let Some(names) = self.params.get(callee) else { return items };
+        let dicts: HashMap<&str, Value> = names
+            .iter()
+            .zip(args)
+            .filter_map(|(n, a)| Some((n.as_str(), super::key_follow::dictionary(a, self.dict)?)))
+            .collect();
+        if dicts.is_empty() {
+            return items;
+        }
+        items
+            .into_iter()
+            .map(|item| {
+                let built = item.get("$spread").and_then(|s| self.mapped_object(s)).unwrap_or(&item);
+                relabelled(built, &dicts).unwrap_or(item)
+            })
+            .collect()
+    }
+
+    /// The one object a `.map(cb)` call's callback returns, `cb` the function its first argument names.
+    fn mapped_object(&self, call: &Value) -> Option<&Value> {
+        let method = call.get("$call").and_then(Value::as_str)?.rsplit_once('.')?.1;
+        if method != "map" {
+            return None;
+        }
+        let callback = call.get("$args")?.as_array()?.first()?.get("$fn_id")?.as_str()?;
+        let [ret] = self.by_member.get(callback)?.as_slice() else { return None };
+        ret.get("value").filter(|v| v.as_object().is_some_and(|o| o.keys().all(|k| !k.starts_with('$'))))
+    }
+
+    /// A TABLE THE CALLER HANDS IN, REBUILT INTO ITEMS (rows 109, #117): every return of `callee` is
+    /// `Object.entries(p).map(([k, v]) => ({ value: k, label: v }))` - or `Object.values(p).map((v) => ({ label: v }))` - over a
+    /// parameter `p`, and the call hands `p` a const object (`toItems(hueLabels)` over `{ Red: 'hue.red' }`). Each entry is one
+    /// element: the callback's one returned object, a property naming the entry's key name its key, one naming its value its
+    /// value, any other property kept as written. None for any other shape - a table read in part would hand the child fewer
+    /// elements than it holds.
+    fn table_lists(&self, callee: &str, args: &[Value]) -> Option<Vec<Value>> {
+        let names = self.params.get(callee)?;
+        let mut items = Vec::new();
+        for r in self.by_member.get(callee)? {
+            let o = r.get("value")?.as_object()?;
+            if o.get("$method").and_then(Value::as_str) != Some("map") {
+                return None;
+            }
+            let receiver = o.get("$receiver")?.as_object()?;
+            let entries = match receiver.get("$call").and_then(Value::as_str)? {
+                "Object.entries" => true,
+                "Object.values" => false,
+                _ => return None,
+            };
+            let [param] = receiver.get("$args")?.as_array()?.as_slice() else { return None };
+            let bare = param.get("$kind").and_then(Value::as_str) == Some("Identifier");
+            let at = names.iter().position(|n| bare && param.get("$expr").and_then(Value::as_str) == Some(n.as_str()))?;
+            let table = args.get(at)?.as_object().filter(|t| t.keys().all(|k| !k.starts_with('$')))?;
+            let callback = o.get("$args")?.as_array()?.first()?.get("$fn_id")?.as_str()?;
+            let [ret] = self.by_member.get(callback)?.as_slice() else { return None };
+            let built = ret.get("value")?.as_object().filter(|b| b.keys().all(|k| !k.starts_with('$')))?;
+            let (key_name, value_name) = if entries {
+                let bound = self.unpacked.get(callback)?;
+                (bound.first().cloned().flatten(), bound.get(1).cloned().flatten())
+            } else {
+                (None, self.params.get(callback)?.first().cloned())
+            };
+            for (key, value) in table {
+                let mut element = serde_json::Map::new();
+                for (prop, v) in built {
+                    let named = v.get("$kind").and_then(Value::as_str) == Some("Identifier");
+                    let name = v.get("$expr").and_then(Value::as_str).filter(|_| named);
+                    let filled = match name {
+                        Some(n) if key_name.as_deref() == Some(n) => Value::String(key.clone()),
+                        Some(n) if value_name.as_deref() == Some(n) => value.clone(),
+                        _ => v.clone(),
+                    };
+                    element.insert(prop.clone(), filled);
+                }
+                items.push(Value::Object(element));
+            }
+        }
+        Some(items)
     }
 
     /// The elements of every list `member` returns - a method, a getter, a function - when every return is one.
@@ -87,6 +207,27 @@ impl ListSource<'_, '_> {
         }
         Some(items)
     }
+}
+
+/// An object with every property that reads a handed dictionary (`$param_index`, alone or as a side of `??`/`||`)
+/// replaced by that dictionary's keys - None when no property does.
+fn relabelled(object: &Value, dicts: &HashMap<&str, Value>) -> Option<Value> {
+    fn reads<'d>(v: &Value, dicts: &'d HashMap<&str, Value>) -> Option<&'d Value> {
+        if let Some(found) = v.get("$param_index").and_then(Value::as_str).and_then(|p| dicts.get(p)) {
+            return Some(found);
+        }
+        let either = matches!(v.get("$logic").and_then(Value::as_str), Some("??" | "||"));
+        v.get("$operands").and_then(Value::as_array).filter(|_| either)?.iter().find_map(|o| reads(o, dicts))
+    }
+    let mut out = object.as_object()?.clone();
+    let mut changed = false;
+    for v in out.values_mut() {
+        if let Some(keys) = reads(v, dicts) {
+            *v = keys.clone();
+            changed = true;
+        }
+    }
+    changed.then_some(Value::Object(out))
 }
 
 /// Runs `f` with the reader `key_fields` follows a call with - for a loop's element, whose property may hold one.

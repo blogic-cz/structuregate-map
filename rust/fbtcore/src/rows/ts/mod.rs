@@ -79,10 +79,12 @@ pub mod key_pushes;
 pub mod key_inputs;
 #[path = "key/fields/key_then.rs"]
 pub mod key_then;
-#[path = "key/key_lists.rs"]
+#[path = "key/lists/key_lists.rs"]
 pub mod key_lists;
-#[path = "key/key_loops.rs"]
+#[path = "key/lists/key_loops.rs"]
 pub mod key_loops;
+#[path = "key/lists/key_options.rs"]
+pub mod key_options;
 #[path = "key/key_dead.rs"]
 pub mod key_dead;
 #[path = "key/key_bound.rs"]

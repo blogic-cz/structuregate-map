@@ -312,7 +312,7 @@ pub fn config_restrictions_all(
     mem: &MemberEnums,
     idx: &EnumIndex,
 ) -> (IndexMap<String, Vec<Value>>, IndexMap<String, Vec<Value>>, ConfigStats) {
-    let loops = super::key_loops::Loops::new(store);
+    let loops = store.shared("loops", super::key_loops::Loops::new);
     let mut per_loop: IndexMap<String, Vec<Value>> = IndexMap::new();
     let expressions = store.table("expressions");
     let classes = store.table("classes");
