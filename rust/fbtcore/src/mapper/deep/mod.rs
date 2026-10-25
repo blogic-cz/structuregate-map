@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
-use passes::{atlas, dispatch, documented, duplicates, enum_types, http, pass, search, seeds, tally};
+use passes::{atlas, dispatch, documented, duplicates, enum_types, http, name_types, pass, search, seeds, tally};
 
 /// What the deep halves are launched with - the options that reach them, and the scripts the caller staged.
 pub struct Deep {
@@ -392,6 +392,7 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
     pass("pass: mediator dispatch", || dispatch(into, db));
     pass("pass: duplicate types", || duplicates(into, db));
     pass("pass: enum type links", || enum_types(into, db, &cs.types_by_enum_name));
+    pass("pass: name type links", || name_types(into, db, &cs.types_by_name));
     if let Some(facts) = &facts {
         pass("pass: document facts", || documented(into, db, facts));
     }

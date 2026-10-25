@@ -82,11 +82,13 @@ internal sealed partial class CsRows
                 break;
 
             case TupleExpressionSyntax or ArrayCreationExpressionSyntax
-                or ImplicitArrayCreationExpressionSyntax or CollectionExpressionSyntax:
+                or ImplicitArrayCreationExpressionSyntax or CollectionExpressionSyntax or AnonymousObjectCreationExpressionSyntax:
                 Constructs(node);
                 break;
 
             case MemberAccessExpressionSyntax access: Reference(access); break;
+            // `o?.IsPaid` reads the member as surely as `o.IsPaid` does (#119): its name hangs off a binding, not an access.
+            case MemberBindingExpressionSyntax binding: Reference(binding); break;
             case IdentifierNameSyntax name when !CsFacts.IsTail(name): Reference(name); break;
             // A GENERIC OR QUALIFIED TYPE NAME is a reference too: `typeof(Pipeline<,>)`, a field of `Holder<int>`, a
             // `Demo.Other.Thing` written out. Only bare identifiers were, so a type registered with DI through an open
@@ -164,11 +166,11 @@ internal sealed partial class CsRows
         // nothing to say so - a large share on a large consumer, where a lambda's type could not be inferred.
         if (symbol is null)
         {
-            if (node is MemberAccessExpressionSyntax && referenced.Add($"{Line(node)}:?{CsFacts.Dotted(node)}"))
+            if (node is MemberAccessExpressionSyntax or MemberBindingExpressionSyntax && referenced.Add($"{Line(node)}:?{CsFacts.Written(node)}"))
             {
                 Row("refs", "ref",
                     ("line", Line(node)),
-                    ("name", CsFacts.Dotted(node) is { Length: > 0 } spelled ? spelled : CsFacts.Text(node)),
+                    ("name", CsFacts.Written(node) is { Length: > 0 } spelled ? spelled : CsFacts.Text(node)),
                     ("symbol", ""),
                     ("kind", "unbound"));
             }
@@ -185,7 +187,7 @@ internal sealed partial class CsRows
         if (!referenced.Add($"{line}:{full}")) return;
         Row("refs", "ref",
             ("line", line),
-            ("name", CsFacts.Dotted(node) is { Length: > 0 } written ? written : CsFacts.Text(node)),
+            ("name", CsFacts.Written(node) is { Length: > 0 } written ? written : CsFacts.Text(node)),
             ("symbol", full),
             ("kind", symbol.Kind.ToString().ToLowerInvariant()));
     }

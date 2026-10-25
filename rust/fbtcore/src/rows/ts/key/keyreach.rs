@@ -384,6 +384,11 @@ pub fn build_closure(
         put("route", Value::String(route.clone()));
         put("n_refs", Value::from(hit.map(|h| h.refs as i64).unwrap_or(0)));
         put("components", Value::from(comps.clone()));
+        // THE TEMPLATE NODES THE KEY RENDERS AT (#122), whatever route took it there - `{{ statusKey | translate }}` over a member a
+        // literal was assigned to as much as a key written in the template: each `template_nodes` id, sorted.
+        let mut nodes: Vec<String> = hit.map(|h| h.nodes.iter().cloned().collect()).unwrap_or_default();
+        nodes.sort();
+        put("nodes", Value::from(nodes));
         put("n_paths", Value::from(sets.len() as i64));
         // EACH WAY NAMED (#53): its `render_path.id` and what it adds to that row's gates/branches, sorted like every list here.
         debug_assert_eq!(on.len(), sets.len());

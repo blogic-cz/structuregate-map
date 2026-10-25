@@ -38,13 +38,49 @@ pub struct Offered {
     pub items: Vec<Element>,
 }
 
+/// Binding id -> its expression's tree: the last row of a binding that has one, as `key_inputs` reads an input's.
+fn binding_trees<'s>(expressions: &'s [Row]) -> HashMap<String, &'s Value> {
+    let mut trees = HashMap::new();
+    for e in expressions {
+        if let (Some(binding), Some(ast)) = (text(e, "binding"), e.get("ast").filter(|a| !a.is_null())) {
+            trees.insert(binding, ast);
+        }
+    }
+    trees
+}
+
+/// AN OUTPUT THAT STORES `$event` IN A PLACE, as the read of that place (#118): `[(value)]="m.x"` is compiled by one Angular
+/// as the output `m.x = $event` (a `Write`) and by a later one as `m.x` itself - so the pair is the same place, never the
+/// same text. A plain `=` of `$event` alone; anything else is None.
+fn stored_place(tree: &Value) -> Option<Value> {
+    let o = tree.as_object()?;
+    let read = match o.get("k")?.as_str()? {
+        "Write" => "Read",
+        "KeyedWrite" => "KeyedRead",
+        _ => return None,
+    };
+    let value = o.get("value")?;
+    let event = value.get("k").and_then(Value::as_str) == Some("Read") && value.get("name").and_then(Value::as_str) == Some("$event")
+        && value.get("receiver").and_then(|r| r.get("k")).and_then(Value::as_str) == Some("Implicit");
+    if !event || o.contains_key("op") {
+        return None;
+    }
+    let mut place = o.clone();
+    place.remove("value");
+    place.insert("k".to_string(), Value::String(read.to_string()));
+    Some(Value::Object(place))
+}
+
 /// Node id -> its value binding (binding id, its source): the input of a two-way pair, or a binding `VALUE_NAMES` names.
 pub(super) fn value_bindings(store: &Store<'_>) -> HashMap<String, (String, String)> {
     let bindings = store.table("bindings");
-    let mut outputs: HashMap<(String, String), String> = HashMap::new();
+    let expressions = store.table("expressions");
+    let trees = binding_trees(&expressions);
+    let tree = |id: &str| trees.get(id).map(|t| super::astreads::unwrap(t));
+    let mut outputs: HashMap<(String, String), (String, Option<Value>)> = HashMap::new();
     for b in bindings.iter().filter(|b| text(b, "kind").as_deref() == Some("output")) {
-        if let (Some(node), Some(name)) = (text(b, "node"), text(b, "name")) {
-            outputs.insert((node, name), text(b, "source").unwrap_or_default());
+        if let (Some(id), Some(node), Some(name)) = (id_of(b, "id"), text(b, "node"), text(b, "name")) {
+            outputs.insert((node, name), (text(b, "source").unwrap_or_default(), tree(&id).and_then(stored_place)));
         }
     }
     let mut out: HashMap<String, (String, String)> = HashMap::new();
@@ -52,7 +88,10 @@ pub(super) fn value_bindings(store: &Store<'_>) -> HashMap<String, (String, Stri
         let (Some(id), Some(node), Some(name)) = (id_of(b, "id"), text(b, "node"), text(b, "name")) else { continue };
         // A PLAIN ATTRIBUTE (`formControlName="tier"`) has no expression: its text is its `value`.
         let source = text(b, "source").filter(|t| !t.is_empty()).or_else(|| text(b, "value")).unwrap_or_default();
-        let two_way = text(b, "kind").as_deref() == Some("input") && outputs.get(&(node.clone(), format!("{name}Change"))) == Some(&source);
+        let paired = outputs.get(&(node.clone(), format!("{name}Change"))).is_some_and(|(text, place)| {
+            *text == source || place.as_ref().is_some_and(|p| tree(&id) == Some(p))
+        });
+        let two_way = text(b, "kind").as_deref() == Some("input") && paired;
         if two_way || VALUE_NAMES.contains(&name.as_str()) {
             out.entry(node).or_insert((id, source));
         }
@@ -67,13 +106,7 @@ pub(super) fn offered(store: &Store<'_>, controls: &HashMap<String, (String, Str
         return Vec::new();
     }
     let expressions = store.table("expressions");
-    let mut trees: HashMap<String, &Value> = HashMap::new();
-    for e in expressions.iter() {
-        // THE LAST ROW OF A BINDING THAT HAS A TREE, as `key_inputs` reads an input's.
-        if let (Some(binding), Some(ast)) = (text(e, "binding"), e.get("ast").filter(|a| !a.is_null())) {
-            trees.insert(binding, ast);
-        }
-    }
+    let trees = binding_trees(&expressions);
     let paths = super::key_inputs::path_lists(store, branches);
     let mut out = Vec::new();
     for b in store.table("bindings").iter().filter(|b| text(b, "kind").as_deref() == Some("input")) {

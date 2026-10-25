@@ -107,6 +107,38 @@ internal static class CsFacts
         }
     }
 
+    /// <summary>
+    /// A name as a reader writes it, through `?.` too: `o?.Inner?.IsReady` is `o.Inner.IsReady`, as `o.Inner.IsReady`
+    /// would be (#119). `Dotted` stops at a binding, whose receiver hangs off the conditional access above it - the
+    /// nearest one holding the binding in its `WhenNotNull` - and stays so for the `reads` it spells. "" as `Dotted`.
+    /// </summary>
+    public static string Written(SyntaxNode node)
+    {
+        var parts = new List<string>();
+        SyntaxNode? at = node;
+        while (true)
+        {
+            var spelled = Dotted(at);
+            if (spelled.Length == 0) return "";
+            parts.Add(spelled);
+            var binding = Leftmost(at);
+            if (binding is null) break;
+            var access = binding.Ancestors().OfType<ConditionalAccessExpressionSyntax>()
+                .FirstOrDefault(c => c.WhenNotNull.Span.Contains(binding.Span));
+            if (access is null) return "";
+            at = access.Expression;
+        }
+        parts.Reverse();
+        return string.Join(".", parts);
+    }
+
+    /// <summary>The binding a member chain starts at (`.A` of `.A.B`), null when it starts at a name.</summary>
+    private static MemberBindingExpressionSyntax? Leftmost(SyntaxNode? node)
+    {
+        while (node is MemberAccessExpressionSyntax access) node = access.Expression;
+        return node as MemberBindingExpressionSyntax;
+    }
+
     private static string Join(List<string> parts)
     {
         if (parts.Count == 0) return "";

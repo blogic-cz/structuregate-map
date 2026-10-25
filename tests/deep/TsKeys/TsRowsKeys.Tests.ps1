@@ -139,7 +139,8 @@ Test-Case 'tsrows keys: a key built by a + chain reaches the component it is bui
 
 # A FIELD HOLDING WHAT AN INJECTED METHOD RETURNS holds the keys that method's ONE plain return builds: `k =
 # this.labels.key(this.grade)` is bound in the template, so the component renders `demo.grades.*`. A callee with
-# a branch and a second return (`pick`) is not read - its branches test its parameter - and stays a literal.
+# a branch and a second return (`pick`) hands back each return's key under that return's own branch (#122): both render,
+# and `demo.pick.first` keeps the `if` it is returned under, as the `literal` route placed it.
 # A LIST OF OBJECTS rendered by `*ngFor` (`tips`, held or returned by that call) is a site only where the loop
 # variable's property is read (`t.tooltip`), carrying the loop's gate; `t.other` is never read, so it stays literal.
 Test-Case 'tsrows keys: a field holding an injected method call, and a list of objects an ngFor reads, hold their keys' {
@@ -191,8 +192,11 @@ Test-Case 'tsrows keys: a field holding an injected method call, and a list of o
         "FROM key_reach WHERE key LIKE 'demo.%'")
     Assert-Line $r 'demo.grades.Alpha | field_binding | 1'
     Assert-Line $r 'demo.grades.Beta | field_binding | 1'
-    Assert-Line $r 'demo.pick.first | literal | 0'
-    Assert-Line $r 'demo.pick.other | literal | 0'
+    Assert-Line $r 'demo.pick.first | field_binding | 1'
+    Assert-Line $r 'demo.pick.other | field_binding | 1'
+    $pb = Invoke-TsRowsQ $made.Db ("SELECT 'pickbr=' || (SELECT count(*) FROM key_reach__always_branches jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) AS b " +
+        "FROM key_reach WHERE key = 'demo.pick.first'")
+    Assert-Line $pb 'pickbr=1'
     Assert-Line $r 'demo.tips.alpha | field_binding | 1'
     Assert-Line $r 'demo.tips.beta | field_binding | 1'
     Assert-Line $r 'demo.own.first | field_binding | 1'
@@ -264,7 +268,7 @@ Test-Case 'tsrows keys: a service key reaches its caller through a hop, a ?? or 
 # an `if` (`oneIf`), after an early return (`dflt`), in a `switch` (`sw`) or two hops down an arm (`both`) linked
 # nothing, and the key read as a `literal` in no component. No condition is carried: the callee's branches test its
 # own parameter, which no gate shares. A key a return of such a method spells itself (`demo.mine.none`, and `pick`
-# above) is still not read: which of them renders is the branch's choice.
+# above) is read too (#122), under that return's own branches - which renders is the branch's choice, and the branch rides it.
 Test-Case 'tsrows keys: a service key reaches its caller through a hop from a method with several returns' {
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/ids.ts' = "export enum Grade { Alpha = 1, Beta = 2 }`n"
@@ -316,8 +320,8 @@ Test-Case 'tsrows keys: a service key reaches its caller through a hop from a me
     Assert-Line $r 'demo.sw.Beta | field_binding | HostComponent'
     Assert-Line $r 'demo.both.Alpha | field_binding | HostComponent'
     Assert-Line $r 'demo.both.other | field_binding | HostComponent'
-    # the key `oneIf` spells in its own second return is the branch's choice, and stays unread
-    Assert-NoLine $r 'demo.mine.none |'
+    # the key `oneIf` spells in its own second return renders in the field too (#122)
+    Assert-Line $r 'demo.mine.none | field_binding | HostComponent'
 }
 
 # A SERVICE'S KEY REACHES THE CALLER THROUGH A CALLBACK AND A LOCAL ARROW: a translated value handed back by a callback

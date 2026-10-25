@@ -15,7 +15,7 @@ pub(super) fn pass(name: &str, work: impl FnOnce()) {
 pub(super) fn tally(into: &mut Collector, db: &str) {
     let Ok(conn) = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return };
     for table in crate::rows::schema::listable_tables(&conn).unwrap_or_default() {
-        if !into.database.contains_key(&table) || ["sql_links", "sql_seeds", "sql_column_refs", "duplicate_types", "doc_facts", "doc_links", "http_endpoints", "http_calls", "http_links", "dispatch", "enum_type_links"].contains(&table.as_str()) {
+        if !into.database.contains_key(&table) || ["sql_links", "sql_seeds", "sql_column_refs", "duplicate_types", "doc_facts", "doc_links", "http_endpoints", "http_calls", "http_links", "dispatch", "enum_type_links", "name_type_links"].contains(&table.as_str()) {
             let rows = crate::rows::schema::count_of(&conn, &table);
             into.database.insert(table, rows);
         }
@@ -73,6 +73,25 @@ pub(super) fn enum_types(into: &mut Collector, db: &str, specs: &[crate::rows::d
             into.notes.extend(notes);
         }
         Err(why) => into.errors.push(format!("ENUM TYPE LINKS were not written — {why}")),
+    }
+}
+
+/// A CLASS CHOSEN BY A NAME STRING, under a declared convention - see `rows/dispatch/nametypes.rs` (#121).
+pub(super) fn name_types(into: &mut Collector, db: &str, specs: &[crate::rows::dispatch::csconfig::NameTypes]) {
+    let written = rusqlite::Connection::open(db).and_then(|mut conn| {
+        let tx = conn.transaction()?;
+        let made = crate::rows::dispatch::nametypes::write(&tx, specs)?;
+        tx.commit()?;
+        Ok(made)
+    });
+    match written {
+        Ok((n, notes)) => {
+            if n > 0 {
+                into.notes.push(format!("{n} name link(s) from a call's name argument to the classes it selects (name_type_links)"));
+            }
+            into.notes.extend(notes);
+        }
+        Err(why) => into.errors.push(format!("NAME TYPE LINKS were not written — {why}")),
     }
 }
 
