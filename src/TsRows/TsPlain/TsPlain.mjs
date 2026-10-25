@@ -50,7 +50,7 @@ const LANG = 'ts';
 
 /** WHAT A ROW MEANS, folded into every file's sha with the compiler's version. Bump it with every change to
  *  what TsPlainRows.mjs writes, or files that did not move keep the old rows - PyRows' ROWS_VERSION. */
-const ROWS_VERSION = '8';
+const ROWS_VERSION = '9';
 
 /** A file this large is a bundle or a generated table, not a source anybody edits; it gets its `files`
  *  row, saying so, and no other. One minified vendor file would otherwise outweigh the tree. */

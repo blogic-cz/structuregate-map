@@ -48,7 +48,7 @@ pub const TSROWS: Set = set!("tsrows-node":
     "TsRows/TsLocales.mjs", "TsRows/TsPaths.mjs", "TsRows/TsNodes.mjs", "TsRows/TsSetup/TsProgram.mjs", "TsRows/TsSetup/TsReads.mjs", "TsRows/TsSetup/TsShape.mjs",
     "TsRows/TsSetup/TsCarried.mjs", "TsRows/TsSetup/TsMetrics.mjs",
     "TsRows/TsSetup/TsProjects.mjs", "TsRows/TsSetup/TsResolve.mjs", "TsRows/TsSetup/TsRunIo.mjs", "TsRows/TsStore.mjs",
-    "TsRows/TsText.mjs", "TsRows/TsPlain/TsLiterals.mjs", "TsRows/TsDecls/TsWalk.mjs",
+    "TsRows/TsText.mjs", "TsRows/TsPlain/TsLiterals.mjs", "TsRows/TsPlain/TsGenerated.mjs", "TsRows/TsDecls/TsWalk.mjs",
     "TsRows/TsHtml.mjs",
     "TsRows/TsDecls/TsAngular.mjs", "TsRows/TsDecls/TsBody.mjs", "TsRows/TsDecls/TsCatch.mjs",
     "TsRows/TsDecls/TsClassRows.mjs", "TsRows/TsDecls/TsExpr/TsLoops.mjs", "TsRows/TsDecls/TsExpr/TsShapes.mjs",
@@ -70,7 +70,7 @@ pub const TSROWS: Set = set!("tsrows-node":
 /// buildmap.json groups by.
 pub const TSPLAIN: Set = set!("plain-ts rows": "TsRows/TsPlain/TsPlain.mjs", "TsRows/TsPlain/TsPlainRows.mjs",
     "TsRows/TsPlain/TsPlainFacts.mjs", "TsGate/TsGate.Map.mjs", "TsRows/TsSetup/TsResolve.mjs",
-    "TsRows/TsDecls/TsCatch.mjs", "TsRows/TsPlain/TsLiterals.mjs");
+    "TsRows/TsDecls/TsCatch.mjs", "TsRows/TsPlain/TsLiterals.mjs", "TsRows/TsPlain/TsGenerated.mjs");
 
 /// The python rows half.
 pub const PYROWS: Set = set!("python rows": "Map/Py/PyRows.py", "Map/Py/PyAst.py", "Map/Py/PyBind.py",
