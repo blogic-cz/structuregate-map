@@ -7,7 +7,8 @@
 //! - `route` - as `key_reach.route` names routes (`template`, `template_string`, `pipe`, `field_binding`);
 //! - `binding` - the `bindings` row of the template expression that places the key (NULL for text content), `input` its name;
 //! - `literal` - the `template_literals` row that built the key on that way: a `tpl:` link of the way, or - for a field or a
-//!   method the template reads, whose ways drop those links - a literal `key_builds` has for the key inside that member's lines;
+//!   method the template reads, whose ways drop those links - a literal `key_builds` has for the key inside that member's lines or those of
+//!   any member or function it calls, transitively (#135: a getter returning a service call; an `*ngFor` collection is the member it reads);
 //!   NULL when the key is written whole or the map cannot tell;
 //! - `typed` - 1 when every hole of that literal is typed (an enum, a union of literals: `key_builds`), so it builds the key exactly; 0 when
 //!   a hole is untyped, or the literal's prefix spells the key but its types say it cannot build it (#132) - an expansion; NULL without a literal.
@@ -55,6 +56,22 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
     // THE LINES OF A MEMBER OR FUNCTION a site reads its key from.
     let span = |r: &Row| Some((id_of(r, "id")?, (text(r, "file")?, r.get("line")?.as_i64()?, r.get("end_line")?.as_i64()?)));
     let spans: HashMap<String, (String, i64, i64)> = store.table("members").iter().chain(store.table("functions").iter()).filter_map(span).collect();
+    // ...AND OF EVERY MEMBER OR FUNCTION IT CALLS, transitively (#135): a getter returning `this.texts.of(code)` builds its key in `of`.
+    let mut callees: HashMap<String, IndexSet<String>> = HashMap::new();
+    for c in store.table("calls").iter() {
+        if let (Some(from), Some(to)) = (id_of(c, "member"), id_of(c, "callee_id")) {
+            callees.entry(from).or_default().insert(to);
+        }
+    }
+    let reached = |start: &str| -> Vec<&(String, i64, i64)> {
+        let mut seen: IndexSet<String> = IndexSet::from([start.to_string()]);
+        let mut i = 0;
+        while let Some(m) = seen.get_index(i).cloned() {
+            i += 1;
+            seen.extend(callees.get(&m).into_iter().flatten().cloned());
+        }
+        seen.iter().filter_map(|m| spans.get(m)).collect()
+    };
     // EVERY TEMPLATE LITERAL WITH A PREFIX, by file (#132): one in a member a site reads whose prefix spells the key, but which `key_builds` says
     // cannot build it, is still the literal that put the key there - an over-expansion, `typed` 0.
     let mut prefixed: HashMap<String, Vec<(String, i64, String)>> = HashMap::new();
@@ -75,11 +92,14 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
         for node in nodes {
             for way in hit.node_via.get(node).into_iter().flatten() {
                 let mut literals: IndexSet<&str> = way.builds.iter().filter_map(|t| tree_literal.get(t)).map(String::as_str).collect();
-                if let Some((file, from, to)) = way.via.reads.as_ref().and_then(|m| spans.get(m)) {
-                    let inside = |line: i64| (*from..=*to).contains(&line);
-                    literals.extend(built.into_iter().flatten().filter(|b| b.file == *file && inside(b.line)).map(|b| b.literal.as_str()));
+                if let Some(read) = way.via.reads.as_ref() {
+                    let within = reached(read);
+                    let inside = |file: &str, line: i64| within.iter().any(|(f, from, to)| f == file && (*from..=*to).contains(&line));
+                    literals.extend(built.into_iter().flatten().filter(|b| inside(&b.file, b.line)).map(|b| b.literal.as_str()));
                     if literals.is_empty() {
-                        literals.extend(prefixed.get(file).into_iter().flatten().filter(|(_, l, p)| inside(*l) && key.starts_with(p.as_str())).map(|(id, _, _)| id.as_str()));
+                        for (file, _, _) in &within {
+                            literals.extend(prefixed.get(file).into_iter().flatten().filter(|(_, l, p)| inside(file, *l) && key.starts_with(p.as_str())).map(|(id, _, _)| id.as_str()));
+                        }
                     }
                 }
                 let mut each: Vec<Option<&str>> = literals.into_iter().map(Some).collect();

@@ -120,7 +120,7 @@ pub fn early(deep: &Deep, files: &Files) -> Early {
 /// WHAT THE PLAIN TYPESCRIPT HALF MAPS: every script file OUTSIDE the Angular workspace, the whole tree when there is
 /// none. The Angular half maps only its workspace, so a React app or an end-to-end suite beside it got no rows at all.
 fn plain_files(deep: &Deep, files: &Files) -> Vec<(String, String)> {
-    match ts::workspace(Path::new(&deep.root)) {
+    match ts::workspace(Path::new(&deep.root), deep.ts_config.as_deref()) {
         None => files.script.clone(),
         Some(ws) => files.script.iter().filter(|(_, abs)| !Path::new(abs).starts_with(&ws)).cloned().collect(),
     }
@@ -131,7 +131,7 @@ fn plain_files(deep: &Deep, files: &Files) -> Vec<(String, String)> {
 /// a workspace that held one.
 fn plain_modules(deep: &Deep) -> Vec<String> {
     let mut modules = deep.ts_node_modules.clone();
-    if let Some(ws) = ts::workspace(Path::new(&deep.root)) {
+    if let Some(ws) = ts::workspace(Path::new(&deep.root), deep.ts_config.as_deref()) {
         let own = ws.join("node_modules");
         if own.is_dir() {
             modules.push(own.to_string_lossy().into_owned());

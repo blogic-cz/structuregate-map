@@ -69,4 +69,31 @@ Test-Case 'tsrows keys: a hole typed by a union of literals builds only those se
     Assert-Line $k 'kind=literal_union'
 }
 
+# (#136) A CONCATENATION BUILDS LIKE A TEMPLATE LITERAL: `'demo.region.' + r` over `r: Region` - in code and in a template - builds `North` and
+# `South` exactly, each named by the enum and its member, and not `demo.region.title`, which no member writes.
+Test-Case 'tsrows keys: a prefix concatenated with an enum-typed value names the enum it builds over (#136)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace @{
+        'apps/shop/src/place.component.ts' = "import { Component, Injectable, Pipe, PipeTransform } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`nexport class I18nService { getTranslation(k: string) { return k; } }`n" +
+            "@Pipe({ name: 'translate', standalone: true })`nexport class TranslatePipe implements PipeTransform { transform(k: string) { return k; } }`n" +
+            "export enum Region { North = 'North', South = 'South' }`n" +
+            "@Component({ selector: 'app-place', standalone: true, imports: [TranslatePipe], template: '<span>{{ `"demo.region.`" + place.region | translate }}</span>' })`n" +
+            "export class PlaceComponent {`n  place: { region: Region } = { region: Region.North };`n" +
+            "  label(r: Region) { return this.i18n.getTranslation('demo.zone.' + r); }`n" +
+            "  constructor(private i18n: I18nService) {}`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"region":{"North":"N","South":"S","title":"T"},"zone":{"North":"N","South":"S","title":"T"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'b=' || b.key || '|' || b.prefix || '|' || b.hole || '|' || b.value || '|' || coalesce(e.name, '-') || '|' || coalesce(b.member, '-') AS r " +
+        "FROM key_builds b LEFT JOIN enums e ON e.id = b.enum WHERE b.key LIKE 'demo.region.%' OR b.key LIKE 'demo.zone.%'")
+    # IN CODE...
+    Assert-Line $r 'b=demo.zone.North|demo.zone.|0|North|Region|North'
+    Assert-Line $r 'b=demo.zone.South|demo.zone.|0|South|Region|South'
+    # ...AND IN A TEMPLATE.
+    Assert-Line $r 'b=demo.region.North|demo.region.|0|North|Region|North'
+    Assert-Line $r 'b=demo.region.South|demo.region.|0|South|Region|South'
+    Assert-NoLine $r '.title|'
+}
+
 }

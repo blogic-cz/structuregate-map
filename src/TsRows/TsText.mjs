@@ -95,12 +95,12 @@ export function collectStrings(ts, store, node, owner, propName, evalNode, field
   // A HOLE THAT NAMES AN ENUM MEMBER (rows 97, #108): `hole_refs` is one entry per hole - the enum a `${Hue[x]}` looks a member NAME up in, else null - and when
   // EVERY hole is one, `expands` lists each string the literal can build (`palette.Red.caption`, `palette.Blue.caption`), in the enums' member order.
   // A checker refusal leaves the row without them, never without the row.
-  const enumHoles = (n, parts) => {
+  const enumHoles = (n, parts, spans = n.templateSpans.map((span) => span.expression)) => {
     try {
       // A NAME LOOKUP FIRST (`${Hue[x]}`), else a hole TYPED by an enum (rows 111, #123: `${r.status}` over `status: Demo`), else by a union of literals
       // (rows 116, #131: `${group}` over `group: 'alpha' | 'beta'`).
-      const refs = enumNameHole ? n.templateSpans.map((span) => enumNameHole.name(span.expression) ?? enumNameHole.value(span.expression)
-        ?? (enumNameHole.literals ? enumNameHole.literals(span.expression) : null)) : [];
+      const refs = enumNameHole ? spans.map((e) => enumNameHole.name(e) ?? enumNameHole.value(e)
+        ?? (enumNameHole.literals ? enumNameHole.literals(e) : null)) : [];
       if (!refs.some((r) => r !== null)) return {};
       const holeRefs = refs.map((r) => (r === null ? null : { name: r.name, file: r.file, line: r.line, kind: r.kind, names: r.names, members: r.members }));
       if (refs.some((r) => r === null) || parts.length !== refs.length + 1) return { hole_refs: holeRefs };
@@ -142,11 +142,48 @@ export function collectStrings(ts, store, node, owner, propName, evalNode, field
         context: parentKind(ts, n), property: propertyContext(ts, n, propName), ...field(n), ...locationOf(n),
       });
     }
+    // A PREFIX JOINED BY `+` BUILDS LIKE A TEMPLATE (rows 118, #136): `'demo.region.' + r` is `form: 'concat'`, its pieces the parts, every operand
+    // that is not a string the evaluator folds a hole - typed as a template's holes are. The outermost `+` only, and none with a template in it
+    // (`BASE + `.${n}``), which the template's own row already leads with BASE.
+    const concat = evalNode ? concatOf(ts, n, evalNode) : null;
+    if (concat) {
+      store.add('template_literals', 'tl', {
+        ...owner, parts: concat.parts, holes: concat.holes.map(text), form: 'concat', ...enumHoles(n, concat.parts, concat.holes),
+        context: parentKind(ts, n), property: propertyContext(ts, n, propName), ...field(n), ...locationOf(n),
+      });
+    }
     const regex = regexOf(ts, n);
     if (regex) store.add('regexes', 'rx', { ...owner, ...regex, context: parentKind(ts, n), ...locationOf(n) });
     ts.forEachChild(n, walk);
   };
   walk(node);
+}
+
+/**
+ * A `+` CHAIN THAT BUILDS A STRING FROM A CONSTANT PREFIX, as a template's `parts` and hole expressions - or null. Only the outermost `+` of a
+ * chain (parentheses walked through), whose first operand folds to a non-empty string, with a hole at least and no template among its operands.
+ */
+function concatOf(ts, n, evalNode) {
+  const isPlus = (x) => ts.isBinaryExpression(x) && x.operatorToken.kind === ts.SyntaxKind.PlusToken;
+  if (!isPlus(n)) return null;
+  let up = n.parent;
+  while (up && ts.isParenthesizedExpression(up)) up = up.parent;
+  if (up && isPlus(up)) return null;
+  const operands = [];
+  const flat = (x) => {
+    while (ts.isParenthesizedExpression(x)) x = x.expression;
+    if (isPlus(x)) { flat(x.left); flat(x.right); } else operands.push(x);
+  };
+  flat(n);
+  if (operands.some((x) => ts.isTemplateExpression(x))) return null;
+  const parts = [''];
+  const holes = [];
+  for (const x of operands) {
+    const v = evalNode(x);
+    if (typeof v === 'string' || (typeof v === 'number' && x !== operands[0])) parts[parts.length - 1] += String(v);
+    else { holes.push(x); parts.push(''); }
+  }
+  return parts[0] && holes.length ? { parts, holes } : null;
 }
 
 /**

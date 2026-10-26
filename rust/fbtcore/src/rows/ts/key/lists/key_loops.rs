@@ -165,6 +165,8 @@ pub struct Loop {
     pub node: String,
     pub variable: String,
     pub items: Vec<Element>,
+    /// The member row the collection reads, whose lines (and callees) build what its elements hold (`key_node_ways`, #135).
+    pub list: Option<String>,
 }
 
 /// THE LOOPS OF A TREE, found once for the sites and for the config a directive inside one reads.
@@ -313,7 +315,7 @@ impl Loops {
             }));
         for (top, expr) in iterated {
             let Some(ast) = expr_by_id.get(&expr).and_then(|e| e.get("ast")).filter(|a| !a.is_null()) else { continue };
-            let Some(items) = read_rows(unwrap(ast)).iter().find_map(|r| lists.get(r)) else { continue };
+            let Some((list, items)) = read_rows(unwrap(ast)).into_iter().find_map(|r| Some((lists.get(&r)?, r)).map(|(i, r)| (r, i))) else { continue };
             let variable = match nodes.iter().find(|n| id_of(n, "id").as_deref() == Some(top.as_str())).and_then(|n| n.get("variables")) {
                 Some(Value::Array(vs)) => vs
                     .iter()
@@ -323,7 +325,7 @@ impl Loops {
             };
             let Some(variable) = variable else { continue };
             out.by_node.entry(top.clone()).or_insert(out.list.len());
-            out.list.push(Loop { node: top, variable: variable.to_string(), items: items.clone() });
+            out.list.push(Loop { node: top, variable: variable.to_string(), items: items.clone(), list: Some(list) });
         }
         out
     }
@@ -552,7 +554,7 @@ pub fn loop_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
                                 way
                             })
                             .collect();
-                        out.push(FieldSite { key: key.clone(), comp: text(n, "component"), node: Some(id.clone()), gates: gates.clone(), ways, via: super::key_routes::Via { binding: id_of(e, "binding"), reads: None } });
+                        out.push(FieldSite { key: key.clone(), comp: text(n, "component"), node: Some(id.clone()), gates: gates.clone(), ways, via: super::key_routes::Via { binding: id_of(e, "binding"), reads: lp.list.clone() } });
                     }
                 }
             }

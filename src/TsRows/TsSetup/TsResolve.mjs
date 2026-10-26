@@ -23,6 +23,9 @@ import path from 'node:path';
  *  declarations pass succeed and the template pass fail one step later. */
 const NEEDED = [['typescript'], ['@angular', 'compiler']];
 
+/** What a TypeScript-only workspace needs: the compiler alone. */
+export const TYPESCRIPT_ONLY = [['typescript']];
+
 const hasAll = (nm, needed) => needed.every((pkg) => existsSync(path.join(nm, ...pkg, 'package.json')));
 
 /**
@@ -120,10 +123,12 @@ export function cacheCompiles() {
   try { if (typeof nodeModule.enableCompileCache === 'function') nodeModule.enableCompileCache(); } catch { /* run uncached */ }
 }
 
-export async function loadToolchain(nodeModules) {
+export async function loadToolchain(nodeModules, angular = true) {
   cacheCompiles();
   const req = createRequire(path.join(nodeModules, 'noop.js'));
   const ts = req('typescript');
+  // A TYPESCRIPT-ONLY WORKSPACE has no templates to parse: no Angular compiler is asked for, and `ng` is null.
+  if (!angular) return { ts, ng: null, tsVersion: ts.version, ngVersion: null, req };
   // @angular/compiler is ESM: imported by RESOLVED PATH and not by bare specifier, because this script's
   // own node resolution has no node_modules to find it in - it is staged into a temporary folder.
   const compiler = await import(pathToFileURL(req.resolve('@angular/compiler')).href);

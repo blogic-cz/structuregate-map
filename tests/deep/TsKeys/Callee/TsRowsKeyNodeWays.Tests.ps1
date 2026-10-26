@@ -64,4 +64,34 @@ Test-Case 'tsrows keys: an over-expansion of a typed literal names the literal, 
     Assert-NoLine $r 'w=demo.items.Item_1Tooltip|-|-'
 }
 
+# (#135) ONE STEP FURTHER: a key built inside a field's initializer (`rows = [..].map(id => ({ name: t(`demo.item_${id}`) }))`) reaches `row.name`,
+# and a getter that calls a service method building it (`get desc() { return this.texts.of(this.code); }`) reaches `[innerHTML]` - each way
+# names the literal that built it there, never NULL like a key written whole.
+Test-Case 'tsrows keys: a key reaching a node through a field or a getter names its literal (#135)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace @{
+        'apps/shop/src/texts.service.ts' = "import { Injectable } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`nexport class I18nService { getTranslation(k: string) { return k; } }`n" +
+            "@Injectable({ providedIn: 'root' })`nexport class TextsService {`n  constructor(private i18n: I18nService) {}`n" +
+            "  of(code: string) { return this.i18n.getTranslation(``demo.desc.`${code}``); }`n}`n"
+        'apps/shop/src/rows.component.ts' = "import { Component } from '@angular/core';`nimport { NgFor } from '@angular/common';`n" +
+            "import { I18nService, TextsService } from './texts.service';`nexport enum Kind { A = 1 }`n" +
+            "@Component({ selector: 'app-rows', standalone: true, imports: [NgFor], template: '<td *ngFor=`"let row of rows`">{{ row.name }}</td><span [innerHTML]=`"desc`"></span>' })`n" +
+            "export class RowsComponent {`n" +
+            "  rows = [Kind.A].map((id) => ({ name: this.i18n.getTranslation(``demo.item_`${id}``) }));`n" +
+            "  get desc() { return this.texts.of(this.code); }`n  code = 'x';`n" +
+            "  constructor(private i18n: I18nService, private texts: TextsService) {}`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"item_1":"I","item_1Tooltip":"IT","desc":{"a":"A","b":"B"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'w=' || w.key || '|' || coalesce(nd.tag, '-') || '|' || coalesce(t.line, '-') || '|' || coalesce(w.typed, '-') AS r " +
+        "FROM key_node_ways w JOIN template_nodes nd ON nd.id = w.node LEFT JOIN template_literals t ON t.id = w.literal WHERE w.key LIKE 'demo.%'")
+    Assert-Line $r 'w=demo.item_1|-|7|1'
+    Assert-Line $r 'w=demo.item_1Tooltip|-|7|0'
+    Assert-Line $r 'w=demo.desc.a|span|7|0'
+    # NO WAY READS AS A KEY WRITTEN WHOLE (literal and typed both NULL).
+    $whole = @($r.Lines | Where-Object { $_.Trim().StartsWith('w=') -and $_.Trim().EndsWith('|-|-') })
+    if ($whole.Count) { throw "ways with no literal:`n$($whole -join "`n")" }
+}
+
 }
