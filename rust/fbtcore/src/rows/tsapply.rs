@@ -383,6 +383,9 @@ fn apply_with(db_path: &Path, root: &str, build: &str, mut payload: TsPayload, d
         // THE GRAPH NOW, AND THEN THE PAYLOAD GOES. The graph is repaired from the payload's own tables;
         // the closure below reads EVERY row back from the database, and holding the payload beside them
         // put the exe at several GB on a large consumer, much of it rows already written.
+        if let Ok(conn) = Connection::open(db_path) {
+            digest.borrow_mut().resolve_kept(&conn);
+        }
         super::remember::remember_graph(&mut receipt, db_path, &digest.borrow(), Some(payload.affected.as_slice()));
         payload.tables = Map::new();
         crate::give_back();

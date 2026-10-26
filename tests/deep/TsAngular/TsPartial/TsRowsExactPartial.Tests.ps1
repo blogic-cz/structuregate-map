@@ -38,17 +38,23 @@ export class LabelService {
         'libs/ui/src/base.ts' = @'
 export class AlphaBase {
   protected id = 1;
+  close(): void {}
 }
 '@
+        # A CALL INTO A FILE THE CALLER NEVER IMPORTS: `alpha` calls `close()` on a `Closer`, which inherits it from `AlphaBase` in `base.ts` -
+        # the edge `base.ts` -> `alpha` is the call's alone, and a partial run that kept `base.ts` lost it from `ts_deps`.
+        'libs/ui/src/closer.ts' = "import { AlphaBase } from './base';`nexport class Closer extends AlphaBase {}`n"
         'apps/shop/src/alpha.component.ts' = @'
 import { Component } from '@angular/core';
 import { LabelService } from '../../../libs/ui/src/label.service';
+import { Closer } from '../../../libs/ui/src/closer';
 @Component({ selector: 'demo-alpha', templateUrl: './alpha.component.html' })
 export class AlphaComponent {
   open = true;
   title = '';
   constructor(private readonly labels: LabelService) {
     this.title = labels.t('demo.alpha');
+    new Closer().close();
   }
 }
 '@

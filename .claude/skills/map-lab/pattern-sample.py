@@ -276,6 +276,9 @@ def make(full, workspace, sample, report=None):
         f = ids.get(stack.pop())
         for p in templates.get(f, set()) | beside.get(f, set()):
             keep.add(p)
+            # A COMPONENT KEPT ONLY AS AN IMPORT keeps its template too - one step, nothing it imports in turn: without it the
+            # sample held the class and not the `.html` that reads its fields, and those fields read as unread.
+            keep.update(templates.get(ids.get(p), set()))
         for p in declares.get(f, set()) | points.get(f, set()) | users.get(f, set()):
             if p not in keep:
                 keep.add(p)

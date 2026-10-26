@@ -82,6 +82,9 @@ pub struct Digest {
     /// Every id a row of those tables holds, however deeply nested -> `table.column` of the first that does
     /// (`dangling::dangling`): the rows the map will hold in place of the ones the replace deletes.
     pub named: IndexMap<String, String>,
+    /// An id a row points at that no payload row holds -> the files whose rows point at it: on a partial run a row it KEPT,
+    /// whose file the payload does not say (`resolve_kept`).
+    pending: IndexMap<String, IndexSet<String>>,
 }
 
 impl Digest {
@@ -171,10 +174,14 @@ impl Digest {
                 if !looks_like_id(id) {
                     continue;
                 }
-                if let Some(target) = self.owner.get(id)
-                    && *target != home
-                {
-                    self.out.entry(target.clone()).or_default().insert(home.clone());
+                match self.owner.get(id) {
+                    Some(target) if *target != home => {
+                        self.out.entry(target.clone()).or_default().insert(home.clone());
+                    }
+                    Some(_) => {}
+                    None => {
+                        self.pending.entry(id.clone()).or_default().insert(home.clone());
+                    }
                 }
             }
         }
@@ -202,6 +209,37 @@ impl Digest {
                 self.unread.insert((own.clone(), named.clone()));
             }
         }
+    }
+
+    /// A PARTIAL RUN'S EDGES INTO THE ROWS IT KEPT: a re-extracted row pointing at a row of a file it did not read again
+    /// (`this.modal.close()` at a kept method) made no edge - the payload does not hold that row, so it named no file - and
+    /// the repaired graph lost the dependency a full run records. The file each such id's row names is read from the map.
+    pub fn resolve_kept(&mut self, db: &rusqlite::Connection) {
+        if self.pending.is_empty() {
+            return;
+        }
+        let Ok(tables) = crate::rows::schema::listable_tables(db) else { return };
+        let ids: Vec<String> = self.pending.keys().cloned().collect();
+        for table in tables {
+            let Ok(columns) = crate::rows::schema::existing_columns(db, &table) else { continue };
+            if !columns.iter().any(|c| c == "id") || !columns.iter().any(|c| c == "file") {
+                continue;
+            }
+            for chunk in ids.chunks(500) {
+                let marks = vec!["?"; chunk.len()].join(",");
+                let sql = format!("SELECT id, file FROM \"{}\" WHERE id IN ({marks}) AND file IS NOT NULL", table.replace('"', "\"\""));
+                let Ok(mut stmt) = db.prepare(&sql) else { break };
+                let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) else { break };
+                for (id, file) in rows.flatten() {
+                    for home in self.pending.get(&id).into_iter().flatten() {
+                        if *home != file {
+                            self.out.entry(file.clone()).or_default().insert(home.clone());
+                        }
+                    }
+                }
+            }
+        }
+        self.pending.clear();
     }
 
     /// Which files depend on which, by path: the edges the rows made, then the template, import and barrel edges.
