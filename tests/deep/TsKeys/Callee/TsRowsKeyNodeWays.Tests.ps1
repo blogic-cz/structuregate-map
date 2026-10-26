@@ -94,4 +94,23 @@ Test-Case 'tsrows keys: a key reaching a node through a field or a getter names 
     if ($whole.Count) { throw "ways with no literal:`n$($whole -join "`n")" }
 }
 
+# (#137) A HOLE THE TEMPLATE'S CALL SPELLS WITH A LITERAL is no wildcard: `label('time')` over `'demo.flight.' + name` builds that one key at
+# that node, so the way is exact (typed 1) - the untyped hole marked it 0, an expansion, though no other key can come of that call.
+Test-Case 'tsrows keys: a hole a template call fills with a literal argument makes its way exact (#137)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace @{
+        'apps/shop/src/flights.component.ts' = "import { Component, Injectable, Input } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`nexport class I18nService { getTranslation(k: string) { return k; } }`n" +
+            "@Component({ selector: 'demo-item', standalone: true, template: '<i>{{ title }}</i>' })`nexport class ItemComponent { @Input() title = ''; }`n" +
+            "@Component({ selector: 'app-flights', standalone: true, imports: [ItemComponent], template: '<demo-item [title]=`"label(\'time\')`"></demo-item><demo-item [title]=`"label(\'number\')`"></demo-item>' })`n" +
+            "export class FlightsComponent {`n  label(name: string) { return this.i18n.getTranslation('demo.flight.' + name); }`n  constructor(private i18n: I18nService) {}`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"flight":{"time":"T","number":"N","title":"X"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT 'w=' || w.key || '|' || coalesce(w.input, '-') || '|' || coalesce(w.typed, '-') AS r FROM key_node_ways w WHERE w.key LIKE 'demo.flight.%'")
+    Assert-Line $r 'w=demo.flight.time|title|1'
+    Assert-Line $r 'w=demo.flight.number|title|1'
+    Assert-NoLine $r 'demo.flight.title'
+}
+
 }

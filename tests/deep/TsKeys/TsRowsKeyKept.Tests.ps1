@@ -139,4 +139,39 @@ Test-Case 'tsrows: a comment beside a template two components share keeps the st
     Assert-Line $again.Result 'kept the closure it stored'
 }
 
+# A CONST IN A LIBRARY TWO PROJECTS HOLD is ONE `expressions` row: its own project's walk described it, and the other project's fold of the
+# importer's call described it again under a second id - which the first partial run after every full one named differently (it reuses
+# the row it was handed back), so the closure was derived again for a comment.
+Test-Case 'tsrows: a comment after a full run keeps the closure when a library const is folded by another project' {
+    $files = $script:TsKeptFiles.Clone()
+    $files['angular.json'] = '{"projects":{"core":{"projectType":"library","root":"libs/core","sourceRoot":"libs/core/src","architect":{"build":{"options":{"tsConfig":"libs/core/tsconfig.lib.json"}}}},' +
+        '"shop":{"projectType":"application","root":"apps/shop","sourceRoot":"apps/shop/src","architect":{"build":{"options":{"tsConfig":"apps/shop/tsconfig.app.json"}}}}}}'
+    $files['libs/core/tsconfig.lib.json'] = '{"compilerOptions":{"strict":true},"include":["src/**/*.ts"]}'
+    $files['libs/core/src/index.ts'] = "const version = '1';`nexport const banner = ``core: `${version}``;`n"
+    $files['apps/shop/src/boot.ts'] = "import { banner } from '../../../libs/core/src/index';`nexport function boot(): void {`n  console.debug(banner);`n}`n"
+    $tree = New-TsRowsWorkspace $files
+    Assert-Exit (New-TsRowsDb $tree).Result 0
+    $one = Invoke-Gate --map-query (Join-Path $tree 'map.sqlite') --width 0 --sql "SELECT 'banner=' || count(*) AS n FROM expressions e JOIN files f ON f.id = e.file WHERE f.path LIKE '%libs/core/src/index.ts' AND e.source LIKE '``core:%'"
+    Assert-Line $one 'banner=1'
+    Add-Content -LiteralPath (Join-Path $tree 'apps/shop/src/boot.ts') -Value '// demo: a remark'
+    $again = New-TsRowsDb $tree
+    Assert-Exit $again.Result 0
+    Assert-Line $again.Result 'kept the closure it stored'
+}
+
+# AN ARRAY OF TWO STRUCTURALLY IDENTICAL CLASSES (`imports: [AlphaModule, BetaModule]`, both empty) is a union the checker REDUCES to whichever it
+# interned first, which a full and a partial run do not agree on: the property's element names both, as written, sorted by place (rows 123).
+Test-Case 'tsrows: an array literal of identical classes names each of them, not the one the checker kept' {
+    $files = $script:TsKeptFiles.Clone()
+    $files['apps/shop/src/mods.module.ts'] = "import { NgModule } from '@angular/core';`n@NgModule({})`nexport class AlphaModule {}`n@NgModule({})`nexport class BetaModule {}`n" +
+        "@NgModule({ imports: [AlphaModule, BetaModule] })`nexport class RootModule {}`n"
+    $tree = New-TsRowsWorkspace $files
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT 'el=' || t.value AS r FROM shape_members m JOIN shape_members__type_ref t ON t.owner = m.id AND t.role = 'name' " +
+        "WHERE m.name = 'imports' AND t.parent IS NOT NULL AND t.parent <> 0 ORDER BY t.n")
+    Assert-Line $r 'el=AlphaModule'
+    Assert-Line $r 'el=BetaModule'
+}
+
 }

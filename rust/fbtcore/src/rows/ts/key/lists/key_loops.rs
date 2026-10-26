@@ -554,7 +554,7 @@ pub fn loop_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
                                 way
                             })
                             .collect();
-                        out.push(FieldSite { key: key.clone(), comp: text(n, "component"), node: Some(id.clone()), gates: gates.clone(), ways, via: super::key_routes::Via { binding: id_of(e, "binding"), reads: lp.list.clone() } });
+                        out.push(FieldSite { key: key.clone(), comp: text(n, "component"), node: Some(id.clone()), gates: gates.clone(), ways, via: super::key_routes::Via { binding: id_of(e, "binding"), reads: lp.list.clone(), spelled: false } });
                     }
                 }
             }

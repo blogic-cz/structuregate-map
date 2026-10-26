@@ -70,15 +70,30 @@ pub(super) fn calls(v: &Value, out: &mut Vec<(String, Vec<Value>)>) {
     }
 }
 
-/// The keys one call of `method` hands its node, each with the ways it is returned in.
-fn method_keys(method: &str, args: &[Value], at: &str, reader: &Returned<'_, '_>, branches: &Branches) -> IndexMap<String, Vec<Vec<String>>> {
+/// Whether a bound return spells its key with no hole left open: a string, a `+` of spelled pieces, or a call (the translate call) one of
+/// whose arguments is (#137).
+fn spelled(v: &Value) -> bool {
+    match v {
+        Value::String(_) => true,
+        Value::Object(o) if o.contains_key("$concat") => o["$concat"].as_array().is_some_and(|xs| xs.iter().all(spelled)),
+        Value::Object(o) if o.contains_key("$call") => o.get("$args").and_then(Value::as_array).is_some_and(|xs| xs.iter().any(spelled)),
+        _ => false,
+    }
+}
+
+/// The keys one call of `method` hands its node, each with the ways it is returned in - and the keys every return that spells them spells
+/// with the call's own literal arguments, no hole left open (`spelled`).
+fn method_keys(method: &str, args: &[Value], at: &str, reader: &Returned<'_, '_>, branches: &Branches) -> (IndexMap<String, Vec<Vec<String>>>, std::collections::HashMap<String, bool>) {
     let no_params = reader.params.get(method).is_none_or(|p| p.is_empty());
     let params = reader.params.get(method).map(Vec::as_slice).unwrap_or_default();
     let mut ways = IndexMap::new();
+    let mut exact: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
     for combo in spellings(args) {
         for r in reader.every.get(method).into_iter().flatten() {
             let Some(ret) = r.get("value") else { continue };
             let value = bind_args(ret, params, &combo);
+            // A HOLE THE CALL'S LITERAL FILLED is no wildcard: only where the method HAS parameters (a key with none is written whole).
+            let closed = !no_params && ret != &value && spelled(&value);
             let base = if no_params { branches.chain_of(r) } else { Vec::new() };
             let mut found = Vec::new();
             value_keys(&value, &base, reader.keys, &mut found);
@@ -96,11 +111,12 @@ fn method_keys(method: &str, args: &[Value], at: &str, reader: &Returned<'_, '_>
                 if !no_params {
                     chain.retain(|link| !link.starts_with("tpl:"));
                 }
+                *exact.entry(key.clone()).or_insert(true) &= closed;
                 member_ways(&mut ways, &key, chain);
             }
         }
     }
-    ways
+    (ways, exact)
 }
 
 /// The sites the template's calls of a method prove, and the nodes that hold one.
@@ -143,9 +159,11 @@ pub(super) fn method_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
                 if !done.insert(format!("{method} {}", Value::from(args.clone()))) {
                     continue;
                 }
-                for (key, ways) in method_keys(&method, &args, &at, reader, &branches) {
+                let (keys, exact) = method_keys(&method, &args, &at, reader, &branches);
+                for (key, ways) in keys {
                     hit_nodes.insert(node_id.clone());
-                    let via = super::key_routes::Via { binding: id_of(e, "binding"), reads: Some(method.clone()) };
+                    let spelled = exact.get(&key).copied().unwrap_or(false);
+                    let via = super::key_routes::Via { binding: id_of(e, "binding"), reads: Some(method.clone()), spelled };
                     out.push(FieldSite { key, comp: text(n, "component"), node: Some(node_id.clone()), gates: gates_of(n), ways, via });
                 }
             }

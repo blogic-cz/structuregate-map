@@ -356,6 +356,8 @@ async function main() {
   //     is one lists the strings it builds in `expands` (`TsText.mjs::collectStrings`, `TsExpr/TsReadRefs.mjs::enumNameHole`).
   // 98: #109 - `propertyPaths` (`structuregate.ts.json`) names members whose strings are property paths and the root they start from; such a string carries `path_refs`
   //     (a segment each, with its row `id`) and `path_complete` (`TsExpr/TsReadRefs.mjs::pathRefs`).
+  // 123: an un-annotated array literal in an object literal names its elements' refs as written, sorted by place, not the checker's reduced union (`TsExpr/TsShapes.mjs::writtenElements`).
+  // 122: an expression another project already described in the run is that row, not a second one at the same place (`TsDecls/TsWalk.mjs`, `store.exprAt`).
   // 121: a `module_ref_from_dependency` diagnostic carries `reason`: `shadows_local` (a local module of that name) or `dependency` (`TsDerive/TsModuleScope.mjs`).
   // 120: a call of `Map#get` keeps the map it looks into as `$receiver` (`TsExpr/TsValue.mjs::mapLookup`), so a factory creating `kinds.get(k)` renders each value.
   // 119: an `@else` / `@else if` branch is gated on the negation of every earlier branch (`block_IfBlockElse` expression, `TsTpl/TsTplExtract.mjs::andNot`).
@@ -385,7 +387,7 @@ async function main() {
   // 99: an immer handler's `writes` follow the helpers it hands its draft to, and the callbacks they call (`TsExpr/TsExprDescribe.mjs::draftWrites`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 121, build: args.build,
+    config: config.file, data: config.data, rows: 123, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

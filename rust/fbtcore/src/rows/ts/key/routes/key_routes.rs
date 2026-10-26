@@ -59,6 +59,8 @@ pub struct FieldSite {
 pub struct Via {
     pub binding: Option<String>,
     pub reads: Option<String>,
+    /// The template's call spelled every hole of the key with its own literal arguments (#137): the way is exact.
+    pub spelled: bool,
 }
 
 /// One way a key is placed at one node: its route, the site's `Via`, and the template literals its ways name (`tpl:<tree>`, the
@@ -314,7 +316,7 @@ pub fn key_routes(
     };
 
     // THE BINDING A TEMPLATE ROW'S EXPRESSION IS (#126).
-    let via_of = |row: &Row| Via { binding: present(row, "expression").and_then(|x| row_of.get(&x).and_then(|e| present(e, "binding"))), reads: None };
+    let via_of = |row: &Row| Via { binding: present(row, "expression").and_then(|x| row_of.get(&x).and_then(|e| present(e, "binding"))), reads: None, spelled: false };
 
     // 1. A carrier on a template node.
     for r in store.table("i18n_refs").iter() {
@@ -402,7 +404,7 @@ pub fn key_routes(
     for e in expressions.iter() {
         let Some(n) = present(e, "node").and_then(|x| node_by_id.get(&x).copied()) else { continue };
         for name in e.get("pipes").and_then(|p| p.as_array()).into_iter().flatten().filter_map(|v| v.as_str()) {
-            let via = Via { binding: present(e, "binding"), reads: None };
+            let via = Via { binding: present(e, "binding"), reads: None, spelled: false };
             uses.entry(name.to_string()).or_default().push((n, present(n, "id").unwrap_or_default(), via));
         }
     }

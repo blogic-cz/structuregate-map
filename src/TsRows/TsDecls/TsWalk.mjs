@@ -149,7 +149,14 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
           { file: home, line: pos.line + 1, source: node.getText() });
         if (held !== null) { store.reused += 1; return held; }
       }
-      return store.add('expressions', 'x', {
+      // ...AND ONE ANOTHER PROJECT ALREADY DESCRIBED IN THIS RUN. Each project has its own describer, so a `const` in a library two
+      // programs hold was described twice - its own file's walk and the importer's fold - under two ids; the importer's `$expr_id`
+      // named the second, a partial run named the first (`handedBack` above), and the closure was derived again on the first edit
+      // after every full run. One row per span and role.
+      const at = `${fileId(sf.fileName)}|${node.getStart()}|${node.getEnd()}|${role}`;
+      const minted = store.exprAt?.get(at);
+      if (minted !== undefined) return minted;
+      const id = store.add('expressions', 'x', {
         // `col` WITH `line`, so a row keeps its id when its file is read again: another file's folded value
         // names it by `$expr_id`, and a re-numbered row left that reference pointing at nothing.
         lang: 'ts', role, file: fileId(sf.fileName), line: pos.line + 1, col: pos.character + 1,
@@ -161,6 +168,8 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
         // it points at.
         ...(refs && refs.size ? { write_refs: Object.fromEntries(refs) } : {}),
       });
+      (store.exprAt ??= new Map()).set(at, id);
+      return id;
     }, readRefs.resolveRead, readRefs.resolveName, log, readRefs.resolveLocal, readRefs.resolveParam);
     const { evalNode, evalCell, propName } = makeEvaluator(ts, checker, symbolAt, describe);
     const bindingFacts = makeBindingFacts(ts, checker, evalCell);
