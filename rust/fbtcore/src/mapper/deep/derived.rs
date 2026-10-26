@@ -144,10 +144,14 @@ pub fn replay(into: &mut Collector, db: &str, key: &Key, atlas: Option<&str>) ->
     for (table, rows) in kept["database"].as_object().into_iter().flatten() {
         into.database.insert(table.clone(), rows.as_i64().unwrap_or(0));
     }
-    // EVERY TABLE AS IT WAS COUNTED THEN: no row moved, and a half that had nothing to do brought no receipt - the
-    // `database` line otherwise shrank on the run that changed nothing.
+    // EVERY TABLE AS IT WAS COUNTED THEN, over a half's receipt: no row moved, a half that had nothing to do brought no
+    // receipt - the `database` line otherwise shrank on the run that changed nothing - and one that did counted before
+    // the passes (#134).
     for (table, rows) in kept["tables"].as_object().into_iter().flatten() {
-        into.database.entry(table.clone()).or_insert(rows.as_i64().unwrap_or(0));
+        into.database.insert(table.clone(), rows.as_i64().unwrap_or(0));
+    }
+    if let Ok(conn) = rusqlite::Connection::open(db) {
+        super::passes::rows_meta(into, &conn);
     }
     true
 }

@@ -13,12 +13,22 @@ pub(super) fn pass(name: &str, work: impl FnOnce()) {
 /// Every table the store would list that nothing here has counted yet - and the two the passes REWRITE, whose
 /// count from an earlier receipt is the count before they ran.
 pub(super) fn tally(into: &mut Collector, db: &str) {
-    let Ok(conn) = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return };
+    let Ok(conn) = rusqlite::Connection::open(db) else { return };
+    // EVERY TABLE, not only those the passes made: a half's receipt counts the tables as they stood when it wrote, before
+    // the passes or the stylesheets moved them, so a refresh printed fewer rows than the tables held (#134).
+    into.database.clear();
     for table in crate::rows::schema::listable_tables(&conn).unwrap_or_default() {
-        if !into.database.contains_key(&table) || ["sql_links", "sql_seeds", "sql_column_refs", "duplicate_types", "doc_facts", "doc_links", "http_endpoints", "http_calls", "http_links", "dispatch", "enum_type_links", "name_type_links", "entity_keys"].contains(&table.as_str()) {
-            let rows = crate::rows::schema::count_of(&conn, &table);
-            into.database.insert(table, rows);
-        }
+        let rows = crate::rows::schema::count_of(&conn, &table);
+        into.database.insert(table, rows);
+    }
+    rows_meta(into, &conn);
+}
+
+/// `_meta.rows` AS THE `database` LINE SAYS IT, written last: the store's tally was taken before the passes made their tables.
+pub(super) fn rows_meta(into: &mut Collector, conn: &rusqlite::Connection) {
+    let rows: i64 = into.database.values().filter(|n| **n > 0).sum();
+    if let Err(why) = crate::rows::meta::put_moved(conn, "rows", &rows.to_string()) {
+        into.notes.push(format!("_meta.rows was not written - {why:#}"));
     }
 }
 
