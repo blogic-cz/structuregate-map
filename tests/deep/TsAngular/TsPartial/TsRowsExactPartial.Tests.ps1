@@ -32,6 +32,9 @@ export class LabelService {
   t(key: string): string { return key; }
 }
 '@
+        # A LIBRARY FILE THE APPLICATION NEVER REACHES, with an import nothing resolves: the `ui` program is the one that notes it, so a run
+        # that leaves that program unbuilt has to say the note again (rows 125).
+        'libs/ui/src/orphan.ts' = "import { gone } from 'demo-missing-package';`nexport const orphan = gone;`n"
         'libs/ui/src/base.ts' = @'
 export class AlphaBase {
   protected id = 1;
@@ -222,6 +225,16 @@ Test-Case 'tsrows: a partial run over every hop that would leave a kept row nami
     $run = Invoke-TsExactRun 'apps/shop/src/main.ts' @{ STRUCTUREGATE_TEST_WHOLE = 'classes' }
     Assert-Line $run.Partial 'reads everything instead'
     Assert-TsExactRows (Get-TsExactRows $run.PartialDb) (Get-TsExactRows $run.FullDb) 'every row after the run read everything'
+}
+
+# A PROJECT THE EDIT DOES NOT TOUCH IS NOT BUILT (rows 125): the `ui` library owns no file the run reads again, so its program stays unbuilt -
+# and the map is still the full run's, its unresolved import (noted by that program) included.
+Test-Case 'tsrows: a partial run leaves an untouched project unbuilt and writes the full run''s rows' {
+    $run = Invoke-TsExactRun 'apps/shop/src/alpha.component.ts'
+    Assert-Line $run.Partial 'left 1 project program(s) unbuilt'
+    $partial = Get-TsExactRows $run.PartialDb
+    if (-not @($partial | Where-Object { $_.StartsWith('diagnostics=') -and $_.Contains('demo-missing-package') }).Count) { throw 'the unbuilt program''s note is gone' }
+    Assert-TsExactRows $partial (Get-TsExactRows $run.FullDb) 'every row after editing alpha.component.ts, the ui program unbuilt'
 }
 
 }

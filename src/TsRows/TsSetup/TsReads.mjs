@@ -178,6 +178,23 @@ export function makeRereads({ ts, fe, changed, gone, readers, deepReaders, surfa
     checked,
     moved,
     late,
+    /** Whether `project` would look at a surface of, or read again, any of `rels` - the project's own files: a partial run leaves the
+     *  program of a project it would not touch unbuilt (`TsDecls/TsWalk.mjs`). No state moves. */
+    touches(rels) {
+      const owned = new Set(rels);
+      for (const rel of owned) if (changed.has(rel) || only.has(rel)) return true;
+      for (const rel of moved) for (const r of readersOf(rel)) if (owned.has(r)) return true;
+      // ...AND WHAT `project` READS AGAIN, as it spells it: the readers of what changed or moved, a moved file's deep readers, and their couples.
+      const again = new Set();
+      for (const rel of [...changed, ...moved]) for (const r of readersOf(rel)) again.add(r);
+      for (const rel of moved) for (const r of readersOf(rel)) for (const r2 of deepReaders[r] ?? []) again.add(r2);
+      const stack = [...again];
+      while (stack.length) {
+        for (const c of coupled[stack.pop()] ?? []) if (!again.has(c)) { again.add(c); stack.push(c); }
+      }
+      for (const rel of again) if (owned.has(rel)) return true;
+      return false;
+    },
     /** `files` are the project's own, not yet read by an earlier one; `open` builds the surface program. */
     project(files, open) {
       const owned = new Map(files.map((sf) => [relativeTo(fe, canonicalPath(sf.fileName)), sf]));
@@ -330,3 +347,19 @@ function decoratorTexts(ts, sf) {
   visit(sf);
   return out;
 }
+
+/**
+ * WHICH PROJECTS A PARTIAL RUN MAY LEAVE UNBUILT (rows 125, `TsDecls/TsWalk.mjs`), and which it builds ahead of the walk (`prewarm`). Only when
+ * the map says which program wrote each note (`program_notes`) and every changed file is one it holds an owner for - a new file, or one gone,
+ * may move any program. Built ahead: the projects owning a file this run reads; a later surface may still ask for another, which the walk
+ * then builds itself.
+ */
+export function skipping(state, planned, now, projects) {
+  const can = planned.cut && Array.isArray(state.program_notes) && state.owners
+    && planned.changed.every((rel) => now.has(rel) && state.owners[rel] !== undefined);
+  if (!can) return { skip: null, ahead: projects };
+  const skip = { owners: state.owners, reached: state.reached ?? [], notes: state.program_notes };
+  const touched = new Set([...planned.changed, ...planned.affected].map((rel) => skip.owners[rel]).filter(Boolean));
+  return { skip, ahead: projects.filter((p) => touched.has(p.name)) };
+}
+

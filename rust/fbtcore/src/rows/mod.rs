@@ -43,6 +43,8 @@ mod rawcells;
 pub mod reads;
 #[path = "partial/remember.rs"]
 mod remember;
+#[path = "partial/skip.rs"]
+mod skip;
 #[path = "partial/uncarried.rs"]
 mod uncarried;
 // WHAT RUST DERIVES FROM THE TYPESCRIPT HALF'S STORED ROWS - the closure and the stylesheet tables, written whole or as
@@ -144,6 +146,11 @@ pub struct TsState {
     pub shapes: Value,
     /// The last full run found every file its rows name among the reads, and no run since found one missing.
     pub reads_proven: bool,
+    /// What a partial run needs to leave a project's program unbuilt - see `skip`: path -> owning project, the `.ts` files a
+    /// program reached, and the notes building one writes (null when the map cannot say which program wrote them).
+    pub owners: Value,
+    pub reached: Value,
+    pub program_notes: Value,
 }
 
 pub fn ts_state(db: &Path, lang: &str) -> TsState {
@@ -163,6 +170,7 @@ pub fn ts_state(db: &Path, lang: &str) -> TsState {
     };
 
     let recorded = reads::recorded(db, lang);
+    let skipping = skip::recorded(db, lang);
     let (graph, scope) = match rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) {
         Ok(conn) if db.exists() => (remember::stored_graph(&conn), remember::stored_scope(&conn)),
         _ => Default::default(),
@@ -186,6 +194,9 @@ pub fn ts_state(db: &Path, lang: &str) -> TsState {
         coupled: recorded.coupled,
         shapes: recorded.shapes,
         reads_proven: recorded.loaded && meta(&format!("reads:{lang}")) == "proven",
+        owners: Value::Object(skipping.owners),
+        reached: Value::Array(skipping.reached),
+        program_notes: skipping.notes.map_or(Value::Null, Value::Array),
     }
 }
 
