@@ -154,6 +154,10 @@ pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Arc<str>, 
         }
     }
 
+    // A COMPONENT IN AN OUTLET-ONLY `<ng-template #ref>` renders where its outlets render it (`key_outlets`, as a key there does): the
+    // edge holds the gates EVERY outlet's way holds - one list per edge, since a `render_path` row is keyed by its edges.
+    let outlets = super::key_outlets::Outlets::new(store);
+
     // BY WHERE THE EDGE IS WRITTEN, not by the order the rows arrived — see `edge_sites`.
     let site = edge_sites(store);
     let renders = store.table("renders");
@@ -176,12 +180,17 @@ pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Arc<str>, 
     for r in ordered {
         let Some(parent) = id_of(r, "from_component") else { continue };
         let Some(to) = id_of(r, "to") else { continue };
-        let gates: Vec<Arc<str>> = id_of(r, "node")
-            .and_then(|n| chains.get(&n).cloned())
-            .unwrap_or_default()
-            .iter()
-            .map(|g| ids.of(g))
-            .collect();
+        let node = id_of(r, "node");
+        let own = node.as_ref().and_then(|n| chains.get(n).cloned()).unwrap_or_default();
+        let held = match node.as_deref().and_then(|n| outlets.rewrite(n, &own)) {
+            Some(ways) => {
+                let mut every = ways.first().cloned().unwrap_or_default();
+                every.retain(|g| ways.iter().all(|w| w.contains(g)));
+                every
+            }
+            None => own,
+        };
+        let gates: Vec<Arc<str>> = held.iter().map(|g| ids.of(g)).collect();
         let to = ids.of(&to);
         let id = id_of(r, "id").unwrap_or_default();
         let mut branches: Vec<Arc<str>> = Vec::new();

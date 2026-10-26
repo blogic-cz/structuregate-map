@@ -86,4 +86,31 @@ Test-Case 'tsrows: a key in an ng-template only outlets render takes the gates o
     Assert-Line $n 'demo.list.selectAll paths 1'
 }
 
+# A COMPONENT inside an outlet-only `<ng-template #ref>` renders where its outlets do, as a key there does: its render edge holds the gate
+# every outlet's way holds, so a key in the CHILD's own template is restricted by the outlet's `*ngIf` (it kept the edge's own chain, none).
+Test-Case 'tsrows: a component in an ng-template only outlets render takes the gates of the outlets' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/kinds.ts' = "export enum KindSet { Home = 1, Flat = 2, Life = 3 }`n"
+        'apps/shop/src/translate.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "@Component({ selector: 'translate', template: '{{ text }}' })`n" +
+            "export class TranslateComponent { @Input() text: string = ''; }`n"
+        'apps/shop/src/child.component.ts' = "import { Component } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-child', template: '<translate [text]=`"\'demo.child.title\'`"></translate>' })`nexport class ChildComponent {}`n"
+        'apps/shop/src/host.component.ts' = "import { Component } from '@angular/core';`nimport { KindSet } from './kinds';`n" +
+            "@Component({ selector: 'demo-host', template: ``n" +
+            "  <ng-container *ngIf=`"vm.kind === KindSet.Home`" [ngTemplateOutlet]=`"childTpl`"></ng-container>`n" +
+            "  <ng-template #childTpl><demo-child></demo-child></ng-template>`n`` })`n" +
+            "export class HostComponent {`n  KindSet = KindSet;`n  vm: { kind: KindSet } = { kind: KindSet.Home };`n}`n"
+        'apps/shop/src/app.module.ts' = "import { NgModule } from '@angular/core';`nimport { CommonModule } from '@angular/common';`n" +
+            "import { TranslateComponent } from './translate.component';`nimport { ChildComponent } from './child.component';`nimport { HostComponent } from './host.component';`n" +
+            "@NgModule({ declarations: [TranslateComponent, ChildComponent, HostComponent], imports: [CommonModule], bootstrap: [HostComponent] })`nexport class AppModule {}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"child":{"title":"C"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["translate:text"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql ($script:TsOutletsSql.Replace("LIKE 'demo.list.%'", "LIKE 'demo.child.%'"))
+    Assert-Line $r 'demo.child.title | vm.kind === KindSet.Home | vm.kind === KindSet.Home | vm.kind in ["Home"]'
+}
+
 }
