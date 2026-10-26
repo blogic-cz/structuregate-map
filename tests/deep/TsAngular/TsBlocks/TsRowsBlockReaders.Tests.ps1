@@ -174,4 +174,21 @@ Test-Case 'tsrows: a feature filling an @for list reaches the keys inside it as 
     Assert-NoLine $f 'demo.loop.none |'
 }
 
+# AN `@else` RENDERS UNDER THE NEGATION OF EVERY EARLIER BRANCH: with no gate of its own it read as unconditional, and an `@else if` held
+# its own condition only. Each now gates on `!(earlier) && (own)`, so the keys split the enum as the branches do.
+Test-Case 'tsrows: an @else and an @else if render under the negation of the earlier branches' {
+    $db = (New-TsRowsDb (New-TsRowsWorkspace @{
+        'apps/shop/src/grades.ts' = "export enum Grade { Alpha = 1, Beta = 2, Gamma = 3 }`n"
+        'apps/shop/src/branches.component.ts' = "import { Component } from '@angular/core';`nimport { Grade } from './grades';`n" +
+            "@Component({ selector: 'demo-branches', standalone: true, template: '@if (grade === grades.Alpha) { <em>{{ \'demo.if.a\' | money }}</em> } " +
+            "@else if (grade === grades.Beta) { <em>{{ \'demo.if.b\' | money }}</em> } @else { <em>{{ \'demo.if.c\' | money }}</em> }' })`n" +
+            "export class BranchesComponent {`n  grades = Grade;`n  grade: Grade = Grade.Alpha;`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"if":{"a":"A","b":"B","c":"C"}}}'
+    }) -Shared).Db
+    $k = Invoke-TsRowsQ $db $script:TsBlockReadersValuesSql
+    Assert-Line $k 'demo.if.a | grade in ["Alpha"]'
+    Assert-Line $k 'demo.if.b | grade in ["Beta"]'
+    Assert-Line $k 'demo.if.c | grade in ["Gamma"]'
+}
+
 }

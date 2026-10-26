@@ -34,6 +34,10 @@ pub struct CallLift {
     members: Rc<Vec<Row>>,
     member_at: HashMap<String, usize>,
     callers: HashMap<String, Vec<usize>>,
+    /// (file, method name) -> the members its resolved calls of that name land on: another class's same-named method is no read of this one.
+    resolved: HashMap<(String, String), Vec<String>>,
+    /// A callback's `functions` row -> what it sits in (`parent`): a member, or another callback.
+    enclosing: HashMap<String, String>,
     done: RefCell<HashMap<String, Option<IndexSet<String>>>>,
 }
 
@@ -42,13 +46,18 @@ impl CallLift {
         let calls = store.table("calls");
         let members = store.table("members");
         let mut callers: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut resolved: HashMap<(String, String), Vec<String>> = HashMap::new();
         for (i, c) in calls.iter().enumerate() {
             if let Some(target) = text(c, "target_id") {
+                if let (Some(file), Some(method)) = (text(c, "file"), text(c, "method")) {
+                    resolved.entry((file, method)).or_default().push(target.clone());
+                }
                 callers.entry(target).or_default().push(i);
             }
         }
         let member_at = members.iter().enumerate().filter_map(|(i, m)| Some((text(m, "id")?, i))).collect();
-        CallLift { reads: MemberReads::new(store), calls, members, member_at, callers, done: RefCell::new(HashMap::new()) }
+        let enclosing = store.table("functions").iter().filter_map(|f| Some((text(f, "id")?, text(f, "parent")?))).collect();
+        CallLift { reads: MemberReads::new(store), calls, members, member_at, callers, resolved, enclosing, done: RefCell::new(HashMap::new()) }
     }
 
     /// The chain a statement of `member` runs under through its callers; empty when nothing is proven.
@@ -59,7 +68,7 @@ impl CallLift {
     /// `row`'s own chain, then what its member lifts.
     pub fn chain_of(&self, row: &Row, branches: &Branches) -> Vec<String> {
         let mut out = branches.chain_of(row);
-        if let Some(member) = text(row, "member") {
+        if let Some(member) = text(row, "member").map(|m| self.member_of(m)) {
             for b in self.of(&member, branches) {
                 if !out.contains(&b) {
                     out.push(b);
@@ -67,6 +76,19 @@ impl CallLift {
             }
         }
         out
+    }
+
+    /// A statement in a CALLBACK (`this.x$.subscribe(() => { .. })`) runs when its member does: the member it sits in, up every
+    /// enclosing callback (a visited set ends a cycle).
+    fn member_of(&self, mut at: String) -> String {
+        let mut seen = HashSet::new();
+        while !self.member_at.contains_key(&at) && seen.insert(at.clone()) {
+            match self.enclosing.get(&at) {
+                Some(up) => at = up.clone(),
+                None => break,
+            }
+        }
+        at
     }
 
     fn lift(&self, member: &str, branches: &Branches, walking: &mut HashSet<String>) -> Option<IndexSet<String>> {
@@ -89,7 +111,11 @@ impl CallLift {
             return None;
         }
         let callers: Vec<&Row> = self.callers.get(member).into_iter().flatten().map(|i| &self.calls[*i]).collect();
-        let own = self.reads.own_reads(m)?;
+        // ANOTHER FILE SPELLING THE NAME reads this member only where its call is not resolved to some other member (a dozen
+        // components each with its own `private showModal` refused every one's lift).
+        let own = self.reads.own_reads_but(m, |f, n| {
+            self.resolved.get(&(f.to_string(), n.to_string())).map_or(0, |ts| ts.iter().filter(|t| t.as_str() != member).count() as i64)
+        })?;
         let file = text(m, "file");
         if callers.is_empty() || own != callers.len() as i64 || callers.iter().any(|c| text(c, "file") != file) {
             return None;
@@ -97,7 +123,7 @@ impl CallLift {
         let mut held: Option<IndexSet<String>> = None;
         for call in callers {
             let mut way: IndexSet<String> = branches.chain_of(call).into_iter().collect();
-            if let Some(from) = text(call, "member") {
+            if let Some(from) = text(call, "member").map(|m| self.member_of(m)) {
                 // A CALLER THE MAP CANNOT LIFT still holds its own chain: the call runs only under it.
                 way.extend(self.lift(&from, branches, walking).unwrap_or_default());
                 if walking.contains(&from) {

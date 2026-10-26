@@ -165,7 +165,7 @@ requires and which enum members it still permits.
   holds the branches and cases EVERY way holds (one case and no case hold nothing; two or more cases, each alone
   on its way, hold `or:<case>|<case>`, the union of their values - #15). They ride `render_path.branches` - never `gates` - and `key_reach` folds them with the key's own,
   so `always_branches`/`always_values` gain the case. `path_always_gates` stays gates alone.
-- **A BRANCH AROUND THE CALL OF A PRIVATE METHOD HOLDS INSIDE IT** (#45, `key/routes/key_called.rs::CallLift`): a dynamic render's edge holds its creating call's own chain (`renders.call`), and a statement of a `private` method (not an `ng*` hook, no decorator) holds what EVERY call of it holds - the intersection of each caller's chain joined to what the caller's own method lifts - when every read of its name is a `calls` row resolved to it: no template, string or other file reads it, its file's `prop_reads` count equals its callers and `this_indexed` is 0. Read for a render edge (`render_path.branches`), a `ts_call` site and every literal way (`key_branches::literal_ways`: literal, pipe). A method called from itself lifts nothing.
+- **A BRANCH AROUND THE CALL OF A PRIVATE METHOD HOLDS INSIDE IT** (#45, `key/routes/key_called.rs::CallLift`): a dynamic render's edge holds its creating call's own chain (`renders.call`), and a statement of a `private` method (not an `ng*` hook, no decorator) holds what EVERY call of it holds - the intersection of each caller's chain joined to what the caller's own method lifts - when every read of its name is a `calls` row resolved to it: no template or string reads it, another file's reads of the name are calls resolved to other members (#104), its file's `prop_reads` count equals its callers and `this_indexed` is 0; a statement in a callback of the method is the method's. Read for a render edge (`render_path.branches`), a `ts_call` site and every literal way (`key_branches::literal_ways`: literal, pipe). A method called from itself lifts nothing.
 
 **AN `@switch` CASE IS AN `*ngSwitchCase`** (#40, `gate/gate_switch.rs`): a `SwitchBlockCase` gate restricts the nearest enclosing `SwitchBlock`'s discriminant to its member, `@default` (no expression, no gate) nothing.
 
@@ -177,4 +177,4 @@ reads it (`gate/ts/gate_tsrows.rs`), a bare `this.f = local` included.
 ## Divergences
 
 Every signed-off divergence from the predecessor, and the rule behind them: [DIVERGENCES.md](DIVERGENCES.md).
-A new restriction is a new divergence: add it to [DIVERGENCES-PROPOSED.md](DIVERGENCES-PROPOSED.md) until it is signed off.
+A new restriction is a new divergence: add it to [DIVERGENCES-63.md](DIVERGENCES-63.md), marked proposed until it is signed off.

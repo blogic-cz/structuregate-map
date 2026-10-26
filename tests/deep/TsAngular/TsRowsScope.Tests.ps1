@@ -235,4 +235,24 @@ Test-Case 'tsrows: a module ref from a dependency is noted once however many sco
         "WHERE d.kind = 'module_ref_from_dependency' AND f.path LIKE '%shared.module.ts' GROUP BY d.name")
     Assert-Line $r 'dep=RouterModule|1'
 }
+
+# (rows 121) WHY A DEPENDENCY'S MODULE IS A ROW: a plain dependency module (`RouterModule`) is `reason = dependency`; one whose name a LOCAL NgModule
+# also declares (a vendored `CommonModule` copy) is `shadows_local` - the refusal there is what keeps the package's import off the local class.
+Test-Case 'tsrows: a module ref from a dependency says whether it shadows a local module' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/vendored/common.module.ts' = "import { NgModule } from '@angular/core';`n@NgModule({})`nexport class CommonModule {}`n"
+        'apps/shop/src/shared.module.ts' = "import { Component, NgModule } from '@angular/core';`nimport { RouterModule } from '@angular/router';`n" +
+            "import { CommonModule } from '@angular/common';`n" +
+            "@Component({ selector: 'demo-chip', template: '<b>c</b>' })`nexport class ChipComponent {}`n" +
+            "@NgModule({ declarations: [ChipComponent], imports: [RouterModule, CommonModule], exports: [ChipComponent, RouterModule, CommonModule] })`nexport class SharedModule {}`n"
+        'apps/shop/src/first.module.ts' = "import { Component, NgModule } from '@angular/core';`nimport { SharedModule } from './shared.module';`n" +
+            "@Component({ selector: 'demo-first', template: '<demo-chip></demo-chip>' })`nexport class FirstComponent {}`n" +
+            "@NgModule({ declarations: [FirstComponent], imports: [SharedModule] })`nexport class FirstModule {}`n"
+    }
+    $made = New-TsRowsDb $tree -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db "SELECT 'why=' || name || '|' || coalesce(reason, '-') AS r FROM diagnostics WHERE kind = 'module_ref_from_dependency'"
+    Assert-Line $r 'why=RouterModule|dependency'
+    Assert-Line $r 'why=CommonModule|shadows_local'
+}
 }

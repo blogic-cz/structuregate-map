@@ -87,8 +87,23 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
     return null;
   }
 
+  /** Each `@if` branch's EARLIER branches' conditions, set when the `@if` is walked: what an `@else` / `@else if` renders under the negation of. */
+  const earlier = new WeakMap();
+  /** `!(a) && !(b) && (c)` as a normalized tree and its source: the earlier conditions negated, then the branch's own. */
+  const andNot = (before, own) => {
+    const unwrap = (n) => (n?.k === 'Source' ? n.ast : n);
+    const parts = [...before.map((e) => ({ k: 'Not', expr: unwrap(normalizeExpr(e)) })), ...(own ? [unwrap(normalizeExpr(own))] : [])];
+    const ast = parts.reduce((left, right) => ({ k: 'Binary', op: '&&', left, right }));
+    const src = [...before.map((e) => `!(${e.source ?? ''})`), ...(own ? [`(${own.source ?? ''})`] : [])].join(' && ');
+    return { norm: { k: 'Source', src, ast }, src };
+  };
+
   /** The block nodes (`@if` / `@switch` / `@for` / `@defer` / `@let`) plus any node type this version added. */
   function emitBlock(kind, node, row, tplId, comp, span) {
+    if (kind === 'IfBlock') {
+      const branches = node.branches ?? [];
+      branches.forEach((b, i) => earlier.set(b, branches.slice(0, i).map((x) => x.expression).filter(Boolean)));
+    }
     // `@let x = expr` holds its expression in `value`, every other block in `expression`.
     const isLet = kind === 'LetDeclaration';
     const expr = isLet ? node.value : node.expression;
@@ -132,10 +147,19 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
     // A `@let` neither: it names a value and decides nothing.
     const iterating = kind === 'ForLoopBlock';
     const gating = !isLet;
+    // AN `@else` / `@else if` RENDERS UNDER THE NEGATION OF EVERY EARLIER BRANCH: its gate reads `!(a) && (c)` from a row of its own,
+    // as a `[hidden]` gate reads `!(c)` - the branch's own expression row (if any) stays what it was, and is no gate.
+    const before = kind === 'IfBlockBranch' ? (earlier.get(node) ?? []) : [];
     if (expr) {
       emitExpr({
         tplId, nodeId, comp, kind: `block_${kind}`, name: isLet ? (node.name ?? kind) : kind,
-        norm: normalizeExpr(expr), src, gate: gating, gateKind: gating ? 'block' : null, span,
+        norm: normalizeExpr(expr), src, gate: gating && !before.length, gateKind: gating && !before.length ? 'block' : null, span,
+      });
+    }
+    if (before.length) {
+      const combined = andNot(before, expr);
+      emitExpr({
+        tplId, nodeId, comp, kind: 'block_IfBlockElse', name: kind, norm: combined.norm, src: combined.src, gate: true, gateKind: 'block', span, gateOnly: true,
       });
     }
     // A `when` TRIGGER'S CONDITION IS AN EXPRESSION, NOT A GATE. It decides when the main content first loads,

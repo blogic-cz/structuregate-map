@@ -48,7 +48,7 @@ export function makeEmitters({ store, normalizeExpr, carriers, gateInputs, class
   }
 
   function emitExpr({ tplId, nodeId, comp, kind, name, norm, src, gate = false, gateKind = null,
-    binding = null, carrier = false, span = {}, unit = null }) {
+    binding = null, carrier = false, span = {}, unit = null, gateOnly = false }) {
     const summary = dedupeSummary(summarizeExpr(norm));
     const exprId = store.add('expressions', 'x', {
       template: tplId, node: nodeId, component: comp.id, binding, kind, name,
@@ -74,6 +74,8 @@ export function makeEmitters({ store, normalizeExpr, carriers, gateInputs, class
         ...(gateKind === 'style' ? { unit } : {}),
       });
     }
+    // A CONDITION BUILT FROM OTHERS (an `@else`'s negation) is a gate and nothing else: its strings are the earlier branches', already rows.
+    if (gateOnly) return { exprId, keys: [] };
     // Every string literal in the expression - unfiltered, exactly as on the TypeScript side.
     for (const s of summary.strings) {
       store.add('template_strings', 'sg', {
