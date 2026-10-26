@@ -12,7 +12,7 @@
  * `this_indexed` is a file that hands its own instance to something that could read it by a name no source spells:
  * `this` anywhere but the receiver of `this.x` / `this['x']` or the argument of `.bind` / `.call` / `.apply` -
  * `this[k]`, `...this`, `const self = this`, `Object.values(this)`, `register(this)`. Then every field of its
- * classes may be read, and none is dropped.
+ * classes may be read, and none is dropped. `untilDestroyed(this)` of `@ngneat/until-destroy` is none: it reads the destroy method alone.
  *
  * Imports are flat: see `TsTypeRef.mjs`.
  */
@@ -25,6 +25,16 @@ export function propReads(ts, sf) {
     || ts.isTypeAssertionExpression(n) || (ts.isSatisfiesExpression && ts.isSatisfiesExpression(n));
   const bound = (call) => ts.isPropertyAccessExpression(call.expression)
     && ['bind', 'call', 'apply'].includes(call.expression.name.text);
+  // `untilDestroyed(this)` OF `@ngneat/until-destroy` (rows 124) reads ONE member of the instance - its destroy method, `ngOnDestroy` or the name
+  // its second argument spells, counted below as a read of that name - so it hands nothing away. Known by the file's own import, never the name alone.
+  const untilDestroyed = new Set();
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier) || st.moduleSpecifier.text !== '@ngneat/until-destroy') continue;
+    for (const el of st.importClause?.namedBindings && ts.isNamedImports(st.importClause.namedBindings) ? st.importClause.namedBindings.elements : []) {
+      if ((el.propertyName ?? el.name).text === 'untilDestroyed') untilDestroyed.add(el.name.text);
+    }
+  }
+  const destroyedBy = (call, at) => ts.isIdentifier(call.expression) && untilDestroyed.has(call.expression.text) && call.arguments[0] === at;
   const escapes = (self) => {
     let at = self;
     while (at.parent && wraps(at.parent)) at = at.parent;
@@ -33,6 +43,11 @@ export function propReads(ts, sf) {
     if (ts.isPropertyAccessExpression(p) && p.expression === at) return false;
     if (ts.isElementAccessExpression(p) && p.expression === at) {
       return !(p.argumentExpression && ts.isStringLiteralLike(p.argumentExpression));
+    }
+    if (ts.isCallExpression(p) && destroyedBy(p, at)) {
+      const named = p.arguments[1];
+      add(named && ts.isStringLiteralLike(named) ? named.text : 'ngOnDestroy');
+      return false;
     }
     return !(ts.isCallExpression(p) && p.arguments.includes(at) && bound(p));
   };

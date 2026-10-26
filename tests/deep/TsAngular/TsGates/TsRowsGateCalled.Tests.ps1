@@ -169,4 +169,38 @@ Test-Case 'tsrows gates: a factory creating what a Map of components looks up re
     Assert-Line $r 'r=RootComponent>FlatDetailComponent'
 }
 
+# (rows 124) `untilDestroyed(this)` OF `@ngneat/until-destroy` IS NO HAND-OVER: it reads the destroy method alone, so a component unsubscribing
+# that way still lifts its private method's call branch - the file was `this_indexed` and every such lift was refused.
+Test-Case 'tsrows gates: untilDestroyed(this) does not stop a private method''s call branch from lifting' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/kinds.ts' = "export enum Kind { Home = 1, Flat = 2, Life = 3 }`n"
+        'apps/shop/src/translate.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "@Component({ selector: 'translate', standalone: true, template: '<span>{{ text }}</span>' })`n" +
+            "export class TranslateComponent { @Input() text!: string; }`n"
+        'apps/shop/src/component.factory.ts' = "import { Injectable, Type, ViewContainerRef } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class ComponentFactory {`n" +
+            "  create<T>(component: Type<T>, container: ViewContainerRef) { return container.createComponent(component); }`n}`n"
+        'apps/shop/src/modal.component.ts' = "import { Component } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-modal', template: '<translate [text]=`"\'demo.modal.title\'`"></translate>' })`n" +
+            "export class ModalComponent {}`n"
+        'apps/shop/src/root.component.ts' = "import { Component, ViewContainerRef } from '@angular/core';`nimport { of } from 'rxjs';`n" +
+            "import { untilDestroyed } from '@ngneat/until-destroy';`n" +
+            "import { Kind } from './kinds';`nimport { ComponentFactory } from './component.factory';`nimport { ModalComponent } from './modal.component';`n" +
+            "@Component({ selector: 'demo-root', template: '<button (click)=`"go()`">go</button>' })`n" +
+            "export class RootComponent {`n  kind: Kind = Kind.Life;`n  ready`$ = of(true);`n" +
+            "  constructor(private componentFactory: ComponentFactory, private viewContainerRef: ViewContainerRef) {}`n" +
+            "  go() {`n    this.ready`$.pipe(untilDestroyed(this)).subscribe();`n    if (this.kind === Kind.Home) {`n      this.openModal();`n    }`n  }`n" +
+            "  private openModal() { this.componentFactory.create(ModalComponent, this.viewContainerRef); }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"modal":{"title":"T"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["translate:text"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $f = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT 'ix=' || this_indexed AS r FROM files WHERE path LIKE '%root.component.ts'"
+    Assert-Line $f 'ix=0'
+    $v = Invoke-TsRowsQ $made.Db $script:CalledValueQ
+    Assert-Line $v 'demo.modal.title | kind in ["Home"]'
+}
+
 }

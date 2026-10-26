@@ -25,19 +25,13 @@ const NODE_BUILTINS = new Set(builtinModules);
 function caseInsensitiveMatch(ts, name, containingFile, options, host, nmDummy) {
   if (!name.startsWith('.')) return aliasMatch(ts, name, containingFile, options, host, nmDummy);
   const wanted = path.resolve(path.dirname(containingFile), name);
+  // EACH FOLDER LISTED ONCE FOR THE RUN (`actualPath`'s listings): every unresolved import of every file listed every folder on its path
+  // again, which was seconds of a partial run on a large workspace.
   for (const form of ['', '.ts', '.tsx', '.d.ts', '.js', '.mjs', '/index.ts', '/index.d.ts']) {
     const full = path.normalize(wanted + form);
-    let at = path.parse(full).root;
-    let found = true;
-    for (const part of full.slice(at.length).split(path.sep).filter((p) => p !== '')) {
-      let entries = [];
-      try { entries = readdirSync(at); } catch { found = false; break; }
-      const hit = entries.find((e) => e.toLowerCase() === part.toLowerCase());
-      if (hit === undefined) { found = false; break; }
-      at = path.join(at, hit);
-    }
-    if (!found || at === full) continue;
-    try { if (statSync(at).isFile()) return true; } catch { /* gone since the listing */ }
+    const at = actualPath(full, true);
+    if (at === undefined || at === full) continue;
+    if (statOf(at)?.isFile()) return true;
   }
   return false;
 }
@@ -48,7 +42,19 @@ function caseInsensitiveMatch(ts, name, containingFile, options, host, nmDummy) 
  * It is asked only of a specifier the exact resolution refused, so a hit is a case-only match by definition; a specifier nothing resolves (`version.json`) stays false.
  */
 const LISTINGS = new Map();
-function actualPath(file) {
+const STATS = new Map();
+/** `stat` of a path, once for the run; null when there is nothing there. */
+function statOf(p) {
+  if (!STATS.has(p)) {
+    let st = null;
+    try { st = statSync(p); } catch { /* nothing there */ }
+    STATS.set(p, st);
+  }
+  return STATS.get(p);
+}
+/** The path as the disk spells it, each segment matched ignoring case; `caseFirst` takes a folder's first case-insensitive match even where the
+ *  exact spelling is there too (`caseInsensitiveMatch` always did), else the exact one first. */
+function actualPath(file, caseFirst = false) {
   const full = path.normalize(file);
   let at = path.parse(full).root;
   for (const part of full.slice(at.length).split(path.sep).filter((p) => p !== '')) {
@@ -59,17 +65,28 @@ function actualPath(file) {
     }
     const entries = LISTINGS.get(at);
     if (entries === null) return undefined;
-    const hit = entries.includes(part) ? part : entries.find((e) => e.toLowerCase() === part.toLowerCase());
+    const folded = () => entries.find((e) => e.toLowerCase() === part.toLowerCase());
+    const hit = caseFirst ? folded() : entries.includes(part) ? part : folded();
     if (hit === undefined) return undefined;
     at = path.join(at, hit);
   }
   return at;
 }
+// ONE ANSWER PER SPECIFIER, FOLDER, EXTENSION AND PROGRAM: resolution reads only the importing file's folder (its `node_modules` up the tree, `paths`
+// against `baseUrl`), so every file of a folder importing the same missing package was resolved again from scratch.
+const ALIASED = new WeakMap();
 function aliasMatch(ts, name, containingFile, options, host, nmDummy) {
-  const statOf = (p) => { const real = actualPath(p); try { return real === undefined ? null : statSync(real); } catch { return null; } };
+  if (!ALIASED.has(options)) ALIASED.set(options, new Map());
+  const memo = ALIASED.get(options);
+  const key = `${path.dirname(containingFile)}\0${path.extname(containingFile)}\0${name}`;
+  if (!memo.has(key)) memo.set(key, aliasResolved(ts, name, containingFile, options, host, nmDummy));
+  return memo.get(key);
+}
+function aliasResolved(ts, name, containingFile, options, host, nmDummy) {
+  const statFolded = (p) => { const real = actualPath(p); return real === undefined ? null : statOf(real); };
   const folded = {
-    fileExists: (f) => statOf(f)?.isFile() ?? false,
-    directoryExists: (d) => statOf(d)?.isDirectory() ?? false,
+    fileExists: (f) => statFolded(f)?.isFile() ?? false,
+    directoryExists: (d) => statFolded(d)?.isDirectory() ?? false,
     readFile: (f) => host.readFile(actualPath(f) ?? f),
     realpath: (p) => p,
     getCurrentDirectory: () => host.getCurrentDirectory(),
