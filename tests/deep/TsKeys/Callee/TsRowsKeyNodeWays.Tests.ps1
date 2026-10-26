@@ -43,4 +43,25 @@ Test-Case 'tsrows keys: each node a key reaches names its input and the literal 
     Assert-NoLine $r '|pipe|'
 }
 
+# (#132) A KEY THE TYPED LITERAL'S PREFIX SPELLS BUT CANNOT BUILD: `Item_${id}` over `id: Item` builds `Item_1` and `Item_2` exactly, while the reach
+# also expands it to `Item_1Tooltip` - that way names the literal with `typed` 0, never NULL like a key written whole.
+Test-Case 'tsrows keys: an over-expansion of a typed literal names the literal, typed 0 (#132)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace @{
+        'apps/shop/src/translate.pipe.ts' = "import { Pipe, PipeTransform } from '@angular/core';`n" +
+            "@Pipe({ name: 'translate', standalone: true })`nexport class TranslatePipe implements PipeTransform { transform(k: string) { return k; } }`n"
+        'apps/shop/src/items.component.ts' = "import { Component } from '@angular/core';`nimport { TranslatePipe } from './translate.pipe';`n" +
+            "export enum Item { A = 1, B = 2 }`n" +
+            "@Component({ selector: 'app-items', standalone: true, imports: [TranslatePipe], template: '<span>{{ titleOf(item) | translate }}</span>' })`n" +
+            "export class ItemsComponent {`n  item = Item.A;`n  titleOf(id: Item) { return ``demo.items.Item_`${id}``; }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"items":{"Item_1":"A","Item_2":"B","Item_1Tooltip":"AT"}}}'
+    }) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'w=' || w.key || '|' || coalesce(t.line, '-') || '|' || coalesce(w.typed, '-') AS r FROM key_node_ways w " +
+        "LEFT JOIN template_literals t ON t.id = w.literal WHERE w.key LIKE 'demo.items.%'")
+    Assert-Line $r 'w=demo.items.Item_1|7|1'
+    Assert-Line $r 'w=demo.items.Item_2|7|1'
+    Assert-Line $r 'w=demo.items.Item_1Tooltip|7|0'
+    Assert-NoLine $r 'w=demo.items.Item_1Tooltip|-|-'
+}
+
 }

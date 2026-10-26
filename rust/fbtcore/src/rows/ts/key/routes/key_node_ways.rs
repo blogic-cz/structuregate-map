@@ -9,8 +9,8 @@
 //! - `literal` - the `template_literals` row that built the key on that way: a `tpl:` link of the way, or - for a field or a
 //!   method the template reads, whose ways drop those links - a literal `key_builds` has for the key inside that member's lines;
 //!   NULL when the key is written whole or the map cannot tell;
-//! - `typed` - 1 when every hole of that literal is typed by an enum (`key_builds.enum`), so it builds the key exactly; 0 when a
-//!   hole is untyped, so it builds every key its pieces match; NULL without a literal.
+//! - `typed` - 1 when every hole of that literal is typed (an enum, a union of literals: `key_builds`), so it builds the key exactly; 0 when
+//!   a hole is untyped, or the literal's prefix spells the key but its types say it cannot build it (#132) - an expansion; NULL without a literal.
 //!
 //! Only the nodes `key_reach.nodes` keeps are read: a weaker route's site a stronger one replaced is not a way in there.
 
@@ -55,6 +55,16 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
     // THE LINES OF A MEMBER OR FUNCTION a site reads its key from.
     let span = |r: &Row| Some((id_of(r, "id")?, (text(r, "file")?, r.get("line")?.as_i64()?, r.get("end_line")?.as_i64()?)));
     let spans: HashMap<String, (String, i64, i64)> = store.table("members").iter().chain(store.table("functions").iter()).filter_map(span).collect();
+    // EVERY TEMPLATE LITERAL WITH A PREFIX, by file (#132): one in a member a site reads whose prefix spells the key, but which `key_builds` says
+    // cannot build it, is still the literal that put the key there - an over-expansion, `typed` 0.
+    let mut prefixed: HashMap<String, Vec<(String, i64, String)>> = HashMap::new();
+    for t in store.table("template_literals").iter() {
+        let (Some(id), Some(file), Some(line)) = (id_of(t, "id"), text(t, "file"), t.get("line").and_then(Value::as_i64)) else { continue };
+        let first = t.get("parts").and_then(Value::as_array).and_then(|p| p.first()).and_then(Value::as_str).filter(|p| !p.is_empty());
+        if let Some(first) = first {
+            prefixed.entry(file).or_default().push((id, line, first.to_string()));
+        }
+    }
 
     let mut out = Vec::new();
     for (key, hit) in routes {
@@ -66,7 +76,11 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
             for way in hit.node_via.get(node).into_iter().flatten() {
                 let mut literals: IndexSet<&str> = way.builds.iter().filter_map(|t| tree_literal.get(t)).map(String::as_str).collect();
                 if let Some((file, from, to)) = way.via.reads.as_ref().and_then(|m| spans.get(m)) {
-                    literals.extend(built.into_iter().flatten().filter(|b| b.file == *file && (*from..=*to).contains(&b.line)).map(|b| b.literal.as_str()));
+                    let inside = |line: i64| (*from..=*to).contains(&line);
+                    literals.extend(built.into_iter().flatten().filter(|b| b.file == *file && inside(b.line)).map(|b| b.literal.as_str()));
+                    if literals.is_empty() {
+                        literals.extend(prefixed.get(file).into_iter().flatten().filter(|(_, l, p)| inside(*l) && key.starts_with(p.as_str())).map(|(id, _, _)| id.as_str()));
+                    }
                 }
                 let mut each: Vec<Option<&str>> = literals.into_iter().map(Some).collect();
                 if each.is_empty() {
@@ -76,7 +90,8 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
                     if !seen.insert((node.clone(), way.route.clone(), way.via.binding.clone(), literal.map(str::to_string))) {
                         continue;
                     }
-                    let typed = literal.and_then(|l| built.into_iter().flatten().find(|b| b.literal == l)).map(|b| Value::from(b.typed as i64));
+                    // NOT BUILT BY IT (no `key_builds` row for the pair): an expansion of its prefix, never exact.
+                    let typed = literal.map(|l| Value::from(built.into_iter().flatten().find(|b| b.literal == l).is_some_and(|b| b.typed) as i64));
                     let mut row = Row::new();
                     let mut put = |k: &str, v: Value| row.insert(k.to_string(), v);
                     let opt = |v: Option<String>| v.map(Value::String).unwrap_or(Value::Null);

@@ -353,6 +353,7 @@ async function main() {
   //     is one lists the strings it builds in `expands` (`TsText.mjs::collectStrings`, `TsExpr/TsReadRefs.mjs::enumNameHole`).
   // 98: #109 - `propertyPaths` (`structuregate.ts.json`) names members whose strings are property paths and the root they start from; such a string carries `path_refs`
   //     (a segment each, with its row `id`) and `path_complete` (`TsExpr/TsReadRefs.mjs::pathRefs`).
+  // 116: #131 - a template-literal hole typed by a union of string or number literals is a `hole_refs` entry of kind `literal_union` (`TsExpr/TsReadRefs.mjs::literalUnionHole`).
   // 115: #117 - a `filter`/`slice`/`map` on the enclosing function's own parameter keeps it as `$receiver` (`TsExpr/TsValue.mjs::treeList`).
   // 114: #127 - a `switch_cases` row names the switched enum (`discriminant_type`, `discriminant_enum` + `discriminant_enum_id`) and what each label selects
   //     (`label_symbols` `Enum.Member`, `label_values` the constant), from the checker (`TsExpr/TsStatements/TsCases.mjs`), as the C# half's.
@@ -376,7 +377,7 @@ async function main() {
   // 99: an immer handler's `writes` follow the helpers it hands its draft to, and the callbacks they call (`TsExpr/TsExprDescribe.mjs::draftWrites`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 115, build: args.build,
+    config: config.file, data: config.data, rows: 116, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

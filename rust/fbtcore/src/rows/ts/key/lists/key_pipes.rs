@@ -54,10 +54,18 @@ impl Pipes {
 
     /// The list a `Pipe` node of a template hands on, `input` reading the list it is applied to; its holder is the input's.
     pub(super) fn piped(&self, tree: &Value, src: &ListSource<'_, '_>, input: impl Fn(&Value) -> Option<(String, Vec<Element>)>) -> Option<(String, Vec<Element>)> {
-        let member = self.transform.get(tree.get("name")?.as_str()?)?.as_deref()?;
+        let name = tree.get("name")?.as_str()?;
+        // `x$ | async`: what the observable emits - the list its field holds.
+        if name == "async" {
+            return input(tree.get("exp")?);
+        }
+        let member = self.transform.get(name)?.as_deref()?;
         let params = src.params.get(member)?;
         let list = params.first()?;
-        let (holder, items) = input(tree.get("exp")?)?;
+        // A LIST THE MAP CANNOT READ (an API's) still takes the labels the pipe writes: one element standing for each, so a dictionary
+        // the pipe relabels from is every key under its prefix - and anything else the pipe hands on reads no key.
+        let exp = tree.get("exp")?;
+        let (holder, items) = input(exp).or_else(|| Some((read_rows(exp).into_iter().next()?, vec![Element::written(Value::Object(Default::default()), Vec::new())])))?;
         let args: Vec<Option<String>> = tree.get("args").and_then(Value::as_array).into_iter().flatten().map(|a| spelled(a, src)).collect();
         let handed: HashMap<&str, &str> = params.iter().skip(1).zip(&args).filter_map(|(p, a)| Some((p.as_str(), a.as_deref()?))).collect();
         let mut out = Vec::new();
@@ -72,7 +80,13 @@ impl Pipes {
                 continue;
             }
             let call = value.get("$call").and_then(Value::as_str)?;
-            if call.strip_suffix(".map").map(|r| r.strip_suffix('?').unwrap_or(r)) != Some(list.as_str()) {
+            let on_list = |m: &str| call.strip_suffix(m).map(|r| r.strip_suffix('?').unwrap_or(r)) == Some(list.as_str());
+            // A FILTER OR A SLICE OF THE LIST keeps a subset of it: every element any call can show.
+            if on_list(".filter") || on_list(".slice") {
+                out.extend(items.iter().cloned());
+                continue;
+            }
+            if !on_list(".map") {
                 return None;
             }
             let callback = value.get("$args")?.as_array()?.first()?.get("$fn_id")?.as_str()?;

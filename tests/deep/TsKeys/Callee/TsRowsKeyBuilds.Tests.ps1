@@ -46,4 +46,27 @@ Test-Case 'tsrows keys: an expanded key names the template literal and the enum 
     Assert-Line $k 'kind=enum_value'
 }
 
+# (#131) A HOLE TYPED BY A UNION OF LITERALS writes exactly those texts: `${group}` over `group: 'alpha' | 'beta'` builds `alpha` and `beta` keys -
+# the member the literal itself, no enum - and no `gamma` key; the plain `string` hole after it stays an untyped expansion under each.
+Test-Case 'tsrows keys: a hole typed by a union of literals builds only those segments (#131)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace @{
+        'apps/shop/src/docs.component.ts' = "import { Component, Injectable } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`nexport class Words { instant(k: string) { return k; } }`n" +
+            "@Component({ selector: 'app-docs', standalone: true, template: '<span>{{ label(\'alpha\', k) }}</span>' })`n" +
+            "export class DocsComponent {`n  k = 'x';`n  constructor(private words: Words) {}`n" +
+            "  label(group: 'alpha' | 'beta', key: string) { return this.words.instant(``demo.enums.`${group}.`${key}``); }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"enums":{"alpha":{"x":"X"},"beta":{"y":"Y"},"gamma":{"z":"Z"}}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["instant"]}'
+    })
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'b=' || key || '|' || hole || '|' || value || '|' || coalesce(enum, '-') || '|' || coalesce(member, '-') AS r FROM key_builds WHERE key LIKE 'demo.enums.%'")
+    Assert-Line $r 'b=demo.enums.alpha.x|0|alpha|-|alpha'
+    Assert-Line $r 'b=demo.enums.beta.y|0|beta|-|beta'
+    Assert-Line $r 'b=demo.enums.alpha.x|1|x|-|-'
+    $g = Invoke-TsRowsQ $made.Db "SELECT 'gamma=' || count(*) AS n FROM key_builds WHERE key LIKE 'demo.enums.gamma.%'"
+    Assert-Line $g 'gamma=0'
+    $k = Invoke-TsRowsQ $made.Db ("SELECT 'kind=' || n.value AS k FROM template_literals__hole_refs n WHERE n.role = 'kind'")
+    Assert-Line $k 'kind=literal_union'
+}
+
 }

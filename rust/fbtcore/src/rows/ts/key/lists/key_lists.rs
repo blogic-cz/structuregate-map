@@ -80,6 +80,11 @@ impl ListSource<'_, '_> {
             Value::Object(o) => o,
             _ => return None,
         };
+        // AN RXJS `obs.pipe(.., map((x) => [..]))`: what its last operator's callback returns, each time it emits.
+        if let Some(callback) = rxjs_map(o) {
+            let [ret] = self.by_member.get(callback)?.as_slice() else { return None };
+            return self.chained(ret.get("value")?, seen);
+        }
         // A CALL OF A FUNCTION RETURNING A LIST (`return toItems(Hue, dict);`) is its list.
         let Some(receiver) = o.get("$receiver") else { return self.callee_lists_in(Some(value), seen).map(|(items, _)| items) };
         let method = o.get("$call").and_then(Value::as_str)?.rsplit_once('.')?.1;
@@ -89,7 +94,9 @@ impl ListSource<'_, '_> {
             "concat" => {
                 let mut items = self.chained(receiver, seen)?;
                 for arg in o.get("$args")?.as_array()? {
-                    items.extend(self.chained(arg, seen)?);
+                    // A PLAIN OBJECT IS ONE ELEMENT (`list.concat({ label })`), as `concat` takes it.
+                    let one = arg.as_object().filter(|a| a.keys().all(|k| !k.starts_with('$'))).map(|_| vec![arg.clone()]);
+                    items.extend(one.or_else(|| self.chained(arg, seen))?);
                 }
                 Some(items)
             }
@@ -275,6 +282,28 @@ impl ListSource<'_, '_> {
             }
         }
         Some(items)
+    }
+}
+
+/// The callback of an rxjs `map` that is the LAST operator of a `.pipe(..)` call: a bare `map(cb)` whose declaration is rxjs's, or that
+/// names none (the extractor resolves no library operator there) - a `map` the tree declares carries its own target and is not one.
+fn rxjs_map(call: &serde_json::Map<String, Value>) -> Option<&str> {
+    call.get("$call").and_then(Value::as_str).filter(|c| c.ends_with(".pipe"))?;
+    let last = call.get("$args")?.as_array()?.last()?;
+    let from_rxjs = last.get("$target").and_then(|t| t.get("file")).and_then(Value::as_str).is_none_or(|f| f.contains("rxjs"));
+    if last.get("$call").and_then(Value::as_str) != Some("map") || !from_rxjs {
+        return None;
+    }
+    last.get("$args")?.as_array()?.first()?.get("$fn_id")?.as_str()
+}
+
+/// A WRITE THAT ADDS TO THE FIELD IT READS (`this.items = this.items.concat({ .. }, more)`): the field's other writes hold what it
+/// had, so the write is what it adds - each argument, an array's elements. Any other value is itself.
+pub(super) fn unconcat(value: Value, field: Option<&str>) -> Value {
+    let own = field.is_some_and(|f| value.get("$call").and_then(Value::as_str) == Some(format!("this.{f}.concat").as_str()));
+    match value.get("$args").and_then(Value::as_array).filter(|_| own) {
+        Some(args) => Value::Array(args.iter().flat_map(|a| match a { Value::Array(xs) => xs.clone(), other => vec![other.clone()] }).collect()),
+        None => value,
     }
 }
 

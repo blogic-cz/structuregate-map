@@ -326,7 +326,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
         diag.note('dynamic_import_scan_failed');
       }
       try {
-        collectStrings(ts, store, sf, { file: fid }, propName, evalNode, readRefs.fieldFacts, { name: readRefs.enumNameHole, value: readRefs.enumValueHole },
+        collectStrings(ts, store, sf, { file: fid }, propName, evalNode, readRefs.fieldFacts, { name: readRefs.enumNameHole, value: readRefs.enumValueHole, literals: readRefs.literalUnionHole },
           propertyPaths.length ? (n) => readRefs.pathRefs(n, propertyPaths) : null);
       } catch {
         diag.note('string_scan_failed');
