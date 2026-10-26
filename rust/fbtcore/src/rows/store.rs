@@ -570,7 +570,10 @@ fn write_meta(
     }
     meta.insert("schema".into(), SCHEMA_VERSION.into());
     meta.insert("root".into(), root);
-    meta.insert(format!("files:{}", req.lang), req.shas.len().to_string());
+    // THE FILES THIS HALF'S ROWS HOLD, as the table says: a write that carries no shas (the closure, a rederive) is no half
+    // without files - counting what it was handed set `files:typescript` to 0 on every run (#134).
+    let mine: i64 = db.query_row("SELECT count(*) FROM files WHERE lang = ?1", [req.lang], |r| r.get(0)).unwrap_or(0);
+    meta.insert(format!("files:{}", req.lang), mine.to_string());
     // THE SETTING IS RECORDED WITH THE ROWS IT SHAPED: `text::reconcile` reads it back to tell a switch from a rerun.
     meta.insert(super::text::KEY.into(), if super::text::effective(db) { "1" } else { "0" }.into());
     meta.insert(
