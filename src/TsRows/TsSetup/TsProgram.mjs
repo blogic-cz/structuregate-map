@@ -223,9 +223,12 @@ export function createProgram(ts, tsconfigPath, nodeModules, diag, noted, checke
       // gap in the map - so they are counted under their own kind.
       noted.add(`${name}|${containingFile}`);
       const builtin = name.startsWith('node:') || NODE_BUILTINS.has(name);
+      // WHICH PROGRAM NOTED IT (`program`, rows 125): a partial run that leaves a project's program unbuilt says its notes again from the
+      // map, in that project's place (`TsDecls/TsWalk.mjs`), so the table is what a full run writes.
+      const program = diag.program ?? null;
       diag.note(builtin ? 'unresolved_node_builtin' : 'unresolved_import',
-        builtin ? { module: name, from: containingFile }
-          : { module: name, from: containingFile, case_insensitive_match: caseInsensitiveMatch(ts, name, containingFile, opts, host, nmDummy) });
+        builtin ? { module: name, from: containingFile, program }
+          : { module: name, from: containingFile, case_insensitive_match: caseInsensitiveMatch(ts, name, containingFile, opts, host, nmDummy), program });
     }
     return r;
   });

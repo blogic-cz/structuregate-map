@@ -47,7 +47,7 @@ import { deriveAnchors } from './TsSpecAnchors.mjs';
 import { rollupComponentReach } from './TsReach.mjs';
 import { rollupI18nCalls } from './TsI18nCalls.mjs';
 import { rollupCallParams, rollupRefIds } from './TsRefs.mjs';
-import { cutShort, emptyChanged, repointProjects, startRereads } from './TsReads.mjs';
+import { cutShort, emptyChanged, repointProjects, startRereads, skipping } from './TsReads.mjs';
 import { shapeOfText } from './TsShape.mjs';
 import { affectedFiles, fingerprint, inventory, knownLines, markParsed, plannedHashes } from './TsInventory.mjs';
 import { discoverProjects, findTypescriptRoot, findWorkspaceRoot, isAngularRoot } from './TsProjects.mjs';
@@ -356,6 +356,7 @@ async function main() {
   //     is one lists the strings it builds in `expands` (`TsText.mjs::collectStrings`, `TsExpr/TsReadRefs.mjs::enumNameHole`).
   // 98: #109 - `propertyPaths` (`structuregate.ts.json`) names members whose strings are property paths and the root they start from; such a string carries `path_refs`
   //     (a segment each, with its row `id`) and `path_complete` (`TsExpr/TsReadRefs.mjs::pathRefs`).
+  // 125: an unresolved import's diagnostic names the `program` that noted it, so a partial run that leaves a project unbuilt says its notes again (`TsDecls/TsWalk.mjs`).
   // 124: `untilDestroyed(this)` of `@ngneat/until-destroy` hands `this` to no one (`files.this_indexed`), and reads its destroy method (`TsDecls/TsPropReads.mjs`).
   // 123: an un-annotated array literal in an object literal names its elements' refs as written, sorted by place, not the checker's reduced union (`TsExpr/TsShapes.mjs::writtenElements`).
   // 122: an expression another project already described in the run is that row, not a second one at the same place (`TsDecls/TsWalk.mjs`, `store.exprAt`).
@@ -388,7 +389,7 @@ async function main() {
   // 99: an immer handler's `writes` follow the helpers it hands its draft to, and the callbacks they call (`TsExpr/TsExprDescribe.mjs::draftWrites`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 124, build: args.build,
+    config: config.file, data: config.data, rows: 125, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
@@ -507,7 +508,8 @@ async function main() {
   // THE PROGRAMS BEFORE THE ROWS: a partial run builds them while rust is still writing what it hands back (`prewarm`),
   // and then loads the rows as they are written (`readCarry`).
   const projects = discoverProjects(ts, fe);
-  if (partial && args.carryPart) prewarm(ts, projects, found.nodeModules);
+  const { skip, ahead } = partial ? skipping(state, planned, now, projects) : { skip: null, ahead: projects };
+  if (partial && args.carryPart) prewarm(ts, ahead, found.nodeModules);
   const diag = new Diagnostics(() => store.currentFile);
   if (partial) {
     // A CELL THAT HELD A STRUCTURE COMES BACK AS TEXT, and has to be turned back before a pass reads
@@ -579,7 +581,7 @@ async function main() {
     // its program membership - a declaration in it is what the ones being re-extracted resolve
     // against - but nothing is extracted from it, because its rows are already loaded.
     only: affected,
-    rereads,
+    rereads, skip,
   }));
   if (repointLater) repointProjects(store, repointLater);
   forgetParses();

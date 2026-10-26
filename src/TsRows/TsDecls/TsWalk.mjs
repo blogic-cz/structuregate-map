@@ -64,8 +64,23 @@ export function makeFileId(store, feRoot, projectId) {
  * program and in its own), and extracting it once per program duplicated its declarations - one element
  * then reported the same directive several times. The first program to reach a file owns it.
  */
-export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted, only = null, rereads = null, propertyPaths = [], sources = () => [] }) {
+export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted, only = null, rereads = null, propertyPaths = [], sources = () => [], skip = null }) {
   const inAnyProgram = new Set();
+  // A PROJECT A PARTIAL RUN DOES NOT TOUCH IS NOT BUILT (rows 125, `skip`: `rows/partial/skip.rs`): it owns no file this run reads or
+  // looks at the surface of (`rereads.touches`). Its files keep the rows they were handed back with; what its program reached is what the
+  // map says it reached; and the notes its program wrote are said again in its place, as the map holds them.
+  const ownedBy = new Map();
+  for (const [rel, name] of Object.entries(skip?.owners ?? {})) {
+    if (!ownedBy.has(name)) ownedBy.set(name, []);
+    ownedBy.get(name).push(rel);
+  }
+  const reachedOf = new Map();
+  for (const abs of skip?.reached ?? []) {
+    const name = skip.owners[relativeTo(fe, abs)] ?? null;
+    if (!reachedOf.has(name)) reachedOf.set(name, []);
+    reachedOf.get(name).push(abs);
+  }
+  let skipped = 0;
   // WHAT EACH FILE READ OUTSIDE ITSELF, and what it shows - see `TsSetup/TsReads.mjs`.
   const log = makeReadLog(ts, fe);
   const extracted = new Set();
@@ -94,8 +109,28 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     });
     projectIds.set(project.name, projectId);
 
+    if (skip && rereads && !project.roots) {
+      const owned = (ownedBy.get(project.name) ?? []).filter((rel) => !extracted.has(canonicalPath(path.join(fe, rel))));
+      if (!rereads.touches(owned)) {
+        rereads.project(owned.map((rel) => ({ fileName: path.join(fe, rel) })), () => null);
+        for (const rel of owned) extracted.add(canonicalPath(path.join(fe, rel)));
+        // ITS PROGRAM'S FILES, and those of no project's (a `.d.ts` a glob roots) once: membership that only its own config or files move.
+        for (const abs of reachedOf.get(project.name) ?? []) inAnyProgram.add(canonicalPath(abs));
+        if (!skipped) for (const abs of reachedOf.get(null) ?? []) inAnyProgram.add(canonicalPath(abs));
+        for (const n of skip.notes) {
+          if (n.program !== project.name) continue;
+          noted.add(`${n.module}|${n.from}`);
+          const detail = n.kind === 'unresolved_node_builtin' ? { module: n.module, from: n.from, program: n.program }
+            : { module: n.module, from: n.from, case_insensitive_match: n.case_insensitive_match === null ? null : n.case_insensitive_match === 1, program: n.program };
+          diag.note(n.kind, detail);
+        }
+        skipped += 1;
+        continue;
+      }
+    }
     let program;
     let checker;
+    diag.program = project.name;
     try {
       ({ program, checker } = timed('typescript: build a program', project.tsconfig,
         () => createProgram(ts, project.tsconfig, nodeModules, diag, noted, true, project.roots)));
@@ -366,6 +401,8 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     }
   }
   linkFunctions(store);
+  diag.program = null;
+  if (skipped) emit('MAP-NOTE', `the typescript half left ${skipped} project program(s) unbuilt: nothing they own is read again`);
   return { inAnyProgram, registry, components };
 }
 
