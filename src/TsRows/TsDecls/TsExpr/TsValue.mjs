@@ -161,6 +161,14 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       const written = draftWrites(ts, handler, declOf);
       if (written.length && value !== null && typeof value === 'object') value.$writes = [...new Set([...(value.$writes ?? []), ...written])];
     }
+    // A HANDLER RETURNING A CONST STATE WHOLE (rows 117): `on(reset, () => initialState)` or `() => ({ ...initialState.root })` writes every key of that
+    // object literal - the returned object's own keys are `writtenPaths`', a spread of the state parameter (`...state`) names no const and adds nothing.
+    if (target?.name === 'on' && String(target.file).includes('/@ngrx/store/') && handler !== undefined
+      && (ts.isArrowFunction(handler) || ts.isFunctionExpression(handler))) {
+      const value = args[args.length - 1];
+      const written = returnedConstKeys(handler);
+      if (written.length && value !== null && typeof value === 'object') value.$writes = [...new Set([...(value.$writes ?? []), ...written])];
+    }
     return {
       $call: node.expression.getText(),
       $args: args,
@@ -170,6 +178,46 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       ...(target ? { $target: target } : {}),
       ...(target && owner ? { $owner: owner } : {}),
     };
+  }
+
+  /** The keys of every const object literal a handler's returns are or spread (`returnedConstKeys`): each return expression - a concise body, or a `return`
+   *  of the body itself, not of a function inside it. */
+  function returnedConstKeys(fn) {
+    const returned = [];
+    if (!ts.isBlock(fn.body)) returned.push(fn.body);
+    else {
+      const visit = (n) => {
+        if (ts.isReturnStatement(n) && n.expression !== undefined) returned.push(n.expression);
+        else if (!ts.isFunctionLike(n)) ts.forEachChild(n, visit);
+      };
+      ts.forEachChild(fn.body, visit);
+    }
+    const keys = [];
+    for (let e of returned) {
+      while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e)) e = e.expression;
+      const wholes = ts.isObjectLiteralExpression(e) ? e.properties.filter((p) => ts.isSpreadAssignment(p)).map((p) => p.expression) : [e];
+      for (const whole of wholes) keys.push(...(constObject(whole)?.properties ?? []).map((p) => (p.name ? propNameOf(p.name) : null)).filter((k) => typeof k === 'string'));
+    }
+    return keys;
+  }
+
+  /** The object literal a read names: a `const` initialised with one (`initialState`), or a property of such a literal (`initialState.root`); null otherwise. */
+  function constObject(e) {
+    if (ts.isPropertyAccessExpression(e)) {
+      const owner = constObject(e.expression);
+      const prop = owner?.properties.find((p) => ts.isPropertyAssignment(p) && p.name !== undefined && propNameOf(p.name) === e.name.text);
+      let init = prop?.initializer;
+      while (init !== undefined && (ts.isParenthesizedExpression(init) || ts.isAsExpression(init))) init = init.expression;
+      return init !== undefined && ts.isObjectLiteralExpression(init) ? init : null;
+    }
+    if (!ts.isIdentifier(e)) return null;
+    let symbol = checker.getSymbolAtLocation(e);
+    if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+    const decl = symbol?.valueDeclaration;
+    if (decl === undefined || !ts.isVariableDeclaration(decl) || (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0) return null;
+    let init = decl.initializer;
+    while (init !== undefined && (ts.isParenthesizedExpression(init) || ts.isAsExpression(init) || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(init)))) init = init.expression;
+    return init !== undefined && ts.isObjectLiteralExpression(init) ? init : null;
   }
 
   /** A TABLE READ AS A LIST (rows 109, #117): `Object.entries(t)` / `Object.values(t)` - the builtin, by its declaration on `ObjectConstructor` - is
