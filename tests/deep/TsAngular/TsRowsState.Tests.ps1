@@ -258,4 +258,35 @@ export const bagReducer = createReducer(initial,
     Assert-Line $h 'h=bag.later | cart.lines.active'
     Assert-Line $h 'h=bag.looped | cart.lines.id'
 }
+
+# A HANDLER RETURNING A CONST STATE WHOLE writes that literal's keys: `() => initial` every top-level key, `() => ({ ...initial.flag })` the nested object's,
+# beside a key written in place. THE CONTROL: a spread of the state PARAMETER (`...s`) names no const and adds nothing.
+Test-Case 'tsrows: a reset handler returning the initial state writes its keys' {
+    $files = @{
+        'apps/shop/src/reset.actions.ts' = @'
+import { createAction } from '@ngrx/store';
+export const reset = createAction('[Demo] reset');
+export const resetFlag = createAction('[Demo] reset flag');
+export const bump = createAction('[Demo] bump');
+'@
+        'apps/shop/src/reset.reducer.ts' = @'
+import { createReducer, on } from '@ngrx/store';
+import * as act from './reset.actions';
+export interface S { n: number; flag: { on: boolean; at: number } }
+const initial: S = { n: 0, flag: { on: false, at: 0 } };
+export const resetReducer = createReducer(initial,
+  on(act.reset, () => initial),
+  on(act.resetFlag, () => ({ ...initial.flag, extra: 1 })),
+  on(act.bump, (s) => ({ ...s, n: s.n + 1 })));
+'@
+    }
+    $made = New-TsRowsDb (New-TsRowsWorkspace $files)
+    Assert-Exit $made.Result 0
+    $h = Invoke-TsRowsQ $made.Db ("SELECT 'h=' || h.action_source || ' | ' || coalesce((SELECT group_concat(w.value) " +
+        "FROM (SELECT value FROM state_handlers__writes w WHERE w.owner = h.id AND w.value IS NOT NULL ORDER BY value) w), '-') AS r FROM state_handlers h WHERE h.reducer_name = 'resetReducer'")
+    Assert-Line $h 'h=act.reset | flag,n'
+    Assert-Line $h 'h=act.resetFlag | at,extra,on'
+    Assert-Line $h 'h=act.bump | n'
+}
+
 }
