@@ -29,8 +29,31 @@ export function makeShapeRows({ ts, store, typeRefAt, typeText, propName, return
   /** A type as its ANNOTATION when written, else what the checker infers - `members.type` for an un-annotated property. */
   const typed = (m, annotation) => ({
     type: annotation ? annotation.getText() : typeText(m, null),
-    ...(annotation ? typeRefAt(annotation) : typeRefAt(m)),
+    ...(annotation ? typeRefAt(annotation) : writtenElements(m) ?? typeRefAt(m)),
   });
+
+  /** AN UN-ANNOTATED ARRAY LITERAL'S ELEMENT IS WHAT ITS ELEMENTS NAME (rows 123), each as written, one per place and sorted by it: the checker's
+   *  element type is a union it REDUCES - two structurally identical classes (`typeof AModule | typeof BModule`) keep whichever it interned
+   *  first, which a full and a partial run do not agree on - so the `element` it named moved with no source change. Null when the literal
+   *  is no array of an array type, and the checker's answer stands. */
+  const writtenElements = (m) => {
+    if (!ts.isPropertyAssignment(m) || !ts.isArrayLiteralExpression(m.initializer)) return null;
+    const base = typeRefAt(m);
+    if (!base?.type_ref || base.type_ref.element === undefined) return null;
+    const seen = new Map();
+    for (const e of m.initializer.elements) {
+      // AN ELEMENT WRITTEN IN PLACE (`{ .. }`, `[ .. ]`) is typed by the literal the checker merges, which a loop reads: left to it.
+      if (ts.isSpreadElement(e) || ts.isOmittedExpression(e) || ts.isObjectLiteralExpression(e) || ts.isArrayLiteralExpression(e)) return null;
+      const ref = typeRefAt(e)?.type_ref;
+      if (!ref) continue;
+      seen.set(`${ref.file ?? ''}\0${String(ref.line ?? '').padStart(9, '0')}\0${ref.name ?? ''}`, ref);
+    }
+    const refs = [...seen.keys()].sort().map((k) => seen.get(k));
+    const element = refs.length === 1 ? refs[0] : refs.length > 1 ? { type_refs: refs, type_refs_of: 'or' } : null;
+    // `unwrapped` is the same element for an array (`TsTypeRef.mjs::unwrappedOf`): both are the written elements, or neither is published.
+    const { element: _, unwrapped: had, ...rest } = base.type_ref;
+    return { ...base, type_ref: element === null ? rest : { ...rest, ...(had === undefined ? {} : { unwrapped: element }), element } };
+  };
   /** A signature's type is only its annotation: an un-annotated one is `any` and names nothing. */
   const written = (annotation) => ({ type: annotation ? annotation.getText() : null, ...(annotation ? typeRefAt(annotation) : { type_ref: null }) });
 

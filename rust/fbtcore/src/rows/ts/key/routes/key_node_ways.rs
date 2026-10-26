@@ -12,6 +12,7 @@
 //!   NULL when the key is written whole or the map cannot tell;
 //! - `typed` - 1 when every hole of that literal is typed (an enum, a union of literals: `key_builds`), so it builds the key exactly; 0 when
 //!   a hole is untyped, or the literal's prefix spells the key but its types say it cannot build it (#132) - an expansion; NULL without a literal.
+//!   A method a template calls with literal arguments that fill every hole (`label('time')` over `'demo.' + name`, #137) is 1 whatever the hole's type.
 //!
 //! Only the nodes `key_reach.nodes` keeps are read: a weaker route's site a stronger one replaced is not a way in there.
 
@@ -111,7 +112,8 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
                         continue;
                     }
                     // NOT BUILT BY IT (no `key_builds` row for the pair): an expansion of its prefix, never exact.
-                    let typed = literal.map(|l| Value::from(built.into_iter().flatten().find(|b| b.literal == l).is_some_and(|b| b.typed) as i64));
+                    // ...UNLESS THE TEMPLATE'S CALL SPELLED IT (#137): `label('time')` over `'demo.' + name` builds that one key.
+                    let typed = literal.map(|l| Value::from((way.via.spelled || built.into_iter().flatten().find(|b| b.literal == l).is_some_and(|b| b.typed)) as i64));
                     let mut row = Row::new();
                     let mut put = |k: &str, v: Value| row.insert(k.to_string(), v);
                     let opt = |v: Option<String>| v.map(Value::String).unwrap_or(Value::Null);
