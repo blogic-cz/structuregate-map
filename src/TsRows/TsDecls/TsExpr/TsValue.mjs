@@ -146,7 +146,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       }
       const isChainLink = !!evaluated && typeof evaluated === 'object' && !Array.isArray(evaluated)
         && evaluated.$receiver !== undefined;
-      if (Array.isArray(evaluated) || isChainLink || objectTable(node.expression.expression) || treeList(node.expression)) receiver = evaluated;
+      if (Array.isArray(evaluated) || isChainLink || objectTable(node.expression.expression) || treeList(node.expression) || mapLookup(node.expression, evaluated)) receiver = evaluated;
       else if (!!evaluated && typeof evaluated === 'object' && !Array.isArray(evaluated)) {
         const id = evaluated.$expr_id ?? evaluated.$cond_expr;
         if (typeof id === 'string') receiverExpr = id;
@@ -227,6 +227,13 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
     if (!ts.isCallExpression(n) || !ts.isPropertyAccessExpression(n.expression) || !['entries', 'values'].includes(n.expression.name.text)) return false;
     return (checker.getSymbolAtLocation(n.expression.name)?.declarations ?? [])
       .some((d) => d.parent !== undefined && ts.isInterfaceDeclaration(d.parent) && d.parent.name.text === 'ObjectConstructor');
+  }
+
+  /** A LOOKUP IN A `Map` (rows 120): `kinds.get(k)` keeps the map it is made on as its `$receiver` when that map's VALUE is a `new Map(..)` - a
+   *  `const` the evaluator followed to its initializer - so a reader reads every value it can hand back (`TsDerive/TsDynRender.mjs`: a component
+   *  class looked up to be created). Decided by the value, never by a method named `get` on anything else. */
+  function mapLookup(access, evaluated) {
+    return access.name.text === 'get' && !!evaluated && typeof evaluated === 'object' && ['Map', 'ReadonlyMap'].includes(evaluated.$new);
   }
 
   /** A LIST A TREE FUNCTION RETURNS, FILTERED OR MAPPED (rows 113, #117): `toItems(Hue, dict).filter(..)` or `.map(cb)` keeps the call it

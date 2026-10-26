@@ -203,4 +203,4 @@ that move: none against a map before #98; against one with #98 alone, `gate_valu
 
 **#62 - what TypeScript merges is one place in `duplicate_types`** (signed off 2026-10-23; no `rows` bump, the pass runs over the finished rows; `rust/fbtcore/src/rows/dups.rs`): a TypeScript declaration with no symbol was a place per row, so `class Order {}` beside `interface Order {..}` in one file, an interface reopened, or an enum continued counted as two places of one name. These are one declaration to the compiler. A class, interface or enum of one name in one file, one namespace (`in_module`) and one function (`func`, the plain half's) is now one place, `kinds` joined (`class,interface`), an enum's members the union. An alias never merges. Tables that move: `duplicate_types` (fewer places; a name only reopened in one file loses its row). No other table moves.
 
-**Proposed, not yet signed off** (#63 on): [DIVERGENCES-PROPOSED.md](DIVERGENCES-PROPOSED.md). An entry moves here when it is signed off.
+**#63 on**, and every divergence proposed from now: [DIVERGENCES-63.md](DIVERGENCES-63.md).

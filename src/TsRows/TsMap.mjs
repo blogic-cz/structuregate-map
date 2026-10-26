@@ -356,8 +356,11 @@ async function main() {
   //     is one lists the strings it builds in `expands` (`TsText.mjs::collectStrings`, `TsExpr/TsReadRefs.mjs::enumNameHole`).
   // 98: #109 - `propertyPaths` (`structuregate.ts.json`) names members whose strings are property paths and the root they start from; such a string carries `path_refs`
   //     (a segment each, with its row `id`) and `path_complete` (`TsExpr/TsReadRefs.mjs::pathRefs`).
-  // 117: an NgRx `on(..)` handler returning a const state whole (`() => initialState`, `({ ...initialState.root })`) writes that literal's keys (`TsExpr/TsValue.mjs::returnedConstKeys`).
+  // 121: a `module_ref_from_dependency` diagnostic carries `reason`: `shadows_local` (a local module of that name) or `dependency` (`TsDerive/TsModuleScope.mjs`).
+  // 120: a call of `Map#get` keeps the map it looks into as `$receiver` (`TsExpr/TsValue.mjs::mapLookup`), so a factory creating `kinds.get(k)` renders each value.
+  // 119: an `@else` / `@else if` branch is gated on the negation of every earlier branch (`block_IfBlockElse` expression, `TsTpl/TsTplExtract.mjs::andNot`).
   // 118: a `+` chain from a constant prefix (`'demo.region.' + r`) is a `template_literals` row, `form: 'concat'`, its holes typed as a template's (#136, `TsText.mjs::concatOf`).
+  // 117: an NgRx `on(..)` handler returning a const state whole (`() => initialState`, `({ ...initialState.root })`) writes that literal's keys (`TsExpr/TsValue.mjs::returnedConstKeys`).
   // 116: #131 - a template-literal hole typed by a union of string or number literals is a `hole_refs` entry of kind `literal_union` (`TsExpr/TsReadRefs.mjs::literalUnionHole`).
   // 115: #117 - a `filter`/`slice`/`map` on the enclosing function's own parameter keeps it as `$receiver` (`TsExpr/TsValue.mjs::treeList`).
   // 114: #127 - a `switch_cases` row names the switched enum (`discriminant_type`, `discriminant_enum` + `discriminant_enum_id`) and what each label selects
@@ -382,7 +385,7 @@ async function main() {
   // 99: an immer handler's `writes` follow the helpers it hands its draft to, and the callbacks they call (`TsExpr/TsExprDescribe.mjs::draftWrites`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 118, build: args.build,
+    config: config.file, data: config.data, rows: 121, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

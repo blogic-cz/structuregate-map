@@ -56,6 +56,11 @@ function componentSlots(value, out, seen) {
   if (v.$cond !== undefined) { componentSlots(v.$then, out, seen); componentSlots(v.$else, out, seen); return; }
   if (v.$logic !== undefined) { for (const o of arr(v.$operands)) componentSlots(o, out, seen); return; }
   if (v.$await !== undefined) { componentSlots(v.$await, out, seen); return; }
+  // A LOOKUP IN A `new Map([[k, X], ..])` (rows 120, `$receiver` of a `Map#get`) is any of the values the map holds: each entry's second item.
+  if (v.$call !== undefined && v.$method === 'get' && ['Map', 'ReadonlyMap'].includes(obj(v.$receiver)?.$new)) {
+    for (const entry of arr(arr(obj(v.$receiver).$args)[0])) componentSlots(arr(entry)[1], out, seen);
+    return;
+  }
   if (v.$call !== undefined) {
     const target = obj(v.$target);
     if (target !== null) out.calls.push({ name: target.name, file: target.file });

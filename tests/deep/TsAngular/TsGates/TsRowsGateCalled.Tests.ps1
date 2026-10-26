@@ -93,4 +93,80 @@ Test-Case 'tsrows keys: a key a private method translates is reached under the b
     # `tipText` is also handed to `setTimeout`, a read that is no call: it runs where the map cannot see
     Assert-Line $r 'demo.pipe.tip | -'
 }
+
+# (audit) ANOTHER CLASS'S SAME-NAMED PRIVATE METHOD IS NOT A READ OF THIS ONE: the lift was refused whenever any other file spelled `openModal`,
+# though the checker resolves that file's call to its own member. And a component created INSIDE A CALLBACK of the lifted method
+# (`this.ready$.subscribe(() => ..)`) runs when the method does, so it renders under the same branch.
+Test-Case 'tsrows gates: the lift survives a same-named method elsewhere and reaches a create in a callback' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/kinds.ts' = "export enum Kind { Home = 1, Flat = 2, Life = 3 }`n"
+        'apps/shop/src/translate.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "@Component({ selector: 'translate', standalone: true, template: '<span>{{ text }}</span>' })`n" +
+            "export class TranslateComponent { @Input() text!: string; }`n"
+        'apps/shop/src/component.factory.ts' = "import { Injectable, Type, ViewContainerRef } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class ComponentFactory {`n" +
+            "  create<T>(component: Type<T>, container: ViewContainerRef) { return container.createComponent(component); }`n}`n"
+        'apps/shop/src/modal.component.ts' = "import { Component } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-modal', template: '<translate [text]=`"\'demo.modal.title\'`"></translate>' })`n" +
+            "export class ModalComponent {}`n" +
+            "@Component({ selector: 'demo-confirm', template: '<translate [text]=`"\'demo.confirm.title\'`"></translate>' })`n" +
+            "export class ConfirmComponent {}`n"
+        'apps/shop/src/root.component.ts' = "import { Component, ViewContainerRef } from '@angular/core';`nimport { of } from 'rxjs';`n" +
+            "import { Kind } from './kinds';`n" +
+            "import { ComponentFactory } from './component.factory';`n" +
+            "import { ModalComponent, ConfirmComponent } from './modal.component';`n" +
+            "@Component({ selector: 'demo-root', template: '<button (click)=`"go()`">go</button>' })`n" +
+            "export class RootComponent {`n  kind: Kind = Kind.Life;`n  sure = false;`n  ready`$ = of(true);`n" +
+            "  constructor(private componentFactory: ComponentFactory, private viewContainerRef: ViewContainerRef) {}`n" +
+            "  go() {`n    if (this.kind === Kind.Home) {`n      this.openModal();`n    }`n  }`n" +
+            "  private openModal() {`n    this.componentFactory.create(ModalComponent, this.viewContainerRef);`n" +
+            "    this.ready`$.subscribe(() => {`n      if (this.sure) {`n        this.componentFactory.create(ConfirmComponent, this.viewContainerRef);`n      }`n    });`n  }`n}`n"
+        # A SIBLING with its own private `openModal`, called once with no branch: its calls resolve to its own member.
+        'apps/shop/src/other.component.ts' = "import { Component } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-sibling', template: '<button (click)=`"go()`">go</button>' })`n" +
+            "export class SiblingComponent {`n  n = 0;`n  go() { this.openModal(); }`n  private openModal() { this.n = 1; }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"modal":{"title":"T"},"confirm":{"title":"C"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["translate:text"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $v = Invoke-TsRowsQ $made.Db $script:CalledValueQ
+    Assert-Line $v 'demo.modal.title | kind in ["Home"]'
+    Assert-Line $v 'demo.confirm.title | kind in ["Home"]'
+    $r = Invoke-TsRowsQ $made.Db $script:CalledBranchQ
+    $confirm = @($r.Lines | Where-Object { $_.Contains('demo.confirm.title |') })
+    if (-not ($confirm -and $confirm[0].Contains('this.sure') -and $confirm[0].Contains('this.kind === Kind.Home'))) { throw "the confirm key's branches: $confirm" }
+}
+
+# (audit) A CLASS LOOKED UP IN A `Map` OF COMPONENTS (`kinds.get(k)`) is each component the map holds: the factory site named none and the
+# graph stopped there (`dynamic_render_component_not_static`), though a method returning the class from a `switch` was followed.
+Test-Case 'tsrows gates: a factory creating what a Map of components looks up renders each of them' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/kinds.ts' = "export enum Kind { Home = 1, Flat = 2, Life = 3 }`n"
+        'apps/shop/src/component.factory.ts' = "import { Injectable, Type, ViewContainerRef } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`n" +
+            "export class ComponentFactory {`n" +
+            "  create<T>(component: Type<T>, container: ViewContainerRef) { return container.createComponent(component); }`n}`n"
+        'apps/shop/src/details.ts' = "import { Type } from '@angular/core';`nimport { Kind } from './kinds';`n" +
+            "import { HomeDetailComponent, FlatDetailComponent } from './detail.component';`n" +
+            "export const detailsByKind = new Map<Kind, Type<unknown>>([[Kind.Home, HomeDetailComponent], [Kind.Flat, FlatDetailComponent]]);`n"
+        'apps/shop/src/detail.component.ts' = "import { Component } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-home-detail', template: '<b>h</b>' })`nexport class HomeDetailComponent {}`n" +
+            "@Component({ selector: 'demo-flat-detail', template: '<b>f</b>' })`nexport class FlatDetailComponent {}`n"
+        'apps/shop/src/root.component.ts' = "import { Component, ViewContainerRef } from '@angular/core';`n" +
+            "import { Kind } from './kinds';`nimport { ComponentFactory } from './component.factory';`nimport { detailsByKind } from './details';`n" +
+            "@Component({ selector: 'demo-root', template: '<button (click)=`"show()`">go</button>' })`n" +
+            "export class RootComponent {`n  kind: Kind = Kind.Home;`n" +
+            "  constructor(private componentFactory: ComponentFactory, private viewContainerRef: ViewContainerRef) {}`n" +
+            "  show() {`n    const detail = detailsByKind.get(this.kind)!;`n    this.componentFactory.create(detail, this.viewContainerRef);`n  }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"}}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db "SELECT 'r=' || c.name || '>' || r.to_name AS r FROM renders r JOIN classes c ON c.id = r.from_class WHERE r.via = 'factory'"
+    Assert-Line $r 'r=RootComponent>HomeDetailComponent'
+    Assert-Line $r 'r=RootComponent>FlatDetailComponent'
+}
+
 }

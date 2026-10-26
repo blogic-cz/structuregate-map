@@ -156,6 +156,12 @@ impl MemberReads {
     /// (an expression, a string, another file's read, a decorator, `this` handed away); otherwise how many times its
     /// own file reads a property of its name.
     pub fn own_reads(&self, m: &Row) -> Option<i64> {
+        self.own_reads_but(m, |_, _| 0)
+    }
+
+    /// `own_reads`, where `elsewhere(file, name)` reads of the name in ANOTHER file are known to be some other member's (a call
+    /// the checker resolved to it): they are no read of this one (`key_called`).
+    pub fn own_reads_but(&self, m: &Row, elsewhere: impl Fn(&str, &str) -> i64) -> Option<i64> {
         let (id, name, file) = (text(m, "id")?, text(m, "name")?, text(m, "file")?);
         let decorated = matches!(m.get("decorators"), Some(Value::Array(a)) if !a.is_empty());
         if decorated || self.indexed.contains(&file) || self.template.rows.contains(&id)
@@ -164,7 +170,7 @@ impl MemberReads {
         }
         // ANOTHER FILE reads it when it spells the name more often than it WRITES it: a sibling class of the same
         // shape assigning its own `this.f` is no read of this one's `f` (#68).
-        if self.by_file.iter().any(|(f, counts)| *f != file && counts.get(&name).is_some_and(|&n| n > self.written(f, &name))) {
+        if self.by_file.iter().any(|(f, counts)| *f != file && counts.get(&name).is_some_and(|&n| n > self.written(f, &name) + elsewhere(f, &name))) {
             return None;
         }
         Some(self.by_file.get(&file).and_then(|c| c.get(&name)).copied().unwrap_or(0))

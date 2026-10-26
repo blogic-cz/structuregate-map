@@ -105,7 +105,9 @@ export function makeScopes(store, diag) {
       const key = `${String(ownerFile)}\0${name}`;
       if (!refused.has(key)) {
         refused.add(key);
-        note('module_ref_from_dependency', { name, file: ownerFile });
+        // WHY IT IS A ROW (rows 121): `shadows_local` when the tree declares a module of the same name - the refusal is what keeps the package's
+        // name off the local class - else `dependency`, a module (or a standalone declarable) a package ships, which is no fault at all.
+        note('module_ref_from_dependency', { name, file: ownerFile, reason: byName.has(name) ? 'shadows_local' : 'dependency' });
       }
       return [];
     }
