@@ -5,7 +5,8 @@
 //! not read `demo.status.*` back as one table indexed by `Demo`. A `template_literals` row whose first part is not empty builds every key
 //! its parts spell (`segments`: each part in order, each hole at least one character); each hole is a row: `hole` its position, `value`
 //! the text it holds in that key, and - when the extractor typed the hole by an enum (`hole_refs`: a name lookup `${Hue[x]}`, or a hole
-//! TYPED by one, rows 112) - `enum`, the `enums` row, and `member`, the member that writes that text. A typed hole whose text no member
+//! TYPED by one, rows 112) - `enum`, the `enums` row, and `member`, the member that writes that text; a hole typed by a union of literals
+//! (`'alpha' | 'beta'`, rows 116, #131) has no `enum`, its `member` the literal. A typed hole whose text no member
 //! writes cannot be what built the key, so the literal builds no such key.
 
 use super::key_branches::{segments, KeySet};
@@ -40,10 +41,15 @@ pub fn rows(store: &Store<'_>) -> Vec<Row> {
         let typed: Vec<Option<Typed>> = match t.get("hole_refs") {
             Some(Value::Array(refs)) => refs.iter().map(|r| {
                 let r = r.as_object()?;
-                let place = (r.get("file")?.as_str()?.to_string(), r.get("line")?.as_i64()?);
                 let names = r.get("names")?.as_array()?.iter().filter_map(Value::as_str);
                 let members = r.get("members")?.as_array()?.iter().filter_map(Value::as_str);
-                Some(Typed { id: enum_at.get(&place).cloned(), member_of: names.zip(members).map(|(n, m)| (n.to_string(), m.to_string())).collect() })
+                let member_of = names.zip(members).map(|(n, m)| (n.to_string(), m.to_string())).collect();
+                // A UNION OF LITERALS (#131) names no enum: its member is the literal it writes.
+                if r.get("kind").and_then(Value::as_str) == Some("literal_union") {
+                    return Some(Typed { id: None, member_of });
+                }
+                let place = (r.get("file")?.as_str()?.to_string(), r.get("line")?.as_i64()?);
+                Some(Typed { id: enum_at.get(&place).cloned(), member_of })
             }).collect(),
             _ => Vec::new(),
         };

@@ -216,7 +216,7 @@ impl Loops {
         let unpacked = super::key_lists::unpacked(store);
         let dict = store.option_list("i18n_dictionary_calls");
         let shaped = super::shape_values::bound_shape_values(store);
-        let pipes = super::key_pipes::Pipes::new(store);
+        let (pipes, this) = (super::key_pipes::Pipes::new(store), super::key_this::ThisFields::new(store));
         let src = ListSource { rows: &rows, by_member: &by_member, params: &params, pushes: &pushes, parent: &parent, unpacked: &unpacked, dict: &dict, shaped: &shaped, pipes: &pipes };
         let mut owner: HashMap<String, Option<String>> = HashMap::new();
         let mut lists: HashMap<String, Vec<Element>> = HashMap::new();
@@ -230,7 +230,7 @@ impl Loops {
                 Some(Value::Array(items)) if items.is_empty() => {}
                 Some(value) => {
                     members_valued.insert(id.clone());
-                    if let Some(list) = elements(value, &src, &[]) {
+                    if let Some(list) = elements(&this.prepared(value, text(m, "class").as_deref(), None), &src, &[]) {
                         lists.insert(id, list);
                     }
                 }
@@ -265,7 +265,7 @@ impl Loops {
             for a in writes {
                 let list = a.get("value")
                     .filter(|_| text(a, "operator").as_deref() == Some("="))
-                    .and_then(|v| elements(v, &src, &branches.chain_of(a)));
+                    .and_then(|v| elements(&this.prepared(v, text(a, "class").as_deref(), text(a, "target").as_deref()), &src, &branches.chain_of(a)));
                 let Some(mut list) = list else {
                     all.clear();
                     unread.insert(target.clone());
@@ -293,7 +293,7 @@ impl Loops {
             }
         }
         // A `this.` READ IN AN ELEMENT THE CLASS WRITES is the field it names, folded (`key_this`): `{ Label: this.labels.fees.entry }`.
-        super::key_this::ThisFields::new(store).fold_lists(&mut lists, &owner);
+        this.fold_lists(&mut lists, &owner);
         // A LIST EVERY PARENT HANDS TO AN `@Input` is the child's (`key_inputs`).
         let handed = super::key_inputs::input_lists(store, &lists, &src, &branches);
         lists.extend(handed);

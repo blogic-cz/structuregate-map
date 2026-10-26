@@ -7,7 +7,8 @@
 //! expression), or `ngModel`, `formControl`, `formControlName` in any form - and each other input bound there whose
 //! expression is a LIST this closure can read (`key_inputs::bound_list`: a field's list, a getter's or a method's returns,
 //! a property of a field) offers every key an element's property holds (`key_loops::element_keys`) - a literal, a translate
-//! call, a call read as its callee returns, a const table a helper rebuilt (`key_lists::ListSource::table_lists`).
+//! call, a call read as its callee returns, a const table a helper rebuilt (`key_lists::ListSource::table_lists`). A list whose
+//! elements hold a function (validation rules, #133) offers nothing.
 //!
 //! THE ROUTE IS IDS: `input_binding` and `value_binding` are `bindings` rows, `holder` the member (or the function) the
 //! list is read from, `callee` the member or function whose return built its elements when every one came from the same.
@@ -117,7 +118,9 @@ pub(super) fn offered(store: &Store<'_>, controls: &HashMap<String, (String, Str
         }
         let Some(tree) = trees.get(&id) else { continue };
         let Some((holder, items)) = super::key_inputs::bound_list(super::astreads::unwrap(tree), lists, src, &paths) else { continue };
-        if items.is_empty() {
+        // A LIST OF RULES IS NO LIST OF CHOICES (#133): an element holding a function (`{ Message: 'k', Validate: (v) => .. }`) is something the
+        // control runs, not a value it offers - a choice is data.
+        if items.is_empty() || items.iter().any(|e| holds_function(&e.value)) {
             continue;
         }
         out.push(Offered {
@@ -125,6 +128,11 @@ pub(super) fn offered(store: &Store<'_>, controls: &HashMap<String, (String, Str
         });
     }
     out
+}
+
+/// Whether an element is an object one property of which is a function (an arrow, a function expression: `$fn`).
+fn holds_function(element: &Value) -> bool {
+    element.as_object().is_some_and(|o| o.values().any(|v| v.get("$fn").is_some()))
 }
 
 /// THE ROWS: one per (control, input, property, key) - the keys an element's property holds, in the order the elements and

@@ -18,14 +18,18 @@ pub(super) struct ThisFields {
     fields: HashMap<(String, String), (String, Value)>,
     /// class id -> the class it extends.
     bases: HashMap<String, String>,
+    /// member id -> its class: an element a method hands back is folded only in that method's class or a subclass of it.
+    member_class: HashMap<String, String>,
 }
 
 impl ThisFields {
     pub(super) fn new(store: &Store<'_>) -> ThisFields {
         let written: HashSet<String> = store.table("assignments").iter().filter_map(|a| id_of(a, "target_id")).collect();
         let mut fields = HashMap::new();
+        let mut member_class = HashMap::new();
         for m in store.table("members").iter() {
             let (Some(id), Some(class), Some(name)) = (id_of(m, "id"), text(m, "class"), text(m, "name")) else { continue };
+            member_class.insert(id.clone(), class.clone());
             if written.contains(&id) || m.get("decorator_line").is_some_and(|d| !d.is_null()) {
                 continue;
             }
@@ -38,16 +42,42 @@ impl ThisFields {
                 bases.insert(id, base.to_string());
             }
         }
-        ThisFields { fields, bases }
+        ThisFields { fields, bases, member_class }
     }
 
-    /// Every element a class wrote in place into its own member's list (none a call handed over), folded in that class.
+    /// Every element of a class's own member's list, folded in that class: one written in place, and one a method of that class (or
+    /// of a base) hands back - `this` there is the same instance. One another class's method hands back is not: its `this` is another.
     pub(super) fn fold_lists(&self, lists: &mut HashMap<String, Vec<super::key_loops::Element>>, owner: &HashMap<String, Option<String>>) {
         for (id, list) in lists.iter_mut() {
             let Some(class) = owner.get(id).and_then(|c| c.as_deref()).filter(|c| !c.is_empty()) else { continue };
-            for element in list.iter_mut().filter(|e| !e.from_call) {
-                element.value = self.fold(&element.value, class);
+            for element in list.iter_mut() {
+                let ours = !element.from_call || element.owner().and_then(|m| self.member_class.get(m)).is_some_and(|c| self.extends(class, c));
+                if ours {
+                    element.value = self.fold(&element.value, class);
+                }
             }
+        }
+    }
+
+    /// A write's or an initializer's value as its list is read (#117): `this.` reads folded in the writing class - a dictionary call's
+    /// `${this.base}.hues` argument included - and a write adding to the field it reads (`key_lists::unconcat`) as what it adds.
+    pub(super) fn prepared(&self, value: &Value, class: Option<&str>, field: Option<&str>) -> Value {
+        let folded = class.filter(|c| !c.is_empty()).map_or_else(|| value.clone(), |c| self.fold(value, c));
+        super::key_lists::unconcat(folded, field)
+    }
+
+    /// Whether `class` is `base` or extends it, through any number of classes.
+    fn extends(&self, class: &str, base: &str) -> bool {
+        let (mut at, mut seen) = (class.to_string(), HashSet::new());
+        loop {
+            if at == base {
+                return true;
+            }
+            if !seen.insert(at.clone()) {
+                return false;
+            }
+            let Some(next) = self.bases.get(&at) else { return false };
+            at = next.clone();
         }
     }
 
@@ -65,7 +95,8 @@ impl ThisFields {
                 if let Some(text) = self.template(o, class, seen) {
                     return Value::String(text);
                 }
-                let fold = |(k, v): (&String, &Value)| (k.clone(), if k.starts_with('$') { v.clone() } else { self.fold_in(v, class, &mut seen.clone()) });
+                // EVERY KEY, a call's `$args` and `$receiver` included: a dictionary call's argument reads `this.` too.
+                let fold = |(k, v): (&String, &Value)| (k.clone(), self.fold_in(v, class, &mut seen.clone()));
                 Value::Object(o.iter().map(fold).collect())
             }
             Value::Array(xs) => Value::Array(xs.iter().map(|x| self.fold_in(x, class, &mut seen.clone())).collect()),
@@ -141,9 +172,10 @@ mod tests {
             (("c:1".to_string(), "labels".to_string()), ("m:3".to_string(), json!({"fees": {"entry": tpl("this.resource", ".entry")}}))),
             (("c:1".to_string(), "loop".to_string()), ("m:4".to_string(), tpl("this.loop", "x"))),
         ]);
-        let this = ThisFields { fields, bases: HashMap::from([("c:1".to_string(), "c:2".to_string())]) };
+        let this = ThisFields { fields, bases: HashMap::from([("c:1".to_string(), "c:2".to_string())]), member_class: HashMap::new() };
         let element = json!({"Label": read("this.labels.fees.entry"), "Other": read("this.missing"), "Self": read("this.loop")});
         assert_eq!(this.fold(&element, "c:1"), json!({"Label": "demo.fees.entry", "Other": read("this.missing"), "Self": read("this.loop")}));
         assert_eq!(this.fold(&read("this.resource"), "c:2"), read("this.resource"), "a base does not see its subclass's field");
     }
 }
+

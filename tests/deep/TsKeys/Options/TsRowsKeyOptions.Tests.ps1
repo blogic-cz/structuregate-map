@@ -181,7 +181,40 @@ $script:KeyOptionsFiles = @{
         "    this.mapped = plainFees.map((o) => ({ ...o, label: this.dictionary.getTranslation(``feeKind.`${o.value}``) }));`n  }`n" +
         "  private translated(options: { value: string; label: string }[]) {`n" +
         "    return options.map((option) => ({ ...option, label: this.dictionary.getTranslation(``fee.`${option.value}``) }));`n  }`n}`n"
-    'apps/shop/src/assets/locales/en.json' = '{"hue":{"red":"Red","blue":"Blue"},"size":{"small":"S","large":"L"},"shown":{"only":"O"},"tier":{"gold":"G"},"grade":{"Gold":"G","Silver":"S"},"answer":{"yes":"Y","no":"N","Warm":"W","Cool":"C"},"spelled":{"out":"W"},"crossed":{"over":"C"},"rank":{"Gold":"G","Silver":"S"},"tone":{"Warm":"W","Cool":"C"},"kind":{"Warm":"W","Cool":"C"},"month":{"Jan":"J","Feb":"F"},"rate":{"Warm":"W","Cool":"C"},"step":{"none":"-","Warm":"W","Cool":"C"},"fee":{"plan":{"prepaid":"P","express":"E"},"flat":"F","rate":"R"},"feeKind":{"flat":"F","rate":"R"}}'
+    # THE LAST #117 SHAPES: a dictionary named through `this`, a method's labels through `this`, a self-concat, an rxjs map, pipes over
+    # a filter and over a list the map cannot read.
+    'apps/shop/src/rate-base.ts' = "export abstract class RateBase {`n  rootKey = 'rank';`n}`n"
+    'apps/shop/src/keep.pipe.ts' = "import { Pipe, PipeTransform } from '@angular/core';`n@Pipe({ name: 'keep', standalone: true })`n" +
+        "export class KeepPipe implements PipeTransform {`n  transform(items: { label: string; value: unknown }[], flag: boolean) {`n" +
+        "    if (flag) {`n      return items.filter((i) => i.value !== null);`n    }`n    return items;`n  }`n}`n"
+    'apps/shop/src/last.component.ts' = "import { Component, Input, OnInit } from '@angular/core';`nimport { Observable, of } from 'rxjs';`nimport { map } from 'rxjs/operators';`n" +
+        "import { DictionaryService } from './dictionary.service';`nimport { RateBase } from './rate-base';`nimport { Tone } from './tone.component';`n" +
+        "import { toSelect } from './select-items';`nimport { KeepPipe } from './keep.pipe';`nimport { LabelledPipe } from './labelled.pipe';`n" +
+        "import { RadioListComponent } from './radio.component';`n" +
+        "@Component({ selector: 'app-last', standalone: true, imports: [RadioListComponent, KeepPipe, LabelledPipe],`n" +
+        "  template: '<radio-list [items]=`"ranked`" [(value)]=`"last.ranked`"></radio-list><radio-list [items]=`"own`" [(value)]=`"last.own`"></radio-list>' +`n" +
+        "    '<radio-list [items]=`"cases`" [(value)]=`"last.cases`"></radio-list><radio-list [items]=`"related`$ | async`" [(value)]=`"last.related`"></radio-list>' +`n" +
+        "    '<radio-list [items]=`"ranked | keep : true`" [(value)]=`"last.kept`"></radio-list><radio-list [items]=`"remote | labelled : \'step\'`" [(value)]=`"last.remote`"></radio-list>' +`n" +
+        "    '<radio-list [items]=`"durations | keep : flag`" [(value)]=`"last.durations`"></radio-list>' })`n" +
+        "export class LastComponent extends RateBase implements OnInit {`n" +
+        "  @Input() remote: { label: string; value: unknown }[] = [];`n" +
+        "  last = { ranked: '', own: '', cases: '', related: '', kept: '', remote: '', durations: '' };`n" +
+        "  ranked = toSelect(Tone, this.dictionary.getTranslationDictionary(```${this.rootKey}``));`n" +
+        "  own = this.ownOptions();`n  flag = true;`n  durations = this.durationOptions();`n" +
+        "  cases: { label: string; value: unknown }[] = [];`n" +
+        "  related`$: Observable<{ label: string; value: unknown }[]> = of([1]).pipe(map((x) => [{ label: this.dictionary.getTranslation('pick.none'), value: null }]));`n" +
+        "  constructor(private dictionary: DictionaryService) {`n    super();`n  }`n" +
+        "  ngOnInit() {`n    this.cases = this.cases.concat({ label: 'case.a', value: 'a' });`n    this.cases = this.cases.concat({ label: 'case.b', value: 'b' });`n  }`n" +
+        "  private durationOptions() {`n    return toSelect(Tone, this.dictionary.getTranslationDictionary('kind'));`n  }`n" +
+        "  private ownOptions() {`n    return [{ label: this.dictionary.getTranslation(```${this.rootKey}.Gold``), value: 1 }];`n  }`n}`n"
+    # (#133) A LIST OF VALIDATION RULES beside a control's value: not its choices.
+    'apps/shop/src/email-box.component.ts' = "import { Component, EventEmitter, Input, Output } from '@angular/core';`n" +
+        "@Component({ selector: 'email-box', standalone: true, template: '' })`nexport class EmailBoxComponent {`n  @Input() value = '';`n" +
+        "  @Output() valueChange = new EventEmitter<string>();`n  @Input() validationRules: { Message: string; Validate: (v: string) => boolean }[] = [];`n}`n"
+    'apps/shop/src/form.component.ts' = "import { Component } from '@angular/core';`nimport { EmailBoxComponent } from './email-box.component';`n" +
+        "@Component({ selector: 'app-form', standalone: true, imports: [EmailBoxComponent], template: '<email-box [(value)]=`"form.email`" [validationRules]=`"rules`"></email-box>' })`n" +
+        "export class FormComponent {`n  form = { email: '' };`n  rules = [{ Message: 'demo.email.invalid', Validate: (v: string) => v.includes('@') }];`n}`n"
+    'apps/shop/src/assets/locales/en.json' = '{"hue":{"red":"Red","blue":"Blue"},"size":{"small":"S","large":"L"},"shown":{"only":"O"},"tier":{"gold":"G"},"grade":{"Gold":"G","Silver":"S"},"answer":{"yes":"Y","no":"N","Warm":"W","Cool":"C"},"spelled":{"out":"W"},"crossed":{"over":"C"},"rank":{"Gold":"G","Silver":"S"},"tone":{"Warm":"W","Cool":"C"},"kind":{"Warm":"W","Cool":"C"},"month":{"Jan":"J","Feb":"F"},"rate":{"Warm":"W","Cool":"C"},"step":{"none":"-","Warm":"W","Cool":"C"},"fee":{"plan":{"prepaid":"P","express":"E"},"flat":"F","rate":"R"},"feeKind":{"flat":"F","rate":"R"},"pick":{"none":"-"},"case":{"a":"A","b":"B"},"demo":{"email":{"invalid":"I"}}}'
 }
 
 # THE CONTROL AND ITS LABELS: `hues` is a const table a helper rebuilds into items (`Object.entries(t).map(([value, label]) => ..)`), `sizes` a list
@@ -306,6 +339,31 @@ Test-Case 'tsrows: a control offers the keys of a list its parent translates and
     Assert-Line $r 'fee=FeeColumnComponent|chosen|fee.rate'
     Assert-Line $r 'fee=FeeListComponent|pickMapped|feeKind.flat'
     Assert-Line $r 'fee=FeeListComponent|pickMapped|feeKind.rate'
+}
+
+# THE LAST #117 SHAPES: a dictionary call naming its prefix through a base class's field (`getTranslationDictionary(`${this.rootKey}`)`), a method
+# of the class whose labels read it too, a field adding to itself (`this.cases = this.cases.concat({ .. })`), an observable built by an rxjs
+# `map` read through `| async`, a pipe filtering its list, and a relabelling pipe over a list the map cannot read (an input).
+Test-Case 'tsrows: a control offers the keys of this-named dictionaries, self-concats, rxjs maps and pipes (#117)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:KeyOptionsFiles) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --limit 0 --sql "SELECT 'last=' || value || '|' || key AS t FROM control_options WHERE value LIKE 'last.%'"
+    Assert-Line $r 'last=last.ranked|rank.Gold'
+    Assert-Line $r 'last=last.own|rank.Gold'
+    Assert-Line $r 'last=last.cases|case.a'
+    Assert-Line $r 'last=last.cases|case.b'
+    Assert-Line $r 'last=last.related|pick.none'
+    Assert-Line $r 'last=last.kept|rank.Silver'
+    Assert-Line $r 'last=last.remote|step.Warm'
+    Assert-Line $r 'last=last.durations|kind.Warm'
+}
+
+# (#133) A LIST WHOSE ELEMENTS HOLD A FUNCTION is rules the control runs, not choices it offers: `[validationRules]="rules"` beside `[(value)]` offers nothing.
+Test-Case 'tsrows: a list of validation rules is no list of options (#133)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:KeyOptionsFiles) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --sql "SELECT 'rules=' || count(*) AS n FROM control_options WHERE key = 'demo.email.invalid' OR value = 'form.email'"
+    Assert-Line $r 'rules=0'
 }
 
 }

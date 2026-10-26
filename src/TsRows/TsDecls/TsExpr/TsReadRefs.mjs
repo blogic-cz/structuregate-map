@@ -326,6 +326,20 @@ export function makeReadRefs(ts, checker, canonicalPath) {
   }
 
   /**
+   * A HOLE TYPED BY A UNION OF LITERALS (rows 116, #131): `${group}` over `group: 'alpha' | 'beta'` writes exactly those texts - `{name, kind: 'literal_union', names,
+   * members}`, `names` and `members` the literals' values in the checker's order, `name` the alias that declares the union (`type Group = ..`) or null, with its
+   * place when it has one. Every arm a string or number literal (`null`/`undefined` aside), at least one; anything else is null.
+   */
+  function literalUnionHole(expr) {
+    const type = checker.getTypeAtLocation(expr);
+    const arms = (type.isUnion() ? type.types : [type]).filter((t) => (t.flags & (ts.TypeFlags.Null | ts.TypeFlags.Undefined)) === 0);
+    if (!arms.length || arms.some((t) => !(t.isStringLiteral() || t.isNumberLiteral()) || (t.flags & ts.TypeFlags.EnumLiteral) !== 0)) return null;
+    const names = arms.map((t) => String(t.value));
+    const alias = type.aliasSymbol?.declarations?.find((d) => ts.isTypeAliasDeclaration(d));
+    return { name: alias ? alias.name.text : null, ...(alias ? at(alias) : {}), kind: 'literal_union', names, members: names };
+  }
+
+  /**
    * A STRING THAT IS A PROPERTY PATH (rows 98, #109): `'Owner.Name'` filling a member `propertyPaths` names (`{type, member, root}`) is resolved segment by segment
    * from the ROOT's type - `this`, the class the literal is written in, or `{argument: n}`, the n-th argument of the call the literal's object is handed to - as
    * a declared type says: each segment the ONE declaration place its owner's arms give the name (a union naming several stops), a numeric segment an element.
@@ -393,5 +407,5 @@ export function makeReadRefs(ts, checker, canonicalPath) {
     return arg === undefined ? null : { type: checker.getTypeAtLocation(arg), at: arg };
   }
 
-  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember, resolveArg, targetLine, fieldTarget, fieldFacts, enumNameHole, enumValueHole, pathRefs };
+  return { resolveRead, resolveName, resolveLocal, resolveParam, resolveMember, resolveArg, targetLine, fieldTarget, fieldFacts, enumNameHole, enumValueHole, literalUnionHole, pathRefs };
 }

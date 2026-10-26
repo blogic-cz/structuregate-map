@@ -97,8 +97,10 @@ export function collectStrings(ts, store, node, owner, propName, evalNode, field
   // A checker refusal leaves the row without them, never without the row.
   const enumHoles = (n, parts) => {
     try {
-      // A NAME LOOKUP FIRST (`${Hue[x]}`), else a hole TYPED by an enum (rows 111, #123: `${r.status}` over `status: Demo`).
-      const refs = enumNameHole ? n.templateSpans.map((span) => enumNameHole.name(span.expression) ?? enumNameHole.value(span.expression)) : [];
+      // A NAME LOOKUP FIRST (`${Hue[x]}`), else a hole TYPED by an enum (rows 111, #123: `${r.status}` over `status: Demo`), else by a union of literals
+      // (rows 116, #131: `${group}` over `group: 'alpha' | 'beta'`).
+      const refs = enumNameHole ? n.templateSpans.map((span) => enumNameHole.name(span.expression) ?? enumNameHole.value(span.expression)
+        ?? (enumNameHole.literals ? enumNameHole.literals(span.expression) : null)) : [];
       if (!refs.some((r) => r !== null)) return {};
       const holeRefs = refs.map((r) => (r === null ? null : { name: r.name, file: r.file, line: r.line, kind: r.kind, names: r.names, members: r.members }));
       if (refs.some((r) => r === null) || parts.length !== refs.length + 1) return { hole_refs: holeRefs };
