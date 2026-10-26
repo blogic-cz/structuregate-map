@@ -25,7 +25,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { canonicalPath, relativeTo } from './TsPaths.mjs';
-import { directories, loadConfig, names, propertyPaths as readPropertyPaths } from './TsConfig.mjs';
+import { directories, findConfig, loadConfig, names, propertyPaths as readPropertyPaths } from './TsConfig.mjs';
 import { compare as compareRegistry, registryFromRows } from './TsRegistry.mjs';
 import { rollupGateChains } from './TsGateChain.mjs';
 import { rollupTemplateReads } from './TsTplReads.mjs';
@@ -50,8 +50,8 @@ import { rollupCallParams, rollupRefIds } from './TsRefs.mjs';
 import { cutShort, emptyChanged, repointProjects, startRereads } from './TsReads.mjs';
 import { shapeOfText } from './TsShape.mjs';
 import { affectedFiles, fingerprint, inventory, knownLines, markParsed, plannedHashes } from './TsInventory.mjs';
-import { discoverProjects, findWorkspaceRoot } from './TsProjects.mjs';
-import { loadToolchain, resolveToolchain, versionMismatch } from './TsResolve.mjs';
+import { discoverProjects, findTypescriptRoot, findWorkspaceRoot, isAngularRoot } from './TsProjects.mjs';
+import { loadToolchain, resolveToolchain, TYPESCRIPT_ONLY, versionMismatch } from './TsResolve.mjs';
 import { Diagnostics, REWRITTEN, Store } from './TsStore.mjs';
 import { createHash } from 'node:crypto';
 import { emit, parseArgs, readCarry, readJson, revisionOf, writePayload } from './TsRunIo.mjs';
@@ -79,7 +79,10 @@ async function main() {
   // THE WORKSPACE, NOT THE ROOT. structuregate is pointed at a repository; an Angular workspace is the
   // directory holding `angular.json` / `nx.json`, which in a real repository is several levels down. A
   // half that mapped the root would build one program out of every project at once.
-  const fe = args.fe || findWorkspaceRoot(args.root);
+  // NO ANGULAR WORKSPACE, BUT A TSCONFIG OPTED INTO (`"semantic": true` in `structuregate.ts.json`): the checker's rows over plain TypeScript,
+  // every pass but the templates - which need `@angular/compiler`, and a tree with no component has none to parse.
+  const fe = args.fe || findWorkspaceRoot(args.root) || findTypescriptRoot(args.root, args.config, findConfig);
+  const angular = Boolean(fe) && isAngularRoot(fe);
   if (!fe) {
     // NOT A FAILURE. Every other repository this exe is deployed into has no Angular workspace in it, and
     // a half that errored there would make the map unusable everywhere it is not needed.
@@ -88,9 +91,9 @@ async function main() {
   }
 
   const state = readJson(args.state, {});
-  const found = resolveToolchain(fe, args.nodeModules);
+  const found = resolveToolchain(fe, args.nodeModules, ...(angular ? [] : [TYPESCRIPT_ONLY]));
   if (!found.nodeModules) {
-    emit('MAP-FATAL', 'no node_modules holding typescript + @angular/compiler. Tried: '
+    emit('MAP-FATAL', `no node_modules holding typescript${angular ? ' + @angular/compiler' : ''}. Tried: `
       + found.tried.join(', ') + ' - install the workspace dependencies, or pass --ts-node-modules '
       + '<dir> naming a checkout that has them');
     return 1;
@@ -98,7 +101,7 @@ async function main() {
 
   let toolchain;
   try {
-    toolchain = await loadToolchain(found.nodeModules);
+    toolchain = await loadToolchain(found.nodeModules, angular);
   } catch (error) {
     emit('MAP-FATAL', `the workspace's typescript + @angular/compiler could not be loaded - ${error.message}`);
     return 1;
@@ -114,10 +117,10 @@ async function main() {
       + 'JSONC tsconfig and angular.json are read - this half cannot discover projects with it');
     return 1;
   }
-  emit('MAP-TOOLCHAIN', `typescript ${tsVersion}`, `@angular/compiler ${ngVersion}`, found.tier);
+  emit('MAP-TOOLCHAIN', `typescript ${tsVersion}`, angular ? `@angular/compiler ${ngVersion}` : 'no @angular/compiler (TypeScript only)', found.tier);
   // A MAJOR MISMATCH IS ANNOUNCED, not discovered later from a missing gate: Angular's own parser
   // error-recovers, so a 17.x compiler reading an 18.x template records `@let` as text and says nothing.
-  const warning = versionMismatch(fe, ngVersion);
+  const warning = angular ? versionMismatch(fe, ngVersion) : null;
   if (warning) emit('MAP-NOTE', `the typescript half ${warning}`);
 
   // READ BEFORE ANYTHING IS WALKED, because the early exit below has to know it: a changed `gateInputs`
@@ -354,6 +357,7 @@ async function main() {
   // 98: #109 - `propertyPaths` (`structuregate.ts.json`) names members whose strings are property paths and the root they start from; such a string carries `path_refs`
   //     (a segment each, with its row `id`) and `path_complete` (`TsExpr/TsReadRefs.mjs::pathRefs`).
   // 117: an NgRx `on(..)` handler returning a const state whole (`() => initialState`, `({ ...initialState.root })`) writes that literal's keys (`TsExpr/TsValue.mjs::returnedConstKeys`).
+  // 118: a `+` chain from a constant prefix (`'demo.region.' + r`) is a `template_literals` row, `form: 'concat'`, its holes typed as a template's (#136, `TsText.mjs::concatOf`).
   // 116: #131 - a template-literal hole typed by a union of string or number literals is a `hole_refs` entry of kind `literal_union` (`TsExpr/TsReadRefs.mjs::literalUnionHole`).
   // 115: #117 - a `filter`/`slice`/`map` on the enclosing function's own parameter keeps it as `$receiver` (`TsExpr/TsValue.mjs::treeList`).
   // 114: #127 - a `switch_cases` row names the switched enum (`discriminant_type`, `discriminant_enum` + `discriminant_enum_id`) and what each label selects
@@ -378,7 +382,7 @@ async function main() {
   // 99: an immer handler's `writes` follow the helpers it hands its draft to, and the callbacks they call (`TsExpr/TsExprDescribe.mjs::draftWrites`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 117, build: args.build,
+    config: config.file, data: config.data, rows: 118, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
@@ -606,7 +610,7 @@ async function main() {
   }
 
   // ---------------------------------------------------------------- PASS 2: the templates
-  const templatePass = timed('typescript: the template pass', '', () => runTemplatePass({
+  const templatePass = !ng ? { parsed: 0 } : timed('typescript: the template pass', '', () => runTemplatePass({
     ng, store, diag, fe, registry: matching, components, config,
     // A COMPONENT THIS RUN IS NOT RE-EXTRACTING ALREADY HAS ITS TEMPLATE'S ROWS, so following the
     // render queue into it would parse the same template twice and store both copies.
@@ -655,7 +659,7 @@ async function main() {
   // template rather than left as a file row with no content behind it.
   let orphans = 0;
   for (const f of store.table('files')) {
-    if (f.ext !== 'html' || f.parsed) continue;
+    if (f.ext !== 'html' || f.parsed || !templatePass.extractor) continue;
     // ITS ROWS ARE ITS OWN FILE'S - the orphan IS the template, so there is no component to borrow from.
     store.enterFile(f.id);
     const res = templatePass.extractor.extract({

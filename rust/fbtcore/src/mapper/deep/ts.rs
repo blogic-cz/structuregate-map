@@ -50,8 +50,8 @@ pub(super) enum Planned {
 pub(super) fn skipped(into: &mut Collector, deep: &Deep, db: &str, root: &str, key: &dyn Fn(Option<&str>) -> Option<String>) -> Result<bool, Option<String>> {
     // NO WORKSPACE IS ANSWERED HERE, before the key - which asks node its version - and before node: every `.ts`
     // edit in a tree with no Angular in it started node twice to hear the same "not here" again.
-    if !has_workspace(Path::new(root)) {
-        into.notes.push(format!("the typescript half did not run: no Angular workspace (angular.json / nx.json / workspace.json) at or under {root}"));
+    if !has_workspace(Path::new(root), deep.ts_config.as_deref()) {
+        into.notes.push(format!("the typescript half did not run: no Angular workspace (angular.json / nx.json / workspace.json) at or under {root}, and no tsconfig.json opted in with \"semantic\": true"));
         return Ok(true);
     }
     // EVERY STEP OF THIS HALF IS A SPAN, as the C# half's are: over a minute of a full run was in none.
@@ -119,11 +119,24 @@ pub(super) fn settle(db: &str, key: &dyn Fn(Option<&str>) -> Option<String>, abs
 /// any depth), never inside `node_modules` or a dot folder, and a link to a folder not followed. Rust never passes
 /// `--fe`, so this walk is the whole of node's answer; `pub(super)` for the plain half, which maps every script file
 /// OUTSIDE this folder.
-pub(super) fn workspace(root: &Path) -> Option<PathBuf> {
+pub(super) fn workspace(root: &Path, config: Option<&str>) -> Option<PathBuf> {
     const MARKS: [&str; 3] = ["angular.json", "nx.json", "workspace.json"];
-    fn marked(dir: &Path) -> bool {
-        MARKS.iter().any(|mark| dir.join(mark).exists())
-    }
+    shallowest(root, |dir| MARKS.iter().any(|mark| dir.join(mark).exists())).or_else(|| {
+        // A TYPESCRIPT-ONLY WORKSPACE, opted into (`findTypescriptRoot`): the shallowest `tsconfig.json`, when the
+        // `structuregate.ts.json` governing it - `--ts-config`, else the nearest at or above it - says `"semantic": true`.
+        let fe = shallowest(root, |dir| dir.join("tsconfig.json").exists())?;
+        let file = match config {
+            Some(given) => Some(PathBuf::from(given)),
+            None => fe.ancestors().map(|at| at.join("structuregate.ts.json")).find(|p| p.is_file()),
+        }?;
+        let data: Value = serde_json::from_slice(&std::fs::read(file).ok()?).ok()?;
+        (data["semantic"] == Value::Bool(true)).then_some(fe)
+    })
+}
+
+/// The folder `marked` holds at the root, or the SHALLOWEST below it (breadth first, at any depth), never inside `node_modules` or
+/// a dot folder, a link to a folder not followed.
+fn shallowest(root: &Path, marked: impl Fn(&Path) -> bool) -> Option<PathBuf> {
     if marked(root) {
         return Some(root.to_path_buf());
     }
@@ -147,8 +160,8 @@ pub(super) fn workspace(root: &Path) -> Option<PathBuf> {
 }
 
 /// Whether node would find a workspace at all.
-pub(super) fn has_workspace(root: &Path) -> bool {
-    workspace(root).is_some()
+pub(super) fn has_workspace(root: &Path, config: Option<&str>) -> bool {
+    workspace(root, config).is_some()
 }
 
 /// State, then plan, parse and store - over `hops`: a run that stopped short of every hop and found it could not

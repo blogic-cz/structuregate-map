@@ -16,8 +16,10 @@ How the half RUNS. The row contract node writes is [src/TsRows/CLAUDE.md](../../
 closure derives and which restrictions a gate is read for is
 [rust/fbtcore/src/rows/ts/CLAUDE.md](../../rust/fbtcore/src/rows/ts/CLAUDE.md).
 
-A tree with NO Angular workspace is not this half's: the Angular half (`rust/fbtcore/src/mapper/deep/ts.rs`) says so
-and the plain half (`src/TsRows/TsPlain/`, `lang = 'ts'`) maps it - and every script file OUTSIDE a workspace
+A tree with NO Angular workspace is not this half's - unless it OPTS IN: `"semantic": true` in the `structuregate.ts.json` governing its
+shallowest `tsconfig.json` makes that folder a TypeScript-only workspace (`workspace` in `mapper/deep/ts.rs`, `findTypescriptRoot` in
+`TsSetup/TsProjects.mjs`, which must agree), mapped by this half with `typescript` alone (`ng` null, no template pass). Otherwise the
+Angular half (`rust/fbtcore/src/mapper/deep/ts.rs`) says so and the plain half (`src/TsRows/TsPlain/`, `lang = 'ts'`) maps it - and every script file OUTSIDE a workspace
 (`plain_files` in `mapper/deep/mod.rs`; its paths are root-relative, the Angular half's workspace-relative; it borrows
 `--ts-node-modules`, then the workspace's own `node_modules` - `plain_modules`) - with syntactic, per-file rows - its columns are the
 `map-sqlite` skill's `skills/map-sqlite/typescript.md`. It imports `TsGate.Map.mjs` for the fingerprint, so a change

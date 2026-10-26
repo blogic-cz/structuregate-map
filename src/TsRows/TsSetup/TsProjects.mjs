@@ -228,8 +228,30 @@ export function discoverProjects(ts, feRoot) {
  *  breadth first, at any depth (a link is never followed: `isDirectory` is false for one). `workspace` in
  *  `rust/fbtcore/src/mapper/deep/ts.rs` walks it the same way and has to agree. */
 export function findWorkspaceRoot(root) {
-  const marks = ['angular.json', 'nx.json', 'workspace.json'];
-  if (marks.some((m) => existsSync(path.join(root, m)))) return slash(path.resolve(root));
+  return findMarked(root, isAngularRoot);
+}
+
+/** Whether `dir` itself holds an Angular workspace's marker. */
+export function isAngularRoot(dir) {
+  return ['angular.json', 'nx.json', 'workspace.json'].some((m) => existsSync(path.join(dir, m)));
+}
+
+/** A TYPESCRIPT-ONLY WORKSPACE, opted into: with no Angular workspace, the shallowest folder holding a `tsconfig.json` - found the
+ *  same breadth-first way - when the `structuregate.ts.json` that governs it (`given`, else the nearest at or above it) says
+ *  `"semantic": true`. `workspace` in `rust/fbtcore/src/mapper/deep/ts.rs` decides it the same way and has to agree. */
+export function findTypescriptRoot(root, given, findConfig) {
+  const fe = findMarked(root, (dir) => existsSync(path.join(dir, TS_DEFAULT_CONFIG)));
+  if (!fe) return '';
+  try {
+    const file = findConfig(given, fe);
+    return file && JSON.parse(readFileSync(file, 'utf8'))?.semantic === true ? fe : '';
+  } catch {
+    return '';
+  }
+}
+
+function findMarked(root, marked) {
+  if (marked(root)) return slash(path.resolve(root));
   const queue = [path.resolve(root)];
   for (let i = 0; i < queue.length; i++) {
     let entries;
@@ -241,7 +263,7 @@ export function findWorkspaceRoot(root) {
     for (const e of entries) {
       if (!e.isDirectory() || e.name === 'node_modules' || e.name.startsWith('.')) continue;
       const p = path.join(queue[i], e.name);
-      if (marks.some((m) => existsSync(path.join(p, m)))) return slash(p);
+      if (marked(p)) return slash(p);
       queue.push(p);
     }
   }
