@@ -11,7 +11,7 @@ use super::featurewalk::{
     OrderedSet,
 };
 use super::store::{Row, Store};
-use indexmap::IndexMap;
+use crate::rows::IndexMap;
 use serde_json::Value;
 
 pub type Codes = IndexMap<String, bool>;
@@ -66,7 +66,7 @@ pub fn intersect(got: Option<Codes>, codes: &Codes) -> Codes {
 
 /// The codes named anywhere in a set of nodes.
 fn codes_in_nodes(nodes: &[&serde_json::Map<String, Value>], root: &str) -> Codes {
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     for n in nodes {
         for (code, _) in codes_in(&Value::Object((*n).clone()), root) {
             out.insert(code, true);
@@ -85,7 +85,7 @@ fn per_property<'a>(
     owner: &Owner<'_>,
     require_value: bool,
 ) -> IndexMap<String, Vec<&'a Row>> {
-    let mut out: IndexMap<String, Vec<&'a Row>> = IndexMap::new();
+    let mut out: IndexMap<String, Vec<&'a Row>> = IndexMap::default();
     for a in rows.iter() {
         if require_value && matches!(a.get("value"), None | Some(Value::Null)) {
             continue;
@@ -115,7 +115,7 @@ pub fn property_features(
     owner: &Owner<'_>,
 ) -> Features {
     let paths: Vec<String> = checks.iter().map(|c| format!("/{}", c.path)).collect();
-    let mut out = Features::new();
+    let mut out = Features::default();
     let assignments = store.table("assignments");
 
     for (key, writes) in per_property(&assignments, owner, true) {
@@ -209,7 +209,7 @@ pub fn callback_checks(
     root: &str,
 ) -> IndexMap<String, Callback> {
     let calls_table = store.table("calls");
-    let mut by_member: IndexMap<String, Vec<&Row>> = IndexMap::new();
+    let mut by_member: IndexMap<String, Vec<&Row>> = IndexMap::default();
     for c in calls_table.iter() {
         if id_of(c, "member").is_none() || matches!(c.get("args"), None | Some(Value::Null)) {
             continue;
@@ -221,7 +221,7 @@ pub fn callback_checks(
     }
 
     let expressions = store.table("expressions");
-    let mut expr_at: IndexMap<String, String> = IndexMap::new();
+    let mut expr_at: IndexMap<String, String> = IndexMap::default();
     for r in expressions.iter() {
         if text(r, "role").as_deref() == Some("expr")
             && let Some(id) = id_of(r, "id")
@@ -238,7 +238,7 @@ pub fn callback_checks(
     }
 
     let functions = store.table("functions");
-    let mut fn_at: IndexMap<String, Option<&Row>> = IndexMap::new();
+    let mut fn_at: IndexMap<String, Option<&Row>> = IndexMap::default();
     for f in functions.iter() {
         let inline = matches!(f.get("inline"), Some(Value::Bool(true)))
             || matches!(f.get("inline"), Some(Value::Number(n)) if n.as_i64() == Some(1));
@@ -258,7 +258,7 @@ pub fn callback_checks(
         }
     }
 
-    let mut out: IndexMap<String, Callback> = IndexMap::new();
+    let mut out: IndexMap<String, Callback> = IndexMap::default();
     for calls in by_member.values() {
         for check in calls {
             let Some(target) = id_of(check, "target_id") else { continue };
@@ -334,7 +334,7 @@ pub fn callback_features(
     owner: &Owner<'_>,
 ) -> Features {
     let branch_rows = store.table("branches");
-    let mut branches: IndexMap<String, &Row> = IndexMap::new();
+    let mut branches: IndexMap<String, &Row> = IndexMap::default();
     for b in branch_rows.iter() {
         if let Some(id) = id_of(b, "id") {
             branches.insert(id, b);
@@ -360,7 +360,7 @@ pub fn callback_features(
         false
     };
 
-    let mut out = Features::new();
+    let mut out = Features::default();
     let assignments = store.table("assignments");
     for (key, writes) in per_property(&assignments, owner, false) {
         if written.contains(&key) {
@@ -388,7 +388,7 @@ pub fn callback_features(
                 proven = false;
                 break;
             }
-            let mut one = Codes::new();
+            let mut one = Codes::default();
             one.insert(cb.code.clone(), true);
             got = Some(intersect(got, &one));
         }
@@ -421,7 +421,7 @@ pub fn ternary_features(
     owner: &Owner<'_>,
 ) -> (Features, IndexMap<String, Row>) {
     let expressions = store.table("expressions");
-    let mut asts: IndexMap<String, &Value> = IndexMap::new();
+    let mut asts: IndexMap<String, &Value> = IndexMap::default();
     for r in expressions.iter() {
         if text(r, "role").as_deref() == Some("ternary")
             && let Some(ast) = r.get("ast").filter(|a| !a.is_null())
@@ -431,8 +431,8 @@ pub fn ternary_features(
         }
     }
 
-    let mut feats = Features::new();
-    let mut writes_out: IndexMap<String, Row> = IndexMap::new();
+    let mut feats = Features::default();
+    let mut writes_out: IndexMap<String, Row> = IndexMap::default();
     let assignments = store.table("assignments");
 
     for (key, writes) in per_property(&assignments, owner, true) {
@@ -478,7 +478,7 @@ pub fn ternary_features(
                 ok = false;
                 break;
             }
-            let mut as_map = Codes::new();
+            let mut as_map = Codes::default();
             for c in codes.strings() {
                 as_map.insert(c, true);
             }

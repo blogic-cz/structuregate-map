@@ -24,7 +24,7 @@ use super::astreads::{is_read, unwrap};
 use super::gate_lookups::{delegated, lookups};
 use super::gate_values::{constant_of, enum_of_type_ref, EnumIndex, MemberEnums};
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
 
 /// What a method's body proves about its one parameter.
@@ -162,7 +162,7 @@ pub(crate) fn param_enum(p: &Value, idx: &EnumIndex) -> Option<(String, bool)> {
 /// Member id -> what its body proves, for every method of ONE enum-typed parameter whose
 /// single return is a membership test, or a call handing it to a proven lookup.
 pub fn predicates(store: &Store<'_>, idx: &EnumIndex) -> IndexMap<String, Predicate> {
-    let mut candidates: IndexMap<String, (String, String, bool)> = IndexMap::new();
+    let mut candidates: IndexMap<String, (String, String, bool)> = IndexMap::default();
     for m in store.table("members").iter() {
         let Some(Value::Array(params)) = m.get("params") else { continue };
         let ([p], Some(id)) = (params.as_slice(), m.get("id").and_then(|v| v.as_str())) else { continue };
@@ -171,7 +171,7 @@ pub fn predicates(store: &Store<'_>, idx: &EnumIndex) -> IndexMap<String, Predic
     }
 
     // ONE RETURN, OUTSIDE ANY BRANCH: a second one is a second answer this does not read.
-    let mut returns: IndexMap<String, Vec<&Row>> = IndexMap::new();
+    let mut returns: IndexMap<String, Vec<&Row>> = IndexMap::default();
     let all = store.table("returns");
     for r in all.iter() {
         if let Some(member) = r.get("member").and_then(|v| v.as_str())
@@ -180,7 +180,7 @@ pub fn predicates(store: &Store<'_>, idx: &EnumIndex) -> IndexMap<String, Predic
             returns.entry(member.to_string()).or_default().push(r);
         }
     }
-    let mut lambdas: IndexMap<String, IndexSet<String>> = IndexMap::new();
+    let mut lambdas: IndexMap<String, IndexSet<String>> = IndexMap::default();
     for f in store.table("functions").iter() {
         let Some(parent) = f.get("parent").and_then(|v| v.as_str()) else { continue };
         if !candidates.contains_key(parent) {
@@ -191,7 +191,7 @@ pub fn predicates(store: &Store<'_>, idx: &EnumIndex) -> IndexMap<String, Predic
         lambdas.entry(parent.to_string()).or_default().extend(names);
     }
     // Expression id -> the member it is the return of, and the declaration the call resolved to.
-    let mut wanted: IndexMap<String, (String, Option<Value>)> = IndexMap::new();
+    let mut wanted: IndexMap<String, (String, Option<Value>)> = IndexMap::default();
     for (member, rows) in &returns {
         let [r] = rows.as_slice() else { continue };
         let unconditional = ["branch", "case"].iter().all(|f| r.get(f).is_none_or(Value::is_null));
@@ -202,8 +202,8 @@ pub fn predicates(store: &Store<'_>, idx: &EnumIndex) -> IndexMap<String, Predic
     }
     let delegates = lookups(store, idx);
 
-    let mut out = IndexMap::new();
-    let none = IndexSet::new();
+    let mut out = IndexMap::default();
+    let none = IndexSet::default();
     for e in store.table("expressions").iter() {
         let Some((member, target)) = e.get("id").and_then(|v| v.as_str()).and_then(|x| wanted.get(x)) else { continue };
         let (Some(ast), Some((param, en, array))) = (e.get("ast"), candidates.get(member)) else { continue };
@@ -369,7 +369,7 @@ mod tests {
     // ---- the call site --------------------------------------------------------------
 
     fn preds(both: bool) -> IndexMap<String, Predicate> {
-        let mut p = IndexMap::new();
+        let mut p = IndexMap::default();
         p.insert("m:is".into(), Predicate { enum_id: "e:p".into(), set: "active".into(),
                                             array: true, both });
         p

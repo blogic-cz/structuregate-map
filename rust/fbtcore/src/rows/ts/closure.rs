@@ -27,7 +27,7 @@ use std::sync::Arc;
 use crate::rows::FastMap as HashMap;
 use super::key_branches::Branches;
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
 
 fn text(row: &Row, field: &str) -> Option<String> {
@@ -84,13 +84,13 @@ pub struct Edge {
 type Site = (String, i64, i64, String, String);
 
 fn edge_sites(store: &Store<'_>) -> impl Fn(&Row) -> Site + use<> {
-    let mut path_of: IndexMap<String, String> = IndexMap::new();
+    let mut path_of: IndexMap<String, String> = IndexMap::default();
     for f in store.table("files").iter() {
         if let Some(id) = id_of(f, "id") {
             path_of.insert(id, text(f, "path").unwrap_or_default());
         }
     }
-    let mut file_of: IndexMap<String, String> = IndexMap::new();
+    let mut file_of: IndexMap<String, String> = IndexMap::default();
     for table in ["components", "directives"] {
         for c in store.table(table).iter() {
             if let (Some(id), Some(file)) = (id_of(c, "id"), id_of(c, "file")) {
@@ -145,7 +145,7 @@ pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Arc<str>, 
     // holding it holds (#56, `key_called`).
     let called = super::key_called::called_under(store, branches);
     let nodes = store.table("template_nodes");
-    let mut chains: IndexMap<String, Vec<String>> = IndexMap::new();
+    let mut chains: IndexMap<String, Vec<String>> = IndexMap::default();
     for n in nodes.iter() {
         if matches!(n.get("gate_chain"), Some(Value::Array(_)))
             && let Some(id) = id_of(n, "id")
@@ -176,7 +176,7 @@ pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Arc<str>, 
     ordered.sort_by_key(|r| site(r));
 
     let mut ids = Ids::default();
-    let mut edges: IndexMap<Arc<str>, Vec<Edge>> = IndexMap::new();
+    let mut edges: IndexMap<Arc<str>, Vec<Edge>> = IndexMap::default();
     for r in ordered {
         let Some(parent) = id_of(r, "from_component") else { continue };
         let Some(to) = id_of(r, "to") else { continue };
@@ -292,7 +292,7 @@ pub fn paths_to_memo(
         Some((held, _)) => Arc::clone(held),
         None => Arc::from(comp),
     };
-    let mut seen = IndexSet::new();
+    let mut seen = IndexSet::default();
     seen.insert(Arc::clone(&start));
     let (paths, _) = walk(edges, &start, &mut seen, memo);
     ((*paths).clone(), false)
@@ -367,7 +367,7 @@ fn walk(
 ///
 /// A root without a reach row is reported with empty lists, not dropped.
 pub fn reach_index(store: &Store<'_>) -> IndexMap<String, (Vec<String>, Vec<String>)> {
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     for r in store.table("component_reach").iter() {
         if let Some(component) = id_of(r, "component") {
             out.insert(component, (string_list(r, "areas"), string_list(r, "routes")));
@@ -386,8 +386,8 @@ pub struct LocaleEntry {
 }
 
 pub fn locale_index(store: &Store<'_>) -> IndexMap<String, LocaleEntry> {
-    let mut acc: IndexMap<String, LocaleEntry> = IndexMap::new();
-    let mut seen: IndexMap<String, IndexSet<String>> = IndexMap::new();
+    let mut acc: IndexMap<String, LocaleEntry> = IndexMap::default();
+    let mut seen: IndexMap<String, IndexSet<String>> = IndexMap::default();
     for t in store.table("translations").iter() {
         let Some(key) = text(t, "key") else { continue };
         let entry = acc.entry(key.clone()).or_default();
@@ -411,7 +411,7 @@ pub fn locale_index(store: &Store<'_>) -> IndexMap<String, LocaleEntry> {
 /// column takes.
 pub fn fold(sets: &[IndexSet<String>]) -> (Vec<String>, Vec<String>) {
     let mut inter: Option<IndexSet<String>> = None;
-    let mut uni: IndexSet<String> = IndexSet::new();
+    let mut uni: IndexSet<String> = IndexSet::default();
     for s in sets {
         for g in s {
             uni.insert(g.clone());
@@ -445,8 +445,8 @@ pub fn render_paths(
     let mut ordered: Vec<String> = needed.iter().cloned().collect();
     ordered.sort();
 
-    let mut by_comp = IndexMap::new();
-    let mut first_id = IndexMap::new();
+    let mut by_comp = IndexMap::default();
+    let mut first_id = IndexMap::default();
     let mut rows = 0usize;
     let mut memo = Memo::default();
     for comp in ordered {

@@ -13,7 +13,7 @@
 use super::key_branches::{member_ways, Branches};
 use super::key_fields::{id_of, text};
 use super::key_follow::Returned;
-use indexmap::IndexMap;
+use crate::rows::IndexMap;
 use super::store::{Row, Store};
 use serde_json::Value;
 use std::cell::OnceCell;

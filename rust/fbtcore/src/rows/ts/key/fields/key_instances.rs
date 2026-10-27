@@ -13,7 +13,7 @@
 use super::key_branches::value_keys;
 use super::key_follow::{arg_keys, translated, Returned};
 use super::store::Row;
-use indexmap::IndexMap;
+use crate::rows::IndexMap;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
@@ -22,7 +22,7 @@ type Found = Vec<(String, Vec<String>)>;
 /// Property path -> the keys it holds, for one `new X(..)` element.
 pub(super) fn properties(new: &Value, reader: &Returned<'_, '_>) -> IndexMap<String, Found> {
     let classes = reader.classes;
-    let mut out: IndexMap<String, Found> = IndexMap::new();
+    let mut out: IndexMap<String, Found> = IndexMap::default();
     let Some(class) = classes.class_built(new) else { return out };
     let (inst, chain) = (classes.inst(), classes.chain(class));
     let mut seen = HashSet::new();

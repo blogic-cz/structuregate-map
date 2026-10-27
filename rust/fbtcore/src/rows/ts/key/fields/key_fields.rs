@@ -27,7 +27,7 @@ use super::key_branches::{member_ways, value_keys, Branches};
 use super::key_follow::Returned;
 use super::key_routes::FieldSite;
 use super::store::{Row, Store};
-use indexmap::IndexMap;
+use crate::rows::IndexMap;
 use serde_json::Value;
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -198,11 +198,11 @@ fn member_keys(store: &Store<'_>, reader: &Returned<'_, '_>) -> IndexMap<String,
     let branches = store.shared("branches", Branches::new);
     let returns = store.table("returns");
     let assignments = store.table("assignments");
-    let mut owner: IndexMap<String, Option<String>> = IndexMap::new();
-    let mut out: IndexMap<String, IndexMap<String, Vec<Vec<String>>>> = IndexMap::new();
+    let mut owner: IndexMap<String, Option<String>> = IndexMap::default();
+    let mut out: IndexMap<String, IndexMap<String, Vec<Vec<String>>>> = IndexMap::default();
     let mut foreign: Vec<String> = Vec::new();
     // (writing class, field) -> the keys that class's constructor writes to a field of its base; and those fields.
-    let mut by_writer: IndexMap<(String, String), IndexMap<String, Vec<Vec<String>>>> = IndexMap::new();
+    let mut by_writer: IndexMap<(String, String), IndexMap<String, Vec<Vec<String>>>> = IndexMap::default();
     let mut ctor_sub: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // A VALUE IS READ FOR EVERY KEY IT CAN BE, a ternary's and a logical operator's arms
@@ -289,7 +289,7 @@ fn member_keys(store: &Store<'_>, reader: &Returned<'_, '_>) -> IndexMap<String,
     }
 
     // A FIELD ONLY A SUBCLASS'S CONSTRUCTOR WROTE FROM OUTSIDE keeps its own writes for a receiver typed by its class.
-    let mut class_only: IndexMap<String, IndexMap<String, Vec<Vec<String>>>> = IndexMap::new();
+    let mut class_only: IndexMap<String, IndexMap<String, Vec<Vec<String>>>> = IndexMap::default();
     for member in foreign.iter().chain(ctor_sub.iter()) {
         if let Some(keys) = out.shift_remove(member) {
             if !foreign.contains(member) {

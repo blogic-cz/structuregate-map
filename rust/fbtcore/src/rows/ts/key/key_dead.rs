@@ -10,7 +10,7 @@
 //! other one: its element is never shown, so it is read exactly as `*ngIf="false"` (#54).
 
 use super::store::{Row, Store};
-use indexmap::IndexSet;
+use crate::rows::IndexSet;
 use serde_json::Value;
 
 fn str_of<'a>(row: &'a Row, name: &str) -> Option<&'a str> {
@@ -47,7 +47,7 @@ pub fn dead_gates(store: &Store<'_>) -> IndexSet<String> {
     if wanted.is_empty() {
         return out;
     }
-    let mut asts: IndexSet<String> = IndexSet::new();
+    let mut asts: IndexSet<String> = IndexSet::default();
     for e in store.table("expressions").iter() {
         // PEEKED, not kept: the tree is asked whether it is the literal, and nothing later reads it again.
         if let Some(id) = str_of(e, "id")

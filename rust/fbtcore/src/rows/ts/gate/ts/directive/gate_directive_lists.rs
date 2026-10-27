@@ -110,7 +110,7 @@ fn rooted(n: &Value) -> Option<(&str, String)> {
 /// with an item, or the field's own test of a member of the class.
 fn test_of(cx: &Ctx<'_>, mx: &Mirror<'_>, n: &Value, h: &Held<'_>, en: &str) -> Option<ListTest> {
     let typed = |x: &Value| -> Option<String> {
-        let resolved = mx.rows.resolve(x, &IndexSet::new(), cx.idx);
+        let resolved = mx.rows.resolve(x, &IndexSet::default(), cx.idx);
         resolved.get("target")?.get("row")?.as_str().map(str::to_string)
     };
     let fits = |row: &Option<String>| row.as_ref().and_then(|r| cx.mem.typed.get(r)).is_none_or(|e| e == en);
@@ -259,7 +259,7 @@ pub(super) fn restriction(cx: &Ctx<'_>, f: &Carried, en: &str, gate_ast: Option<
 /// setters of inputs no template binds (or by nothing at all) - and those SETTERS, which never run.
 pub(super) fn never_set(store: &Store<'_>, writes: &IndexMap<String, Vec<&Row>>, bound: &IndexSet<String>) -> (IndexSet<String>, IndexSet<String>) {
     let members = store.table("members");
-    let mut unbound: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut unbound: IndexMap<String, Option<String>> = IndexMap::default();
     for m in members.iter() {
         let Some(id) = id_of(m, "id") else { continue };
         let decorators = m.get("decorators").and_then(|d| d.as_array());
@@ -270,7 +270,7 @@ pub(super) fn never_set(store: &Store<'_>, writes: &IndexMap<String, Vec<&Row>>,
             unbound.insert(id, param);
         }
     }
-    let mut out = IndexSet::new();
+    let mut out = IndexSet::default();
     for m in members.iter() {
         let Some(id) = id_of(m, "id") else { continue };
         let blank = m.get("value").is_none_or(|v| v.is_null() || *v == Value::Bool(false));
@@ -295,8 +295,8 @@ pub(super) fn never_set(store: &Store<'_>, writes: &IndexMap<String, Vec<&Row>>,
 
 /// The scopes a body sits in, innermost first: a callback, the callback around it, ... its method.
 pub(super) fn scopes(store: &Store<'_>) -> (IndexMap<String, String>, IndexMap<String, Vec<String>>) {
-    let mut parent = IndexMap::new();
-    let mut params: IndexMap<String, Vec<String>> = IndexMap::new();
+    let mut parent = IndexMap::default();
+    let mut params: IndexMap<String, Vec<String>> = IndexMap::default();
     for table in ["members", "functions"] {
         for r in store.table(table).iter() {
             let Some(id) = id_of(r, "id") else { continue };
@@ -317,8 +317,8 @@ pub(super) fn scopes(store: &Store<'_>) -> (IndexMap<String, String>, IndexMap<S
 /// whose class is not known is counted.
 pub(super) fn dead_params(store: &Store<'_>, mx: &Mirror<'_>) -> IndexSet<(String, String)> {
     let members = store.table("members");
-    let mut class_of: IndexMap<String, String> = IndexMap::new();
-    let mut field_named: IndexMap<(String, String), String> = IndexMap::new();
+    let mut class_of: IndexMap<String, String> = IndexMap::default();
+    let mut field_named: IndexMap<(String, String), String> = IndexMap::default();
     let mut methods: Vec<(String, String, String)> = Vec::new();
     for m in members.iter() {
         let (Some(id), Some(cls), Some(name)) = (id_of(m, "id"), id_of(m, "class"), str_of(m.get("name"))) else { continue };
@@ -337,7 +337,7 @@ pub(super) fn dead_params(store: &Store<'_>, mx: &Mirror<'_>) -> IndexSet<(Strin
         }
         None
     };
-    let mut by_callee: IndexMap<String, Vec<&Row>> = IndexMap::new();
+    let mut by_callee: IndexMap<String, Vec<&Row>> = IndexMap::default();
     for c in mx.calls.values().flatten() {
         if let Some(callee) = str_of(c.get("callee")) {
             by_callee.entry(callee).or_default().push(c);
@@ -347,7 +347,7 @@ pub(super) fn dead_params(store: &Store<'_>, mx: &Mirror<'_>) -> IndexSet<(Strin
     let related = |a: &str, b: &str| {
         a == b || chain_of(&cidx, a).iter().any(|c| c.id == b) || chain_of(&cidx, b).iter().any(|c| c.id == a)
     };
-    let mut out = IndexSet::new();
+    let mut out = IndexSet::default();
     for (id, cls, name) in &methods {
         let calls: Vec<&Row> = by_callee.get(&format!("this.{name}")).into_iter().flatten().copied()
             .filter(|c| owner(id_of(c, "member").unwrap_or_default()).is_none_or(|o| related(&o, cls)))
@@ -381,7 +381,7 @@ pub(super) fn never(mx: &Mirror<'_>, member: &str, side: &Value) -> bool {
         }
         Some("Not") => n.get("expr").filter(|e| kind(e) == Some("Not")).and_then(|e| e.get("expr")).is_some_and(|e| never(mx, member, e)),
         Some("Read") if n.get("receiver").and_then(kind) == Some("This") => {
-            let resolved = mx.rows.resolve(n, &IndexSet::new(), &Default::default());
+            let resolved = mx.rows.resolve(n, &IndexSet::default(), &Default::default());
             resolved.get("target").and_then(|t| t.get("row")).and_then(|r| r.as_str()).is_some_and(|r| mx.never.contains(r))
         }
         // THE NEAREST SCOPE DECLARING THE NAME owns it: a callback's own parameter shadows the method's.

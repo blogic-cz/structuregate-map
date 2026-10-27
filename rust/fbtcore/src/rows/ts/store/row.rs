@@ -186,14 +186,6 @@ impl Cell {
         }
     }
 
-    /// The structure this cell holds, rebuilt and NOT kept - None when it is a plain value or already decoded.
-    fn undecoded(&self, at: &At<'_>) -> Option<Value> {
-        match self {
-            Cell::Value(_) | Cell::Null => None,
-            Cell::Json(held) => held.1.get().is_none().then(|| structure(&held.0)),
-            Cell::Nodes(decoded) => decoded.get().is_none().then(|| at.rebuild()),
-        }
-    }
 
     /// Moved out for the WRITE: a cell nobody decoded goes as its text, which the store spells exactly as it
     /// spells a decoded one (`rawcells`).
@@ -337,18 +329,11 @@ impl Row {
         }
     }
 
-    /// A cell READ ONCE AND NOT KEPT: a structure nobody decoded yet is rebuilt for `f` and dropped after it, where `get`
-    /// would hold it decoded for the rest of the closure. For a scan that asks something of every row's tree; the answer
-    /// is the one `get` gives.
+    /// A cell read for `f`, KEPT DECODED as `get` keeps it. It once rebuilt a structure nobody had decoded and dropped it after
+    /// `f`, to hold less - but the closure's peak is after `Store::release`, which drops every decoded tree anyway, and the passes
+    /// before it peeked the same trees again and again - kept, a large workspace's closure took a tenth less time for the same
+    /// peak. For a scan that asks something of every row's tree.
     pub fn peek<R>(&self, key: &str, f: impl FnOnce(Option<&Value>) -> R) -> R {
-        if let Row::Held { schema, cells, rowid } = self
-            && let Some(&index) = schema.at.get(key)
-            && { schema.mark(index); true }
-            && let Some(Some(cell)) = cells.get(index)
-            && let Some(fresh) = cell.undecoded(&At { schema, cells, rowid: *rowid, index })
-        {
-            return f(Some(&fresh));
-        }
         f(self.get(key))
     }
 

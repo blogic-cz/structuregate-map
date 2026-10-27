@@ -18,7 +18,7 @@ use super::key_unread::{MemberReads, Unread};
 use super::key_branches::{literal_ways, value_keys, Branches};
 use super::sourcescan::braced_names;
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
 
 /// THE FIRST THREE TIE. Ranking `template_string` BELOW a carrier lost render sites
@@ -102,7 +102,7 @@ struct Routes {
 
 impl Routes {
     fn new() -> Routes {
-        Routes { inner: IndexMap::new() }
+        Routes { inner: IndexMap::default() }
     }
 
     fn put(&mut self, key: &str, route: &str, comp: Option<String>, gates: Vec<String>, node: Option<&str>) {
@@ -339,7 +339,7 @@ pub fn key_routes(
     }
 
     let components = store.table("components");
-    let mut components_by_file: IndexMap<Option<String>, Vec<&Row>> = IndexMap::new();
+    let mut components_by_file: IndexMap<Option<String>, Vec<&Row>> = IndexMap::default();
     for c in components.iter() {
         components_by_file.entry(text(c, "file")).or_default().push(c);
     }
@@ -394,13 +394,13 @@ pub fn key_routes(
     //     transform. The pipe's file declares no component, so no other route gives it a site.
     //     Ranked with `ts_call` - see `rank`.
     let lit_ways = literal_ways(store, &branches);
-    let mut pipe_of_file: IndexMap<String, IndexSet<String>> = IndexMap::new();
+    let mut pipe_of_file: IndexMap<String, IndexSet<String>> = IndexMap::default();
     for p in store.table("pipes").iter() {
         if let (Some(file), Some(name)) = (text(p, "file"), text(p, "pipe_name")) {
             pipe_of_file.entry(file).or_default().insert(name);
         }
     }
-    let mut uses: IndexMap<String, Vec<(&Row, String, Via)>> = IndexMap::new();
+    let mut uses: IndexMap<String, Vec<(&Row, String, Via)>> = IndexMap::default();
     for e in expressions.iter() {
         let Some(n) = present(e, "node").and_then(|x| node_by_id.get(&x).copied()) else { continue };
         for name in e.get("pipes").and_then(|p| p.as_array()).into_iter().flatten().filter_map(|v| v.as_str()) {
@@ -530,7 +530,7 @@ pub fn key_routes(
         }
     }
 
-    let mut component_by_class: IndexMap<Option<String>, Option<String>> = IndexMap::new();
+    let mut component_by_class: IndexMap<Option<String>, Option<String>> = IndexMap::default();
     for c in components.iter() {
         component_by_class.entry(text(c, "class")).or_insert_with(|| text(c, "id"));
     }

@@ -22,7 +22,7 @@
 //! exactly one place.
 
 use super::store::{Row, Store};
-use indexmap::IndexMap;
+use crate::rows::IndexMap;
 use serde_json::Value;
 
 /// One assignment row the feature pass proved to be a guarded ternary write.
@@ -63,7 +63,7 @@ fn property_of(row: &Row) -> String {
 /// File -> its component, or nothing when the file declares more than one and the literal
 /// names neither.
 fn component_by_file(store: &Store<'_>) -> IndexMap<Option<String>, Option<String>> {
-    let mut out: IndexMap<Option<String>, Option<String>> = IndexMap::new();
+    let mut out: IndexMap<Option<String>, Option<String>> = IndexMap::default();
     for c in store.table("components").iter() {
         let file = text(c, "file");
         if out.contains_key(&file) {
@@ -83,14 +83,14 @@ fn component_by_file(store: &Store<'_>) -> IndexMap<Option<String>, Option<Strin
 /// condition to the key would demand a capability one of its ways in does not need — which
 /// HIDES content from callers entitled to it.
 fn member_properties(store: &Store<'_>, ternary_writes: &TernaryWrites) -> IndexMap<String, String> {
-    let mut by_member: IndexMap<String, Vec<&Row>> = IndexMap::new();
+    let mut by_member: IndexMap<String, Vec<&Row>> = IndexMap::default();
     for a in ternary_writes.values() {
         let Some(member) = id_of(a, "member") else { continue };
         by_member.entry(member).or_default().push(a);
     }
 
     let calls = store.table("calls");
-    let mut sites: IndexMap<String, Vec<&Row>> = IndexMap::new();
+    let mut sites: IndexMap<String, Vec<&Row>> = IndexMap::default();
     for c in calls.iter() {
         let (Some(target), Some(_)) = (id_of(c, "callee_id"), id_of(c, "member")) else {
             continue;
@@ -98,7 +98,7 @@ fn member_properties(store: &Store<'_>, ternary_writes: &TernaryWrites) -> Index
         sites.entry(target).or_default().push(c);
     }
 
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     for (target, call_sites) in sites {
         let mut prop: Option<String> = None;
         let mut ok = true;
@@ -140,14 +140,14 @@ fn member_properties(store: &Store<'_>, ternary_writes: &TernaryWrites) -> Index
 /// same property says the key needs BOTH, which is wrong the moment they are alternative
 /// renders in different subtrees.
 fn gate_by_property(store: &Store<'_>) -> IndexMap<String, Option<String>> {
-    let mut class_of_component: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut class_of_component: IndexMap<String, Option<String>> = IndexMap::default();
     for c in store.table("components").iter() {
         if let Some(id) = id_of(c, "id") {
             class_of_component.insert(id, id_of(c, "class"));
         }
     }
 
-    let mut out: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut out: IndexMap<String, Option<String>> = IndexMap::default();
     for g in store.table("gates").iter() {
         let Some(Value::Array(reads)) = g.get("reads") else { continue };
         let Some(component) = id_of(g, "component") else { continue };
@@ -182,14 +182,14 @@ fn spans_by_file(
     ternary_writes: &TernaryWrites,
     member_prop: &IndexMap<String, String>,
 ) -> IndexMap<String, Vec<Span>> {
-    let mut class_file: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut class_file: IndexMap<String, Option<String>> = IndexMap::default();
     for r in store.table("classes").iter() {
         if let Some(id) = id_of(r, "id") {
             class_file.insert(id, text(r, "file"));
         }
     }
 
-    let mut out: IndexMap<String, Vec<Span>> = IndexMap::new();
+    let mut out: IndexMap<String, Vec<Span>> = IndexMap::default();
     let mut add = |file: Option<String>, span: Span| {
         if let Some(file) = file.filter(|f| !f.is_empty()) {
             out.entry(file).or_default().push(span);
@@ -289,7 +289,7 @@ mod tests {
     use serde_json::{json, Map};
 
     fn writes_of(rows: Value) -> TernaryWrites {
-        let mut out = TernaryWrites::new();
+        let mut out = TernaryWrites::default();
         for r in rows.as_array().expect("rows") {
             let row = Row::Built(r.as_object().cloned().expect("a row"));
             out.insert(id_of(&row, "id").unwrap_or_default(), row);

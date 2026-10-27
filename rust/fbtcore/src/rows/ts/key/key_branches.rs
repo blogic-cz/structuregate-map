@@ -36,7 +36,7 @@ use super::key_arms::template_arms;
 use super::gate_tsrows::TsRows;
 use super::gate_values::EnumIndex;
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
 
 fn cell(row: &Row, field: &str) -> Option<String> {
@@ -419,7 +419,7 @@ impl Branches {
     pub fn conds(&self, store: &Store<'_>, idx: &EnumIndex) -> Conds {
         let step = crate::trace::stage("branches: read the rows");
         let rows = TsRows::of(store);
-        let mut bound: IndexMap<String, IndexSet<String>> = IndexMap::new();
+        let mut bound: IndexMap<String, IndexSet<String>> = IndexMap::default();
         for f in store.table("functions").iter() {
             let Some(parent) = cell(f, "parent") else { continue };
             let Some(Value::Array(params)) = f.get("params") else { continue };
@@ -428,7 +428,7 @@ impl Branches {
         }
         let expressions = store.table("expressions");
         // BY ROW, NOT BY TREE: an AST is decoded when it is read (`store::Cell`).
-        let mut rows_of: IndexMap<String, &Row> = IndexMap::new();
+        let mut rows_of: IndexMap<String, &Row> = IndexMap::default();
         for e in expressions.iter() {
             if let Some(id) = cell(e, "id") {
                 rows_of.insert(id, e);
@@ -441,7 +441,7 @@ impl Branches {
                 Some(rows.resolve_in(super::astreads::unwrap(ast), names, idx, member))
             })
         };
-        let none = IndexSet::new();
+        let none = IndexSet::default();
         let mut out = Conds::new();
         drop(step);
         let step = crate::trace::stage("branches: resolve the conditions");
@@ -484,7 +484,7 @@ fn push_way(ways: &mut Vec<Vec<String>>, chain: Vec<String>) {
 pub fn literal_ways(store: &Store<'_>, branches: &Branches) -> IndexMap<String, Vec<Vec<String>>> {
     let keys: KeySet =
         store.table("translations").iter().filter_map(|t| cell(t, "key")).collect();
-    let mut writes: IndexMap<String, Vec<(i64, i64, Vec<String>)>> = IndexMap::new();
+    let mut writes: IndexMap<String, Vec<(i64, i64, Vec<String>)>> = IndexMap::default();
     let (assignments, returns, calls) = (store.table("assignments"), store.table("returns"), store.table("calls"));
     let statements = assignments.iter().chain(returns.iter()).map(|r| (r, r.get("value").into_iter().collect::<Vec<_>>()))
         .chain(calls.iter().map(|c| (c, c.get("args").and_then(|a| a.as_array()).into_iter().flatten().collect())));
@@ -509,7 +509,7 @@ pub fn literal_ways(store: &Store<'_>, branches: &Branches) -> IndexMap<String, 
             writes.entry(format!("{key} {file}")).or_default().push((line, end, chain));
         }
     }
-    let mut out: IndexMap<String, Vec<Vec<String>>> = IndexMap::new();
+    let mut out: IndexMap<String, Vec<Vec<String>>> = IndexMap::default();
     for s in store.table("string_literals").iter() {
         let Some(Value::String(value)) = s.get("value") else { continue };
         let (Some(file), Some(line)) = (cell(s, "file"), number(s, "line")) else { continue };

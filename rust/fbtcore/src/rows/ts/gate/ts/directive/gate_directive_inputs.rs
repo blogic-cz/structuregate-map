@@ -65,18 +65,18 @@ impl<'a> Mirror<'a> {
         returns: &'a [Row],
     ) -> Self {
         let mut m = Mirror {
-            writes: IndexMap::new(),
-            exprs: IndexMap::new(),
-            branches: IndexMap::new(),
-            calls: IndexMap::new(),
-            returns: IndexMap::new(),
-            locals: IndexMap::new(),
-            never: IndexSet::new(),
-            dead: IndexSet::new(),
-            dead_params: IndexSet::new(),
-            parent: IndexMap::new(),
-            children: IndexMap::new(),
-            params: IndexMap::new(),
+            writes: IndexMap::default(),
+            exprs: IndexMap::default(),
+            branches: IndexMap::default(),
+            calls: IndexMap::default(),
+            returns: IndexMap::default(),
+            locals: IndexMap::default(),
+            never: IndexSet::default(),
+            dead: IndexSet::default(),
+            dead_params: IndexSet::default(),
+            parent: IndexMap::default(),
+            children: IndexMap::default(),
+            params: IndexMap::default(),
             rows: TsRows::of(store),
         };
         (m.parent, m.params) = lists::scopes(store);
@@ -457,7 +457,7 @@ pub(super) fn mirror_restriction(cx: &Ctx<'_>, f: &Carried, gate_ast: Option<&Va
     if !f.tests.is_empty() {
         return lists::restriction(cx, f, en, gate_ast);
     }
-    let mut by_dim: IndexMap<&str, &Comparison> = IndexMap::new();
+    let mut by_dim: IndexMap<&str, &Comparison> = IndexMap::default();
     for c in &f.comparisons {
         by_dim.insert(c.dim.as_str(), c);
     }

@@ -24,7 +24,7 @@ use super::gate_tsrows::TsRows;
 use super::gate_values::{enum_of_type_ref, EnumIndex};
 use super::astreads::{is_read, unwrap};
 use super::store::Store;
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
 
 /// Row id of every member or `const` holding such a call -> the enum and members it tests in, and whether
@@ -36,7 +36,7 @@ pub fn curried(
     bound: &IndexMap<String, IndexSet<String>>,
 ) -> IndexMap<String, (String, Vec<String>, bool)> {
     // (factory, list the call handed it) by the row the call initialises.
-    let mut built: IndexMap<String, (String, Value)> = IndexMap::new();
+    let mut built: IndexMap<String, (String, Value)> = IndexMap::default();
     for table in ["members", "consts"] {
         for r in store.table(table).iter() {
             let (Some(Value::String(id)), Some(value)) = (r.get("id"), r.get("value")) else { continue };
@@ -45,12 +45,12 @@ pub fn curried(
             built.insert(id.clone(), (factory, list.clone()));
         }
     }
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     if built.is_empty() {
         return out;
     }
     // THE FACTORY'S ONE UNCONDITIONAL RETURN, the arrow it hands back.
-    let mut returns: IndexMap<&str, Vec<Option<&str>>> = IndexMap::new();
+    let mut returns: IndexMap<&str, Vec<Option<&str>>> = IndexMap::default();
     let all = store.table("returns");
     for r in all.iter() {
         let Some(member) = r.get("member").and_then(Value::as_str).filter(|m| built.values().any(|(f, _)| f == m)) else { continue };
@@ -60,9 +60,9 @@ pub fn curried(
     let wanted: IndexMap<&str, &str> = returns.iter()
         .filter_map(|(m, xs)| match xs.as_slice() { [Some(x)] => Some((*x, *m)), _ => None })
         .collect();
-    let none = IndexSet::new();
+    let none = IndexSet::default();
     let protos = some_methods(store);
-    let mut params: IndexMap<&str, &Value> = IndexMap::new();
+    let mut params: IndexMap<&str, &Value> = IndexMap::default();
     let functions = store.table("functions");
     for f in functions.iter() {
         if let (Some(id), Some(Value::Array(ps))) = (f.get("id").and_then(Value::as_str), f.get("params")) {
@@ -170,7 +170,7 @@ fn definition_guards(store: &Store<'_>, found: &IndexMap<String, (String, Option
             }
         }
     }
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     if spans.is_empty() {
         return out;
     }
@@ -195,7 +195,7 @@ fn definition_guards(store: &Store<'_>, found: &IndexMap<String, (String, Option
 /// parameter is a type, never an argument. A method two definitions give two bodies is read only when EVERY
 /// one proves it: which assignment runs last is not in the source.
 fn some_methods(store: &Store<'_>) -> IndexSet<String> {
-    let mut found: IndexMap<String, (String, Option<String>)> = IndexMap::new(); // fn id -> (target key, the one param)
+    let mut found: IndexMap<String, (String, Option<String>)> = IndexMap::default(); // fn id -> (target key, the one param)
     for f in store.table("functions").iter() {
         if f.get("form").and_then(Value::as_str) != Some("prototype-method") {
             continue;
@@ -210,7 +210,7 @@ fn some_methods(store: &Store<'_>) -> IndexSet<String> {
         let one = match params.as_slice() { [p] => Some(p.to_string()), _ => None };
         found.insert(id.to_string(), (key, one));
     }
-    let mut returns: IndexMap<&str, Vec<Option<String>>> = IndexMap::new();
+    let mut returns: IndexMap<&str, Vec<Option<String>>> = IndexMap::default();
     let all = store.table("returns");
     let guards = definition_guards(store, &found);
     for r in all.iter() {
@@ -224,7 +224,7 @@ fn some_methods(store: &Store<'_>) -> IndexSet<String> {
     let one: IndexMap<String, &str> = returns.iter()
         .filter_map(|(m, xs)| match xs.as_slice() { [Some(x)] => Some((x.clone(), *m)), _ => None })
         .collect();
-    let mut proves: IndexSet<&str> = IndexSet::new();
+    let mut proves: IndexSet<&str> = IndexSet::default();
     for e in store.table("expressions").iter() {
         let Some(fid) = e.get("id").and_then(Value::as_str).and_then(|x| one.get(x)) else { continue };
         let Some(p) = found[*fid].1.as_deref() else { continue };
@@ -238,7 +238,7 @@ fn some_methods(store: &Store<'_>) -> IndexSet<String> {
             proves.insert(*fid);
         }
     }
-    let mut every: IndexMap<&str, bool> = IndexMap::new();
+    let mut every: IndexMap<&str, bool> = IndexMap::default();
     for (id, (key, _)) in &found {
         *every.entry(key.as_str()).or_insert(true) &= proves.contains(id.as_str());
     }

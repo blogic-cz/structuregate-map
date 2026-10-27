@@ -7,7 +7,7 @@
 //! (`derive/delta.rs`) finds the rows that did not move still equal.
 
 use super::store::{Row, Store};
-use indexmap::IndexMap;
+use crate::rows::IndexMap;
 use serde_json::Value;
 
 /// The chain's id: `ch:` and the first 16 hex digits of a hash of its ids in order.

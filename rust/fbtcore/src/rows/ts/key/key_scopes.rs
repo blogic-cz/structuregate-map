@@ -17,7 +17,7 @@
 
 use super::closure::RenderPath;
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -60,7 +60,7 @@ fn plain_chain(s: &str) -> bool {
 impl Scopes {
     pub fn new(store: &Store<'_>) -> Scopes {
         // (class, member) the class writes itself: an assignment on `this`, or a setter.
-        let mut written: IndexSet<(String, String)> = IndexSet::new();
+        let mut written: IndexSet<(String, String)> = IndexSet::default();
         for a in store.table("assignments").iter() {
             if cell(a, "scope").as_deref() != Some("this") {
                 continue;
@@ -81,7 +81,7 @@ impl Scopes {
             }
         }
         // (class, name) of every `typeof X` field: an enum alias the template reads constants through.
-        let mut aliases: IndexSet<(String, String)> = IndexSet::new();
+        let mut aliases: IndexSet<(String, String)> = IndexSet::default();
         for m in store.table("members").iter() {
             if cell(m, "type").is_some_and(|t| t.starts_with("typeof "))
                 && let (Some(class), Some(name)) = (cell(m, "class"), cell(m, "name"))
@@ -89,20 +89,20 @@ impl Scopes {
                 aliases.insert((class, name));
             }
         }
-        let mut member_of: IndexMap<String, String> = IndexMap::new();
+        let mut member_of: IndexMap<String, String> = IndexMap::default();
         for io in store.table("io").iter() {
             if let (Some(id), Some(member)) = (cell(io, "id"), cell(io, "member")) {
                 member_of.insert(id, member);
             }
         }
         // (node, to_class) -> the render ids of it, each with the parent class that renders.
-        let mut renders: IndexMap<(String, String), Vec<(String, String)>> = IndexMap::new();
+        let mut renders: IndexMap<(String, String), Vec<(String, String)>> = IndexMap::default();
         for r in store.table("renders").iter() {
             if let (Some(id), Some(node), Some(class)) = (cell(r, "id"), cell(r, "node"), cell(r, "to_class")) {
                 renders.entry((node, class)).or_default().push((id, cell(r, "from_class").unwrap_or_default()));
             }
         }
-        let mut binds: IndexMap<String, IndexMap<String, String>> = IndexMap::new();
+        let mut binds: IndexMap<String, IndexMap<String, String>> = IndexMap::default();
         for iu in store.table("input_usage").iter() {
             let (Some(io), Some(node), Some(class), Some(source)) =
                 (cell(iu, "io"), cell(iu, "node"), cell(iu, "to_class"), cell(iu, "source"))
@@ -120,7 +120,7 @@ impl Scopes {
                 binds.entry(id.clone()).or_default().insert(member.clone(), source.clone());
             }
         }
-        let mut gate_comp = IndexMap::new();
+        let mut gate_comp = IndexMap::default();
         for g in store.table("gates").iter() {
             if let (Some(id), Some(c)) = (cell(g, "id"), cell(g, "component")) {
                 gate_comp.insert(id, c);

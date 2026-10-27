@@ -49,7 +49,7 @@ use super::astreads::unwrap;
 use super::gate_values::{EnumIndex, MemberEnums};
 use super::jsstr::sort_key;
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
 
 #[path = "gate_directives_index.rs"]
@@ -72,7 +72,7 @@ fn input_keys_of(
     chain: &[Class],
     enum_id: &str,
 ) -> Vec<String> {
-    let mut keys: IndexSet<String> = IndexSet::new();
+    let mut keys: IndexSet<String> = IndexSet::default();
     for cls in chain {
         for m in members_by_class.get(&cls.id).map(Vec::as_slice).unwrap_or(&[]) {
             if str_of(m.get("kind")).as_deref() != Some("setter") {
@@ -133,7 +133,7 @@ fn directive_restriction(facts: &Facts, literal_keys: Option<&Vec<String>>) -> V
     // Deduplicated by dimension: a later comparison on a dimension already seen REPLACES the
     // value while keeping the first one's position, which is what building a map from
     // entries does.
-    let mut by_dim: IndexMap<&str, &Comparison> = IndexMap::new();
+    let mut by_dim: IndexMap<&str, &Comparison> = IndexMap::default();
     for c in &facts.comparisons {
         by_dim.insert(c.dim.as_str(), c);
     }
@@ -174,13 +174,13 @@ struct Ctx<'a> {
 }
 
 fn facts_for(ctx: &Ctx<'_>, chain: &[Class]) -> Vec<Facts> {
-    let mut by_field: IndexMap<String, (String, IndexSet<String>, bool)> = IndexMap::new();
+    let mut by_field: IndexMap<String, (String, IndexSet<String>, bool)> = IndexMap::default();
     // NEAREST BINDER WINS, which is what the instance ends up holding: the base constructor
     // runs first and the subclass overwrites it, so an ancestor's constant is not a second
     // value on the same field. The chain is walked at all because the binding need not be on
     // the concrete class. A field the nearer class assigns something UNREADABLE also closes
     // it — the ancestor's constant no longer survives.
-    let mut nearest: IndexMap<String, String> = IndexMap::new();
+    let mut nearest: IndexMap<String, String> = IndexMap::default();
     for cls in chain {
         for a in ctx.assignments_by_class.get(&cls.id).map(Vec::as_slice).unwrap_or(&[]) {
             let Some(target) = id_of(a, "target_id") else { continue };
@@ -200,7 +200,7 @@ fn facts_for(ctx: &Ctx<'_>, chain: &[Class]) -> Vec<Facts> {
             }
             let slot = by_field
                 .entry(target)
-                .or_insert_with(|| (enum_id.clone(), IndexSet::new(), false));
+                .or_insert_with(|| (enum_id.clone(), IndexSet::default(), false));
             slot.1.insert(rest.to_string());
             // An assignment under an `if` or a `case` binds the constant CONDITIONALLY, so
             // the class no longer proves one value reaches the comparison.
@@ -268,8 +268,8 @@ pub fn directive_restrictions(
     let selector_index = store.table("selector_index");
     let gates = store.table("gates");
 
-    let mut expr_by_file: IndexMap<String, Vec<&Row>> = IndexMap::new();
-    let mut expr_by_id: IndexMap<String, &Row> = IndexMap::new();
+    let mut expr_by_file: IndexMap<String, Vec<&Row>> = IndexMap::default();
+    let mut expr_by_id: IndexMap<String, &Row> = IndexMap::default();
     for e in expressions.iter() {
         if let Some(file) = id_of(e, "file") {
             expr_by_file.entry(file).or_default().push(e);
@@ -278,14 +278,14 @@ pub fn directive_restrictions(
             expr_by_id.insert(id, e);
         }
     }
-    let mut assignments_by_class: IndexMap<String, Vec<&Row>> = IndexMap::new();
+    let mut assignments_by_class: IndexMap<String, Vec<&Row>> = IndexMap::default();
     for a in assignments.iter() {
         if let Some(class) = id_of(a, "class") {
             assignments_by_class.entry(class).or_default().push(a);
         }
     }
-    let mut members_by_class: IndexMap<String, Vec<&Row>> = IndexMap::new();
-    let mut class_of_member: IndexMap<String, String> = IndexMap::new();
+    let mut members_by_class: IndexMap<String, Vec<&Row>> = IndexMap::default();
+    let mut class_of_member: IndexMap<String, String> = IndexMap::default();
     for m in members.iter() {
         let Some(id) = id_of(m, "id") else { continue };
         if let Some(class) = id_of(m, "class") {
@@ -293,13 +293,13 @@ pub fn directive_restrictions(
             members_by_class.entry(class).or_default().push(m);
         }
     }
-    let mut interface_name: IndexMap<String, String> = IndexMap::new();
+    let mut interface_name: IndexMap<String, String> = IndexMap::default();
     for i in interfaces.iter() {
         if let (Some(id), Some(name)) = (id_of(i, "id"), str_of(i.get("name"))) {
             interface_name.insert(id, name);
         }
     }
-    let mut type_members: IndexMap<String, Vec<&Row>> = IndexMap::new();
+    let mut type_members: IndexMap<String, Vec<&Row>> = IndexMap::default();
     for tm in type_members_rows.iter() {
         let Some(owner) = id_of(tm, "owner") else { continue };
         let Some(name) = interface_name.get(&owner) else { continue };
@@ -308,7 +308,7 @@ pub fn directive_restrictions(
     // A SELECTOR CAN NAME SEVERAL CLASSES, and the join this replaces produced one row per
     // class. Keeping only one of them would decide a gate by whichever class happened to be
     // indexed last.
-    let mut classes_of_selector: IndexMap<String, Vec<String>> = IndexMap::new();
+    let mut classes_of_selector: IndexMap<String, Vec<String>> = IndexMap::default();
     for si in selector_index.iter() {
         let Some(selector) = str_of(si.get("selector")) else { continue };
         if let Some(class) = id_of(si, "class") {
@@ -331,10 +331,10 @@ pub fn directive_restrictions(
     let (branches, calls, returns) =
         (store.table("branches"), store.table("calls"), store.table("returns"));
     let mirror = inputs::Mirror::new(store, &assignments, &expressions, &branches, &calls, &returns);
-    let mut per_input: IndexMap<(String, String), Vec<inputs::Carried>> = IndexMap::new();
+    let mut per_input: IndexMap<(String, String), Vec<inputs::Carried>> = IndexMap::default();
 
-    let mut per_class: IndexMap<String, Vec<Facts>> = IndexMap::new();
-    let mut out: IndexMap<String, Vec<Value>> = IndexMap::new();
+    let mut per_class: IndexMap<String, Vec<Facts>> = IndexMap::default();
+    let mut out: IndexMap<String, Vec<Value>> = IndexMap::default();
     let mut stats = DirectiveStats::default();
     for g in gates.iter() {
         if str_of(g.get("gate_kind")).as_deref() != Some("structural") {

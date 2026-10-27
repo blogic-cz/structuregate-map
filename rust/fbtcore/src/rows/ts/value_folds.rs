@@ -9,7 +9,7 @@
 use super::gate_values::EnumIndex;
 use super::jsstr::sort_key;
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
 
 /// One way in, as the gate ids on it.
@@ -62,7 +62,7 @@ fn split(k: &str) -> (&str, &str) {
 /// A DIMENSION IS KEYED BY ITS TEXT AS RENAMED ON ITS WAY (`key_scopes`): a child's `item.kind` under
 /// `[item]="vm"` is `vm.kind`, so it meets the parent's gates on that variable instead of beside them.
 pub fn per_way_allowed(ways: &[Way], gates: &GateMap, idx: &EnumIndex, renames: Option<&Renames>) -> PerWay {
-    per_way_keyed(ways, gates, idx, renames, None, None, &mut Labels::new(), &mut Classes::new(), &mut SetSides::new())
+    per_way_keyed(ways, gates, idx, renames, None, None, &mut Labels::default(), &mut Classes::new(), &mut SetSides::default())
 }
 
 /// `per_way_allowed`, with an `arg:` link keyed by the callee parameter it restricts where it reads one: the
@@ -80,10 +80,10 @@ pub fn per_way_keyed(
 ) -> PerWay {
     let mut out = Vec::with_capacity(ways.len());
     for (i, way) in ways.iter().enumerate() {
-        let mut here: IndexMap<String, IndexSet<String>> = IndexMap::new();
+        let mut here: IndexMap<String, IndexSet<String>> = IndexMap::default();
         // Per SET dimension: the one `in` kept, and every member a `not_in` removed.
-        let mut set_kept: IndexMap<String, IndexSet<String>> = IndexMap::new();
-        let mut set_out: IndexMap<String, IndexSet<String>> = IndexMap::new();
+        let mut set_kept: IndexMap<String, IndexSet<String>> = IndexMap::default();
+        let mut set_out: IndexMap<String, IndexSet<String>> = IndexMap::default();
         for g in way {
             let Some((_, rows)) = gates.get(g) else { continue };
             let spelled = |r: &Value| match renames.and_then(|r| r.get(i)).and_then(|m| m.get(g)) {
@@ -91,7 +91,7 @@ pub fn per_way_keyed(
                 None => field(r, "dim"),
             };
             let param = params.and_then(|p| p.get(g));
-            let mut dims_of: IndexMap<String, IndexSet<String>> = IndexMap::new();
+            let mut dims_of: IndexMap<String, IndexSet<String>> = IndexMap::default();
             if param.is_some() {
                 for r in rows {
                     dims_of.entry(field(r, "enum")).or_default().insert(spelled(r));
@@ -132,7 +132,7 @@ pub fn per_way_keyed(
                 }
                 // A DIMENSION ALREADY HELD IS NARROWED IN PLACE: what this row allows is asked per held member, never
                 // built - an `unknown` or `not_in` row is the enum's whole domain, copied once per gate per way.
-                let listed: IndexSet<String> = if op == "unknown" { IndexSet::new() } else { values_of(r).into_iter().collect() };
+                let listed: IndexSet<String> = if op == "unknown" { IndexSet::default() } else { values_of(r).into_iter().collect() };
                 let allows = |v: &String| match op.as_str() {
                     "unknown" => info.domain.contains(v),
                     "in" => listed.contains(v),
@@ -161,7 +161,7 @@ pub fn per_way_keyed(
 
 /// Spellings of `dim` through the way's bindings, both directions, transitively (bounded).
 fn spellings(dim: &str, pairs: &[(String, String)]) -> IndexSet<String> {
-    let mut out: IndexSet<String> = IndexSet::from([dim.to_string()]);
+    let mut out: IndexSet<String> = IndexSet::from_iter([dim.to_string()]);
     let mut i = 0;
     while i < out.len() && out.len() < 32 {
         let d = out[i].clone();
@@ -199,7 +199,7 @@ fn unify_present(here: &mut IndexMap<String, IndexSet<String>>, pairs: &[(String
             }
         }
     }
-    let mut groups: IndexMap<usize, Vec<String>> = IndexMap::new();
+    let mut groups: IndexMap<usize, Vec<String>> = IndexMap::default();
     for (k, c) in &class {
         groups.entry(*c).or_default().push(k.clone());
     }
@@ -247,7 +247,7 @@ pub fn merge_aliased(rows: &mut Vec<Value>, classes: &Classes) {
 pub fn relabel(rows: &mut [Value], labels: &Labels) {
     for r in rows.iter_mut() {
         let d = field(r, "dimension");
-        let mut parts: IndexSet<String> = IndexSet::new();
+        let mut parts: IndexSet<String> = IndexSet::default();
         for p in d.split(" | ") {
             let k = format!("{}#{p}", field(r, "enum"));
             match labels.get(&k) {
@@ -270,7 +270,7 @@ pub fn relabel(rows: &mut [Value], labels: &Labels) {
 /// were met, a dimension first restricted on the third way missed the two ways above it
 /// and came out looking restricted when those two allow everything.
 fn dimensions(per_way: &PerWay) -> IndexSet<String> {
-    let mut keys = IndexSet::new();
+    let mut keys = IndexSet::default();
     for here in per_way {
         for k in here.keys() {
             keys.insert(k.clone());
@@ -281,10 +281,10 @@ fn dimensions(per_way: &PerWay) -> IndexSet<String> {
 
 /// The values every way in still permits between them, where that is less than the domain.
 pub fn fold_values(ways: &[Way], gates: &GateMap, idx: &EnumIndex, per_way: Option<&PerWay>) -> Vec<Value> {
-    let mut sides = SetSides::new();
+    let mut sides = SetSides::default();
     match per_way {
         Some(p) => fold_sided(p, idx, &sides),
-        None => fold_sided(&per_way_keyed(ways, gates, idx, None, None, None, &mut Labels::new(), &mut Classes::new(), &mut sides), idx, &sides),
+        None => fold_sided(&per_way_keyed(ways, gates, idx, None, None, None, &mut Labels::default(), &mut Classes::new(), &mut sides), idx, &sides),
     }
 }
 
@@ -295,7 +295,7 @@ pub fn fold_sided(per_way: &PerWay, idx: &EnumIndex, sides: &SetSides) -> Vec<Va
         let (enum_id, dim) = split(&k);
         let Some(info) = idx.by_id.get(enum_id) else { continue };
 
-        let mut union: IndexSet<String> = IndexSet::new();
+        let mut union: IndexSet<String> = IndexSet::default();
         for here in per_way {
             // ABSENT AND EMPTY ARE DIFFERENT ANSWERS. A way that never mentions the
             // dimension permits all of it; a way that permits NOTHING permits nothing. An
@@ -357,7 +357,7 @@ pub fn fold_sided(per_way: &PerWay, idx: &EnumIndex, sides: &SetSides) -> Vec<Va
 /// across ways. Keyed by text, ways that spelled the argument differently shared no dimension and the fold widened it.
 /// Every other row is keyed by its text, as before.
 fn fold_enums(per_way: &PerWay, idx: &EnumIndex, published: &[Value]) -> Vec<Value> {
-    let mut dims: IndexMap<String, IndexSet<String>> = IndexMap::new();
+    let mut dims: IndexMap<String, IndexSet<String>> = IndexMap::default();
     for k in dimensions(per_way) {
         let (enum_id, dim) = split(&k);
         dims.entry(enum_id.to_string()).or_default().insert(dim.to_string());
@@ -368,7 +368,7 @@ fn fold_enums(per_way: &PerWay, idx: &EnumIndex, published: &[Value]) -> Vec<Val
             continue;
         }
         let Some(info) = idx.by_id.get(&enum_id) else { continue };
-        let mut union: IndexSet<String> = IndexSet::new();
+        let mut union: IndexSet<String> = IndexSet::default();
         for here in per_way {
             let mut mentioned = false;
             for name in &names {
@@ -440,7 +440,7 @@ pub fn unreadable_values(
         let (enum_id, dim) = split(&k);
         let Some(info) = idx.by_id.get(enum_id) else { continue };
 
-        let mut union: IndexSet<String> = IndexSet::new();
+        let mut union: IndexSet<String> = IndexSet::default();
         let mut on_every_way = true;
         let mut some_way_knows_nothing = false;
         for here in per_way {

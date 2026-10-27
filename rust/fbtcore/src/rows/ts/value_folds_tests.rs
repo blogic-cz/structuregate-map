@@ -282,7 +282,7 @@ fn a_nameless_declaration_sorts_under_None_and_not_under_the_empty_string() {
 #[test]
 fn every_feature_a_gate_requires_gets_its_own_row_to_intersect() {
     let mut store = Store::from_payload(serde_json::Map::new(), "typescript");
-    let mut gates: IndexMap<String, (Option<String>, Vec<String>)> = IndexMap::new();
+    let mut gates: IndexMap<String, (Option<String>, Vec<String>)> = IndexMap::default();
     gates.insert("g:1".into(), (Some("ng:1".into()), vec!["A".into(), "B".into()]));
     gates.insert("g:2".into(), (None, vec![]));
     assert_eq!(write_gate_features(&mut store, &gates), 2);
@@ -308,8 +308,8 @@ fn an_arg_link_reading_two_dims_of_one_enum_keeps_its_text_keys() {
     ];
     let gates = map(&[("arg:1", rows)]);
     let params: ArgParams = [("arg:1".to_string(), "param:f#0".to_string())].into_iter().collect();
-    let mut labels = Labels::new();
-    let per = per_way_keyed(&[way(&["arg:1"])], &gates, &idx_of(FOUR), None, None, Some(&params), &mut labels, &mut Classes::new(), &mut SetSides::new());
+    let mut labels = Labels::default();
+    let per = per_way_keyed(&[way(&["arg:1"])], &gates, &idx_of(FOUR), None, None, Some(&params), &mut labels, &mut Classes::new(), &mut SetSides::default());
     assert!(per[0].contains_key("e:1#a.kind") && per[0].contains_key("e:1#b.kind"));
     assert!(labels.is_empty(), "no parameter key for two dimensions");
 }
@@ -322,7 +322,7 @@ fn aliased_present_keys_on_one_way_intersect() {
     ];
     let gates = map(&[("g:1", rows)]);
     let aliases: Aliases = vec![vec![("vm.k".to_string(), "k".to_string())]];
-    let per = per_way_keyed(&[way(&["g:1"])], &gates, &idx_of(FOUR), None, Some(&aliases), None, &mut Labels::new(), &mut Classes::new(), &mut SetSides::new());
+    let per = per_way_keyed(&[way(&["g:1"])], &gates, &idx_of(FOUR), None, Some(&aliases), None, &mut Labels::default(), &mut Classes::new(), &mut SetSides::default());
     let b: IndexSet<String> = ["B".to_string()].into_iter().collect();
     assert_eq!(per[0]["e:1#vm.k"], b);
     assert_eq!(per[0]["e:1#k"], b);

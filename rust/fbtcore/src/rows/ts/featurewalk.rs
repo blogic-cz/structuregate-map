@@ -5,7 +5,7 @@
 //! level down.
 
 use super::jsstr;
-use indexmap::IndexMap;
+use crate::rows::IndexMap;
 use serde_json::Value;
 
 /// A JavaScript `Set`, for the one place both of its behaviours are needed at once.
@@ -85,7 +85,7 @@ pub fn walk_value(v: &Value, fn_: &mut dyn FnMut(&serde_json::Map<String, Value>
 
 /// Every `<root>.X` a serialised value names, at any depth.
 pub fn codes_in(value: &Value, root: &str) -> IndexMap<String, bool> {
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     let prefix = format!("{root}.");
     walk_value(value, &mut |n| {
         if let Some(Value::String(member)) = n.get("$member")
@@ -247,7 +247,7 @@ pub fn necessary_nodes(node: &Value) -> Vec<&serde_json::Map<String, Value>> {
 /// when the feature is OFF — the row then told a caller to switch on the very thing that
 /// hides the content.
 pub fn necessary_idents(node: &Value) -> IndexMap<String, bool> {
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     for n in necessary_nodes(node) {
         if n.get("$kind").and_then(|k| k.as_str()) == Some("Identifier")
             && let Some(Value::String(expr)) = n.get("$expr")

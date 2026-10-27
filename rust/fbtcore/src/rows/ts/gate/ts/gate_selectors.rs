@@ -15,7 +15,7 @@
 use super::gate_predicates::{kind, local, method_call, only_return, param_enum};
 use super::gate_values::EnumIndex;
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
 
 fn text<'a>(n: &'a Value, field: &str) -> Option<&'a str> {
@@ -57,8 +57,8 @@ struct Decls<'s> {
 
 impl<'s> Decls<'s> {
     fn new(files: &'s [Row], consts: &'s [Row], exprs: &'s [Row], functions: &'s [Row]) -> Decls<'s> {
-        let mut d = Decls { paths: IndexMap::new(), arrows: IndexMap::new(), at: IndexMap::new(),
-                            fns: IndexMap::new(), named: IndexMap::new(), inner: IndexMap::new(), asts: IndexMap::new() };
+        let mut d = Decls { paths: IndexMap::default(), arrows: IndexMap::default(), at: IndexMap::default(),
+                            fns: IndexMap::default(), named: IndexMap::default(), inner: IndexMap::default(), asts: IndexMap::default() };
         for f in files {
             if let (Some(id), Some(path)) = (cell(f, "id"), cell(f, "path")) {
                 d.paths.insert(id, format!("/{}", path.replace('\\', "/")));
@@ -177,13 +177,13 @@ impl Selectors {
             store.table("expressions"), store.table("functions"), store.table("returns"));
         let decls = Decls::new(&files, &consts, &exprs, &functions);
         let written: IndexSet<String> = store.table("assignments").iter().filter_map(|a| cell(a, "target_id")).collect();
-        let mut returned: IndexMap<String, Vec<String>> = IndexMap::new();
+        let mut returned: IndexMap<String, Vec<String>> = IndexMap::default();
         for r in returns.iter() {
             if let (Some(m), Some(x)) = (cell(r, "member"), cell(r, "expression")) {
                 returned.entry(m).or_default().push(x);
             }
         }
-        let mut by_prop = IndexMap::new();
+        let mut by_prop = IndexMap::default();
         for m in store.table("members").iter() {
             let (Some(id), Some(value)) = (cell(m, "id"), m.get("value")) else { continue };
             if cell(m, "kind").as_deref() != Some("property") || written.contains(&id) || !ngrx(value, "select") {

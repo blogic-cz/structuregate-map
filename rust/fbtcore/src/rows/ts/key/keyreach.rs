@@ -59,7 +59,7 @@ use super::value_folds::{
     fold_sided, merge_aliased, per_way_keyed, relabel, unreadable_values, write_gate_features, write_gate_values, Aliases, Classes, Labels, Renames, SetSides,
 };
 use crate::trace::retained;
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
 use std::path::Path;
 
@@ -81,7 +81,7 @@ const TEXT_EXTS: &[&str] = &[
 /// on read, so nothing has to be turned off; it is stated because the language it was
 /// ported from does.
 pub fn read_texts(store: &Store<'_>, root: &Path) -> IndexMap<String, String> {
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     for f in store.table("files").iter() {
         let ext = match f.get("ext") {
             Some(Value::String(s)) => s.to_lowercase(),
@@ -231,7 +231,7 @@ pub fn build_closure(
     // Paths per COMPONENT, computed once for every component any key reaches, then shared by
     // all its keys. Summed over the keyed render sites the paths come to several times as many as
     // keyed by the COMPONENT they all pass through.
-    let mut needed: IndexSet<String> = IndexSet::new();
+    let mut needed: IndexSet<String> = IndexSet::default();
     for hit in routes.values() {
         for comp in hit.sites.keys().flatten() {
             needed.insert(comp.clone());
@@ -376,9 +376,9 @@ pub fn build_closure(
         // ONE WALK OVER THE WAYS, read by both folds — they ask the same question of the
         // same sets, and computing them twice per key was nearly twice the walks one does.
         let ways: Vec<IndexSet<String>> = sets.clone();
-        let mut labels = Labels::new();
+        let mut labels = Labels::default();
         let mut classes = Classes::new();
-        let mut sides = SetSides::new();
+        let mut sides = SetSides::default();
         let per_way = per_way_keyed(&ways, &value_map, &idx, Some(&renames), Some(&aliases), Some(&arg_params), &mut labels, &mut classes, &mut sides);
         debug_assert_eq!(aliases.len(), ways.len());
         let mut values = fold_sided(&per_way, &idx, &sides);
@@ -430,7 +430,7 @@ pub fn build_closure(
         put("truncated", Value::from(i64::from(cut)));
         (route, tr, row, on)
     }).collect();
-    let mut chains = IndexMap::new();
+    let mut chains = IndexMap::default();
     for (route, how, cells, ways) in folded {
         *counts.entry(route).or_default() += 1;
         if let Some(how) = how {
@@ -541,7 +541,7 @@ pub fn ways_of(
             w.path_sets.push(p.gates.iter().map(|g| g.to_string()).collect());
             // A CHILD'S INPUT READS AS THE PARENT'S EXPRESSION through the edge that binds it (`key_scopes`): the path's own
             // gates are renamed once per path, a chain's sites per chain.
-            let mut owned: IndexMap<String, Vec<super::key_scopes::Step>> = IndexMap::new();
+            let mut owned: IndexMap<String, Vec<super::key_scopes::Step>> = IndexMap::default();
             for (id, at) in p.gates.iter().filter_map(|g| Some((&**g, scopes.gate_comp.get(&**g)?.as_str()))) {
                 let steps = scopes.steps(p, at);
                 if !steps.is_empty() {
@@ -598,7 +598,7 @@ fn features_of(
     gates: &IndexSet<String>,
     map: &IndexMap<String, (Option<String>, Vec<String>)>,
 ) -> IndexSet<String> {
-    let mut out = IndexSet::new();
+    let mut out = IndexSet::default();
     for g in gates {
         if let Some((_, features)) = map.get(g) {
             out.extend(features.iter().cloned());

@@ -26,7 +26,7 @@
 use super::astreads::{is_read, unwrap};
 use super::gate_values::{constant_of, EnumIndex, MemberEnums};
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
 
 #[path = "gate_config_index.rs"]
@@ -184,14 +184,14 @@ fn member_use(
     ctx: &Ctx<'_>,
     by_class: &IndexMap<String, IndexMap<String, Option<ConfigMember>>>,
 ) -> IndexMap<String, IndexMap<String, &'static str>> {
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     for (cls, members) in by_class {
         let Some(c) = ctx.class_by_id.get(cls) else { continue };
         let Some(file) = text(c, "file") else { continue };
 
-        let mut good: IndexSet<String> = IndexSet::new();
-        let mut bad: IndexSet<String> = IndexSet::new();
-        let mut read: IndexSet<String> = IndexSet::new();
+        let mut good: IndexSet<String> = IndexSet::default();
+        let mut bad: IndexSet<String> = IndexSet::default();
+        let mut read: IndexSet<String> = IndexSet::default();
         vocab_tests(ctx, cls, members, &mut good, &mut bad);
 
         if let Some(rows) = ctx.expr_by_file.get(&file) {
@@ -243,7 +243,7 @@ fn member_use(
             }
         }
 
-        let mut verdict: IndexMap<String, &'static str> = IndexMap::new();
+        let mut verdict: IndexMap<String, &'static str> = IndexMap::default();
         let ordered = good
             .iter()
             .cloned()
@@ -275,7 +275,7 @@ pub(crate) fn literal_entries(ast: Option<&Value>) -> Option<IndexMap<String, Va
         Some(Value::Array(v)) => v,
         _ => &empty,
     };
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     for (i, k) in keys.iter().enumerate() {
         if let Some(Value::String(key)) = k.as_object().and_then(|k| k.get("key")) {
             out.insert(key.clone(), values.get(i).cloned().unwrap_or(Value::Null));
@@ -313,7 +313,7 @@ pub fn config_restrictions_all(
     idx: &EnumIndex,
 ) -> (IndexMap<String, Vec<Value>>, IndexMap<String, Vec<Value>>, ConfigStats) {
     let loops = store.shared("loops", super::key_loops::Loops::new);
-    let mut per_loop: IndexMap<String, Vec<Value>> = IndexMap::new();
+    let mut per_loop: IndexMap<String, Vec<Value>> = IndexMap::default();
     let expressions = store.table("expressions");
     let classes = store.table("classes");
     let locals = store.table("locals");
@@ -321,10 +321,10 @@ pub fn config_restrictions_all(
     let returns = store.table("returns");
 
     let mut ctx = Ctx {
-        expr_by_id: IndexMap::new(),
-        expr_by_file: IndexMap::new(),
-        class_by_id: IndexMap::new(),
-        by_class: IndexMap::new(),
+        expr_by_id: IndexMap::default(),
+        expr_by_file: IndexMap::default(),
+        class_by_id: IndexMap::default(),
+        by_class: IndexMap::default(),
     };
     for e in expressions.iter() {
         if let Some(id) = id_of(e, "id") {
@@ -350,7 +350,7 @@ pub fn config_restrictions_all(
     let by_class = config_members(store, idx);
     let uses = member_use(&ctx, &by_class);
 
-    let mut classes_of_selector: IndexMap<String, Vec<String>> = IndexMap::new();
+    let mut classes_of_selector: IndexMap<String, Vec<String>> = IndexMap::default();
     for si in store.table("selector_index").iter() {
         let Some(selector) = text(si, "selector") else { continue };
         if let Some(cls) = id_of(si, "class") {
@@ -358,7 +358,7 @@ pub fn config_restrictions_all(
         }
     }
 
-    let mut out: IndexMap<String, Vec<Value>> = IndexMap::new();
+    let mut out: IndexMap<String, Vec<Value>> = IndexMap::default();
     let mut stats = ConfigStats::default();
     for cls in by_class.keys() {
         if uses.get(cls).map(|v| !v.is_empty()).unwrap_or(false) {
