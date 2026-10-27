@@ -56,17 +56,18 @@ export function makeReadLog(ts, feRoot) {
       for (const t of Array.isArray(v.types) ? v.types : []) { symbol(t?.symbol); symbol(t?.aliasSymbol); }
     }
   };
-  const wrapped = new Map();
   return {
-    /** The checker every pass is given: the same one, with each answer noted while a file is open. */
+    /** The checker every pass is given: the same one, with each answer noted while a file is open. Its functions are
+     *  kept per checker, never across them: a method only an earlier program asked kept that program alive to the end. */
     wrap(checker) {
+      const wrapped = new Map();
       return new Proxy(checker, {
         get(target, prop) {
           if (prop === UNRECORDED) return target;
           const value = target[prop];
           if (typeof value !== 'function') return value;
           let fn = wrapped.get(prop);
-          if (fn === undefined || fn.target !== target) {
+          if (fn === undefined) {
             fn = (...args) => {
               const out = value.apply(target, args);
               if (current !== null) {
@@ -84,7 +85,6 @@ export function makeReadLog(ts, feRoot) {
               }
               return out;
             };
-            fn.target = target;
             wrapped.set(prop, fn);
           }
           return fn;

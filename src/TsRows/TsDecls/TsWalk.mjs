@@ -57,6 +57,12 @@ export function makeFileId(store, feRoot, projectId) {
   };
 }
 
+/** The compiler matcher's binding predicate over `names`, made OUT HERE: a closure made in the project loop holds that
+ *  loop's whole scope, and with it every program the walk built, for as long as the registry lives. */
+function bindingNames(names) {
+  return { hasBindingPropertyName: (n) => names.includes(n) };
+}
+
 /**
  * THE FILES OF EVERY PROJECT, one program at a time.
  *
@@ -320,8 +326,8 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
                 // would otherwise emit a join key whose case matches no other row's.
                 file: relativeTo(fe, canonicalPath(sf.fileName)), is_component: r.kind === 'component',
                 // Duck-typed for the compiler's own matcher.
-                inputs: { hasBindingPropertyName: (n) => inputs.includes(n) },
-                outputs: { hasBindingPropertyName: (n) => outputs.includes(n) },
+                inputs: bindingNames(inputs),
+                outputs: bindingNames(outputs),
                 // THE NAMES BEHIND THE PREDICATES, so this registry can be compared against the one
                 // rebuilt from rows - see `TsTpl/TsRegistry.mjs`. Two closures are never equal.
                 inputNames: inputs, outputNames: outputs,
