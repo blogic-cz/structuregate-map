@@ -1,7 +1,7 @@
 //! A NODE TABLE'S SHAPE INDEX - `(role, parent, owner, n)`, which answers a shape across every owner (each root `$ref`, each
 //! `$template` list, #71). Every node table has one but a CLOSURE table's (`tsderive::CLOSURE_TABLES`, divergence #109): every
-//! reader of those starts from its row (`owner`, the key) or from a value, and `key_reach__paths`' shape index alone was a
-//! tenth of a full map's store. A consumer whose query does need it asks for it once (`--map-index <db> <table>`): the request
+//! reader of those starts from its row (`owner`, the key) or from a value, and the ways' shape index alone (then
+//! `key_reach__paths`, #110) was a tenth of a full map's store. A consumer whose query does need it asks for it once (`--map-index <db> <table>`): the request
 //! is kept in `_meta` (`index:<child table>`), so every later write makes it again - a full run included.
 
 use super::super::schema;

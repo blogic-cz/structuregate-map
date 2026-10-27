@@ -75,18 +75,18 @@ Test-Case 'tsrows keys: a closure node table has no shape index until --map-inde
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $indexQ = "SELECT 'ix=' || name AS ix FROM sqlite_master WHERE type = 'index' AND name IN ('ix_key_reach__paths_role', 'ix_key_reach__paths_value', 'ix_expressions__ast_role')"
+    $indexQ = "SELECT 'ix=' || name AS ix FROM sqlite_master WHERE type = 'index' AND name IN ('ix_render_path__hops_role', 'ix_render_path__hops_value', 'ix_expressions__ast_role')"
     $ix = Invoke-TsRowsQ $made.Db $indexQ
-    Assert-NoLine $ix 'ix=ix_key_reach__paths_role'
-    Assert-Line $ix 'ix=ix_key_reach__paths_value'
+    Assert-NoLine $ix 'ix=ix_render_path__hops_role'
+    Assert-Line $ix 'ix=ix_render_path__hops_value'
     Assert-Line $ix 'ix=ix_expressions__ast_role'
-    $asked = Invoke-Gate --map-index $made.Db key_reach__paths
+    $asked = Invoke-Gate --map-index $made.Db render_path__hops
     Assert-Exit $asked 0
-    Assert-Line (Invoke-TsRowsQ $made.Db $indexQ) 'ix=ix_key_reach__paths_role'
+    Assert-Line (Invoke-TsRowsQ $made.Db $indexQ) 'ix=ix_render_path__hops_role'
     # A FULL RE-READ rewrites the closure tables, and makes the asked-for index again.
     $again = Invoke-Gate --root $tree --map-sqlite $made.Db --ts-node-modules $script:TsRowsModules --ts-config (Join-Path $tree 'structuregate.ts.json') --map-reread typescript
     Assert-Exit $again 0
-    Assert-Line (Invoke-TsRowsQ $made.Db $indexQ) 'ix=ix_key_reach__paths_role'
+    Assert-Line (Invoke-TsRowsQ $made.Db $indexQ) 'ix=ix_render_path__hops_role'
     Assert-Line (Invoke-Gate --map-index $made.Db expressions__ast) 'already has its shape index'
     Assert-Exit (Invoke-Gate --map-index $made.Db no__such) 2
 }

@@ -202,9 +202,9 @@ Test-Case 'tsrows keys: a subtype read through its base renders only on a path t
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $paths = Invoke-TsRowsQ $made.Db ("SELECT 'way ' || k.key || ' ' || group_concat(c.name, '>') AS w FROM key_reach k " +
-        "JOIN key_reach__paths p ON p.owner = '#' || k.rowid AND p.role = 'path' " +
-        "JOIN render_path__hops h ON h.owner = p.value AND h.parent = 0 JOIN components c ON c.id = h.value " +
-        "WHERE k.key IN ('demo.paid', 'demo.idle') GROUP BY k.key, p.value ORDER BY k.key")
+        "JOIN key_reach_ways p ON p.key = k.key " +
+        "JOIN render_path__hops h ON h.owner = p.path AND h.parent = 0 JOIN components c ON c.id = h.value " +
+        "WHERE k.key IN ('demo.paid', 'demo.idle') GROUP BY k.key, p.path ORDER BY k.key")
     Assert-Line $paths 'way demo.paid PageAComponent>TableAComponent'
     Assert-NoLine $paths 'way demo.paid PageBComponent'
     Assert-Line $paths 'way demo.idle PageBComponent>TableBComponent'

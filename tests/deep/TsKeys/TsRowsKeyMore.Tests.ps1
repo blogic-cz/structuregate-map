@@ -173,7 +173,7 @@ Test-Case 'tsrows keys: a list a component builds and only hands to a child inpu
     Assert-Line $g 'demo.choice.yes | ngIf vm.kind === Kind.Home'
     Assert-NoLine $g 'demo.both.yes | ngIf'
 }
-Test-Case 'tsrows keys: key_reach.paths names each way - its render_path row and what the way adds to it (#53)' {
+Test-Case 'tsrows keys: key_reach_ways names each way - its render_path row and what the way adds to it (#53)' {
     $tree = New-TsRowsWorkspace @{
         'apps/shop/tsconfig.app.json' = '{"compilerOptions":{"strict":false},"include":["src/**/*.ts"]}'
         'apps/shop/src/translate.service.ts' = "import { Injectable } from '@angular/core';`n" +
@@ -195,7 +195,7 @@ Test-Case 'tsrows keys: key_reach.paths names each way - its render_path row and
             "import { VisibleDirective } from './visible.directive';`n" +
             "@Component({ selector: 'demo-a', standalone: true, imports: [VisibleDirective, RadioComponent], template: '<div *demoVisible=`"alphaConfig`"><demo-radio [model]=`"model`"></demo-radio></div><div *demoVisible=`"betaConfig`"><demo-radio [model]=`"model`"></demo-radio></div>' })`n" +
             "export class AComponent {`n  alphaConfig = { kinds: [Kind.Home] };`n  betaConfig = { kinds: [Kind.Flat] };`n  model: { Label: string }[];`n" +
-            "  constructor(private translate: TranslateService) {`n    this.model = [{ Label: this.translate.getTranslation('demo.choice.yes') }];`n  }`n}`n"
+            "  constructor(private translate: TranslateService) {`n    this.model = [{ Label: this.translate.getTranslation('demo.choice.yes') }, { Label: this.translate.getTranslation('demo.choice.no') }];`n  }`n}`n"
         'apps/shop/src/b.component.ts' = "import { Component } from '@angular/core';`n" +
             "import { RadioComponent } from './radio.component';`n" +
             "@Component({ selector: 'demo-b', standalone: true, imports: [RadioComponent], template: '<demo-radio [model]=`"other`"></demo-radio>' })`n" +
@@ -215,21 +215,27 @@ Test-Case 'tsrows keys: key_reach.paths names each way - its render_path row and
             "import { ListComponent } from './list.component';`n" +
             "@Component({ selector: 'demo-root', standalone: true, imports: [AComponent, BComponent, ListComponent], template: '<demo-a></demo-a><demo-b></demo-b><demo-list></demo-list>' })`n" +
             "export class RootComponent {}`n"
-        'apps/shop/src/assets/locales/en.json' = '{"demo":{"choice":{"yes":"Yes"},"list":{"b":"B"}}}'
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"choice":{"yes":"Yes","no":"No"},"list":{"b":"B"}}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     # one entry per way: n_paths of them
-    $n = Invoke-TsRowsQ $made.Db "SELECT key || ' ' || n_paths || ' ' || (SELECT count(*) FROM key_reach__paths jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) AS n FROM key_reach WHERE key LIKE 'demo.%'"
+    $n = Invoke-TsRowsQ $made.Db "SELECT key || ' ' || n_paths || ' ' || (SELECT count(*) FROM key_reach_ways jn WHERE jn.key = key_reach.key) AS n FROM key_reach WHERE key LIKE 'demo.%'"
     Assert-Line $n 'demo.choice.yes 2 2'
     Assert-Line $n 'demo.list.b 2 2'
+    # demo.choice.no goes every way demo.choice.yes goes: each of its ways names the SAME key_reach_chains row, one row per
+    # chain; a way adding nothing names no chain
+    $c = Invoke-TsRowsQ $made.Db ("SELECT 'shared=' || count(*) || ' unique=' || ((SELECT count(*) FROM key_reach_chains) = " +
+        "(SELECT count(DISTINCT chain) FROM key_reach_ways)) || ' bare=' || (SELECT count(*) FROM key_reach_ways WHERE key = 'demo.list.b' AND chain IS NULL) AS c " +
+        "FROM key_reach_ways a JOIN key_reach_ways b ON b.chain = a.chain AND b.ord = a.ord AND b.key = 'demo.choice.no' WHERE a.key = 'demo.choice.yes'")
+    Assert-Line $c 'shared=2 unique=1 bare=1'
     # each way: key | its render_path's components | that row's gates | what the way adds (a gate by its source, a link by its prefix)
     $w = Invoke-Gate --map-query $made.Db --width 0 --sql ("SELECT k.key || ' | ' || (SELECT group_concat(name, '>') FROM (SELECT c.name FROM render_path__hops h " +
         "JOIN components c ON c.id = h.value WHERE h.owner = p.id AND h.parent = 0 ORDER BY h.ord)) || ' | ' || coalesce((SELECT group_concat(g.source, ' & ') FROM render_path__gates pg " +
         "JOIN gates g ON g.id = pg.value WHERE pg.owner = p.id AND pg.parent = 0), '-') || ' | ' || coalesce((SELECT group_concat(coalesce(g2.source, substr(o.value, 1, instr(o.value, ':') - 1)), ' & ') " +
-        "FROM key_reach__paths ol JOIN key_reach__paths o ON o.owner = ol.owner AND o.parent = ol.n LEFT JOIN gates g2 ON g2.id = o.value WHERE ol.owner = w.owner AND ol.parent = w.n AND ol.role = 'own'), '-') AS way " +
-        "FROM key_reach k JOIN key_reach__paths w ON w.owner = '#' || k.rowid AND w.parent = 0 JOIN render_path p ON p.id = $(Get-TsFieldSql 'key_reach__paths' 'w' 'path') WHERE k.key LIKE 'demo.%' ORDER BY 1")
+        "FROM key_reach_chains__own o LEFT JOIN gates g2 ON g2.id = o.value WHERE o.owner = w.chain AND o.parent = 0), '-') AS way " +
+        "FROM key_reach k JOIN key_reach_ways w ON w.key = k.key JOIN render_path p ON p.id = w.path WHERE k.key LIKE 'demo.%' ORDER BY 1")
     # the two rows through A that bind the list - never the one through B, whose edge binds another list
     Assert-Line $w 'demo.choice.yes | RootComponent>AComponent>RadioComponent | alphaConfig | bind & model'
     Assert-Line $w 'demo.choice.yes | RootComponent>AComponent>RadioComponent | betaConfig | bind & model'
