@@ -115,9 +115,10 @@ Test-Case 'tsrows: a key under a style that always hides renders on no way, as u
     $made = New-TsStyleGatesDb
     Assert-Exit $made.Result 0
     # Every scalar of the row, and how many nodes each list holds: gate ids differ, the shape of the answer must not.
-    $lists = @('roots', 'routes', 'modules', 'components', 'paths', 'always_gates', 'maybe_gates', 'always_branches',
+    $lists = @(@('roots', 'routes', 'modules', 'components', 'always_gates', 'maybe_gates', 'always_branches',
         'maybe_branches', 'always_values', 'unreadable_values') |
-        ForEach-Object { "(SELECT COUNT(*) FROM key_reach__$_ c WHERE c.owner = '#' || k.rowid)" }
+        ForEach-Object { "(SELECT COUNT(*) FROM key_reach__$_ c WHERE c.owner = '#' || k.rowid)" }) +
+        "(SELECT COUNT(*) FROM key_reach_ways w WHERE w.key = k.key)"
     $cols = "k.n_paths || '|' || coalesce(k.min_depth, '') || '|' || coalesce(k.route, '') || '|' || k.n_refs || '|' || " +
         ($lists -join " || '|' || ")
     $r = Invoke-TsStyleGatesQ $made.Db "SELECT 'kr=' || k.key || '|' || $cols AS r FROM key_reach k WHERE k.key IN ('demo.paint.never', 'demo.paint.offif')"

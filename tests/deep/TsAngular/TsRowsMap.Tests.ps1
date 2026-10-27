@@ -49,7 +49,7 @@ Test-Case 'tsrows: every join the spec declares, every lookup column and every n
         "FROM (SELECT column1 AS t, column2 AS c FROM (VALUES $asked)) w WHERE EXISTS (SELECT 1 FROM pragma_table_info(w.t) p WHERE p.name = w.c)")
     Assert-Line $l 'lookups asked'
     # ...BUT A CLOSURE TABLE'S (divergence #109): every reader there starts from the key or a value, and `--map-index` gives one on request.
-    $closure = "'render_path', 'gate_features', 'gate_values', 'key_reach', 'control_options', 'key_builds', 'key_node_ways'"
+    $closure = "'render_path', 'gate_features', 'gate_values', 'key_reach', 'key_reach_ways', 'key_reach_chains', 'control_options', 'key_builds', 'key_node_ways'"
     $nodes = Invoke-TsRowsQ $made.Db ("SELECT CASE WHEN tbl IN ($closure) THEN 'closure shaped=' ELSE 'shapeless=' END || child AS r FROM _cells WHERE " +
         "(tbl IN ($closure)) = EXISTS (SELECT 1 FROM pragma_index_list(_cells.child) il, pragma_index_info(il.name) ii WHERE ii.seqno = 0 AND ii.name = 'role') " +
         "UNION ALL SELECT 'node tables=' || count(*) FROM _cells UNION ALL SELECT 'closure node tables=' || count(*) FROM _cells WHERE tbl IN ($closure)")

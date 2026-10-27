@@ -101,6 +101,8 @@ pub mod key_bound;
 pub mod key_scopes;
 #[path = "key/keyreach.rs"]
 pub mod keyreach;
+#[path = "key/key_ways.rs"]
+pub mod key_ways;
 #[path = "key/key_literals.rs"]
 pub mod key_literals;
 #[path = "key/key_returned.rs"]

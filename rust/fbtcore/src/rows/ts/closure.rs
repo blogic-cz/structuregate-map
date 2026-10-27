@@ -431,7 +431,7 @@ pub fn fold(sets: &[IndexSet<String>]) -> (Vec<String>, Vec<String>) {
 /// The paths of every component any key reaches, computed once and shared by its keys.
 pub struct Paths {
     pub by_comp: IndexMap<String, (Vec<RenderPath>, bool)>,
-    /// `render_path.id` of each component's first path: path i of c is `first_id[c] + i` (`key_reach.paths`, #53).
+    /// `render_path.id` of each component's first path: path i of c is `first_id[c] + i` (`key_reach_ways.path`, #53).
     pub first_id: IndexMap<String, i64>,
     pub rows: usize,
 }

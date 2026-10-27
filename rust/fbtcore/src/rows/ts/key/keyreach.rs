@@ -337,7 +337,7 @@ pub fn build_closure(
     // keys are folded apart and written in the locales' order - the order the rows were always written in.
     use rayon::prelude::*;
     let keyed: Vec<_> = locales.iter().collect();
-    let folded: Vec<(String, Option<String>, Vec<(String, Value)>)> = keyed.par_iter().map(|&(key, loc)| {
+    let folded: Vec<(String, Option<String>, Vec<(String, Value)>, Vec<(i64, Vec<String>)>)> = keyed.par_iter().map(|&(key, loc)| {
         let hit = routes.get(key);
         // The map publishes its OWN `referenced` flag over the whole source, counted by an
         // exact literal join. A key it calls referenced that none of the routes located is
@@ -403,11 +403,10 @@ pub fn build_closure(
         nodes.sort();
         put("nodes", Value::from(nodes));
         put("n_paths", Value::from(sets.len() as i64));
-        // EACH WAY NAMED (#53): its `render_path.id` and what it adds to that row's gates/branches, sorted like every list here.
+        // EACH WAY NAMED (#53): its `render_path.id` and what it adds to that row's gates/branches, sorted like every list
+        // here - a `key_reach_ways` row each (`key_ways`).
         debug_assert_eq!(on.len(), sets.len());
         on.sort();
-        put("paths", Value::Array(on.into_iter()
-            .map(|(id, own)| serde_json::json!({ "path": id, "own": own })).collect()));
         put("min_depth", depth.map(Value::from).unwrap_or(Value::Null));
         put("roots", Value::from(sorted(roots)));
         put("modules", Value::from(sorted(mods)));
@@ -429,9 +428,10 @@ pub fn build_closure(
         put("trace", tr.clone().map(Value::String).unwrap_or(Value::Null));
         put("trace_file", tr_file.map(Value::String).unwrap_or(Value::Null));
         put("truncated", Value::from(i64::from(cut)));
-        (route, tr, row)
+        (route, tr, row, on)
     }).collect();
-    for (route, how, cells) in folded {
+    let mut chains = IndexMap::new();
+    for (route, how, cells, ways) in folded {
         *counts.entry(route).or_default() += 1;
         if let Some(how) = how {
             *traces.entry(how).or_default() += 1;
@@ -440,8 +440,11 @@ pub fn build_closure(
         for (k, v) in cells {
             row.insert(k, v);
         }
+        let key = row.get("key").and_then(Value::as_str).unwrap_or_default().to_string();
         store.emit("key_reach", row);
+        super::key_ways::emit_ways(store, &key, ways, &mut chains);
     }
+    super::key_ways::emit_chains(store, chains);
 
     let stats = Closure {
         path_rows: paths.rows,
@@ -466,7 +469,7 @@ pub fn build_closure(
 pub struct Ways {
     pub sets: Vec<IndexSet<String>>,
     /// Per way (parallel to `sets`): the `render_path.id` it runs over and the ids it adds to that row's
-    /// `gates`/`branches` - the site's own chain and its links. Published as `key_reach.paths` (#53).
+    /// `gates`/`branches` - the site's own chain and its links. Published as `key_reach_ways` (#53, `key_ways`).
     pub on: Vec<(i64, Vec<String>)>,
     pub path_sets: Vec<IndexSet<String>>,
     /// Per way (parallel to `sets`): the renames each gate or link's dimension goes through.
