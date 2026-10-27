@@ -357,6 +357,8 @@ async function main() {
   // 98: #109 - `propertyPaths` (`structuregate.ts.json`) names members whose strings are property paths and the root they start from; such a string carries `path_refs`
   //     (a segment each, with its row `id`) and `path_complete` (`TsExpr/TsReadRefs.mjs::pathRefs`).
   // 125: an unresolved import's diagnostic names the `program` that noted it, so a partial run that leaves a project unbuilt says its notes again (`TsDecls/TsWalk.mjs`).
+  // 126: #138 - a `Map#get` call keeps `$key_expr`/`$entry_exprs` (`TsExpr/TsValue.mjs::lookupKeys`), and a class created from an entry holds
+  //     `lookup:<key>@<argument>` on its `renders.return_ways` (`TsDerive/TsDynRender.mjs`).
   // 124: `untilDestroyed(this)` of `@ngneat/until-destroy` hands `this` to no one (`files.this_indexed`), and reads its destroy method (`TsDecls/TsPropReads.mjs`).
   // 123: an un-annotated array literal in an object literal names its elements' refs as written, sorted by place, not the checker's reduced union (`TsExpr/TsShapes.mjs::writtenElements`).
   // 122: an expression another project already described in the run is that row, not a second one at the same place (`TsDecls/TsWalk.mjs`, `store.exprAt`).
@@ -389,7 +391,7 @@ async function main() {
   // 99: an immer handler's `writes` follow the helpers it hands its draft to, and the callbacks they call (`TsExpr/TsExprDescribe.mjs::draftWrites`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 125, build: args.build,
+    config: config.file, data: config.data, rows: 126, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
