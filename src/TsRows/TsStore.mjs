@@ -239,6 +239,7 @@ export class Store {
     // The lookups `handedBack` builds, by table and key. Empty on a full run, which is handed nothing.
     this.handed = new Map();
     this.reused = 0;
+    this.idMark = '';
   }
 
   /**
@@ -564,7 +565,12 @@ export class Store {
   id(prefix) {
     const n = (this.counters[prefix] ?? this.floor) + 1;
     this.counters[prefix] = n;
-    return `${prefix}:${n}`;
+    return `${prefix}:${this.idMark}${n}`;
+  }
+
+  /** Every id minted from now on carries `tag` before its number (`TsSetup/TsPairWalk.mjs`), until it is renumbered; '' ends it. */
+  mark(tag) {
+    this.idMark = tag;
   }
 
   table(name) {

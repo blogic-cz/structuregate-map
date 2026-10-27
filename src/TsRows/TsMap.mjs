@@ -578,7 +578,7 @@ async function main() {
   // WHICH STRINGS ARE PROPERTY PATHS, AND FROM WHERE (rows 98, #109) - application knowledge, an input (`TsConfig.mjs::propertyPaths`).
   const propertyPaths = readPropertyPaths(config, (name) => diag.note('property_path_spec_invalid', { name }));
   const { inAnyProgram, registry, components } = timed('typescript: walk every project', '', () => walkProjects({
-    ts, store, fe, nodeModules: found.nodeModules, projects, diag, noted: new Set(), propertyPaths,
+    ts, store, fe, nodeModules: found.nodeModules, projects, diag, noted: new Set(), propertyPaths, angular,
     sources: () => treeSources(fe, args.skipDirs, skipFiles),
     // WHICH FILES THIS RUN OPENS. Every other file in the program is still WALKED for its ids and
     // its program membership - a declaration in it is what the ones being re-extracted resolve
