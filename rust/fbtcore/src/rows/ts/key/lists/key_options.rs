@@ -43,7 +43,10 @@ pub struct Offered {
 fn binding_trees<'s>(expressions: &'s [Row]) -> HashMap<String, &'s Value> {
     let mut trees = HashMap::new();
     for e in expressions {
-        if let (Some(binding), Some(ast)) = (text(e, "binding"), e.get("ast").filter(|a| !a.is_null())) {
+        // THE BINDING FIRST: a tree is decoded when it is read and then kept, and asking every row for its tree decoded the
+        // whole table's - most of them the trees of no binding.
+        let Some(binding) = text(e, "binding") else { continue };
+        if let Some(ast) = e.get("ast").filter(|a| !a.is_null()) {
             trees.insert(binding, ast);
         }
     }

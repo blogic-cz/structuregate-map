@@ -138,6 +138,14 @@ fn asked(call: &Call, callbacks: Callbacks) -> Value {
         let exit = lens::run(db, &o.map_query_args, &mut out);
         return answer(out, exit, true);
     }
+    if let Some((db, table)) = &o.map_index {
+        let made = rusqlite::Connection::open(db).map_err(anyhow::Error::from).and_then(|c| crate::rows::cells::shape::request(&c, table));
+        let exit = match made {
+            Ok(said) => { out.line(said); 0 }
+            Err(e) => { out.error(format!("structuregate: --map-index: {e}")); 2 }
+        };
+        return answer(out, exit, true);
+    }
     if let Some(base) = &o.map_slice {
         let (Some(files), Some(into)) = (&o.slice_files, &o.map_sqlite) else {
             out.error("structuregate: --map-slice <base> takes --slice-files <file|@list> and --map-sqlite <out>".into());

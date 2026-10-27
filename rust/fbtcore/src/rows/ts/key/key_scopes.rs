@@ -19,6 +19,7 @@ use super::closure::RenderPath;
 use super::store::{Row, Store};
 use indexmap::{IndexMap, IndexSet};
 use serde_json::Value;
+use std::sync::Arc;
 
 fn cell(row: &Row, field: &str) -> Option<String> {
     match row.get(field) {
@@ -27,8 +28,9 @@ fn cell(row: &Row, field: &str) -> Option<String> {
     }
 }
 
-/// One step of a rename: the child's input member -> the parent's read chain on that edge.
-pub type Step = IndexMap<String, String>;
+/// One step of a rename: the child's input member -> the parent's read chain on that edge. SHARED: a way holds the
+/// steps of every gate on it, and a deep copy per gate per way was most of the time `keyreach::ways_of` took.
+pub type Step = Arc<IndexMap<String, String>>;
 
 #[derive(Default)]
 pub struct Scopes {
@@ -36,6 +38,8 @@ pub struct Scopes {
     binds: IndexMap<String, Step>,
     /// Gate id -> the component it sits in.
     pub gate_comp: IndexMap<String, String>,
+    /// The step of an edge with no bindings.
+    empty: Step,
 }
 
 /// A literal (`1`, `true`, `null`), or a chain through the parent's `typeof X` alias field (`DemoIDs.Home`), is a CONSTANT:
@@ -98,7 +102,7 @@ impl Scopes {
                 renders.entry((node, class)).or_default().push((id, cell(r, "from_class").unwrap_or_default()));
             }
         }
-        let mut binds: IndexMap<String, Step> = IndexMap::new();
+        let mut binds: IndexMap<String, IndexMap<String, String>> = IndexMap::new();
         for iu in store.table("input_usage").iter() {
             let (Some(io), Some(node), Some(class), Some(source)) =
                 (cell(iu, "io"), cell(iu, "node"), cell(iu, "to_class"), cell(iu, "source"))
@@ -122,24 +126,26 @@ impl Scopes {
                 gate_comp.insert(id, c);
             }
         }
-        Scopes { binds, gate_comp }
+        let binds = binds.into_iter().map(|(id, step)| (id, Arc::new(step))).collect();
+        Scopes { binds, gate_comp, empty: Step::default() }
     }
 
     /// The renames a way through `p` applies to a text read in `comp`, child edge first.
     ///
-    /// AN EDGE WITH NO BINDINGS IS AN EMPTY STEP, and it stops the rename: past it the name is not known.
+    /// AN EDGE WITH NO BINDINGS IS AN EMPTY STEP, and it stops the rename: past it the name is not known - so a child
+    /// edge with none renames nothing, and no steps are made at all.
     pub fn steps(&self, p: &RenderPath, comp: &str) -> Vec<Step> {
         let Some(j) = p.hops.iter().rposition(|h| &**h == comp) else { return Vec::new() };
-        p.edges[..j.min(p.edges.len())]
-            .iter()
-            .rev()
-            .map(|e| self.binds.get(&**e).cloned().unwrap_or_default())
-            .collect()
+        let edges = &p.edges[..j.min(p.edges.len())];
+        if edges.last().and_then(|e| self.binds.get(&**e)).is_none_or(|s| s.is_empty()) {
+            return Vec::new();
+        }
+        edges.iter().rev().map(|e| Arc::clone(self.binds.get(&**e).unwrap_or(&self.empty))).collect()
     }
 
     /// Every binding on the way's edges as (parent source, child member): one variable under two spellings on this way.
     pub fn pairs(&self, p: &RenderPath) -> Vec<(String, String)> {
-        p.edges.iter().flat_map(|e| self.binds.get(&**e).into_iter().flatten()).map(|(m, x)| (x.clone(), m.clone())).collect()
+        p.edges.iter().flat_map(|e| self.binds.get(&**e).into_iter().flat_map(|s| s.iter())).map(|(m, x)| (x.clone(), m.clone())).collect()
     }
 }
 

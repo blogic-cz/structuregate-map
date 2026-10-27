@@ -191,6 +191,12 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         environment. A plugin that cannot be launched, or that stops half way, is a
                         FINDING that fails --map-check: it was named on the command line, so a map
                         silently missing half its rows is worse than one that never ran.
+  --map-index <db> <table>
+                        Give one node table of the translation-key closure (key_reach__paths,
+                        render_path__gates, ...) the (role, parent, owner, n) index a full map no longer
+                        builds for those tables, now and on every later write. Only for a query that
+                        matches a SHAPE across every key; one that starts from the key (owner) or from a
+                        value needs none.
   --map-query <db> ...  QUERY a SQLite map instead of building one. Everything after the database
                         path goes to the lens: --tables, --schema T, --find NAME, --id ROW,
                         --file FRAGMENT, --cat FRAGMENT [--lines a-b], --text FTS,

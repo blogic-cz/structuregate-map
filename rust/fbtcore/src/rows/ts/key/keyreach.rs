@@ -536,6 +536,17 @@ pub fn ways_of(
                 Some(d) => d.min(hops),
             });
             w.path_sets.push(p.gates.iter().map(|g| g.to_string()).collect());
+            // A CHILD'S INPUT READS AS THE PARENT'S EXPRESSION through the edge that binds it (`key_scopes`): the path's own
+            // gates are renamed once per path, a chain's sites per chain.
+            let mut owned: IndexMap<String, Vec<super::key_scopes::Step>> = IndexMap::new();
+            for (id, at) in p.gates.iter().filter_map(|g| Some((&**g, scopes.gate_comp.get(&**g)?.as_str()))) {
+                let steps = scopes.steps(p, at);
+                if !steps.is_empty() {
+                    owned.entry(id.to_string()).or_insert(steps);
+                }
+            }
+            let pairs = scopes.pairs(p);
+            let site_steps = scopes.steps(p, c);
             for (chain, links) in chains {
                 // A case a factory returned a child under (`key_returned`) holds on this path like a
                 // gate does, and folds with the key's own branches.
@@ -543,15 +554,12 @@ pub fn ways_of(
                     p.gates.iter().chain(p.branches.iter()).map(|g| g.to_string()).collect();
                 one.extend(chain.iter().filter(|g| !g.starts_with("edge:") && !g.starts_with("via:")).cloned());
                 one.extend(plinks.iter().chain(links.iter()).cloned());
-                // A CHILD'S INPUT READS AS THE PARENT'S EXPRESSION through the edge that binds it (`key_scopes`).
-                let mut named: IndexMap<String, Vec<super::key_scopes::Step>> = IndexMap::new();
+                let mut named = owned.clone();
                 let sites = chain.iter().filter(|g| !g.starts_with("edge:") && !g.starts_with("via:") && !g.starts_with("bind:"));
-                let owned = p.gates.iter().filter_map(|g| Some((&**g, scopes.gate_comp.get(&**g)?.as_str())));
-                w.aliases.push(scopes.pairs(p));
-                for (id, at) in owned.chain(sites.map(|g| (g.as_str(), c.as_str()))) {
-                    let steps = scopes.steps(p, at);
-                    if steps.first().is_some_and(|s| !s.is_empty()) {
-                        named.entry(id.to_string()).or_insert(steps);
+                w.aliases.push(pairs.clone());
+                if !site_steps.is_empty() {
+                    for id in sites {
+                        named.entry(id.clone()).or_insert_with(|| site_steps.clone());
                     }
                 }
                 w.renames.push(named);

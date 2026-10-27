@@ -164,7 +164,7 @@ pub fn create(db: &Connection, table: &str, column: &str) -> Result<String> {
     Ok(child_table)
 }
 
-/// THE UNIQUE `(owner, n)` KEY AND THE `(value, owner, n)` AND `(role, parent, owner, n)` INDEXES, made AFTER the rows
+/// THE UNIQUE `(owner, n)` KEY AND THE `(value, owner, n)` AND `(role, parent, owner, n)` INDEXES (the last not on a closure table), made AFTER the rows
 /// are in. The key finds a cell and a node, and refuses a node written twice. `(role, parent)` answers a SHAPE across
 /// every owner - each root `$ref`, each `$template` list (#71): the key serves only a lookup inside one owner. Both
 /// end in the key because a rowid table's index carries only the rowid: without `owner` a join on it filtered by role
@@ -176,19 +176,20 @@ pub fn index_values(db: &Connection) -> Result<()> {
     if schema::existing_columns(db, REGISTRY).map(|c| c.is_empty()).unwrap_or(true) {
         return Ok(());
     }
-    let children: Vec<String> = {
-        let mut stmt = db.prepare(&format!("SELECT child FROM {REGISTRY}"))?;
-        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    let children: Vec<(String, String)> = {
+        let mut stmt = db.prepare(&format!("SELECT tbl, child FROM {REGISTRY}"))?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
-    for child_table in children {
+    for (table, child_table) in children {
         crate::trace::metric!("store: index a node table", child_table, {
             key_index(db, &child_table)?;
             let t = schema::escape(&child_table);
-            db.execute_batch(&format!(
-                "CREATE INDEX IF NOT EXISTS \"ix_{t}_value\" ON \"{t}\" (value, owner, n); \
-                 CREATE INDEX IF NOT EXISTS \"ix_{t}_role\" ON \"{t}\" (role, parent, owner, n)"
-            ))?;
+            db.execute_batch(&format!("CREATE INDEX IF NOT EXISTS \"ix_{t}_value\" ON \"{t}\" (value, owner, n)"))?;
+            // A CLOSURE TABLE'S NODES HAVE NO SHAPE INDEX unless one was asked for (`shape`, divergence #109).
+            if let Some(shape) = shape::shape_index(db, &table, &child_table) {
+                db.execute_batch(&shape)?;
+            }
         });
     }
     Ok(())
@@ -522,6 +523,7 @@ pub fn load_all(db: &Connection, table: &str, column: &str) -> Result<HashMap<St
 
 pub mod meta;
 pub mod probe;
+pub mod shape;
 pub mod text;
 
 #[cfg(test)]
