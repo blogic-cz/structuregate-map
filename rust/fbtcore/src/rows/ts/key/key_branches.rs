@@ -356,7 +356,7 @@ impl Branches {
         if id.starts_with("loop:") { return "loop"; }
         if id.starts_with("bind:") { return "bind"; }
         if id.starts_with("or:") { return "either"; }
-        if self.cases.contains_key(id) {
+        if self.cases.contains_key(id) || id.starts_with("lookup:") {
             return "case";
         }
         match self.by_id.get(id) {
@@ -369,7 +369,7 @@ impl Branches {
 
     pub fn contains(&self, id: &str) -> bool {
         let choice = id.strip_prefix('!').unwrap_or(id);
-        ["tpl:", "loop:", "bind:", "or:", "arg:"].iter().any(|p| id.starts_with(p)) || self.by_id.contains_key(id) || self.cases.contains_key(id)
+        ["tpl:", "loop:", "bind:", "or:", "arg:", "lookup:"].iter().any(|p| id.starts_with(p)) || self.by_id.contains_key(id) || self.cases.contains_key(id)
             || self.choices.contains_key(choice) || self.arms.contains_key(choice)
     }
 

@@ -56,6 +56,11 @@ pub fn returned_under(store: &Store<'_>, branches: &Branches) -> IndexMap<String
         for way in ways {
             let mut chain = IndexSet::new();
             for rv in way.as_array().into_iter().flatten().filter_map(|v| v.as_str()) {
+                // THE KEY OF A `Map` ENTRY the class was looked up by is a case of its own (`gate_cases::lookup_values`).
+                if rv.starts_with("lookup:") {
+                    chain.insert(rv.to_string());
+                    continue;
+                }
                 // A ROW THE MAP DOES NOT HOLD PROVES NOTHING, so the way holds nothing either -
                 // never fewer conditions than the rows say, never more.
                 let Some(row) = by_id.get(rv) else {
@@ -181,5 +186,16 @@ mod tests {
         let out = returned_under(&s, &Branches::new(&s));
         assert_eq!(out["rd:1"], vec!["sc:1".to_string(), "sc:2".to_string()]);
         assert!(!out.contains_key("rd:2"));
+    }
+
+    #[test]
+    fn a_class_looked_up_by_one_or_two_map_keys_holds_that_key_or_either() {
+        let s = store(json!([
+            {"id": "rd:1", "return_ways": [["lookup:x:1@x:9"]]},
+            {"id": "rd:2", "return_ways": [["lookup:x:1@x:9"], ["lookup:x:2@x:9"]]},
+        ]));
+        let out = returned_under(&s, &Branches::new(&s));
+        assert_eq!(out["rd:1"], vec!["lookup:x:1@x:9".to_string()]);
+        assert_eq!(out["rd:2"], vec!["or:lookup:x:1@x:9|lookup:x:2@x:9".to_string()]);
     }
 }

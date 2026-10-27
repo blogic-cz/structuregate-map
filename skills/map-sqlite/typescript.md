@@ -52,8 +52,8 @@ Beside the shared tables it adds the FRAMEWORK tables:
   own template is `declared` (rows 82): Angular puts the component in its own scope. A host no module declares (`unknown`) keeps an
   edge to every candidate. `components.unused = 1` when no `renders` edge, route or `bootstrap` reaches the
   class - a `renders_out_of_scope` candidate is no render. A render created in code names the method that returned the class
-  (`returned_by`) and each way it was returned (`return_ways`, `returns` ids); a `case` or `if` every way sits
-  in lands in `render_path.branches`. `templates`/`template_nodes`/`bindings` are the template side; `gates`/
+  (`returned_by`) and each way it was returned (`return_ways`, `returns` ids, or `lookup:<key>@<arg>` expression ids for an entry of a
+  `Map#get`, rows 126, a case of its own); a `case` or `if` every way sits in lands in `render_path.branches`. `templates`/`template_nodes`/`bindings` are the template side; `gates`/
   `gate_values` what hides a node (`gates.gate_kind = 'hidden'` is `[hidden]`/`[attr.hidden]`, whose `expression` is a row holding the NEGATED condition; a `style` gate carries `unit`, `px` of `[style.height.px]` whose `name` is `height`) (`op` in/not_in/unknown; `listed_json` (child table `gate_values__listed_json`) what a config object lists, even an
   exclusion the map cannot polarise); `state_*` NgRx; `di`/`injectables` injection.
 * **`route_keys`** (`rk:`) is one row per `{{key}}` in a route's own `path` (`'{{routes.order.detail}}/:id'`, as a

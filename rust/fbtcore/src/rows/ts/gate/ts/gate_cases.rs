@@ -130,6 +130,50 @@ pub fn case_values(
     out
 }
 
+/// THE KEY OF A `Map` ENTRY IS A CASE (#138): `lookup:<key>@<argument>` on a render's `return_ways`
+/// (`TsDerive/TsDynRender.mjs`) is the class one entry of `map.get(argument)` holds, created only
+/// when the argument equals that entry's key - the `case` a `switch` returning it would state, so it
+/// is restricted as one group of one label. A tree that does not resolve leaves the id unread.
+pub fn lookup_values(
+    store: &Store<'_>,
+    mem: &MemberEnums,
+    idx: &EnumIndex,
+) -> IndexMap<String, (Option<String>, Vec<Value>)> {
+    let mut wanted: IndexSet<String> = IndexSet::new();
+    for r in store.table("renders").iter() {
+        let Some(Value::Array(ways)) = r.get("return_ways") else { continue };
+        let ids = ways.iter().filter_map(Value::as_array).flatten().filter_map(Value::as_str);
+        wanted.extend(ids.filter(|id| id.starts_with("lookup:")).map(str::to_string));
+    }
+    let mut out = IndexMap::new();
+    if wanted.is_empty() {
+        return out;
+    }
+    let rows = TsRows::of(store);
+    let none = IndexSet::new();
+    let expressions = store.table("expressions");
+    let ast_of: IndexMap<String, &Row> = expressions.iter().filter_map(|e| cell(e, "id").map(|id| (id, e))).collect();
+    let read = |id: &str| {
+        ast_of.get(id).and_then(|r| r.get("ast")).filter(|a| !a.is_null()).map(|a| rows.resolve(unwrap(a), &none, idx))
+    };
+    for id in wanted {
+        let Some((key, on)) = id.strip_prefix("lookup:").and_then(|rest| rest.split_once('@')) else { continue };
+        let Some(ast) = read(on) else { continue };
+        let dim = match dimension_of(&ast, mem) {
+            Some((en, dim, row)) => Dimension { enum_id: Some(en), dim, row },
+            None => match untyped_dimension(&ast) {
+                Some(dim) => Dimension { enum_id: None, dim, row: None },
+                None => continue,
+            },
+        };
+        let label = read(key).and_then(|k| constant_of(&k, mem, idx));
+        if let Some(arm) = switch_arm(&dim, label.as_ref()) {
+            out.insert(id, (None, vec![arm]));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

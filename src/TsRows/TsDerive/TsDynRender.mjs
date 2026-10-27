@@ -56,9 +56,17 @@ function componentSlots(value, out, seen) {
   if (v.$cond !== undefined) { componentSlots(v.$then, out, seen); componentSlots(v.$else, out, seen); return; }
   if (v.$logic !== undefined) { for (const o of arr(v.$operands)) componentSlots(o, out, seen); return; }
   if (v.$await !== undefined) { componentSlots(v.$await, out, seen); return; }
-  // A LOOKUP IN A `new Map([[k, X], ..])` (rows 120, `$receiver` of a `Map#get`) is any of the values the map holds: each entry's second item.
+  // A LOOKUP IN A `new Map([[k, X], ..])` (rows 120, `$receiver` of a `Map#get`) is any of the values the map holds: each entry's second item -
+  // created only when the looked-up key IS that entry's (rows 126, #138), so a class named there carries `lookup:<key tree>@<argument tree>`, the
+  // `case` a `switch` would state (`rust/fbtcore/src/rows/ts/key/key_returned.rs`).
   if (v.$call !== undefined && v.$method === 'get' && ['Map', 'ReadonlyMap'].includes(obj(v.$receiver)?.$new)) {
-    for (const entry of arr(arr(obj(v.$receiver).$args)[0])) componentSlots(arr(entry)[1], out, seen);
+    const keys = arr(v.$entry_exprs);
+    for (const [i, entry] of arr(arr(obj(v.$receiver).$args)[0]).entries()) {
+      const from = out.refs.length;
+      componentSlots(arr(entry)[1], out, seen);
+      const key = str(keys[i]);
+      if (key !== null && typeof v.$key_expr === 'string') for (const ref of out.refs.slice(from)) ref.lookup ??= `lookup:${key}@${v.$key_expr}`;
+    }
     return;
   }
   if (v.$call !== undefined) {
@@ -295,7 +303,9 @@ export function rollupDynamicRenders(store, diag) {
    *  A declaration is followed once per WAY in, never twice on one way - a second caller of the same
    *  registry is a second way, and dropping it would hand the edge the first way's conditions alone. */
   const candidatesOf = (slots) => {
-    const out = slots.refs.map((ref) => ({ ref, returnedBy: null, way: [] }));
+    // A CLASS AN ENTRY OF A `Map` LOOKUP NAMES holds that entry's key on its way (`componentSlots`).
+    const keyed = (ref, way) => (ref.lookup === undefined ? way : [...way, ref.lookup]);
+    const out = slots.refs.map((ref) => ({ ref, returnedBy: null, way: keyed(ref, []) }));
     const queue = slots.calls.map((ref) => ({ decl: declForRef(ref), way: [], path: [] }))
       .filter((q) => q.decl != null);
     while (queue.length) {
@@ -305,7 +315,7 @@ export function rollupDynamicRenders(store, diag) {
       for (const r of returnsOf.get(decl) ?? []) {
         const inner = slotsOf(r.value);
         const through = [...way, r.id];
-        for (const ref of inner.refs) out.push({ ref, returnedBy: decl, way: through });
+        for (const ref of inner.refs) out.push({ ref, returnedBy: decl, way: keyed(ref, through) });
         for (const ref of inner.calls) {
           const next = declForRef(ref);
           if (next != null) queue.push({ decl: next, way: through, path: onPath });
@@ -358,7 +368,7 @@ export function rollupDynamicRenders(store, diag) {
         ...(returnedBy === null ? {} : { returned_by: returnedBy }),
         // EVERY WAY THE CLASS IS RETURNED, as the `returns` rows on it - the edge holds only what every way
         // holds, and a way through no `return` (the class written at the site) holds nothing.
-        ...(returnedBy === null ? {} : { return_ways: ways }),
+        ...(returnedBy === null && !ways.some((w) => w.length) ? {} : { return_ways: ways }),
         // An outlet edge still happens AT a node and keeps it; a call has neither. No element MATCHED in
         // either case, so `tag` is empty rather than borrowed from the container the outlet sits on.
         template: site.where.template ?? null,

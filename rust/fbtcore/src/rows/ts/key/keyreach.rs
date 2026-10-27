@@ -41,7 +41,7 @@
 //! `truncated` stays a column because a consumer filters on it, and is now always 0.
 
 use super::closure::{fold, load_edges, locale_index, reach_index, render_paths, Paths};
-use super::gate_cases::case_values;
+use super::gate_cases::{case_values, lookup_values};
 use super::gate_config;
 use super::gate_directives;
 use super::gate_features::gate_features_with;
@@ -282,6 +282,7 @@ pub fn build_closure(
     let stage = crate::trace::stage("closure: values");
     let mem = member_enums(store, &idx);
     value_map.extend(case_values(store, &mem, &idx));
+    value_map.extend(lookup_values(store, &mem, &idx));
     // SEVERAL CASES RETURNING ONE CLASS: either of them - see `key_returned::either_link`.
     let either = super::key_returned::either_values(store, &branches, &value_map, &idx);
     value_map.extend(either);

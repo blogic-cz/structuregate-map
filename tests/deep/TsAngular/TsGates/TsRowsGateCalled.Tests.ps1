@@ -152,21 +152,29 @@ Test-Case 'tsrows gates: a factory creating what a Map of components looks up re
             "import { HomeDetailComponent, FlatDetailComponent } from './detail.component';`n" +
             "export const detailsByKind = new Map<Kind, Type<unknown>>([[Kind.Home, HomeDetailComponent], [Kind.Flat, FlatDetailComponent]]);`n"
         'apps/shop/src/detail.component.ts' = "import { Component } from '@angular/core';`n" +
-            "@Component({ selector: 'demo-home-detail', template: '<b>h</b>' })`nexport class HomeDetailComponent {}`n" +
-            "@Component({ selector: 'demo-flat-detail', template: '<b>f</b>' })`nexport class FlatDetailComponent {}`n"
+            "@Component({ selector: 'demo-home-detail', template: '<translate [text]=`"\'demo.home\'`"></translate>' })`nexport class HomeDetailComponent {}`n" +
+            "@Component({ selector: 'demo-flat-detail', template: '<translate [text]=`"\'demo.flat\'`"></translate>' })`nexport class FlatDetailComponent {}`n"
+        'apps/shop/src/translate.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "@Component({ selector: 'translate', standalone: true, template: '<span>{{ text }}</span>' })`n" +
+            "export class TranslateComponent { @Input() text!: string; }`n"
         'apps/shop/src/root.component.ts' = "import { Component, ViewContainerRef } from '@angular/core';`n" +
             "import { Kind } from './kinds';`nimport { ComponentFactory } from './component.factory';`nimport { detailsByKind } from './details';`n" +
             "@Component({ selector: 'demo-root', template: '<button (click)=`"show()`">go</button>' })`n" +
             "export class RootComponent {`n  kind: Kind = Kind.Home;`n" +
             "  constructor(private componentFactory: ComponentFactory, private viewContainerRef: ViewContainerRef) {}`n" +
             "  show() {`n    const detail = detailsByKind.get(this.kind)!;`n    this.componentFactory.create(detail, this.viewContainerRef);`n  }`n}`n"
-        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"}}'
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"home":"H","flat":"F"}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["translate:text"]}'
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db "SELECT 'r=' || c.name || '>' || r.to_name AS r FROM renders r JOIN classes c ON c.id = r.from_class WHERE r.via = 'factory'"
     Assert-Line $r 'r=RootComponent>HomeDetailComponent'
     Assert-Line $r 'r=RootComponent>FlatDetailComponent'
+    # (#138) EACH ENTRY RENDERS UNDER ITS OWN KEY, as a `switch` returning the class would: the lookup is a case per entry.
+    $v = Invoke-TsRowsQ $made.Db $script:CalledValueQ
+    Assert-Line $v 'demo.home | kind in ["Home"]'
+    Assert-Line $v 'demo.flat | kind in ["Flat"]'
 }
 
 # (rows 124) `untilDestroyed(this)` OF `@ngneat/until-destroy` IS NO HAND-OVER: it reads the destroy method alone, so a component unsubscribing

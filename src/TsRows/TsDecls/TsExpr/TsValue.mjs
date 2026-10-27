@@ -173,6 +173,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       $call: node.expression.getText(),
       $args: args,
       ...(receiver !== undefined ? { $receiver: receiver, $method: node.expression.name.getText() } : {}),
+      ...(receiver !== undefined && mapLookup(node.expression, receiver) ? lookupKeys(node) : {}),
       ...(receiverExpr !== undefined ? { $receiver_expr: receiverExpr } : {}),
       ...(receiverValue !== undefined ? { $receiver_value: receiverValue } : {}),
       ...(target ? { $target: target } : {}),
@@ -234,6 +235,26 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
    *  class looked up to be created). Decided by the value, never by a method named `get` on anything else. */
   function mapLookup(access, evaluated) {
     return access.name.text === 'get' && !!evaluated && typeof evaluated === 'object' && ['Map', 'ReadonlyMap'].includes(evaluated.$new);
+  }
+
+  /** WHICH KEY A `Map#get` LOOKS UP AND WHAT EACH ENTRY IS KEYED BY (rows 126, #138): `$key_expr` is the tree of the argument and `$entry_exprs` the tree
+   *  of each entry's key, in the order of the map's entries, so a reader states an entry's value as held only when the argument equals its key - the
+   *  `case` a `switch` returning the same value would be. Only a `const` (or `readonly` property) whose initializer is `new Map([[k, v], ..])` written
+   *  out: a spread or an entry that is no pair leaves nothing to align with the evaluated entries, and nothing is said. */
+  function lookupKeys(node) {
+    if (!describe || node.arguments.length !== 1) return {};
+    let symbol = checker.getSymbolAtLocation(ts.isPropertyAccessExpression(node.expression.expression) ? node.expression.expression.name : node.expression.expression);
+    if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+    const decl = symbol?.valueDeclaration;
+    const fixed = decl !== undefined && ((ts.isVariableDeclaration(decl) && (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0)
+      || (ts.isPropertyDeclaration(decl) && (ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Readonly) !== 0));
+    let init = fixed ? decl.initializer : undefined;
+    while (init !== undefined && (ts.isParenthesizedExpression(init) || ts.isAsExpression(init) || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(init)))) init = init.expression;
+    const list = init !== undefined && ts.isNewExpression(init) ? init.arguments?.[0] : undefined;
+    if (list === undefined || !ts.isArrayLiteralExpression(list) || !list.elements.every((e) => ts.isArrayLiteralExpression(e) && e.elements.length === 2)) return {};
+    const key = describe(node.arguments[0], 'case')?.id;
+    const entries = list.elements.map((e) => describe(e.elements[0], 'case')?.id ?? null);
+    return typeof key === 'string' ? { $key_expr: key, $entry_exprs: entries } : {};
   }
 
   /** A LIST A TREE FUNCTION RETURNS, FILTERED OR MAPPED (rows 113, #117): `toItems(Hue, dict).filter(..)` or `.map(cb)` keeps the call it
