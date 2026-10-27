@@ -155,6 +155,13 @@ by id STRING, so the gate reported thousands of changed rows with no fact differ
 nine prefixes are shared with the C# half (`f`, `c`, `x`, `fn`, `br`, `p`, `k`, `e`, `i`); the other halves
 stamp `lang`, never `half`, so the per-language tally in `_meta` says who is present.
 
+**A FULL RUN WALKS THE FIRST TWO PROJECTS AT ONCE** (`src/TsRows/TsSetup/TsPairWalk.mjs`): the first in a worker thread with its own
+program and `Store`, the second here, merged into the rows - ids, order, counters - the walk one after the other writes
+(`STRUCTUREGATE_TS_PAIR=0` is that walk; `TsRowsPairWalk` compares the two maps table by table). The merge gives back
+what the second would have found the first had made: an interned key (`files`) and an expression's span (`store.exprAt`).
+A NEW READ, during the walk, of a row an earlier project wrote is a new thing the merge has to give back - a line in it
+and a case in that suite. A partial run never pairs.
+
 **IT PARSES IN FLIGHT** (`rust/fbtcore/src/mapper/deep/flight.rs`): node runs on a thread of its own while python,
 rust and C# store, and its rows are stored after theirs - so it NUMBERS IN A LANE, `LANE` above every counter it was
 handed (`floor` in `TsStore.mjs` for a prefix never recorded), and a lane the halves beside it crossed is parsed

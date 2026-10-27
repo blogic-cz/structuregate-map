@@ -35,6 +35,7 @@ import { makeReadLog, surfaceOf } from './TsReads.mjs';
 import { propReads } from './TsPropReads.mjs';
 import { generatedHeader } from './TsGenerated.mjs';
 import { shapeOf } from './TsShape.mjs';
+import { pairUp } from './TsPairWalk.mjs';
 
 /**
  * ONE PHYSICAL FILE, ONE ROW - and the backfill that keeps it true.
@@ -59,7 +60,7 @@ export function makeFileId(store, feRoot, projectId) {
 
 /** The compiler matcher's binding predicate over `names`, made OUT HERE: a closure made in the project loop holds that
  *  loop's whole scope, and with it every program the walk built, for as long as the registry lives. */
-function bindingNames(names) {
+export function bindingNames(names) {
   return { hasBindingPropertyName: (n) => names.includes(n) };
 }
 
@@ -70,8 +71,11 @@ function bindingNames(names) {
  * program and in its own), and extracting it once per program duplicated its declarations - one element
  * then reported the same directive several times. The first program to reach a file owns it.
  */
-export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted, only = null, rereads = null, propertyPaths = [], sources = () => [], skip = null }) {
+export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted, only = null, rereads = null, propertyPaths = [], sources = () => [], skip = null,
+  first = null, angular }) {
   const inAnyProgram = new Set();
+  // THE FIRST TWO PROJECTS AT ONCE on a full run (`TsSetup/TsPairWalk.mjs`); `first` is the worker walking the first of them.
+  const pair = first ? null : pairUp({ ts, fe, nodeModules, angular, projects, propertyPaths, partial: Boolean(rereads || skip || only) });
   // A PROJECT A PARTIAL RUN DOES NOT TOUCH IS NOT BUILT (rows 125, `skip`: `rows/partial/skip.rs`): it owns no file this run reads or
   // looks at the surface of (`rereads.touches`). Its files keep the rows they were handed back with; what its program reached is what the
   // map says it reached; and the notes its program wrote are said again in its place, as the map holds them.
@@ -101,7 +105,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
   // AN OUTSIDE PROGRAM IS NO PROJECT: its files belong to the project it borrowed the config of, and `reachable` 0 says the rest.
   const projectIds = new Map();
   for (const project of everyProgram()) {
-    const projectId = project.roots ? (projectIds.get(project.name) ?? null) : store.add('projects', 'p', {
+    const projectId = first ? first.projectId : project.roots ? (projectIds.get(project.name) ?? null) : store.add('projects', 'p', {
       name: project.name,
       dir: project.rel,
       project_type: project.projectType,
@@ -114,6 +118,8 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
       targets: project.targets,
     });
     projectIds.set(project.name, projectId);
+    if (pair?.isFirst(project)) { pair.start(projectId); continue; }
+    if (pair?.isSecond(project)) pair.fork(store, diag, registry, components);
 
     if (skip && rereads && !project.roots) {
       const owned = (ownedBy.get(project.name) ?? []).filter((rel) => !extracted.has(canonicalPath(path.join(fe, rel))));
@@ -149,6 +155,8 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
 
     if (!project.roots) for (const p of programFilePaths(program, fe)) inAnyProgram.add(canonicalPath(p));
     const files = projectSourceFiles(program, fe);
+    first?.onFiles({ owned: files.map((sf) => canonicalPath(sf.fileName)), reached: [...inAnyProgram] });
+    if (pair?.isSecond(project)) pair.owned(extracted, inAnyProgram);
     if (!files.length) {
       // An empty program is indistinguishable from a project with no code, and it is how a wrong tsconfig
       // choice hides: picking a references-only config emptied several libs' programs while the run still
@@ -405,8 +413,9 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
       if (!rereads) store.patch(fid, { surface: surfaceOf(ts, program, sf) });
       else if (rereads.checked.has(rel)) store.patch(fid, { surface: rereads.checked.get(rel) });
     }
+    if (pair?.isSecond(project)) pair.join(store, diag, noted, registry, components);
   }
-  linkFunctions(store);
+  if (!first) linkFunctions(store);
   diag.program = null;
   if (skipped) emit('MAP-NOTE', `the typescript half left ${skipped} project program(s) unbuilt: nothing they own is read again`);
   return { inAnyProgram, registry, components };
