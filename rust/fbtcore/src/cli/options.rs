@@ -65,6 +65,8 @@ pub struct Options {
     pub map_sqlite: Option<String>,
     pub map_query: Option<String>,
     pub map_query_args: Vec<String>,
+    /// `--map-index <db> <table>`: give a closure node table its shape index, now and on every later write (`rows::cells::shape`).
+    pub map_index: Option<(String, String)>,
     /// `--map-slice <base>`: cut a partial map out of a full one (`slice/`), the files `--slice-files` names and their dependents `--slice-hops` deep.
     pub map_slice: Option<String>,
     pub slice_files: Option<String>,
@@ -245,6 +247,10 @@ pub fn parse(args: &[String]) -> Result<Parsed, String> {
                 // error, it is the lens's business.
                 o.map_query_args = args[i + 1..].to_vec();
                 i = args.len();
+            }
+            "--map-index" => {
+                let db = full(&next()?);
+                o.map_index = Some((db, next()?));
             }
             "--map-slice" => o.map_slice = Some(full(&next()?)),
             "--slice-files" => o.slice_files = Some(next()?),

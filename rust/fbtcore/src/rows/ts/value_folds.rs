@@ -130,21 +130,21 @@ pub fn per_way_keyed(
                     here.insert(k, kept.into_iter().filter(|v| !removed.contains(v)).collect());
                     continue;
                 }
-                let allowed: IndexSet<String> = match op.as_str() {
-                    "unknown" => info.domain.clone(),
-                    "in" => values_of(r).into_iter().collect(),
-                    _ => {
-                        let excluded: IndexSet<String> = values_of(r).into_iter().collect();
-                        info.domain.iter().filter(|v| !excluded.contains(*v)).cloned().collect()
-                    }
+                // A DIMENSION ALREADY HELD IS NARROWED IN PLACE: what this row allows is asked per held member, never
+                // built - an `unknown` or `not_in` row is the enum's whole domain, copied once per gate per way.
+                let listed: IndexSet<String> = if op == "unknown" { IndexSet::new() } else { values_of(r).into_iter().collect() };
+                let allows = |v: &String| match op.as_str() {
+                    "unknown" => info.domain.contains(v),
+                    "in" => listed.contains(v),
+                    _ => info.domain.contains(v) && !listed.contains(v),
                 };
-                match here.get(&k) {
-                    Some(held) => {
-                        let narrowed: IndexSet<String> =
-                            held.iter().filter(|v| allowed.contains(*v)).cloned().collect();
-                        here.insert(k, narrowed);
-                    }
+                match here.get_mut(&k) {
+                    Some(held) => held.retain(|v| allows(v)),
                     None => {
+                        let allowed: IndexSet<String> = match op.as_str() {
+                            "in" => listed.clone(),
+                            _ => info.domain.iter().filter(|v| allows(v)).cloned().collect(),
+                        };
                         here.insert(k, allowed);
                     }
                 }
@@ -167,7 +167,8 @@ fn spellings(dim: &str, pairs: &[(String, String)]) -> IndexSet<String> {
         let d = out[i].clone();
         for (x, m) in pairs {
             for (from, to) in [(x, m), (m, x)] {
-                if d == *from || d.starts_with(&format!("{from}.")) {
+                // `from` itself or a chain under it, asked without building `from.` per pair.
+                if d.strip_prefix(from.as_str()).is_some_and(|rest| rest.is_empty() || rest.starts_with('.')) {
                     out.insert(format!("{to}{}", &d[from.len()..]));
                 }
             }

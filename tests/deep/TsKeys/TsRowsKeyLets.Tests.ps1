@@ -59,4 +59,36 @@ Test-Case 'tsrows keys: a let local that is written after its initializer hands 
     Assert-NoLine $r 'demo.unusedlet.Alpha | field_binding | HostComponent'
     Assert-NoLine $r 'demo.unusedlet.Beta | field_binding | HostComponent'
 }
+
+# (divergence #109) A CLOSURE TABLE'S NODES HAVE NO SHAPE INDEX: every reader starts from the key or a value, and the one index cost
+# a tenth of a full map. `--map-index` gives one table its index, kept on every later write - a full re-read included.
+Test-Case 'tsrows keys: a closure node table has no shape index until --map-index asks for one, and keeps it' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/translate.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "@Component({ selector: 'translate', standalone: true, template: '{{ text }}' })`n" +
+            "export class TranslateComponent { @Input() text: string = ''; }`n"
+        'apps/shop/src/root.component.ts' = "import { Component } from '@angular/core';`nimport { TranslateComponent } from './translate.component';`n" +
+            "@Component({ selector: 'demo-root', standalone: true, imports: [TranslateComponent], template: '<translate [text]=`"\'demo.root.title\'`"></translate>' })`n" +
+            "export class RootComponent {}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"root":{"title":"T"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["translate:text"]}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $indexQ = "SELECT 'ix=' || name AS ix FROM sqlite_master WHERE type = 'index' AND name IN ('ix_key_reach__paths_role', 'ix_key_reach__paths_value', 'ix_expressions__ast_role')"
+    $ix = Invoke-TsRowsQ $made.Db $indexQ
+    Assert-NoLine $ix 'ix=ix_key_reach__paths_role'
+    Assert-Line $ix 'ix=ix_key_reach__paths_value'
+    Assert-Line $ix 'ix=ix_expressions__ast_role'
+    $asked = Invoke-Gate --map-index $made.Db key_reach__paths
+    Assert-Exit $asked 0
+    Assert-Line (Invoke-TsRowsQ $made.Db $indexQ) 'ix=ix_key_reach__paths_role'
+    # A FULL RE-READ rewrites the closure tables, and makes the asked-for index again.
+    $again = Invoke-Gate --root $tree --map-sqlite $made.Db --ts-node-modules $script:TsRowsModules --ts-config (Join-Path $tree 'structuregate.ts.json') --map-reread typescript
+    Assert-Exit $again 0
+    Assert-Line (Invoke-TsRowsQ $made.Db $indexQ) 'ix=ix_key_reach__paths_role'
+    Assert-Line (Invoke-Gate --map-index $made.Db expressions__ast) 'already has its shape index'
+    Assert-Exit (Invoke-Gate --map-index $made.Db no__such) 2
+}
+
 }
