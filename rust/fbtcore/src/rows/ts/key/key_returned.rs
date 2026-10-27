@@ -18,7 +18,7 @@
 
 use super::key_branches::Branches;
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
 
 fn cell(row: &Row, field: &str) -> Option<String> {
@@ -34,7 +34,7 @@ fn cell(row: &Row, field: &str) -> Option<String> {
 /// order the first way names them. A render with no `return_ways`, or with nothing every way
 /// holds, has no entry.
 pub fn returned_under(store: &Store<'_>, branches: &Branches) -> IndexMap<String, Vec<String>> {
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     let renders = store.table("renders");
     let wanted: Vec<(&Row, &Vec<Value>)> = renders
         .iter()
@@ -54,7 +54,7 @@ pub fn returned_under(store: &Store<'_>, branches: &Branches) -> IndexMap<String
         let mut held: Option<IndexSet<String>> = None;
         let mut chains: Vec<IndexSet<String>> = Vec::new();
         for way in ways {
-            let mut chain = IndexSet::new();
+            let mut chain = IndexSet::default();
             for rv in way.as_array().into_iter().flatten().filter_map(|v| v.as_str()) {
                 // THE KEY OF A `Map` ENTRY the class was looked up by is a case of its own (`gate_cases::lookup_values`).
                 if rv.starts_with("lookup:") {
@@ -91,7 +91,7 @@ pub fn returned_under(store: &Store<'_>, branches: &Branches) -> IndexMap<String
 /// `key_reach` reads as the union of the cases' values (`gate_collapse::either`). A way holding no
 /// case of its own, or more than one condition of its own, leaves the edge with the intersection.
 fn either_link(chains: &[IndexSet<String>], held: &IndexSet<String>, branches: &Branches) -> Option<String> {
-    let mut cases: IndexSet<String> = IndexSet::new();
+    let mut cases: IndexSet<String> = IndexSet::default();
     for chain in chains {
         let own: Vec<&String> = chain.iter().filter(|c| !held.contains(*c)).collect();
         let [case] = own.as_slice() else { return None };
@@ -114,7 +114,7 @@ pub fn either_values(
     value_map: &IndexMap<String, (Option<String>, Vec<Value>)>,
     idx: &super::gate_values::EnumIndex,
 ) -> IndexMap<String, (Option<String>, Vec<Value>)> {
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     for link in returned_under(store, branches).into_values().flatten() {
         let Some(ids) = link.strip_prefix("or:") else { continue };
         let mut rows: Option<Vec<Value>> = None;

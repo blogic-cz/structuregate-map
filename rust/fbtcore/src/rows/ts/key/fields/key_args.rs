@@ -19,7 +19,7 @@ use super::value_folds::ArgParams;
 use super::key_branches::Branches;
 use super::key_fields::{id_of, text};
 use super::store::{Row, Store};
-use indexmap::IndexSet;
+use crate::rows::IndexSet;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -34,7 +34,7 @@ pub fn arg_conds<'l>(
     idx: &EnumIndex,
 ) -> (Conds, ArgParams) {
     let mut out = Conds::new();
-    let mut found_params = ArgParams::new();
+    let mut found_params = ArgParams::default();
     let links: IndexSet<&String> = links.filter(|l| l.starts_with("arg:")).collect();
     if links.is_empty() {
         return (out, found_params);
@@ -92,7 +92,7 @@ pub fn arg_conds<'l>(
         let Some(cond) = ast(tree) else { continue };
         // THE CALLEE'S OWN `const` LOCALS are their values first: a plain chain, or a private accessor's one return.
         let cond = locals.inline(&cond, callee);
-        let mut read = IndexSet::new();
+        let mut read = IndexSet::default();
         params_read(&cond, callee_names, &mut read);
         // THE CONDITION LIFTED OUT OF HOPS k.. is kept by that suffix (`lifted`), read in the member hop k is written in:
         // each call site only puts its own arguments in, however many links share what lies below it.
@@ -137,7 +137,7 @@ pub fn arg_conds<'l>(
         }
         let Some(replaced) = cond else { continue };
         let caller = owner(hops[0]);
-        let none = IndexSet::new();
+        let none = IndexSet::default();
         let mut resolved = rows.resolve_in(&replaced, inner.get(callee).unwrap_or(&none), idx, caller.as_deref());
         // A METHOD THE TEMPLATE CALLS: its own parameters are the template's arguments at that call, or the condition names `r.kind`
         // (or a bare `k`) where the template reads `row.kind`.

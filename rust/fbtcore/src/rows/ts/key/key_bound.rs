@@ -22,7 +22,7 @@ use super::astreads::unwrap;
 use super::closure::RenderPath;
 use super::gate_input_flags::{bound_inputs, input_alias, written_members};
 use super::store::{Row, Store};
-use indexmap::IndexMap;
+use crate::rows::IndexMap;
 use serde_json::{json, Value};
 
 fn cell(row: &Row, field: &str) -> Option<String> {
@@ -38,7 +38,7 @@ pub struct Bound {
     /// `bind:<render>#<gate>` -> the gate's condition with the edge's own binding in place of the flag.
     pub conds: IndexMap<String, (Value, bool)>,
     /// Edges on which the gate's condition is the literal `false`.
-    pub dead: indexmap::IndexSet<String>,
+    pub dead: crate::rows::IndexSet<String>,
     /// Gate id -> its component, for the gates above only.
     pub component_of_gate: IndexMap<String, String>,
 }
@@ -108,7 +108,7 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
     let written = written_members(store);
     let defined = bound_inputs(store, &written);
     // class -> (input alias -> member id, initializer literal)
-    let mut inputs: IndexMap<String, IndexMap<String, (String, Option<Value>)>> = IndexMap::new();
+    let mut inputs: IndexMap<String, IndexMap<String, (String, Option<Value>)>> = IndexMap::default();
     for m in store.table("members").iter() {
         let (Some(id), Some(class)) = (cell(m, "id"), cell(m, "class")) else { continue };
         if cell(m, "kind").as_deref() != Some("property") || written.contains(&id) || defined.contains_key(&id) {
@@ -122,8 +122,8 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
         return out;
     }
     let expressions = store.table("expressions");
-    let mut tree_of_binding: IndexMap<String, &Row> = IndexMap::new();
-    let mut by_id: IndexMap<String, &Row> = IndexMap::new();
+    let mut tree_of_binding: IndexMap<String, &Row> = IndexMap::default();
+    let mut by_id: IndexMap<String, &Row> = IndexMap::default();
     for e in expressions.iter() {
         if let Some(b) = cell(e, "binding") {
             tree_of_binding.insert(b, e);
@@ -133,7 +133,7 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
         }
     }
     // (node, input name) -> the one tree bound there; two bindings of one name are read as none.
-    let mut bound: IndexMap<(String, String), Option<Value>> = IndexMap::new();
+    let mut bound: IndexMap<(String, String), Option<Value>> = IndexMap::default();
     for b in store.table("bindings").iter() {
         let (Some(id), Some(node), Some(name)) = (cell(b, "id"), cell(b, "node"), cell(b, "name")) else { continue };
         if cell(b, "kind").as_deref() != Some("input") {
@@ -144,7 +144,7 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
         let slot = if bound.contains_key(&key) { None } else { tree };
         bound.insert(key, slot);
     }
-    let mut gates_of: IndexMap<String, Vec<(String, &Row)>> = IndexMap::new();
+    let mut gates_of: IndexMap<String, Vec<(String, &Row)>> = IndexMap::default();
     let gates = store.table("gates");
     for g in gates.iter() {
         if let (Some(id), Some(comp)) = (cell(g, "id"), cell(g, "component")) {
@@ -155,7 +155,7 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
         let (Some(id), Some(to), Some(class), Some(node)) = (cell(r, "id"), cell(r, "to"), cell(r, "to_class"), cell(r, "node")) else { continue };
         let (Some(own), Some(gs)) = (inputs.get(&class), gates_of.get(&to)) else { continue };
         // member row -> this edge's value for it
-        let mut with: IndexMap<String, Value> = IndexMap::new();
+        let mut with: IndexMap<String, Value> = IndexMap::default();
         for (alias, (member, init)) in own {
             match bound.get(&(node.clone(), alias.clone())) {
                 Some(Some(tree)) => with.insert(member.clone(), tree.clone()),

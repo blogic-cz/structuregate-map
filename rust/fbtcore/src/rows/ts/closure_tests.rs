@@ -243,7 +243,7 @@ fn naive(edges: &IndexMap<Arc<str>, Vec<Edge>>, comp: &str) -> Vec<RenderPath> {
         Some((held, _)) => Arc::clone(held),
         None => Arc::from(comp),
     };
-    let mut seen = IndexSet::new();
+    let mut seen = IndexSet::default();
     seen.insert(Arc::clone(&start));
     walk(edges, &start, &mut seen)
 }
@@ -253,7 +253,7 @@ fn naive(edges: &IndexMap<Arc<str>, Vec<Edge>>, comp: &str) -> Vec<RenderPath> {
 /// by each other (so a cycle is cut), a self-render, and two edges between the SAME pair -
 /// which is what multiplies the real map's paths.
 fn shapes() -> IndexMap<Arc<str>, Vec<Edge>> {
-    let mut edges: IndexMap<Arc<str>, Vec<Edge>> = IndexMap::new();
+    let mut edges: IndexMap<Arc<str>, Vec<Edge>> = IndexMap::default();
     let mut add = |child: &str, parent: &str, id: &str, gate: Option<&str>| {
         edges.entry(Arc::from(child)).or_default().push(Edge {
             id: Arc::from(id),

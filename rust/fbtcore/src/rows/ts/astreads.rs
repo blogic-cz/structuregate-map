@@ -8,7 +8,7 @@
 //! `Source` gains a sibling wrapper, five files have to learn it and the one that does not
 //! silently walks a tree it thinks is empty.
 
-use indexmap::IndexSet;
+use crate::rows::IndexSet;
 use serde_json::Value;
 
 /// A stored tree is wrapped in a `Source` node carrying the original text; the walk wants
@@ -62,7 +62,7 @@ fn row_text(v: &Value) -> String {
 /// runs, which is exactly the kind of difference the 53-table gate reports as changed rows
 /// carrying no changed fact.
 pub fn read_rows(ast: &Value) -> IndexSet<String> {
-    let mut out = IndexSet::new();
+    let mut out = IndexSet::default();
     let mut stack: Vec<&Value> = vec![ast];
 
     while let Some(n) = stack.pop() {

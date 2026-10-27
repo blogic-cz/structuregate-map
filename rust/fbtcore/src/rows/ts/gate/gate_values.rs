@@ -25,7 +25,7 @@ use super::astreads::is_read;
 use super::featurewalk::{necessary_either, OrderedSet};
 use super::gate_predicates::{predicate_restriction, predicates};
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
 
 const EQ: &[&str] = &["===", "=="];
@@ -76,7 +76,7 @@ pub struct EnumIndex {
 }
 
 pub fn enum_index(store: &Store<'_>) -> EnumIndex {
-    let mut file_path: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut file_path: IndexMap<String, Option<String>> = IndexMap::default();
     for f in store.table("files").iter() {
         if let Some(id) = id_of(f, "id") {
             file_path.insert(id, text(f, "path"));
@@ -378,7 +378,7 @@ pub fn gate_values_with(
     let mut either = |l: Vec<Value>, r: Vec<Value>| super::gate_collapse::either(&l, &r, &idx);
 
     let expressions = store.table("expressions");
-    let mut expr_by_id: IndexMap<String, &Row> = IndexMap::new();
+    let mut expr_by_id: IndexMap<String, &Row> = IndexMap::default();
     for e in expressions.iter() {
         if let Some(id) = id_of(e, "id") {
             expr_by_id.insert(id, e);

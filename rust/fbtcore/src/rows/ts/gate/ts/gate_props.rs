@@ -34,7 +34,7 @@ use super::gate_features::template_written;
 use super::gate_tsrows::TsRows;
 use super::gate_values::EnumIndex;
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
 
 fn cell(row: &Row, field: &str) -> Option<String> {
@@ -134,7 +134,7 @@ impl<'a> Props<'a> {
     }
 
     fn defs(store: &Store<'_>, idx: &EnumIndex, rows: &TsRows) -> IndexMap<String, (Value, bool)> {
-        let mut asts: IndexMap<String, &Row> = IndexMap::new();
+        let mut asts: IndexMap<String, &Row> = IndexMap::default();
         let expressions = store.table("expressions");
         // BY ROW, NOT BY TREE: an AST is decoded when it is read (`store::Cell`), so only the trees a lookup
         // asks for are ever decoded.
@@ -143,21 +143,21 @@ impl<'a> Props<'a> {
                 asts.insert(id, e);
             }
         }
-        let mut bound: IndexMap<String, IndexSet<String>> = IndexMap::new();
+        let mut bound: IndexMap<String, IndexSet<String>> = IndexMap::default();
         for f in store.table("functions").iter() {
             let Some(parent) = cell(f, "parent") else { continue };
             let names = f.get("params").and_then(|p| p.as_array()).into_iter().flatten()
                 .filter_map(|p| p.get("name").and_then(|n| n.as_str()).map(str::to_string));
             bound.entry(parent).or_default().extend(names);
         }
-        let none = IndexSet::new();
+        let none = IndexSet::default();
         let tree = |x: Option<String>, member: Option<String>| -> Option<Value> {
             let ast = asts.get(&x?)?.get("ast").filter(|a| !a.is_null())?;
             let names = member.as_ref().and_then(|m| bound.get(m)).unwrap_or(&none);
             Some(rows.resolve_in(unwrap(ast), names, idx, member.as_deref()))
         };
 
-        let mut returns: IndexMap<String, Vec<&Row>> = IndexMap::new();
+        let mut returns: IndexMap<String, Vec<&Row>> = IndexMap::default();
         let all_returns = store.table("returns");
         for r in all_returns.iter() {
             if let Some(m) = cell(r, "member") {
@@ -169,7 +169,7 @@ impl<'a> Props<'a> {
             .filter(|l| cell(l, "declared").as_deref() == Some("const") && l.get("value").is_none_or(|v| v.get("$fn").is_none()))
             .filter_map(|l| Some((cell(l, "id")?, cell(l, "expression")?)))
             .collect();
-        let mut writes: IndexMap<String, Vec<&Row>> = IndexMap::new();
+        let mut writes: IndexMap<String, Vec<&Row>> = IndexMap::default();
         let assignments = store.table("assignments");
         for a in assignments.iter() {
             if let Some(t) = cell(a, "target_id") {
@@ -183,7 +183,7 @@ impl<'a> Props<'a> {
             .filter_map(|b| cell(b, "id").map(|id| (id, b)))
             .collect();
         let written_by_template = template_written(store);
-        let mut lifecycle: IndexMap<String, String> = IndexMap::new();
+        let mut lifecycle: IndexMap<String, String> = IndexMap::default();
         for m in store.table("members").iter() {
             let first = cell(m, "kind").as_deref() == Some("constructor") || cell(m, "name").as_deref() == Some("ngOnInit");
             if let (true, Some(id), Some(class)) = (first, cell(m, "id"), cell(m, "class")) {

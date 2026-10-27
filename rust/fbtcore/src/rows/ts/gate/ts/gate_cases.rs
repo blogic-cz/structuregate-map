@@ -20,7 +20,7 @@ use super::gate_switch::{switch_arm, Dimension};
 use super::gate_tsrows::TsRows;
 use super::gate_values::{constant_of, dimension_of, untyped_dimension, EnumIndex, MemberEnums};
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
 
 fn cell(row: &Row, field: &str) -> Option<String> {
@@ -50,7 +50,7 @@ fn arm_of(g: &Group, dim: &Dimension, siblings: &[&Group]) -> Option<Value> {
         if !all_in || arms.len() != g.labels.len() {
             return Some(json!({"enum": en, "dim": dim.dim, "row": dim.row, "op": "unknown"}));
         }
-        let mut values: IndexSet<Value> = IndexSet::new();
+        let mut values: IndexSet<Value> = IndexSet::default();
         for a in &arms {
             values.extend(a["values"].as_array().into_iter().flatten().cloned());
         }
@@ -60,7 +60,7 @@ fn arm_of(g: &Group, dim: &Dimension, siblings: &[&Group]) -> Option<Value> {
     let named: Vec<&Option<(String, String)>> = siblings.iter().flat_map(|s| s.labels.iter()).collect();
     let en = dim.enum_id.clone().or_else(|| named.iter().find_map(|c| c.as_ref().map(|(e, _)| e.clone())))?;
     let own: IndexSet<&str> = g.labels.iter().flatten().map(|(_, v)| v.as_str()).collect();
-    let mut values: IndexSet<String> = IndexSet::new();
+    let mut values: IndexSet<String> = IndexSet::default();
     for c in named {
         match c {
             Some((e, v)) if *e == en => {
@@ -82,11 +82,11 @@ pub fn case_values(
     idx: &EnumIndex,
 ) -> IndexMap<String, (Option<String>, Vec<Value>)> {
     let rows = TsRows::of(store);
-    let none = IndexSet::new();
+    let none = IndexSet::default();
     let expressions = store.table("expressions");
     // BY ROW, NOT BY TREE: an AST is decoded when it is read (`store::Cell`), so the map holds rows and only the
     // trees a lookup asks for are ever decoded.
-    let mut ast_of: IndexMap<String, &Row> = IndexMap::new();
+    let mut ast_of: IndexMap<String, &Row> = IndexMap::default();
     for e in expressions.iter() {
         if let Some(id) = cell(e, "id") {
             ast_of.insert(id, e);
@@ -96,7 +96,7 @@ pub fn case_values(
         id.and_then(|i| ast_of.get(i)).and_then(|r| r.get("ast")).filter(|a| !a.is_null()).map(|a| rows.resolve(unwrap(a), &none, idx))
     };
 
-    let mut switches: IndexMap<String, Vec<Group>> = IndexMap::new();
+    let mut switches: IndexMap<String, Vec<Group>> = IndexMap::default();
     for c in store.table("switch_cases").iter() {
         let (Some(id), Some(switch)) = (cell(c, "id"), cell(c, "discriminant_expr")) else { continue };
         let labels = match c.get("label_exprs") {
@@ -110,7 +110,7 @@ pub fn case_values(
         switches.entry(switch).or_default().push(Group { id, labels, default });
     }
 
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     for (switch, groups) in &switches {
         let Some(ast) = read(Some(switch)) else { continue };
         let dim = match dimension_of(&ast, mem) {
@@ -139,18 +139,18 @@ pub fn lookup_values(
     mem: &MemberEnums,
     idx: &EnumIndex,
 ) -> IndexMap<String, (Option<String>, Vec<Value>)> {
-    let mut wanted: IndexSet<String> = IndexSet::new();
+    let mut wanted: IndexSet<String> = IndexSet::default();
     for r in store.table("renders").iter() {
         let Some(Value::Array(ways)) = r.get("return_ways") else { continue };
         let ids = ways.iter().filter_map(Value::as_array).flatten().filter_map(Value::as_str);
         wanted.extend(ids.filter(|id| id.starts_with("lookup:")).map(str::to_string));
     }
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     if wanted.is_empty() {
         return out;
     }
     let rows = TsRows::of(store);
-    let none = IndexSet::new();
+    let none = IndexSet::default();
     let expressions = store.table("expressions");
     let ast_of: IndexMap<String, &Row> = expressions.iter().filter_map(|e| cell(e, "id").map(|id| (id, e))).collect();
     let read = |id: &str| {

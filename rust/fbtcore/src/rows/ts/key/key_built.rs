@@ -19,7 +19,7 @@
 use super::gate_tsrows::TsRows;
 use super::gate_values::{dimension_of, untyped_dimension, EnumIndex, MemberEnums};
 use super::store::Store;
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
 
 /// Link id -> the restrictions its holes state, in `gate_values`' own map shape.
@@ -29,20 +29,20 @@ pub fn built_values(
     mem: &MemberEnums,
     idx: &EnumIndex,
 ) -> IndexMap<String, (Option<String>, Vec<Value>)> {
-    let mut wanted: IndexMap<String, Vec<(String, Vec<String>)>> = IndexMap::new();
+    let mut wanted: IndexMap<String, Vec<(String, Vec<String>)>> = IndexMap::default();
     for link in links {
         let Some((tree, holes)) = link.strip_prefix("tpl:").and_then(|l| l.split_once('=')) else { continue };
         let texts = holes.split('|').map(str::to_string).collect();
         wanted.entry(tree.to_string()).or_default().push((link.clone(), texts));
     }
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     if wanted.is_empty() {
         return out;
     }
     let rows = TsRows::of(store);
-    let none = IndexSet::new();
+    let none = IndexSet::default();
     // Enum id -> value as printed -> member name, for a hole that interpolates the value.
-    let mut printed: IndexMap<String, IndexMap<String, String>> = IndexMap::new();
+    let mut printed: IndexMap<String, IndexMap<String, String>> = IndexMap::default();
     for e in store.table("enums").iter() {
         let Some(id) = e.get("id").and_then(|v| v.as_str()) else { continue };
         for m in e.get("members").and_then(|v| v.as_array()).into_iter().flatten() {
@@ -143,7 +143,7 @@ mod tests {
         let mut mem = MemberEnums::default();
         mem.typed.insert("m:id".into(), "e:1".into());
         let hole = json!({"k": "Read", "name": "VendorID", "receiver": {"k": "This"}, "target": {"row": "m:id"}});
-        let mut printed = IndexMap::new();
+        let mut printed = IndexMap::default();
         printed.insert("e:1".to_string(), [("9".to_string(), "Delta".to_string())].into_iter().collect());
         let r = printed_value(&hole, "9", &mem, &idx(), &printed).expect("a restriction");
         assert_eq!(r["values"], json!(["Delta"]));

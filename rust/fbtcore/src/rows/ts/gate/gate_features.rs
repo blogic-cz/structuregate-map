@@ -20,7 +20,7 @@ use super::feature_writes::{
 };
 use super::featurewalk::{codes_in, necessary, OrderedSet};
 use super::store::{Row, Store};
-use indexmap::IndexMap;
+use crate::rows::IndexMap;
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -63,7 +63,7 @@ fn id_of(row: &Row, field: &str) -> Option<String> {
 /// property is also one of the gate-input names, so a by-name poison dropped gates
 /// every other pass proves.
 pub fn write_owners(store: &Store<'_>) -> impl Fn(&Row) -> Option<String> + use<> {
-    let mut member_class: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut member_class: IndexMap<String, Option<String>> = IndexMap::default();
     for r in store.table("members").iter() {
         if let Some(id) = id_of(r, "id") {
             member_class.insert(id, text(r, "class"));
@@ -94,19 +94,19 @@ pub fn write_owners(store: &Store<'_>) -> impl Fn(&Row) -> Option<String> + use<
 /// than to a look-alike. Interfaces are searched too because part of an
 /// app may call the feature service through an interface.
 pub fn resolve_checks(store: &Store<'_>, specs: &[String]) -> Vec<Check> {
-    let mut file_path: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut file_path: IndexMap<String, Option<String>> = IndexMap::default();
     for f in store.table("files").iter() {
         if let Some(id) = id_of(f, "id") {
             file_path.insert(id, text(f, "path"));
         }
     }
-    let mut class_name: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut class_name: IndexMap<String, Option<String>> = IndexMap::default();
     for c in store.table("classes").iter() {
         if let Some(id) = id_of(c, "id") {
             class_name.insert(id, text(c, "name"));
         }
     }
-    let mut interface_name: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut interface_name: IndexMap<String, Option<String>> = IndexMap::default();
     for i in store.table("interfaces").iter() {
         if let Some(id) = id_of(i, "id") {
             interface_name.insert(id, text(i, "name"));
@@ -164,7 +164,7 @@ pub fn resolve_checks(store: &Store<'_>, specs: &[String]) -> Vec<Check> {
 /// Split on `=` rather than matched: `!==` and `>=` yield three parts and are rejected by
 /// the count, and a write to a nested path does not write the property itself.
 pub fn template_written(store: &Store<'_>) -> HashSet<String> {
-    let mut comp_class: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut comp_class: IndexMap<String, Option<String>> = IndexMap::default();
     for r in store.table("components").iter() {
         if let Some(id) = id_of(r, "id") {
             comp_class.insert(id, text(r, "class"));
@@ -212,7 +212,7 @@ pub fn declaration_index(store: &Store<'_>) -> impl Fn(Option<&Value>) -> Option
         parts[parts.len().saturating_sub(2)..].join("/")
     }
 
-    let mut by_tail: IndexMap<String, Vec<(String, String)>> = IndexMap::new();
+    let mut by_tail: IndexMap<String, Vec<(String, String)>> = IndexMap::default();
     for f in store.table("files").iter() {
         let path = text(f, "path").unwrap_or_default();
         let Some(id) = id_of(f, "id") else { continue };
@@ -222,7 +222,7 @@ pub fn declaration_index(store: &Store<'_>) -> impl Fn(Option<&Value>) -> Option
             .push((id, format!("/{}", path.replace('\\', "/"))));
     }
 
-    let mut decl_at: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut decl_at: IndexMap<String, Option<String>> = IndexMap::default();
     for m in store.table("members").iter() {
         let Some(file) = id_of(m, "file") else { continue };
         let k = format!("{file} {}", id_of(m, "line").unwrap_or_else(|| "None".into()));
@@ -401,7 +401,7 @@ pub fn gate_features_with(
         }
     }
 
-    let mut member_class: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut member_class: IndexMap<String, Option<String>> = IndexMap::default();
     for r in store.table("members").iter() {
         if let Some(id) = id_of(r, "id") {
             member_class.insert(id, text(r, "class"));
@@ -439,14 +439,14 @@ pub fn gate_features_with(
     };
 
     let expressions = store.table("expressions");
-    let mut expr_by_id: IndexMap<String, &Row> = IndexMap::new();
+    let mut expr_by_id: IndexMap<String, &Row> = IndexMap::default();
     for e in expressions.iter() {
         if let Some(id) = id_of(e, "id") {
             expr_by_id.insert(id, e);
         }
     }
 
-    let mut out: IndexMap<String, (Option<String>, Vec<String>)> = IndexMap::new();
+    let mut out: IndexMap<String, (Option<String>, Vec<String>)> = IndexMap::default();
     let polarity = super::gate_values::class_polarity(store);
     for g in store.table("gates").iter() {
         let Some(e) = id_of(g, "expression").and_then(|x| expr_by_id.get(&x)) else { continue };
@@ -480,7 +480,7 @@ pub fn gate_features_with(
         }
     }
 
-    let mut cond_out: IndexMap<String, Vec<String>> = IndexMap::new();
+    let mut cond_out: IndexMap<String, Vec<String>> = IndexMap::default();
     conds.each(|id, ast, negated| {
         let mut got = OrderedSet::new();
         {
@@ -521,7 +521,7 @@ fn make_resolve<'a>(
     root: &'a str,
 ) -> impl FnMut(&Value, bool) -> Vec<Value> + 'a {
     move |n: &Value, negated: bool| -> Vec<Value> {
-        let mut got: Codes = IndexMap::new();
+        let mut got: Codes = IndexMap::default();
         let Some(object) = n.as_object() else { return Vec::new() };
         let kind = object.get("k").and_then(|k| k.as_str()).unwrap_or("");
         if negated || !matches!(kind, "Read" | "Call" | "SafeRead") {

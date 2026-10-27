@@ -19,7 +19,7 @@
 use super::key_fields::{id_of, text};
 use super::key_routes::Route;
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -32,7 +32,7 @@ struct Built {
 }
 
 pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row]) -> Vec<Row> {
-    let mut by_key: IndexMap<String, Vec<Built>> = IndexMap::new();
+    let mut by_key: IndexMap<String, Vec<Built>> = IndexMap::default();
     for b in builds {
         let (Some(key), Some(literal), Some(file), Some(line)) = (text(b, "key"), text(b, "literal"), text(b, "file"), b.get("line").and_then(Value::as_i64)) else { continue };
         let typed = b.get("enum").is_some_and(|e| !e.is_null());
@@ -65,7 +65,7 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
         }
     }
     let reached = |start: &str| -> Vec<&(String, i64, i64)> {
-        let mut seen: IndexSet<String> = IndexSet::from([start.to_string()]);
+        let mut seen: IndexSet<String> = IndexSet::from_iter([start.to_string()]);
         let mut i = 0;
         while let Some(m) = seen.get_index(i).cloned() {
             i += 1;
@@ -87,7 +87,7 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
     let mut out = Vec::new();
     for (key, hit) in routes {
         let built = by_key.get(key);
-        let mut seen: IndexSet<(String, String, Option<String>, Option<String>)> = IndexSet::new();
+        let mut seen: IndexSet<(String, String, Option<String>, Option<String>)> = IndexSet::default();
         let mut nodes: Vec<&String> = hit.nodes.iter().collect();
         nodes.sort();
         for node in nodes {

@@ -29,7 +29,7 @@
 use super::astreads::unwrap;
 use super::gate_values::{constant_of, dimension_of, untyped_dimension, EnumIndex, MemberEnums};
 use super::store::{Row, Store};
-use indexmap::IndexMap;
+use crate::rows::IndexMap;
 use serde_json::{json, Value};
 
 fn text(row: &Row, field: &str) -> Option<String> {
@@ -151,7 +151,7 @@ pub fn switch_restrictions(
     idx: &EnumIndex,
 ) -> (IndexMap<String, Vec<Value>>, SwitchStats) {
     let expressions = store.table("expressions");
-    let mut expr_by_id: IndexMap<String, &Row> = IndexMap::new();
+    let mut expr_by_id: IndexMap<String, &Row> = IndexMap::default();
     for e in expressions.iter() {
         if let Some(id) = id_of(e, "id") {
             expr_by_id.insert(id, e);
@@ -159,7 +159,7 @@ pub fn switch_restrictions(
     }
 
     let nodes = store.table("template_nodes");
-    let mut parent: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut parent: IndexMap<String, Option<String>> = IndexMap::default();
     for n in nodes.iter() {
         if let Some(id) = id_of(n, "id") {
             parent.insert(id, id_of(n, "parent"));
@@ -176,7 +176,7 @@ pub fn switch_restrictions(
     // THE ENUM COMES FROM WHICHEVER SIDE PROVES IT: the switch's own declaration when the
     // checker typed it, otherwise the case constant, with `row` left null to say the tie
     // is by TEXT.
-    let mut dims: IndexMap<String, Dimension> = IndexMap::new();
+    let mut dims: IndexMap<String, Dimension> = IndexMap::default();
     for g in gates.iter().filter(|g| is_switch(g)) {
         let Some(ast) = ast_of(g) else { continue };
         let Some(node) = id_of(g, "node") else { continue };
@@ -187,7 +187,7 @@ pub fn switch_restrictions(
         }
     }
 
-    let mut out: IndexMap<String, Vec<Value>> = IndexMap::new();
+    let mut out: IndexMap<String, Vec<Value>> = IndexMap::default();
     let mut stats = SwitchStats { switches: dims.len(), ..Default::default() };
 
     for g in gates.iter().filter(|g| is_case(g)) {
@@ -283,7 +283,7 @@ mod tests {
         // desugaring inserts wrappers and templates nest containers freely.
         let parent = parents(&[("n:case", Some("n:w1")), ("n:w1", Some("n:w2")),
                                ("n:w2", Some("n:switch")), ("n:switch", None)]);
-        let mut dims = IndexMap::new();
+        let mut dims = IndexMap::default();
         dims.insert("n:switch".to_string(), dim_of(Some("e:1")));
         assert_eq!(enclosing_dimension("n:case", &parent, &dims), Some(&dim_of(Some("e:1"))));
     }
@@ -294,7 +294,7 @@ mod tests {
                                ("n:outer", None)]);
         let inner = Dimension { enum_id: Some("e:inner".into()), dim: "b".into(), row: None };
         let outer = Dimension { enum_id: Some("e:outer".into()), dim: "a".into(), row: None };
-        let mut dims = IndexMap::new();
+        let mut dims = IndexMap::default();
         dims.insert("n:outer".to_string(), outer);
         dims.insert("n:inner".to_string(), inner.clone());
         assert_eq!(enclosing_dimension("n:case", &parent, &dims), Some(&inner));
@@ -303,13 +303,13 @@ mod tests {
     #[test]
     fn a_cycle_in_the_parent_links_ends_the_walk_rather_than_spinning() {
         let parent = parents(&[("n:a", Some("n:b")), ("n:b", Some("n:a"))]);
-        assert_eq!(enclosing_dimension("n:a", &parent, &IndexMap::new()), None);
+        assert_eq!(enclosing_dimension("n:a", &parent, &IndexMap::default()), None);
     }
 
     #[test]
     fn a_case_under_no_switch_at_all_is_unplaced() {
         let parent = parents(&[("n:case", None)]);
-        assert_eq!(enclosing_dimension("n:case", &parent, &IndexMap::new()), None);
+        assert_eq!(enclosing_dimension("n:case", &parent, &IndexMap::default()), None);
     }
 
     /// One switch and one arm, named `switch`/`case` with `kind`, the case node under `between` (none: directly under the switch).

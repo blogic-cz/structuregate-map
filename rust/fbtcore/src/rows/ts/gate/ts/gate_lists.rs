@@ -22,7 +22,7 @@ use super::gate_values::{
     constant_of, dimension_of, enum_of_type_ref, untyped_dimension, EnumIndex, MemberEnums,
 };
 use super::store::Store;
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
 
 /// A list a row holds: the enum its items NAME (`TierIDs` of `TierIDs.Small`), the one it
@@ -110,7 +110,7 @@ pub(super) fn enum_for(list: &List, dim_enum: Option<&String>, idx: &EnumIndex) 
 
 /// Names the callbacks of `parent` bind, which is what marks an element in its trees.
 fn bound_by(store: &Store<'_>) -> IndexMap<String, IndexSet<String>> {
-    let mut out: IndexMap<String, IndexSet<String>> = IndexMap::new();
+    let mut out: IndexMap<String, IndexSet<String>> = IndexMap::default();
     for f in store.table("functions").iter() {
         let Some(parent) = f.get("parent").and_then(|v| v.as_str()) else { continue };
         let Some(Value::Array(params)) = f.get("params") else { continue };
@@ -133,8 +133,8 @@ pub fn lists(store: &Store<'_>, idx: &EnumIndex) -> Lists {
 
     let rows = TsRows::of(store);
     let bound = bound_by(store);
-    let none = IndexSet::new();
-    let mut candidates: IndexMap<String, (String, String)> = IndexMap::new();
+    let none = IndexSet::default();
+    let mut candidates: IndexMap<String, (String, String)> = IndexMap::default();
     for table in ["members", "functions"] {
         for r in store.table(table).iter() {
             let (Some(Value::String(id)), Some(Value::Array(params))) = (r.get("id"), r.get("params")) else { continue };
@@ -144,14 +144,14 @@ pub fn lists(store: &Store<'_>, idx: &EnumIndex) -> Lists {
         }
     }
     // ONE RETURN, OUTSIDE ANY BRANCH — the rule `gate_predicates` holds its own reader to.
-    let mut returns: IndexMap<String, Vec<Option<String>>> = IndexMap::new();
+    let mut returns: IndexMap<String, Vec<Option<String>>> = IndexMap::default();
     for r in store.table("returns").iter() {
         let Some(member) = r.get("member").and_then(|v| v.as_str()).filter(|m| candidates.contains_key(*m)) else { continue };
         let unconditional = ["branch", "case"].iter().all(|f| r.get(f).is_none_or(Value::is_null));
         let tree = r.get("expression").and_then(|v| v.as_str()).filter(|_| unconditional).map(str::to_string);
         returns.entry(member.to_string()).or_default().push(tree);
     }
-    let mut wanted: IndexMap<String, String> = IndexMap::new();
+    let mut wanted: IndexMap<String, String> = IndexMap::default();
     for (member, trees) in returns {
         if let [Some(x)] = trees.as_slice() {
             wanted.insert(x.clone(), member);

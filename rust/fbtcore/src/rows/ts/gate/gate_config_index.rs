@@ -85,14 +85,14 @@ pub fn config_members(
     store: &Store<'_>,
     idx: &EnumIndex,
 ) -> IndexMap<String, IndexMap<String, Option<ConfigMember>>> {
-    let mut file_path: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut file_path: IndexMap<String, Option<String>> = IndexMap::default();
     for f in store.table("files").iter() {
         if let Some(id) = id_of(f, "id") {
             file_path.insert(id, text(f, "path"));
         }
     }
 
-    let mut ifaces: IndexMap<String, Vec<(String, String)>> = IndexMap::new();
+    let mut ifaces: IndexMap<String, Vec<(String, String)>> = IndexMap::default();
     for i in store.table("interfaces").iter() {
         let Some(name) = text(i, "name") else { continue };
         let Some(id) = id_of(i, "id") else { continue };
@@ -103,7 +103,7 @@ pub fn config_members(
         ifaces.entry(name).or_default().push((id, path));
     }
 
-    let mut tms: IndexMap<String, Vec<ConfigMember>> = IndexMap::new();
+    let mut tms: IndexMap<String, Vec<ConfigMember>> = IndexMap::default();
     for tm in store.table("type_members").iter() {
         let Some(en) = enum_of_type(idx, tm.get("type_ref")) else { continue };
         let (Some(owner), Some(name), Some(row)) =
@@ -114,7 +114,7 @@ pub fn config_members(
         tms.entry(owner).or_default().push(ConfigMember { name, row, enum_id: en });
     }
 
-    let mut out: IndexMap<String, IndexMap<String, Option<ConfigMember>>> = IndexMap::new();
+    let mut out: IndexMap<String, IndexMap<String, Option<ConfigMember>>> = IndexMap::default();
     let mut add = |cls: String, name: &str, file: Option<String>| {
         let Some(candidates) = ifaces.get(name) else { return };
         for (id, path) in candidates {
@@ -200,7 +200,7 @@ fn listed_of(node: &Value, en: &str, mem: &MemberEnums, idx: &EnumIndex) -> Opti
         },
         _ => vec![node],
     };
-    let mut out: IndexSet<String> = IndexSet::new();
+    let mut out: IndexSet<String> = IndexSet::default();
     for item in items {
         let (found, value) = constant_of(item, mem, idx)?;
         if found != en {
@@ -239,7 +239,7 @@ impl Supplied {
 
     /// Every member any branch lists, sorted - published whatever the `op`.
     pub(super) fn listed(&self) -> Option<Vec<String>> {
-        let mut all: IndexSet<String> = IndexSet::new();
+        let mut all: IndexSet<String> = IndexSet::default();
         for l in self.lists.as_ref()? {
             all.extend(l.iter().cloned());
         }

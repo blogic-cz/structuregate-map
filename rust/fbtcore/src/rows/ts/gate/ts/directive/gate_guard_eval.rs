@@ -6,7 +6,7 @@
 //! list of constants. `necessary` is what a condition cannot be true without.
 
 use super::astreads::unwrap;
-use indexmap::IndexMap;
+use crate::rows::IndexMap;
 use serde_json::Value;
 
 pub(crate) fn k(n: &Value) -> Option<&str> {

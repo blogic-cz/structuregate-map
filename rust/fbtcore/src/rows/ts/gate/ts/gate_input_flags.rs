@@ -16,7 +16,7 @@
 
 use super::astreads::unwrap;
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
 
 fn cell(row: &Row, field: &str) -> Option<String> {
@@ -46,24 +46,24 @@ pub fn written_members(store: &Store<'_>) -> IndexSet<String> {
 /// Input property id -> the one tree every usage binds it to.
 pub fn bound_inputs(store: &Store<'_>, written: &IndexSet<String>) -> IndexMap<String, Value> {
     // class -> every node it is rendered at.
-    let mut usages: IndexMap<String, IndexSet<String>> = IndexMap::new();
+    let mut usages: IndexMap<String, IndexSet<String>> = IndexMap::default();
     for r in store.table("renders").iter() {
         if let (Some(class), Some(node)) = (cell(r, "to_class"), cell(r, "node")) {
             usages.entry(class).or_default().insert(node);
         }
     }
     if usages.is_empty() {
-        return IndexMap::new();
+        return IndexMap::default();
     }
     let expressions = store.table("expressions");
-    let mut tree_of_binding: IndexMap<String, &Row> = IndexMap::new();
+    let mut tree_of_binding: IndexMap<String, &Row> = IndexMap::default();
     for e in expressions.iter() {
         if let Some(b) = cell(e, "binding") {
             tree_of_binding.insert(b, e);
         }
     }
     // (node, input name) -> the binding trees on it.
-    let mut bound: IndexMap<(String, String), Vec<Value>> = IndexMap::new();
+    let mut bound: IndexMap<(String, String), Vec<Value>> = IndexMap::default();
     for b in store.table("bindings").iter() {
         if cell(b, "kind").as_deref() != Some("input") {
             continue;
@@ -72,7 +72,7 @@ pub fn bound_inputs(store: &Store<'_>, written: &IndexSet<String>) -> IndexMap<S
         let tree = tree_of_binding.get(&id).and_then(|e| e.get("ast")).filter(|a| !a.is_null()).map(|a| unwrap(a).clone());
         bound.entry((node, name)).or_default().push(tree.unwrap_or(Value::Null));
     }
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     for m in store.table("members").iter() {
         let (Some(id), Some(class)) = (cell(m, "id"), cell(m, "class")) else { continue };
         if cell(m, "kind").as_deref() != Some("property") || written.contains(&id) {
@@ -116,14 +116,14 @@ mod tests {
 
     #[test]
     fn an_input_every_usage_binds_alike_is_the_bound_tree() {
-        let out = bound_inputs(&store(json!({})), &IndexSet::new());
+        let out = bound_inputs(&store(json!({})), &IndexSet::default());
         assert_eq!(out["m:c"], json!({"k": "Read", "name": "isPlus", "target": {"row": "m:p"}}));
     }
 
     #[test]
     fn a_usage_that_binds_nothing_two_trees_or_a_write_of_its_own_leave_it_alone() {
         let unbound = store(json!({"renders": [{"node": "n:1", "to_class": "c:child"}, {"node": "n:2", "to_class": "c:child"}]}));
-        assert!(bound_inputs(&unbound, &IndexSet::new()).is_empty(), "n:2 leaves the initializer");
+        assert!(bound_inputs(&unbound, &IndexSet::default()).is_empty(), "n:2 leaves the initializer");
         let differ = store(json!({
             "renders": [{"node": "n:1", "to_class": "c:child"}, {"node": "n:2", "to_class": "c:child"}],
             "bindings": [{"id": "b:1", "node": "n:1", "name": "isPlus", "kind": "input"},
@@ -131,7 +131,7 @@ mod tests {
             "expressions": [{"id": "x:1", "binding": "b:1", "ast": {"k": "Read", "name": "a"}},
                             {"id": "x:2", "binding": "b:2", "ast": {"k": "Read", "name": "b"}}],
         }));
-        assert!(bound_inputs(&differ, &IndexSet::new()).is_empty(), "two parents disagree");
+        assert!(bound_inputs(&differ, &IndexSet::default()).is_empty(), "two parents disagree");
         let written: IndexSet<String> = ["m:c".to_string()].into_iter().collect();
         assert!(bound_inputs(&store(json!({})), &written).is_empty());
     }

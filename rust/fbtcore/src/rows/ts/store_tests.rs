@@ -271,17 +271,15 @@ fn a_structure_written_as_nodes_comes_back_for_the_row_that_owns_it() {
 }
 
 #[test]
-fn a_peeked_structure_answers_as_a_read_one_does_and_is_not_kept() {
+fn a_peeked_structure_answers_as_a_read_one_does_and_is_kept() {
     with_nodes("peek", |db| {
     let store = Store::from_db(db, "typescript").unwrap();
     let exprs = store.table("expressions");
     let undecoded = |row: &Row| matches!(row, Row::Held { cells, .. } if cells.iter().any(|c| matches!(c, Some(Cell::Nodes(d)) if d.get().is_none())));
     let seen = exprs[0].peek("ast", |ast| ast.cloned());
     assert_eq!(seen, Some(json!({"k": "Literal", "v": false})));
-    assert!(undecoded(&exprs[0]), "the tree peeked is not held decoded");
+    assert!(!undecoded(&exprs[0]), "the tree peeked is held decoded, as a read holds it");
     assert_eq!(exprs[0].get("ast"), seen.as_ref(), "the same answer a read gives");
-    assert!(!undecoded(&exprs[0]), "a read keeps it");
-    assert_eq!(exprs[0].peek("ast", |ast| ast.cloned()), seen, "and a peek then answers from what was kept");
     });
 }
 

@@ -23,7 +23,7 @@ use super::astreads::unwrap;
 use super::gate_tsrows::{bare, TsRows};
 use super::gate_values::EnumIndex;
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
 use std::rc::Rc;
 
@@ -68,7 +68,7 @@ impl<'a> Calls<'a> {
     }
 
     pub fn new(store: &Store<'_>, idx: &'a EnumIndex, rows: std::rc::Rc<TsRows>, claimed: &dyn Fn(&str) -> bool) -> Calls<'a> {
-        let mut bound: IndexMap<String, IndexSet<String>> = IndexMap::new();
+        let mut bound: IndexMap<String, IndexSet<String>> = IndexMap::default();
         for f in store.table("functions").iter() {
             let Some(parent) = cell(f, "parent") else { continue };
             let names = f.get("params").and_then(|p| p.as_array()).into_iter().flatten()
@@ -77,11 +77,11 @@ impl<'a> Calls<'a> {
         }
         // (id, params, declared type) of every callable row; a property holding a function is
         // an ALIAS of the function its tree is anchored on.
-        let mut callable: IndexMap<String, (Vec<String>, Option<String>)> = IndexMap::new();
-        let mut alias: IndexMap<String, String> = IndexMap::new();
+        let mut callable: IndexMap<String, (Vec<String>, Option<String>)> = IndexMap::default();
+        let mut alias: IndexMap<String, String> = IndexMap::default();
         // EVERY PROPERTY HOLDING ONE FUNCTION shares its tree: keyed to one member, each later property
         // replaced the one before, and only the last gate calling it was read.
-        let mut anchors: IndexMap<String, Vec<String>> = IndexMap::new();
+        let mut anchors: IndexMap<String, Vec<String>> = IndexMap::default();
         for table in ["members", "functions"] {
             for r in store.table(table).iter() {
                 let Some(id) = cell(r, "id") else { continue };
@@ -118,14 +118,14 @@ impl<'a> Calls<'a> {
             }
         }
 
-        let mut returns: IndexMap<String, Vec<&Row>> = IndexMap::new();
+        let mut returns: IndexMap<String, Vec<&Row>> = IndexMap::default();
         let all = store.table("returns");
         for r in all.iter() {
             if let Some(m) = cell(r, "member").filter(|m| callable.contains_key(m)) {
                 returns.entry(m).or_default().push(r);
             }
         }
-        let mut wanted: IndexMap<String, String> = IndexMap::new();
+        let mut wanted: IndexMap<String, String> = IndexMap::default();
         for (member, rs) in &returns {
             let [r] = rs.as_slice() else { continue };
             let plain = ["branch", "case"].iter().all(|f| cell(r, f).is_none());
@@ -134,7 +134,7 @@ impl<'a> Calls<'a> {
             }
         }
         let exprs = store.table("expressions");
-        let mut fns = IndexMap::new();
+        let mut fns = IndexMap::default();
         for (at, e) in exprs.iter().enumerate() {
             let Some(member) = cell(e, "id").and_then(|x| wanted.get(&x)) else { continue };
             let Some((params, declared)) = callable.get(member) else { continue };

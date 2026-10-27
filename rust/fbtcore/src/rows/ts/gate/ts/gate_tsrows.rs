@@ -30,7 +30,7 @@
 use super::astreads::is_read;
 use super::gate_values::{enum_of_type_ref, EnumIndex};
 use super::store::Store;
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Map, Value};
 
 /// The tables a TypeScript read can land on, by their own (file, line).
@@ -108,7 +108,7 @@ impl TsRows {
             let slashed = format!("/{}", path.replace('\\', "/"));
             out.by_tail.entry(tail(&path)).or_default().push((id, slashed));
         }
-        let mut at: IndexMap<String, Vec<(&str, Option<String>, Option<String>)>> = IndexMap::new();
+        let mut at: IndexMap<String, Vec<(&str, Option<String>, Option<String>)>> = IndexMap::default();
         for m in store.table("members").iter() {
             if let (Some(file), Some(name), Some(id)) = (cell(m.get("file")), cell(m.get("name")), cell(m.get("id"))) {
                 out.members_named.entry(format!("{file} {name}")).or_default().push(id.clone());
@@ -152,7 +152,7 @@ impl TsRows {
             };
             out.decl_at.insert(k, id);
         }
-        let mut wanted: IndexMap<String, String> = IndexMap::new();
+        let mut wanted: IndexMap<String, String> = IndexMap::default();
         for l in store.table("locals").iter() {
             let (Some(id), Some(m), Some(n)) = (cell(l.get("id")), cell(l.get("member")), cell(l.get("name"))) else { continue };
             if cell(l.get("declared")).as_deref() != Some("const") {
@@ -373,7 +373,7 @@ mod tests {
     fn a_member_read_is_tied_to_its_row_by_file_and_line() {
         let store = store_of(tables());
         let ast = member("tierID", json!({"k": "This"}), 10, "C:/fe/app/cmp.ts");
-        let out = TsRows::new(&store).resolve(&ast, &IndexSet::new(), &idx(&store));
+        let out = TsRows::new(&store).resolve(&ast, &IndexSet::default(), &idx(&store));
         assert_eq!(out["target"]["row"], json!("m:1"));
     }
 
@@ -388,7 +388,7 @@ mod tests {
             target["name"] = json!("tierID");
             target["also"] = json!([also]);
             let ast = json!({"k": "Read", "name": "tierID", "receiver": {"k": "This"}, "target": target});
-            let out = TsRows::new(&store).resolve(&ast, &IndexSet::new(), &idx(&store));
+            let out = TsRows::new(&store).resolve(&ast, &IndexSet::default(), &idx(&store));
             assert_eq!(out["target"]["row"], json!("m:1"), "first {first}");
         }
     }
@@ -398,7 +398,7 @@ mod tests {
         let store = store_of(tables());
         let receiver = member("TierIDs", json!({"k": "Implicit"}), 3, "C:/fe/app/tiers.ts");
         let ast = member("Small", receiver, 4, "C:/fe/app/tiers.ts");
-        let out = TsRows::new(&store).resolve(&ast, &IndexSet::new(), &idx(&store));
+        let out = TsRows::new(&store).resolve(&ast, &IndexSet::default(), &idx(&store));
         assert_eq!(out["target"]["enum"], json!("e:1"));
     }
 
@@ -407,12 +407,12 @@ mod tests {
         let store = store_of(tables());
         let ast = member("Small", json!({"k": "Read", "name": "TierIDs", "receiver": {"k": "Implicit"}}),
                          4, "C:/fe/app/tiers.ts");
-        let out = TsRows::new(&store).resolve(&ast, &IndexSet::new(), &idx(&store));
+        let out = TsRows::new(&store).resolve(&ast, &IndexSet::default(), &idx(&store));
         assert_eq!(out["target"]["enum"], json!("e:1"));
         // The same name declared in ANOTHER file is not that enum.
         let elsewhere = member("Small", json!({"k": "Read", "name": "TierIDs", "receiver": {"k": "Implicit"}}),
                                4, "C:/fe/app/cmp.ts");
-        let out = TsRows::new(&store).resolve(&elsewhere, &IndexSet::new(), &idx(&store));
+        let out = TsRows::new(&store).resolve(&elsewhere, &IndexSet::default(), &idx(&store));
         assert!(out["target"].get("enum").is_none());
     }
 
@@ -422,7 +422,7 @@ mod tests {
         t["consts"] = json!([{"id": "k:1", "file": "f:2", "line": 10}]);
         let store = store_of(t);
         let ast = member("tierID", json!({"k": "This"}), 10, "C:/fe/app/cmp.ts");
-        let out = TsRows::new(&store).resolve(&ast, &IndexSet::new(), &idx(&store));
+        let out = TsRows::new(&store).resolve(&ast, &IndexSet::default(), &idx(&store));
         assert!(out["target"].get("row").is_none());
     }
 
@@ -433,14 +433,14 @@ mod tests {
         t["functions"] = json!([{"id": "fn:1", "file": "f:2", "line": 20, "name": "isBig"}]);
         let store = store_of(t);
         let ast = member("isBig", json!({"k": "Implicit"}), 20, "C:/fe/app/cmp.ts");
-        let out = TsRows::new(&store).resolve(&ast, &IndexSet::new(), &idx(&store));
+        let out = TsRows::new(&store).resolve(&ast, &IndexSet::default(), &idx(&store));
         assert_eq!(out["target"]["row"], json!("fn:1"));
         // Two DIFFERENT names on one line are still two declarations, and still nothing.
         let mut t = tables();
         t["consts"] = json!([{"id": "k:1", "file": "f:2", "line": 20, "name": "a"}]);
         t["functions"] = json!([{"id": "fn:1", "file": "f:2", "line": 20, "name": "b"}]);
         let store = store_of(t);
-        let out = TsRows::new(&store).resolve(&ast, &IndexSet::new(), &idx(&store));
+        let out = TsRows::new(&store).resolve(&ast, &IndexSet::default(), &idx(&store));
         assert!(out["target"].get("row").is_none());
     }
 
@@ -456,13 +456,13 @@ mod tests {
         let store = store_of(t);
         let rows = TsRows::new(&store);
         let local = |n: &str| json!({"k": "Read", "name": n, "receiver": {"k": "Implicit"}});
-        let out = rows.resolve_in(&local("picked"), &IndexSet::new(), &idx(&store), Some("m:9"));
+        let out = rows.resolve_in(&local("picked"), &IndexSet::default(), &idx(&store), Some("m:9"));
         assert_eq!(out["target"]["row"], json!("lo:1"));
-        let out = rows.resolve_in(&local("has"), &IndexSet::new(), &idx(&store), Some("m:9"));
+        let out = rows.resolve_in(&local("has"), &IndexSet::default(), &idx(&store), Some("m:9"));
         assert_eq!(out["k"], json!("Fn"), "the arrow's own tree, in place");
-        let out = rows.resolve_in(&local("later"), &IndexSet::new(), &idx(&store), Some("m:9"));
+        let out = rows.resolve_in(&local("later"), &IndexSet::default(), &idx(&store), Some("m:9"));
         assert!(out.get("target").is_none(), "a `let` may hold something else by then");
-        let out = rows.resolve_in(&local("picked"), &IndexSet::new(), &idx(&store), Some("m:other"));
+        let out = rows.resolve_in(&local("picked"), &IndexSet::default(), &idx(&store), Some("m:other"));
         assert!(out.get("target").is_none(), "another member's local is not in scope");
     }
 
@@ -484,13 +484,13 @@ mod tests {
         let store = store_of(tables());
         let class = json!({"k": "Read", "name": "Holder", "receiver": {"k": "Implicit"},
                            "target": {"name": "Holder", "file": "C:/fe/app/cmp.ts", "line": 10, "kind": "class"}});
-        let out = TsRows::new(&store).resolve(&class, &IndexSet::new(), &idx(&store));
+        let out = TsRows::new(&store).resolve(&class, &IndexSet::default(), &idx(&store));
         assert!(out["target"].get("row").is_none(), "{out}");
         assert_eq!(bare(class.as_object().unwrap()), Some("Holder"));
         // The control: the same target without the mark is the member at that line, and no longer a bare name.
         let mut plain = class.clone();
         plain["target"].as_object_mut().unwrap().remove("kind");
-        let out = TsRows::new(&store).resolve(&plain, &IndexSet::new(), &idx(&store));
+        let out = TsRows::new(&store).resolve(&plain, &IndexSet::default(), &idx(&store));
         assert_eq!(out["target"]["row"], json!("m:1"));
         assert_eq!(bare(plain.as_object().unwrap()), None);
     }

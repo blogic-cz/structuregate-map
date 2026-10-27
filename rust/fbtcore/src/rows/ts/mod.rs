@@ -266,7 +266,7 @@ pub fn gate_values_json(db: &Path, half: &str) -> Result<String> {
 /// This is the table the other three exist to fill, so it is the last differential and the
 /// one that covers every column. `root` is the workspace the dead-key trace reads its text
 /// from; without it the trace answers `absent` for everything.
-fn tally(counts: &indexmap::IndexMap<String, usize>) -> Value {
+fn tally(counts: &crate::rows::IndexMap<String, usize>) -> Value {
     let mut out = Map::new();
     for (name, n) in counts {
         out.insert(name.clone(), Value::from(*n as i64));
@@ -317,7 +317,7 @@ pub fn render_paths_json(db: &Path, half: &str, checks: &[String], enum_name: &s
     let routes = key_routes::key_routes(&store, &lit_gates, &fields);
 
     // Paths per COMPONENT, computed once for every component any key reaches.
-    let mut needed: indexmap::IndexSet<String> = indexmap::IndexSet::new();
+    let mut needed: crate::rows::IndexSet<String> = indexmap::IndexSet::default();
     for hit in routes.values() {
         for comp in hit.sites.keys().flatten() {
             needed.insert(comp.clone());

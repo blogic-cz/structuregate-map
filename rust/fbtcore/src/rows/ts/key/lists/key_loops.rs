@@ -37,7 +37,7 @@ use super::key_fields::{id_of, returns_by_member, text};
 use super::key_lists::{with_reader, ListSource};
 use super::key_routes::FieldSite;
 use super::store::{Row, Store};
-use indexmap::IndexMap;
+use crate::rows::IndexMap;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
@@ -45,7 +45,7 @@ use std::collections::{HashMap, HashSet};
 pub(super) type Elements = IndexMap<String, IndexMap<String, Vec<(usize, Vec<String>)>>>;
 
 pub(super) fn element_keys(items: &[Element], keys: &KeySet, i18n: &[String], reader: &Returned<'_, '_>) -> Elements {
-    let mut out: Elements = IndexMap::new();
+    let mut out: Elements = IndexMap::default();
     for (i, item) in items.iter().enumerate() {
         let Some(object) = item.value.as_object() else { continue };
         // AN INSTANCE (`new PayButton(..)`) HOLDS WHAT ITS CLASS SAYS, by dotted path (`key_instances`).

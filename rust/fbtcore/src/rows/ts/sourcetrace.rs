@@ -21,7 +21,7 @@
 use super::jsstr::trim_start;
 use super::sourcescan::{dotted_names, lines, strip_blocks, strip_line_comment, words};
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
 
 /// How a key still appears in source. `Absent` is the only one that means dead.
@@ -99,8 +99,8 @@ fn is_parsed(row: &Row) -> bool {
 
 /// `texts` is `path -> content`, read once by the caller.
 pub fn source_trace(store: &Store<'_>, texts: &IndexMap<String, String>) -> Trace {
-    let mut parsed: IndexSet<String> = IndexSet::new();
-    let mut id_by_path: IndexMap<String, String> = IndexMap::new();
+    let mut parsed: IndexSet<String> = IndexSet::default();
+    let mut id_by_path: IndexMap<String, String> = IndexMap::default();
     for f in store.table("files").iter() {
         if let (Some(path), Some(id)) = (text(f, "path"), text(f, "id")) {
             id_by_path.insert(path, id.clone());
@@ -118,15 +118,15 @@ pub fn source_trace(store: &Store<'_>, texts: &IndexMap<String, String>) -> Trac
 
     // THE LOCALE FILES ARE OUT. They define every key, so with them in the scan every
     // key read as referenced and the trace answered nothing.
-    let mut locales: IndexSet<String> = IndexSet::new();
+    let mut locales: IndexSet<String> = IndexSet::default();
     for t in store.table("translations").iter() {
         if let Some(file) = text(t, "file") {
             locales.insert(file);
         }
     }
 
-    let mut dotted: IndexMap<String, String> = IndexMap::new();
-    let mut seen: IndexSet<String> = IndexSet::new();
+    let mut dotted: IndexMap<String, String> = IndexMap::default();
+    let mut seen: IndexSet<String> = IndexSet::default();
     let mut scanned = 0usize;
     let mut comment_lines = 0usize;
     for (path, content) in texts {

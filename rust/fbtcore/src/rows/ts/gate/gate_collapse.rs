@@ -4,7 +4,7 @@
 //! that restricts a SET rather than a value — see `gate_predicates`.
 
 use super::gate_values::EnumIndex;
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
 
 #[derive(Debug, Default)]
@@ -35,7 +35,7 @@ struct Slot {
 /// dimension instead dropped a restriction the gate proves. Its `not_in`s still union, and an
 /// `in` still loses what a `not_in` removes: "A or B is active, and B is not" is "A is active".
 pub fn collapse(items: &[Value], idx: &EnumIndex) -> Vec<Value> {
-    let mut by_dim: IndexMap<String, Slot> = IndexMap::new();
+    let mut by_dim: IndexMap<String, Slot> = IndexMap::default();
 
     for r in items {
         let Some(object) = r.as_object() else { continue };
@@ -66,7 +66,7 @@ pub fn collapse(items: &[Value], idx: &EnumIndex) -> Vec<Value> {
 
         slot.set |= object.get("set") == Some(&Value::Bool(true));
         if let Some(Value::Array(listed)) = object.get("listed") {
-            let held = slot.listed.get_or_insert_with(IndexSet::new);
+            let held = slot.listed.get_or_insert_with(IndexSet::default);
             held.extend(listed.iter().filter_map(|v| v.as_str().map(|s| s.to_string())));
         }
         match object.get("op").and_then(|v| v.as_str()) {

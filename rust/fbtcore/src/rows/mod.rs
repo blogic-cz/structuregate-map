@@ -15,6 +15,10 @@
 /// it gives is no more stable than std's was: nothing may depend on it.
 pub type FastMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState>;
 pub type FastSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
+/// ...AND THE ORDERED ONES THE CLOSURE FOLDS EVERY KEY THROUGH (`rows/ts`): an `IndexMap`/`IndexSet` keeps insertion order
+/// whatever it hashes with, so foldhash changes no answer - and SipHash was a tenth of the closure's time.
+pub type IndexMap<K, V> = indexmap::IndexMap<K, V, foldhash::fast::RandomState>;
+pub type IndexSet<K> = indexmap::IndexSet<K, foldhash::fast::RandomState>;
 
 pub mod calls;
 pub mod cells;

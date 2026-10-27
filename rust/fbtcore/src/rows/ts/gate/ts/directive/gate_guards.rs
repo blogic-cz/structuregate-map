@@ -33,7 +33,7 @@ use super::gate_guard_eval::{k, name, necessary, not, Atom, Eval, Sym, F};
 use super::gate_config::literal_entries;
 use super::gate_values::{constant_of, dimension_of, untyped_dimension, EnumIndex, MemberEnums};
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
 
 fn cell(row: &Row, field: &str) -> Option<String> {
@@ -80,7 +80,7 @@ impl Class {
     /// The branches around a statement, innermost first, each as a condition.
     fn chain(&self, start: Option<String>, entry: bool) -> Vec<Cond> {
         let mut out = Vec::new();
-        let mut seen = IndexSet::new();
+        let mut seen = IndexSet::default();
         let mut current = start;
         while let Some(id) = current {
             if !seen.insert(id.clone()) {
@@ -181,7 +181,7 @@ impl Class {
         });
         let in_callback = self.calls.iter().filter(|(m, _)| !own.contains(m.as_str()))
             .flat_map(|(_, list)| list).any(|c| renders(c) && inside(c));
-        let mut reached = IndexSet::new();
+        let mut reached = IndexSet::default();
         for r in roots {
             self.reach(r, chain, &mut reached);
         }
@@ -228,7 +228,7 @@ impl Class {
 
 /// The occurrence's literal, as what each config member holds.
 fn env_of(entries: &IndexMap<String, Value>, mem: &MemberEnums, idx: &EnumIndex) -> IndexMap<String, Sym> {
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     for (key, v) in entries {
         let sym = match k(v) {
             Some("Array") => {
@@ -251,15 +251,15 @@ fn env_of(entries: &IndexMap<String, Value>, mem: &MemberEnums, idx: &EnumIndex)
 
 /// Gate id -> the restrictions its directive's render path proves, in `gate_values`' shape.
 pub fn guard_restrictions(store: &Store<'_>, mem: &MemberEnums, idx: &EnumIndex) -> IndexMap<String, Vec<Value>> {
-    let mut files: IndexMap<String, String> = IndexMap::new();
+    let mut files: IndexMap<String, String> = IndexMap::default();
     for f in store.table("files").iter() {
         if let (Some(id), Some(p)) = (cell(f, "id"), cell(f, "path")) {
             files.insert(id, p.replace('\\', "/"));
         }
     }
-    let mut class_at: IndexMap<(String, String), String> = IndexMap::new();
-    let mut spans: IndexMap<String, (String, i64, i64)> = IndexMap::new();
-    let mut parent_of: IndexMap<String, (String, String)> = IndexMap::new();
+    let mut class_at: IndexMap<(String, String), String> = IndexMap::default();
+    let mut spans: IndexMap<String, (String, i64, i64)> = IndexMap::default();
+    let mut parent_of: IndexMap<String, (String, String)> = IndexMap::default();
     for c in store.table("classes").iter() {
         let Some(id) = cell(c, "id") else { continue };
         if let Some(file) = cell(c, "file") {
@@ -287,12 +287,12 @@ pub fn guard_restrictions(store: &Store<'_>, mem: &MemberEnums, idx: &EnumIndex)
     };
 
     let mut ctx = Class {
-        branches: IndexMap::new(),
+        branches: IndexMap::default(),
         exprs: store.table("expressions"),
-        ast_at: IndexMap::new(),
-        members: IndexMap::new(),
-        calls: IndexMap::new(),
-        returns: IndexMap::new(),
+        ast_at: IndexMap::default(),
+        members: IndexMap::default(),
+        calls: IndexMap::default(),
+        returns: IndexMap::default(),
     };
     for b in store.table("branches").iter() {
         if let Some(id) = cell(b, "id") {
@@ -305,8 +305,8 @@ pub fn guard_restrictions(store: &Store<'_>, mem: &MemberEnums, idx: &EnumIndex)
             ctx.ast_at.insert(id, at);
         }
     }
-    let mut params: IndexMap<String, Vec<String>> = IndexMap::new();
-    let mut decorated: IndexSet<String> = IndexSet::new();
+    let mut params: IndexMap<String, Vec<String>> = IndexMap::default();
+    let mut decorated: IndexSet<String> = IndexSet::default();
     let mut setters: Vec<(String, String, String, String)> = Vec::new();
     for m in store.table("members").iter() {
         let (Some(cls), Some(n)) = (cell(m, "class"), cell(m, "name")) else { continue };
@@ -344,7 +344,7 @@ pub fn guard_restrictions(store: &Store<'_>, mem: &MemberEnums, idx: &EnumIndex)
 
     // A FIELD IS A CONFIG MEMBER ONLY WHEN EVERY WRITE TO IT COPIES THAT ONE MEMBER off a
     // parameter of the method writing it. One other write and it is a field of its own.
-    let mut aliases_by_class: IndexMap<String, IndexMap<String, Option<String>>> = IndexMap::new();
+    let mut aliases_by_class: IndexMap<String, IndexMap<String, Option<String>>> = IndexMap::default();
     for a in store.table("assignments").iter() {
         let (Some(cls), Some(target)) = (cell(a, "class"), cell(a, "target")) else { continue };
         if cell(a, "scope").as_deref() != Some("this") {
@@ -363,18 +363,18 @@ pub fn guard_restrictions(store: &Store<'_>, mem: &MemberEnums, idx: &EnumIndex)
         slot.insert(target, merged);
     }
 
-    let mut entry_of: IndexMap<String, Vec<(String, String, String)>> = IndexMap::new();
+    let mut entry_of: IndexMap<String, Vec<(String, String, String)>> = IndexMap::default();
     for (cls, alias, id, p) in setters {
         entry_of.entry(cls).or_default().push((alias, id, p));
     }
-    let mut classes_of_selector: IndexMap<String, Vec<String>> = IndexMap::new();
+    let mut classes_of_selector: IndexMap<String, Vec<String>> = IndexMap::default();
     for si in store.table("selector_index").iter() {
         if let (Some(sel), Some(cls)) = (cell(si, "selector"), cell(si, "class")) {
             classes_of_selector.entry(sel).or_default().push(cls);
         }
     }
 
-    let mut out: IndexMap<String, Vec<Value>> = IndexMap::new();
+    let mut out: IndexMap<String, Vec<Value>> = IndexMap::default();
     for g in store.table("gates").iter() {
         let (Some(gid), Some(gname)) = (cell(g, "id"), cell(g, "name")) else { continue };
         let Some(entries) = cell(g, "expression").and_then(|x| ctx.ast(&x)).and_then(|a| literal_entries(Some(a))) else { continue };
@@ -382,7 +382,7 @@ pub fn guard_restrictions(store: &Store<'_>, mem: &MemberEnums, idx: &EnumIndex)
         let chain = chain_of(cls);
         let Some((_, setter, param)) = chain.iter().filter_map(|c| entry_of.get(c)).flatten().find(|(a, ..)| *a == gname) else { continue };
 
-        let mut aliases: IndexMap<String, String> = IndexMap::new();
+        let mut aliases: IndexMap<String, String> = IndexMap::default();
         for c in chain.iter().rev() {
             for (f, m) in aliases_by_class.get(c).into_iter().flatten() {
                 match m {
@@ -396,7 +396,7 @@ pub fn guard_restrictions(store: &Store<'_>, mem: &MemberEnums, idx: &EnumIndex)
         let no_param = Eval { env: &env, aliases: &aliases, param: None };
 
         let mut paths = Vec::new();
-        let mut visited = IndexSet::new();
+        let mut visited = IndexSet::default();
         ctx.walk(setter, true, &[], &chain, &mut Vec::new(), &mut visited, &mut paths);
         // A RENDER THE WALK DID NOT REACH IS A WAY IN IT CANNOT SEE: a lifecycle hook, a
         // subscription callback. Reading the reached sites alone would then claim a condition

@@ -68,14 +68,14 @@ pub(super) struct MemberIdx {
 }
 
 pub(super) fn member_index(store: &Store<'_>) -> MemberIdx {
-    let mut file_path: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut file_path: IndexMap<String, Option<String>> = IndexMap::default();
     for f in store.table("files").iter() {
         if let Some(id) = id_of(f, "id") {
             file_path.insert(id, str_of(f.get("path")));
         }
     }
     let mut idx =
-        MemberIdx { by_line_name: IndexMap::new(), name_of: IndexMap::new(), plain: IndexSet::new() };
+        MemberIdx { by_line_name: IndexMap::default(), name_of: IndexMap::default(), plain: IndexSet::default() };
     for m in store.table("members").iter() {
         let line = m.get("line").map(|v| v.to_string()).unwrap_or_else(|| "null".into());
         let name = str_of(m.get("name")).unwrap_or_default();
@@ -168,7 +168,7 @@ pub(super) fn comparisons_in(
     plain: bool,
 ) -> Vec<Comparison> {
     let mut out: Vec<Comparison> = Vec::new();
-    let mut seen: IndexSet<String> = IndexSet::new();
+    let mut seen: IndexSet<String> = IndexSet::default();
     let Some(file) = cls.file.as_deref() else { return out };
     let Some(rows) = expr_by_file.get(file) else { return out };
     for r in rows {
@@ -239,13 +239,13 @@ pub(super) struct ClassIdx {
 
 /// The class hierarchy, by DECLARATION.
 pub(super) fn class_index(store: &Store<'_>) -> ClassIdx {
-    let mut file_path: IndexMap<String, Option<String>> = IndexMap::new();
+    let mut file_path: IndexMap<String, Option<String>> = IndexMap::default();
     for f in store.table("files").iter() {
         if let Some(id) = id_of(f, "id") {
             file_path.insert(id, str_of(f.get("path")));
         }
     }
-    let mut idx = ClassIdx { by_id: IndexMap::new(), by_name: IndexMap::new() };
+    let mut idx = ClassIdx { by_id: IndexMap::default(), by_name: IndexMap::default() };
     for c in store.table("classes").iter() {
         let Some(id) = id_of(c, "id") else { continue };
         let ext = c.get("extends").filter(|v| v.is_object()).cloned();
@@ -272,7 +272,7 @@ pub(super) fn class_index(store: &Store<'_>) -> ClassIdx {
 /// A class and every ancestor, CYCLE-SAFE — `extends` is data, and data can name a loop.
 pub(super) fn chain_of(idx: &ClassIdx, class_id: &str) -> Vec<Class> {
     let mut out = Vec::new();
-    let mut seen: IndexSet<String> = IndexSet::new();
+    let mut seen: IndexSet<String> = IndexSet::default();
     let mut cur = idx.by_id.get(class_id).cloned();
     while let Some(c) = cur {
         if !seen.insert(c.id.clone()) {

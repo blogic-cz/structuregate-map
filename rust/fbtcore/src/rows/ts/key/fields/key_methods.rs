@@ -21,7 +21,7 @@ use super::key_fields::{id_of, text};
 use super::key_follow::{bind_args, spellings, Returned};
 use super::key_routes::FieldSite;
 use super::store::{Row, Store};
-use indexmap::IndexMap;
+use crate::rows::IndexMap;
 use serde_json::Value;
 
 /// A node's `gate_chain` as text.
@@ -86,7 +86,7 @@ fn spelled(v: &Value) -> bool {
 fn method_keys(method: &str, args: &[Value], at: &str, reader: &Returned<'_, '_>, branches: &Branches) -> (IndexMap<String, Vec<Vec<String>>>, std::collections::HashMap<String, bool>) {
     let no_params = reader.params.get(method).is_none_or(|p| p.is_empty());
     let params = reader.params.get(method).map(Vec::as_slice).unwrap_or_default();
-    let mut ways = IndexMap::new();
+    let mut ways = IndexMap::default();
     let mut exact: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
     for combo in spellings(args) {
         for r in reader.every.get(method).into_iter().flatten() {

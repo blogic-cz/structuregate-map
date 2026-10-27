@@ -19,7 +19,7 @@ use super::featurewalk::is_blank;
 use super::gate_predicates::{kind, local, method_call, only_return, param_enum, this_path, Predicate};
 use super::gate_values::EnumIndex;
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
 
 fn text<'a>(n: &'a Value, field: &str) -> Option<&'a str> {
@@ -84,7 +84,7 @@ fn needs(n: &Value, v: &str) -> bool {
 }
 
 fn by_member<'a>(rows: &'a [Row], wanted: &IndexMap<String, Lookup>) -> IndexMap<String, Vec<&'a Row>> {
-    let mut out: IndexMap<String, Vec<&Row>> = IndexMap::new();
+    let mut out: IndexMap<String, Vec<&Row>> = IndexMap::default();
     for r in rows {
         if let Some(m) = r.get("member").and_then(|v| v.as_str())
             && wanted.contains_key(m)
@@ -97,16 +97,16 @@ fn by_member<'a>(rows: &'a [Row], wanted: &IndexMap<String, Lookup>) -> IndexMap
 
 /// Every function of one enum-typed key and one other parameter whose body is a keyed lookup.
 pub fn lookups(store: &Store<'_>, idx: &EnumIndex) -> Vec<Lookup> {
-    let mut file_path: IndexMap<String, String> = IndexMap::new();
+    let mut file_path: IndexMap<String, String> = IndexMap::default();
     for f in store.table("files").iter() {
         if let (Some(id), Some(path)) = (f.get("id").and_then(|v| v.as_str()), f.get("path").and_then(|v| v.as_str())) {
             file_path.insert(id.to_string(), slash(path));
         }
     }
     // Function id -> the lookup it would be, before its body is read, and its two names.
-    let mut candidates: IndexMap<String, Lookup> = IndexMap::new();
-    let mut names: IndexMap<String, (String, String)> = IndexMap::new();
-    let mut lambdas: IndexMap<String, IndexSet<String>> = IndexMap::new();
+    let mut candidates: IndexMap<String, Lookup> = IndexMap::default();
+    let mut names: IndexMap<String, (String, String)> = IndexMap::default();
+    let mut lambdas: IndexMap<String, IndexSet<String>> = IndexMap::default();
     for f in store.table("functions").iter() {
         let Some(Value::Array(params)) = f.get("params") else { continue };
         if let Some(parent) = f.get("parent").and_then(|v| v.as_str()) {
@@ -131,7 +131,7 @@ pub fn lookups(store: &Store<'_>, idx: &EnumIndex) -> Vec<Lookup> {
     let returns_all = store.table("returns");
     let locals = by_member(&locals_all, &candidates);
     let returns = by_member(&returns_all, &candidates);
-    let mut trees: IndexMap<String, Value> = IndexMap::new();
+    let mut trees: IndexMap<String, Value> = IndexMap::default();
     let wanted: IndexSet<&str> = locals.values().chain(returns.values()).flatten()
         .filter_map(|r| r.get("expression").and_then(|v| v.as_str())).collect();
     for e in store.table("expressions").iter() {
@@ -145,7 +145,7 @@ pub fn lookups(store: &Store<'_>, idx: &EnumIndex) -> Vec<Lookup> {
     }
     let tree = |r: &Row| r.get("expression").and_then(|v| v.as_str()).and_then(|x| trees.get(x));
 
-    let none = IndexSet::new();
+    let none = IndexSet::default();
     let mut out = Vec::new();
     for (id, mut lookup) in candidates {
         let Some((key, list)) = names.get(&id) else { continue };

@@ -18,7 +18,7 @@
 use super::key_branches::Branches;
 use super::key_unread::{text, MemberReads};
 use super::store::{Row, Store};
-use indexmap::{IndexMap, IndexSet};
+use crate::rows::{IndexMap, IndexSet};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -142,7 +142,7 @@ impl CallLift {
 /// `renders.id` -> what the creating call and every call of its member hold. A render with no `call`, or holding
 /// nothing, has no entry.
 pub fn called_under(store: &Store<'_>, branches: &Branches) -> IndexMap<String, Vec<String>> {
-    let mut out = IndexMap::new();
+    let mut out = IndexMap::default();
     let lift = CallLift::new(store);
     let call_by_id: HashMap<String, usize> = lift.calls.iter().enumerate().filter_map(|(i, c)| Some((text(c, "id")?, i))).collect();
     for r in store.table("renders").iter() {
