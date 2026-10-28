@@ -83,7 +83,15 @@ export function makeScopes(store, diag) {
 
   // ONE NOTE PER NAME AND FILE (rows 96): a ref is asked again for every scope that reaches it - one refusal was noted up to fifty times.
   const refused = new Set();
-  const modulesForRef = (ref, ownerFile) => {
+  // A PACKAGE'S STANDALONE COMPONENT OR DIRECTIVE, by the file listing it and its name (`external_declarables`, `TsDecls/TsLibPipes.mjs`).
+  const standaloneEntries = new Set();
+  for (const row of [...modules, ...store.table('components')]) {
+    for (const n of Array.isArray(row.external_declarables) ? row.external_declarables : []) standaloneEntries.add(`${String(row.file)}\0${n}`);
+  }
+  const moduleIds = new Set(modules.map((m) => m.id));
+  /** `owner`: the `ng_modules` or standalone `components` row whose `imports`/`exports` list `ref`. */
+  const modulesForRef = (ref, owner) => {
+    const ownerFile = owner?.file;
     const name = ref?.name ?? (typeof ref?.call === 'string' ? ref.call.split('.')[0] : null);
     if (!name) return [];
     if (ref?.file) {
@@ -106,8 +114,11 @@ export function makeScopes(store, diag) {
       if (!refused.has(key)) {
         refused.add(key);
         // WHY IT IS A ROW (rows 121): `shadows_local` when the tree declares a module of the same name - the refusal is what keeps the package's
-        // name off the local class - else `dependency`, a module (or a standalone declarable) a package ships, which is no fault at all.
-        note('module_ref_from_dependency', { name, file: ownerFile, reason: byName.has(name) ? 'shadows_local' : 'dependency' });
+        // name off the local class - `standalone` for a component or directive a package ships (rows 130), else `dependency`, a module a package
+        // ships, which is no fault at all. WHOSE LIST names it (rows 130): `module` or `component`, and `line` that class's line.
+        const reason = byName.has(name) ? 'shadows_local' : standaloneEntries.has(key) ? 'standalone' : 'dependency';
+        note('module_ref_from_dependency', { name, file: ownerFile, reason,
+          [moduleIds.has(owner.id) ? 'module' : 'component']: owner.id, line: classById.get(owner.class)?.line ?? null });
       }
       return [];
     }
@@ -174,7 +185,7 @@ export function makeScopes(store, diag) {
     if (!m || seen.has(m.id)) return out;
     seen.add(m.id);
     for (const e of refsOf(m, 'exports')) {
-      const asModules = modulesForRef(e, m.file); // a re-exported MODULE widens the scope
+      const asModules = modulesForRef(e, m); // a re-exported MODULE widens the scope
       if (asModules.length) {
         for (const im of asModules) merge(out, exportedOf(im, seen));
         continue;
@@ -186,10 +197,10 @@ export function makeScopes(store, diag) {
   };
 
   /** `imports` may hold a module, a `RouterModule.forChild(...)`, or a standalone component directly. */
-  const importsOf = (list, ownerFile) => {
+  const importsOf = (list, owner) => {
     const out = emptyScope();
     for (const i of list) {
-      const asModules = modulesForRef(i, ownerFile);
+      const asModules = modulesForRef(i, owner);
       if (asModules.length) {
         for (const im of asModules) merge(out, exportedOf(im));
         continue;
@@ -206,7 +217,7 @@ export function makeScopes(store, diag) {
     if (cached) return cached;
     const declared = emptyScope();
     for (const d of refsOf(m, 'declarations')) addRef(declared, d);
-    const imported = importsOf(refsOf(m, 'imports'), m.file);
+    const imported = importsOf(refsOf(m, 'imports'), m);
     addExternal(imported, m, 'imports');
     const scope = { declared, imported };
     scopeCache.set(m.id, scope);
@@ -220,7 +231,7 @@ export function makeScopes(store, diag) {
   for (const c of store.table('components')) if (c.standalone === true) standaloneByClass.set(c.class, c);
   /** A standalone component's scope: its own `imports`, and the library pipes they make visible. */
   const standaloneScope = (c) => {
-    const scope = importsOf(refsOf(c, 'imports'), c.file);
+    const scope = importsOf(refsOf(c, 'imports'), c);
     addExternal(scope, c, 'imports');
     return scope;
   };

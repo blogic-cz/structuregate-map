@@ -40,6 +40,8 @@ pub struct Scopes {
     pub gate_comp: IndexMap<String, String>,
     /// The step of an edge with no bindings.
     empty: Step,
+    /// Component -> the (name, chain) its class proves one variable (`key_defined`, #117).
+    defined: IndexMap<String, Arc<Vec<(String, String)>>>,
 }
 
 /// A literal (`1`, `true`, `null`), or a chain through the parent's `typeof X` alias field (`DemoIDs.Home`), is a CONSTANT:
@@ -127,7 +129,7 @@ impl Scopes {
             }
         }
         let binds = binds.into_iter().map(|(id, step)| (id, Arc::new(step))).collect();
-        Scopes { binds, gate_comp, empty: Step::default() }
+        Scopes { binds, gate_comp, empty: Step::default(), defined: super::key_defined::defined(store) }
     }
 
     /// The renames a way through `p` applies to a text read in `comp`, child edge first.
@@ -144,8 +146,18 @@ impl Scopes {
     }
 
     /// Every binding on the way's edges as (parent source, child member): one variable under two spellings on this way.
+    /// And every (name, chain) a component on the way proves one variable in its own class (#117, `key_defined`).
     pub fn pairs(&self, p: &RenderPath) -> Vec<(String, String)> {
-        p.edges.iter().flat_map(|e| self.binds.get(&**e).into_iter().flat_map(|s| s.iter())).map(|(m, x)| (x.clone(), m.clone())).collect()
+        let mut out: Vec<(String, String)> = p.edges.iter().flat_map(|e| self.binds.get(&**e).into_iter().flat_map(|s| s.iter()))
+            .map(|(m, x)| (x.clone(), m.clone())).collect();
+        for h in &p.hops {
+            for pair in self.defined.get(&**h).into_iter().flat_map(|d| d.iter()) {
+                if !out.contains(pair) {
+                    out.push(pair.clone());
+                }
+            }
+        }
+        out
     }
 }
 

@@ -97,12 +97,15 @@ export function makeLibPipes({ ts, checker, symbolAt, feRoot, propName }) {
   };
 
   /**
-   * `external_pipes` of a `@Component`/`@NgModule` class: `{name, class, file, line, from}` per pipe a LIBRARY entry of
-   * its `imports` (`from: 'imports'`) or `exports` (`from: 'exports'`) makes visible, in list order; undefined when none.
+   * `pipes`: the class's `external_pipes` - `{name, class, file, line, from}` per pipe a LIBRARY entry of its `imports`
+   * (`from: 'imports'`) or `exports` (`from: 'exports'`) makes visible, in list order; undefined when none. `declarables`: its
+   * `external_declarables` - the names of the library entries that are a component or directive themselves (`ɵcmp`/`ɵdir`:
+   * a standalone one a package ships), each once; undefined when none.
    */
   return (node, decorators) => {
     const out = [];
     const seenPipe = new Set();
+    const declarables = new Set();
     const list = ts.canHaveDecorators(node) ? (ts.getDecorators(node) ?? []) : [];
     for (const [at, d] of list.entries()) {
       const name = decorators[at]?.name;
@@ -117,6 +120,7 @@ export function makeLibPipes({ ts, checker, symbolAt, feRoot, propName }) {
         classesIn(p.initializer, new Set(), classes);
         for (const cls of classes) {
           if (!inLibrary(cls)) continue;
+          if (cls.name && (staticArgs(cls, 'ɵcmp') || staticArgs(cls, 'ɵdir'))) declarables.add(cls.name.text);
           for (const pipe of pipesOfClass(cls)) {
             const key = `${from}\u0000${pipe.file}\u0000${pipe.line}\u0000${pipe.name}`;
             if (seenPipe.has(key)) continue;
@@ -126,6 +130,6 @@ export function makeLibPipes({ ts, checker, symbolAt, feRoot, propName }) {
         }
       }
     }
-    return out.length ? out : undefined;
+    return { pipes: out.length ? out : undefined, declarables: declarables.size ? [...declarables] : undefined };
   };
 }

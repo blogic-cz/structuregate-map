@@ -19,6 +19,7 @@ import { makeExprNormalizer } from './TsTplExpr.mjs';
 import { makeEmitters, probeBindingTypes } from './TsTplEmit.mjs';
 import { isCustomElement, spanOf } from './TsTplKeys.mjs';
 import { childOwnedBindings, matchNode } from './TsTplMatch.mjs';
+import { ELSE_GATE } from './TsGateChain.mjs';
 
 /** Angular's own container tags, asked of ANGULAR. They are compiler constructs and not components, so "no
  *  directive matched" is the correct outcome for them and must not be reported as a gap - it was, nearly all
@@ -382,6 +383,15 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
     }
     if (isTpl) {
       for (const a of node.templateAttrs) emitBound(a, 'template_attr', nodeId, tplId, comp, false, shift);
+      // `*ngIf="c; else ref"` RENDERS `ref` UNDER `!(c)`: a gate of its own on this node, in no node's chain (`TsGateChain.mjs`) -
+      // `key_outlets.rs` puts it on the way through the `else` in place of the `ngIf` gate, as `@else` reads its negation.
+      const bound = [...node.templateAttrs, ...(node.inputs ?? [])];
+      const cond = bound.find((a) => a.name === 'ngIf')?.value;
+      if (cond && bound.some((a) => a.name === 'ngIfElse')) {
+        const not = andNot([cond], null);
+        emitExpr({ tplId, nodeId, comp, kind: 'template_attr', name: ELSE_GATE, norm: not.norm, src: not.src,
+          gate: true, gateKind: 'block', span, gateOnly: true });
+      }
     }
     return nodeId;
   }

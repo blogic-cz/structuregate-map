@@ -142,8 +142,8 @@ flattens it - and the alias row has `type_ref`/`type_refs` of its own parts (`ty
 to a component some translation key site sits in (or is placed through): a component no key reaches - a row component a factory creates
 with no text of its own - has no `render_path` row though `component_reach` counts its roots. For every path to any component, walk
 `render_graph` from `component_reach`'s roots. An `@else` / `@else if` branch is gated (rows 119): its `gates` row (`kind =
-'block_IfBlockElse'`) holds `!(earlier) && (own)`, so `render_path.gates` of a component under it carries the negation.
+'block_IfBlockElse'`) holds `!(earlier) && (own)`, so `render_path.gates` of a component under it carries the negation. So is the `<ng-template #ref>` of an `*ngIf="c; else ref"` (rows 130): a `gates` row `ngIfElseNot` on the `ngIf` node holds `!(c)`, in no node's `gate_chain`, and a way through the `else` holds it in place of the `ngIf`.
 
 **`module_ref_from_dependency`** (a `diagnostics` row per name and file) is an NgModule's `imports`/`exports` entry naming something a package
-ships: `reason = 'dependency'` for the common case - a dependency module, or a standalone directive or component a package exports, no fault -
-and `reason = 'shadows_local'` when the tree also declares a module of that name and the refusal is what keeps the two apart (rows 121). Every NgModule and standalone component is walked, whether or not a render asks its scope (rows 129).
+ships: `reason = 'dependency'` for the common case - a dependency module, no fault - `reason = 'standalone'` for a standalone component or directive a package ships (rows 130) -
+and `reason = 'shadows_local'` when the tree also declares a module of that name and the refusal is what keeps the two apart (rows 121). Every NgModule and standalone component is walked, whether or not a render asks its scope (rows 129). `module` or `component` names the class whose list holds it and `line` that class's line (rows 130); a file listing the name in two classes has one row, the first's.
