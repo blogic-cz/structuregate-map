@@ -260,19 +260,6 @@ fn present(row: &Row, field: &str) -> Option<String> {
     }
 }
 
-/// A gate chain, which is a list of gate ids or nothing at all.
-fn gate_chain(row: &Row) -> Vec<String> {
-    match row.get("gate_chain") {
-        Some(Value::Array(items)) => items
-            .iter()
-            .map(|v| match v {
-                Value::String(s) => s.clone(),
-                other => other.to_string(),
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
-}
 
 pub fn key_routes(
     store: &Store<'_>,
@@ -324,7 +311,7 @@ pub fn key_routes(
             continue;
         };
         let Some(n) = node_by_id.get(&node) else { continue };
-        routes.put_sited(&outlets, &key, "template", text(n, "component"), gate_chain(n), &arm_ways(r, &key), Some(&node), &via_of(r));
+        routes.put_sited(&outlets, &key, "template", text(n, "component"), super::gate_inert::chain(store, n), &arm_ways(r, &key), Some(&node), &via_of(r));
     }
 
     // 2. A string inside a template expression, on the same kind of node.
@@ -335,7 +322,7 @@ pub fn key_routes(
             continue;
         }
         let Some(n) = node_by_id.get(&node) else { continue };
-        routes.put_sited(&outlets, &value, "template_string", text(n, "component"), gate_chain(n), &arm_ways(s, &value), Some(&node), &via_of(s));
+        routes.put_sited(&outlets, &value, "template_string", text(n, "component"), super::gate_inert::chain(store, n), &arm_ways(s, &value), Some(&node), &via_of(s));
     }
 
     let components = store.table("components");
@@ -412,7 +399,7 @@ pub fn key_routes(
         let Some((key, file)) = pair.rsplit_once(' ') else { continue };
         for name in pipe_of_file.get(file).into_iter().flatten() {
             for (n, id, via) in uses.get(name).into_iter().flatten() {
-                routes.put_sited(&outlets, key, "pipe", text(n, "component"), gate_chain(n), ways, Some(id), via);
+                routes.put_sited(&outlets, key, "pipe", text(n, "component"), super::gate_inert::chain(store, n), ways, Some(id), via);
             }
         }
     }

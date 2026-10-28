@@ -338,7 +338,7 @@ pub fn field_sites(store: &Store<'_>) -> (Vec<FieldSite>, Stats) {
             Some(read_rows(unwrap(ast)))
         }) else { continue };
 
-        let gates = super::key_methods::gates_of(n);
+        let gates = super::gate_inert::chain(store, n);
 
         let mut hit = false;
         for row in rows {

@@ -24,19 +24,6 @@ use super::store::{Row, Store};
 use crate::rows::IndexMap;
 use serde_json::Value;
 
-/// A node's `gate_chain` as text.
-pub(super) fn gates_of(n: &Row) -> Vec<String> {
-    match n.get("gate_chain") {
-        Some(Value::Array(items)) => items
-            .iter()
-            .map(|v| match v {
-                Value::String(s) => s.clone(),
-                other => other.to_string(),
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
-}
 
 /// A template argument as the extractor's own statement rows spell one: a string, or a ternary of them.
 fn arg_value(a: &Value) -> Value {
@@ -164,7 +151,7 @@ pub(super) fn method_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
                     hit_nodes.insert(node_id.clone());
                     let spelled = exact.get(&key).copied().unwrap_or(false);
                     let via = super::key_routes::Via { binding: id_of(e, "binding"), reads: Some(method.clone()), spelled };
-                    out.push(FieldSite { key, comp: text(n, "component"), node: Some(node_id.clone()), gates: gates_of(n), ways, via });
+                    out.push(FieldSite { key, comp: text(n, "component"), node: Some(node_id.clone()), gates: super::gate_inert::chain(store, n), ways, via });
                 }
             }
         }
