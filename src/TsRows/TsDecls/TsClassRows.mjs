@@ -414,9 +414,10 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
     let angularRows = [];
     if (angular) {
       io = angular.registerIo({ classId, className, fid, members: summaries });
+      const lib = libPipesOf(node, decorators);
       angularRows = angular.registerAngular({
         classId, fid, filePath: node.getSourceFile().fileName, className, decorators,
-        externalPipes: libPipesOf(node, decorators),
+        externalPipes: lib.pipes, externalDeclarables: lib.declarables,
       });
     }
     return { classId, decorators, members, name: className, io, angularRows, injectsTemplateRef };

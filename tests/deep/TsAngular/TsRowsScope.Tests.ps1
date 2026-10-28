@@ -262,8 +262,8 @@ Test-Case 'tsrows: a module ref from a dependency is noted for a scope no render
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/entry.module.ts' = "import { NgModule } from '@angular/core';`nimport { CommonModule } from '@angular/common';`n" +
             "@NgModule({ declarations: [], imports: [CommonModule] })`nexport class EntryModule {}`n"
-        'apps/shop/src/list.component.ts' = "import { Component } from '@angular/core';`nimport { CommonModule } from '@angular/common';`n" +
-            "@Component({ selector: 'demo-list', standalone: true, imports: [CommonModule], template: '<b *ngIf=`"on`">x</b>' })`nexport class ListComponent { on = true; }`n"
+        'apps/shop/src/list.component.ts' = "import { Component } from '@angular/core';`nimport { CommonModule, NgIf } from '@angular/common';`n" +
+            "@Component({ selector: 'demo-list', standalone: true, imports: [CommonModule, NgIf], template: '<b *ngIf=`"on`">x</b>' })`nexport class ListComponent { on = true; }`n"
         'apps/shop/src/chip.module.ts' = "import { Component, NgModule } from '@angular/core';`nimport { CommonModule } from '@angular/common';`n" +
             "@Component({ selector: 'demo-chip', template: '<b>c</b>' })`nexport class ChipComponent {}`n" +
             "@Component({ selector: 'demo-host', template: '<demo-chip></demo-chip>' })`nexport class HostComponent {}`n" +
@@ -276,5 +276,11 @@ Test-Case 'tsrows: a module ref from a dependency is noted for a scope no render
     Assert-Line $r 'dep=entry.module.ts|CommonModule|1'
     Assert-Line $r 'dep=list.component.ts|CommonModule|1'
     Assert-Line $r 'dep=chip.module.ts|CommonModule|1'
+    # (rows 130) WHOSE LIST AND WHAT IT IS: a package's standalone `NgIf` is `standalone`, a package module `dependency`; `module` or `component` names the owner, `line` its class.
+    $w = Invoke-TsRowsQ $made.Db ("SELECT 'own=' || d.name || '|' || d.reason || '|' || CASE WHEN d.module IS NOT NULL THEN 'module=' || m.name ELSE 'component=' || c.name END || '|' || d.line AS r " +
+        "FROM diagnostics d LEFT JOIN ng_modules m ON m.id = d.module LEFT JOIN components c ON c.id = d.component WHERE d.kind = 'module_ref_from_dependency'")
+    Assert-Line $w 'own=CommonModule|dependency|module=EntryModule|4'
+    Assert-Line $w 'own=CommonModule|dependency|component=ListComponent|4'
+    Assert-Line $w 'own=NgIf|standalone|component=ListComponent|4'
 }
 }

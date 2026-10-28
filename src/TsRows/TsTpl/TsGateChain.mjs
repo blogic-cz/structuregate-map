@@ -6,10 +6,13 @@
  * translation key or a component. Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
 
+/** The gate `*ngIf="c; else ref"` holds for `ref`'s way: `!(c)`, on the `ngIf` node but in NO chain - the node's own content renders under `c`. */
+export const ELSE_GATE = 'ngIfElseNot';
+
 export function rollupGateChains(store) {
   const gatesByNode = new Map();
   for (const g of store.table('gates')) {
-    if (g.node == null) continue;
+    if (g.node == null || g.name === ELSE_GATE) continue;
     const hit = gatesByNode.get(g.node);
     if (hit) hit.push(g.id);
     else gatesByNode.set(g.node, [g.id]);

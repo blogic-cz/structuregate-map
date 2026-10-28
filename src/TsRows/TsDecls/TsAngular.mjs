@@ -90,7 +90,7 @@ export function makeAngularRows({ store, feRoot, diag }) {
   }
 
   /** The decorators of one class -> its `components`/`directives`/`pipes`/`injectables`/`ng_modules` rows. */
-  function registerAngular({ classId, fid, filePath, className, decorators, externalPipes }) {
+  function registerAngular({ classId, fid, filePath, className, decorators, externalPipes, externalDeclarables }) {
     const out = [];
     for (const d of decorators) {
       const meta = metaOf(d);
@@ -126,6 +126,8 @@ export function makeAngularRows({ store, feRoot, diag }) {
           imports: flatRefs(meta.imports).map(refName),
           // THE PIPES A LIBRARY ENTRY OF `imports` MAKES VISIBLE, read off its typings (`TsLibPipes.mjs`, #86).
           external_pipes: externalPipes,
+          // THE LIBRARY ENTRIES THAT ARE A STANDALONE COMPONENT OR DIRECTIVE, by name (`TsLibPipes.mjs`): `module_ref_from_dependency` says `standalone` for them.
+          external_declarables: externalDeclarables,
           providers: flatRefs(meta.providers).map(refName),
           view_providers: flatRefs(meta.viewProviders).map(refName),
           animations_present: meta.animations !== undefined,
@@ -156,6 +158,7 @@ export function makeAngularRows({ store, feRoot, diag }) {
           // ...of `imports` and of `exports`, each pipe saying which (`from`): an exported library module widens the scope
           // of every module importing this one, an imported one only this module's own.
           external_pipes: externalPipes,
+          external_declarables: externalDeclarables,
         });
       }
     }

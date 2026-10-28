@@ -103,6 +103,8 @@ pub mod key_dead;
 pub mod key_bound;
 #[path = "key/key_scopes.rs"]
 pub mod key_scopes;
+#[path = "key/routes/key_defined.rs"]
+pub mod key_defined;
 #[path = "key/keyreach.rs"]
 pub mod keyreach;
 #[path = "key/key_ways.rs"]
