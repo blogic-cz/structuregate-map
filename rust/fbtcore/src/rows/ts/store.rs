@@ -25,7 +25,6 @@ use serde_json::Map;
 use serde_json::Value;
 use std::cell::RefCell;
 use super::super::{FastMap, FastSet};
-use std::collections::HashMap;
 use std::rc::Rc;
 
 mod row;
@@ -52,8 +51,9 @@ pub struct Store<'a> {
     order: Vec<String>,
     /// What a pass builds from the rows and several passes ask for, built once and shared (`shared`).
     memo: RefCell<FastMap<&'static str, Rc<dyn std::any::Any>>>,
-    /// Derived rows this run produced, by table.
-    pub emitted: HashMap<String, Vec<Row>>,
+    /// Derived rows this run produced, by table, IN THE ORDER THE TABLES WERE FIRST EMITTED: they are written in it, and a
+    /// `HashMap` wrote them - and registered their child tables in `_cells` - in a new order on every run.
+    pub emitted: super::super::IndexMap<String, Vec<Row>>,
     /// WHAT THE PASSES READ: every table asked for, and each read's column names and flags (`Schema::reads`).
     /// Kept past `release`, which lets the rows go - see `reads`.
     asked: RefCell<Vec<(String, Option<Asked>)>>,
@@ -90,7 +90,7 @@ impl<'a> Store<'a> {
             #[cfg(test)]
             order: Vec::new(),
             memo: RefCell::new(FastMap::default()),
-            emitted: HashMap::new(),
+            emitted: Default::default(),
             asked: RefCell::new(Vec::new()),
         })
     }
@@ -144,7 +144,7 @@ impl<'a> Store<'a> {
             payload: true,
             order,
             memo: RefCell::new(FastMap::default()),
-            emitted: HashMap::new(),
+            emitted: Default::default(),
             asked: RefCell::new(Vec::new()),
         }
     }

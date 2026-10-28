@@ -22,8 +22,8 @@ print('tables=%d/%d' % (len(ta), len(tb)))
 for t in sorted(set(ta) | set(tb)):
     if t not in ta or t not in tb:
         print('DIFF ' + t); continue
-    # `_cells` is written in an order the closure does not keep from run to run: compared as a set.
-    if tb[t] or t == '_cells':
+    # `_cells` IN ROWID ORDER TOO: the closure registers its child tables in the order it emitted them, the same every run.
+    if tb[t]:
         ra, rb = (sorted(c.execute(f'SELECT * FROM "{t}"').fetchall(), key=repr) for c in (a, b))
     else:
         ra, rb = (c.execute(f'SELECT rowid, * FROM "{t}" ORDER BY rowid').fetchall() for c in (a, b))
