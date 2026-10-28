@@ -95,6 +95,8 @@ pub mod key_pipes;
 pub mod key_builds;
 #[path = "key/fields/shape_values.rs"]
 pub mod shape_values;
+#[path = "key/fields/shape_select.rs"]
+pub mod shape_select;
 #[path = "key/key_dead.rs"]
 pub mod key_dead;
 #[path = "key/key_bound.rs"]

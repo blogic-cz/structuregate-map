@@ -28,7 +28,24 @@ pub(super) fn bound_shape_values(store: &Store<'_>) -> HashMap<String, Value> {
     if wanted.is_empty() {
         return HashMap::new();
     }
-    values_of(store, &wanted)
+    let mut out = values_of(store, &wanted);
+    // A SIGNATURE OF A DECLARED TYPE has no value here: the selector a field of that type selects, the literal properties typed
+    // by it and the writes naming it hold its values (`shape_select`).
+    let missing: HashSet<String> = wanted.into_iter().filter(|w| !out.contains_key(w)).collect();
+    if missing.is_empty() {
+        return out;
+    }
+    let mut found = super::shape_select::selected_values(store, &missing);
+    let filled = super::shape_select::filled(store, &missing);
+    let properties: HashSet<String> = filled.values().flat_map(|(ps, _)| ps.iter().cloned()).collect();
+    let valued = values_of(store, &properties);
+    for (w, (ps, writes)) in filled {
+        let list = found.entry(w).or_default();
+        list.extend(ps.iter().filter_map(|p| valued.get(p).cloned()));
+        list.extend(writes);
+    }
+    out.extend(found.into_iter().filter_map(|(w, vs)| Some((w, super::shape_select::one_value(vs)?))));
+    out
 }
 
 /// A span of lines in one file.

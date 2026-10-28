@@ -32,6 +32,13 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
    * that takes `branch`. Never a `branch` - those are conditions. LEXICAL (rows 71): a function or class expression in the body stays in the loop, as `branch` does.
    */
   let currentLoop = null;
+  /** A PROPERTY WRITE NAMES ITS DECLARATION'S PLACE too (rows 128): `state.list = [..]` writes `State`'s `list` signature - the row a template read of it lands on -
+   *  so `line` is that declaration's name line (`TsReadRefs.mjs::targetLine`), as a call's `target` carries it. */
+  const placed = (name) => {
+    const declared = declFileOf(name);
+    const line = declared === null || targetLine === undefined ? undefined : targetLine(name)?.line;
+    return line === undefined ? declared : { ...declared, line };
+  };
   /** How many rows the emitters wrote: a bare expression statement is described only when its walk wrote none. */
   let rowsWritten = 0;
   /**
@@ -229,7 +236,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       target: lhs.name, scope: lhs.scope, ...(lhs.holder !== undefined ? { holder: lhs.holder } : {}),
       // WHICH PROPERTY IS BEING SET, resolved. Published as text only, the write side of TypeScript had no
       // link where the read side has one.
-      target_ref: ts.isPropertyAccessExpression(left) ? declFileOf(left.name)
+      target_ref: ts.isPropertyAccessExpression(left) ? placed(left.name)
         : ts.isIdentifier(left) ? declFileOf(left) : null,
       operator: ts.tokenToString(node.operatorToken.kind) ?? '=',
       value: evalCell(rhs), expression: treeOf(rhs),
