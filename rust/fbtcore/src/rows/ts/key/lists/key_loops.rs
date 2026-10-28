@@ -537,13 +537,7 @@ pub fn loop_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
                         continue;
                     }
                     hit = true;
-                    let gates: Vec<String> = match n.get("gate_chain") {
-                        Some(Value::Array(items)) => items
-                            .iter()
-                            .map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()))
-                            .collect(),
-                        _ => Vec::new(),
-                    };
+                    let gates = super::gate_inert::chain(store, n);
                     for (key, ways) in keys {
                         let ways = ways
                             .iter()

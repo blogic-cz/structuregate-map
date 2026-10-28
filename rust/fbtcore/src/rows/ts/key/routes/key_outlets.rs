@@ -67,7 +67,7 @@ impl Outlets {
         for n in store.table("template_nodes").iter() {
             let (Some(id), Some(tpl)) = (text(n, "id"), text(n, "template")) else { continue };
             if let Some(p) = text(n, "parent") { o.parent.insert(id.clone(), p); }
-            let chain = strings(n, "gate_chain");
+            let chain = super::gate_inert::chain(store, n);
             if !chain.is_empty() { o.chain.insert(id.clone(), chain); }
             let is_tpl = text(n, "kind").as_deref() == Some("Template") && text(n, "tag").as_deref() == Some("ng-template");
             for (name, _) in named(n, "variables") { *declared.entry((tpl.clone(), name)).or_default() += 1; }

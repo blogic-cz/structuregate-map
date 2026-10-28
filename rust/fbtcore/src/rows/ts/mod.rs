@@ -28,6 +28,8 @@ pub mod gate_features;
 pub mod gate_guard_eval;
 #[path = "gate/ts/directive/gate_guards.rs"]
 pub mod gate_guards;
+#[path = "gate/ts/directive/gate_inert.rs"]
+pub mod gate_inert;
 #[path = "gate/ts/gate_curried.rs"]
 pub mod gate_curried;
 #[path = "gate/ts/gate_lists.rs"]

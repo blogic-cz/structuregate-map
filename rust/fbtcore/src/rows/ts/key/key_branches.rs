@@ -326,7 +326,9 @@ impl Branches {
                 continue;
             }
             if let Some(ast) = e.get("ast") {
-                out.arms.extend(template_arms(&id, ast).1.into_iter().map(|(arm, tree)| (arm, tree.clone())));
+                // AN INERT DIRECTIVE'S ALIAS (`*ngVar="E as v"`) in a condition is `E` (`gate_inert::unaliased`).
+                let node = cell(e, "node");
+                out.arms.extend(template_arms(&id, ast).1.into_iter().map(|(arm, tree)| (arm, super::gate_inert::unaliased(store, node.as_deref(), tree))));
             }
         }
         // AND A STATEMENT SITS IN ONE: `c ? this.t('a') : this.t('b')` stamps each call with the

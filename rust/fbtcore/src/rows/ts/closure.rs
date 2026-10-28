@@ -150,7 +150,7 @@ pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Arc<str>, 
         if matches!(n.get("gate_chain"), Some(Value::Array(_)))
             && let Some(id) = id_of(n, "id")
         {
-            chains.insert(id, string_list(n, "gate_chain"));
+            chains.insert(id, super::gate_inert::chain(store, n));
         }
     }
 
