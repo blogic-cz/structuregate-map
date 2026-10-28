@@ -231,8 +231,14 @@ export function makeScopes(store, diag) {
     return (fromFile ? declaringModuleByFile.get(fromFile) : undefined)
       ?? (typeof fromClass?.name === 'string' ? declaringModule.get(fromClass.name) : undefined);
   };
+  /** EVERY SCOPE WALKED ONCE, so every refusal is noted: a module or standalone component no render asks of (its template renders
+   *  no declarable, it declares nothing) still names its dependencies - walked only on demand, it had no row. */
+  const walkAll = () => {
+    for (const m of modules) { scopeOf(m); exportedOf(m); }
+    for (const c of standaloneByClass.values()) standaloneScope(c);
+  };
   return {
-    scopeOf, standaloneScope, moduleOfClass, standaloneByClass,
+    scopeOf, standaloneScope, moduleOfClass, standaloneByClass, walkAll,
     quiet: () => { note = () => {}; },
   };
 }
@@ -297,6 +303,7 @@ export function rollupModuleScope(store, diag, scopes = makeScopes(store, diag))
     if (judged.byName) r.scope_by_name = true;
     counts[r.scope] = (counts[r.scope] ?? 0) + 1;
   }
+  scopes.walkAll();
 
   // Where a single element still matched more than one IN-SCOPE candidate, say so. Deduped by TARGET id and
   // not by name: the two colliding components share a name, so a name-based set collapsed the very

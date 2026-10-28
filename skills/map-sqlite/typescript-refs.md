@@ -146,4 +146,4 @@ with no text of its own - has no `render_path` row though `component_reach` coun
 
 **`module_ref_from_dependency`** (a `diagnostics` row per name and file) is an NgModule's `imports`/`exports` entry naming something a package
 ships: `reason = 'dependency'` for the common case - a dependency module, or a standalone directive or component a package exports, no fault -
-and `reason = 'shadows_local'` when the tree also declares a module of that name and the refusal is what keeps the two apart (rows 121).
+and `reason = 'shadows_local'` when the tree also declares a module of that name and the refusal is what keeps the two apart (rows 121). Every NgModule and standalone component is walked, whether or not a render asks its scope (rows 129).
