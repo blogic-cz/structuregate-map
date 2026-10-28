@@ -255,4 +255,26 @@ Test-Case 'tsrows: a module ref from a dependency says whether it shadows a loca
     Assert-Line $r 'why=RouterModule|dependency'
     Assert-Line $r 'why=CommonModule|shadows_local'
 }
+
+# (rows 129) EVERY MODULE NAMES ITS DEPENDENCIES, ASKED OR NOT (`TsModuleScope.mjs::walkAll`): `EntryModule` declares nothing and the standalone `ListComponent`
+# renders no declarable, so no render asks either scope - and their `CommonModule` had no row. `ChipModule`'s is asked through `demo-chip` as before.
+Test-Case 'tsrows: a module ref from a dependency is noted for a scope no render asks of' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/entry.module.ts' = "import { NgModule } from '@angular/core';`nimport { CommonModule } from '@angular/common';`n" +
+            "@NgModule({ declarations: [], imports: [CommonModule] })`nexport class EntryModule {}`n"
+        'apps/shop/src/list.component.ts' = "import { Component } from '@angular/core';`nimport { CommonModule } from '@angular/common';`n" +
+            "@Component({ selector: 'demo-list', standalone: true, imports: [CommonModule], template: '<b *ngIf=`"on`">x</b>' })`nexport class ListComponent { on = true; }`n"
+        'apps/shop/src/chip.module.ts' = "import { Component, NgModule } from '@angular/core';`nimport { CommonModule } from '@angular/common';`n" +
+            "@Component({ selector: 'demo-chip', template: '<b>c</b>' })`nexport class ChipComponent {}`n" +
+            "@Component({ selector: 'demo-host', template: '<demo-chip></demo-chip>' })`nexport class HostComponent {}`n" +
+            "@NgModule({ declarations: [ChipComponent, HostComponent], imports: [CommonModule] })`nexport class ChipModule {}`n"
+    }
+    $made = New-TsRowsDb $tree -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'dep=' || substr(f.path, length(rtrim(f.path, replace(f.path, '/', ''))) + 1) || '|' || d.name || '|' || count(*) AS r " +
+        "FROM diagnostics d JOIN files f ON f.id = d.file WHERE d.kind = 'module_ref_from_dependency' GROUP BY f.path, d.name")
+    Assert-Line $r 'dep=entry.module.ts|CommonModule|1'
+    Assert-Line $r 'dep=list.component.ts|CommonModule|1'
+    Assert-Line $r 'dep=chip.module.ts|CommonModule|1'
+}
 }
