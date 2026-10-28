@@ -267,7 +267,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     };
     // EVERY TYPE LITERAL AND OBJECT LITERAL (rows 71, `TsExpr/TsShapes.mjs`): the body walk tells it where each object literal stands.
     const shapes = makeShapeRows({
-      ts, store, typeRefAt, typeText: classRows.typeText, propName, returnRefOf: classRows.returnRefOf,
+      ts, store, typeRefAt, typeText: classRows.typeText, propName, returnRefOf: classRows.returnRefOf, fieldTarget: readRefs.fieldTarget,
     });
     const rows = makeBodyRows({
       ts, store, evalNode, evalCell, describe, declFileOf: classRows.declFileOf, declareInline, declareClass, propName,

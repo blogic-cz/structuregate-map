@@ -14,7 +14,7 @@
  */
 import { locationOf } from './TsNodes.mjs';
 
-export function makeShapeRows({ ts, store, typeRefAt, typeText, propName, returnRefOf }) {
+export function makeShapeRows({ ts, store, typeRefAt, typeText, propName, returnRefOf, fieldTarget }) {
   const contexts = new WeakMap();
 
   /** WHERE THE BODY WALK STANDS at an object literal: the columns a `calls` row there would carry. */
@@ -54,6 +54,11 @@ export function makeShapeRows({ ts, store, typeRefAt, typeText, propName, return
     const { element: _, unwrapped: had, ...rest } = base.type_ref;
     return { ...base, type_ref: element === null ? rest : { ...rest, ...(had === undefined ? {} : { unwrapped: element }), element } };
   };
+  /** THE DECLARED MEMBER A LITERAL'S PROPERTY FILLS (rows 128, `TsReadRefs.mjs::fieldTarget`): `{ list: [..] }` typed `State` names `State`'s `list` signature, the
+   *  place a template read of `state.list` lands on - so the closure reads the value written there (`shape_select.rs`). None without a contextual type. */
+  const fills = (m) => {
+    try { const target = fieldTarget?.(m.initializer); return target ? { target } : {}; } catch { return {}; }
+  };
   /** A signature's type is only its annotation: an un-annotated one is `any` and names nothing. */
   const written = (annotation) => ({ type: annotation ? annotation.getText() : null, ...(annotation ? typeRefAt(annotation) : { type_ref: null }) });
 
@@ -73,7 +78,7 @@ export function makeShapeRows({ ts, store, typeRefAt, typeText, propName, return
     if (ts.isSetAccessor(m)) return { kind: 'setter', name, ...typed(m, m.type) };
     if (ts.isShorthandPropertyAssignment(m)) return { kind: 'shorthand', name, ...typed(m, null), ...returnRefOf(m, 'property') };
     if (ts.isPropertySignature(m)) return { kind: 'signature', name, ...written(m.type), ...returnRefOf(m, 'property') };
-    if (ts.isPropertyAssignment(m)) return { kind: 'property', name, ...typed(m, null), ...returnRefOf(m, 'property') };
+    if (ts.isPropertyAssignment(m)) return { kind: 'property', name, ...typed(m, null), ...returnRefOf(m, 'property'), ...fills(m) };
     return null;
   }
 

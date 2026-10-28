@@ -360,6 +360,7 @@ async function main() {
   // 126: #138 - a `Map#get` call keeps `$key_expr`/`$entry_exprs` (`TsExpr/TsValue.mjs::lookupKeys`), and a class created from an entry holds
   //     `lookup:<key>@<argument>` on its `renders.return_ways` (`TsDerive/TsDynRender.mjs`).
   // 127: #53 - a key's ways are `key_reach_ways` rows naming a `key_reach_chains` row, no longer `key_reach.paths` nodes (`rust .../key/key_ways.rs`).
+  // 128: #117 - an object literal's property names the declared member it fills (`shape_members.target`, `TsExpr/TsShapes.mjs`), and a property write its declaration's line (`assignments.target_ref.line`, `TsDecls/TsBody.mjs`).
   // 124: `untilDestroyed(this)` of `@ngneat/until-destroy` hands `this` to no one (`files.this_indexed`), and reads its destroy method (`TsDecls/TsPropReads.mjs`).
   // 123: an un-annotated array literal in an object literal names its elements' refs as written, sorted by place, not the checker's reduced union (`TsExpr/TsShapes.mjs::writtenElements`).
   // 122: an expression another project already described in the run is that row, not a second one at the same place (`TsDecls/TsWalk.mjs`, `store.exprAt`).
@@ -392,7 +393,7 @@ async function main() {
   // 99: an immer handler's `writes` follow the helpers it hands its draft to, and the callbacks they call (`TsExpr/TsExprDescribe.mjs::draftWrites`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 127, build: args.build,
+    config: config.file, data: config.data, rows: 128, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
