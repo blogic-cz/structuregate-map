@@ -188,6 +188,14 @@ def suffixes(name: str) -> list:
     return [joined + ".py", joined + "/__init__.py"]
 
 
+def packages(rel: str, find, module: str) -> list:
+    """The `__init__.py` of every package an import passes through - `a.b.c` runs `a/__init__.py` and
+    `a/b/__init__.py` before `c` - but not one holding the importer, which Python ran before the importer."""
+    parts = module.split(".") if module else []
+    inits = [find(".".join(parts[:i])) for i in range(1, len(parts))]
+    return [init for init in inits if init.endswith("__init__.py") and not rel.startswith(init[: -len("__init__.py")])]
+
+
 def imports(root: str, rel: str, tree: ast.Module) -> None:
     """Every import, wherever it is written, and whether the file already handles its absence.
 
@@ -206,22 +214,29 @@ def imports(root: str, rel: str, tree: ast.Module) -> None:
             for alias in node.names:
                 path = module_path(root, alias.name)
                 if path:
-                    emit(by_path, rel, path)
+                    for target in [path] + packages(rel, lambda m: module_path(root, m), alias.name):
+                        emit(by_path, rel, target)
                 else:
                     emit(by_name, rel, alias.name.split(".")[0])
                     for candidate in suffixes(alias.name):
                         emit(by_suffix, rel, candidate)
         elif isinstance(node, ast.ImportFrom):
             if node.level:
-                path = relative_path(root, rel, node.level, node.module or "")
-                if path:
-                    emit(by_path, rel, path)
+                # `from . import alpha` binds the SUBMODULE as the absolute spelling does (below), and
+                # `from .sub.beta import f` runs `sub/__init__.py` on the way.
+                module = node.module or ""
+                find = lambda m, level=node.level: relative_path(root, rel, level, m)  # noqa: E731
+                nested = [find(module + "." + a.name if module else a.name) for a in node.names]
+                for target in [find(module)] + packages(rel, find, module) + nested:
+                    if target:
+                        emit(by_path, rel, target)
                 continue
             if not node.module:
                 continue
             path = module_path(root, node.module)
             if path:
-                emit(by_path, rel, path)
+                for target in [path] + packages(rel, lambda m: module_path(root, m), node.module):
+                    emit(by_path, rel, target)
             else:
                 for candidate in suffixes(node.module):
                     emit(by_suffix, rel, candidate)
