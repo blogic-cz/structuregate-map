@@ -130,7 +130,7 @@ impl Classes {
     }
 
     fn file_of(&self, abs: &str) -> Option<&str> {
-        let abs = abs.replace('\\', "/");
+        let abs = crate::rows::ts::feature_writes::ref_file(abs);
         self.by_tail.get(&tail(&abs))?.iter().find(|(_, p)| abs.ends_with(p.as_str())).map(|(id, _)| id.as_str())
     }
 

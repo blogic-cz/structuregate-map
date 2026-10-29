@@ -58,7 +58,7 @@ pub(super) fn enum_of_type(idx: &EnumIndex, type_ref: Option<&Value>) -> Option<
         _ => return None,
     };
     let file = match target.get("file") {
-        Some(Value::String(f)) if !f.is_empty() => slash(f),
+        Some(Value::String(f)) if !f.is_empty() => crate::rows::ts::feature_writes::ref_file(f),
         _ => return None,
     };
     for (path, id) in idx.by_decl.get(&name)? {
@@ -119,7 +119,7 @@ pub fn config_members(
         let Some(candidates) = ifaces.get(name) else { return };
         for (id, path) in candidates {
             if let Some(file) = &file
-                && !slash(file).ends_with(&format!("/{path}"))
+                && !crate::rows::ts::feature_writes::ref_file(file).ends_with(&format!("/{path}"))
             {
                 continue;
             }

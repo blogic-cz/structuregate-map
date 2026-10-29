@@ -313,7 +313,7 @@ Test-Case 'tsrows: every param of a read is the line and col of a params item or
         "JOIN $owner o ON o.id = l.owner WHERE l.role = 'line' AND l.value = pl.value AND c.value = pc.value AND o.file = fl.id)" }
     $sql = "SELECT 'reads=' || count(*) || ' orphans=' || sum(CASE WHEN " + (& $join 'members__params' 'members') + " OR " + (& $join 'functions__params' 'functions') +
         " THEN 0 ELSE 1 END) AS r FROM expressions x JOIN expressions__ast pa ON pa.owner = x.id AND pa.role = 'param' " +
-        "JOIN expressions__ast pf ON pf.owner = x.id AND pf.parent = pa.n AND pf.role = 'file' JOIN files fl ON fl.abs = pf.value " +
+        "JOIN expressions__ast pf ON pf.owner = x.id AND pf.parent = pa.n AND pf.role = 'file' JOIN files fl ON fl.path = pf.value " +
         "JOIN expressions__ast pl ON pl.owner = x.id AND pl.parent = pa.n AND pl.role = 'line' " +
         "JOIN expressions__ast pc ON pc.owner = x.id AND pc.parent = pa.n AND pc.role = 'col' WHERE fl.path LIKE '%bind.use.ts'"
     $r = Invoke-TsRowsQ $db $sql
@@ -354,7 +354,7 @@ Test-Case 'tsrows: a read of a decorated member targets its name line, not its d
     # Every target of that file's code is a place some row sits at: a `members` row or a `classes` row.
     $sql = "SELECT 'orphans=' || count(*) AS r FROM expressions x JOIN files xf ON xf.id = x.file JOIN expressions__ast t ON t.owner = x.id AND t.role = 'target' " +
         "JOIN expressions__ast tf ON tf.owner = x.id AND tf.parent = t.n AND tf.role = 'file' JOIN expressions__ast tl ON tl.owner = x.id AND tl.parent = t.n AND tl.role = 'line' " +
-        "JOIN files df ON df.abs = tf.value WHERE xf.path LIKE '%bind.loops.ts' AND df.path LIKE '%bind.loops.ts' " +
+        "JOIN files df ON df.path = tf.value WHERE xf.path LIKE '%bind.loops.ts' AND df.path LIKE '%bind.loops.ts' " +
         "AND NOT EXISTS (SELECT 1 FROM members m WHERE m.file = df.id AND m.line = tl.value) AND NOT EXISTS (SELECT 1 FROM classes c WHERE c.file = df.id AND c.line = tl.value)"
     Assert-Line (Invoke-TsRowsQ $db $sql) 'orphans=0'
 }
@@ -469,8 +469,8 @@ Test-Case 'tsrows: a call argument naming a const has an arg_refs item joining t
         "JOIN calls__arg_refs d ON d.owner = i.owner AND d.parent = i.n AND d.role = 'file' " +
         "WHERE cf.path LIKE '%argrefs.ts'"
     $r = Invoke-TsRowsQ $db ("SELECT 'item=' || c.line || '|' || a.value || '|' || w.value || '|' || r.value || '|' || k.value || '|' || l.value || '|' || " +
-        "(SELECT count(*) FROM consts q JOIN files qf ON qf.id = q.file WHERE qf.abs = d.value AND q.line = l.value AND q.name = r.value) || '|' || " +
-        "(SELECT count(*) FROM locals q JOIN files qf ON qf.id = q.file WHERE qf.abs = d.value AND q.line = l.value AND q.name = r.value) AS r $items ORDER BY c.line")
+        "(SELECT count(*) FROM consts q JOIN files qf ON qf.id = q.file WHERE qf.path = d.value AND q.line = l.value AND q.name = r.value) || '|' || " +
+        "(SELECT count(*) FROM locals q JOIN files qf ON qf.id = q.file WHERE qf.path = d.value AND q.line = l.value AND q.name = r.value) AS r $items ORDER BY c.line")
     Assert-Line $r 'item=9|1|hueLabels|hueLabels|const|2|1|0'
     Assert-Line $r 'item=10|1|hl|hueLabels|const|2|1|0'
     Assert-Line $r 'item=11|1|t|t|const|8|0|1'

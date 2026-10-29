@@ -90,10 +90,12 @@ impl Outlets {
         let mut by_type: HashSet<String> = HashSet::new();
         // A COMPONENT OF THE TREE never sits on an `ng-template`, so a query by its type hands no template over - unless it reads one
         // (`{ read: TemplateRef }`). `TemplateRef` itself, a directive (it may sit on one) or a type the tree does not declare still does.
-        let abs_of: HashMap<String, String> = store.table("files").iter()
-            .filter_map(|f| Some((text(f, "id")?, text(f, "abs")?.replace('\\', "/")))).collect();
+        // A REF NAMES ITS FILE RELATIVE TO THE ROOT (rows 132), as `files.path` does; `abs` too, for a map written before.
+        let spellings: HashMap<String, Vec<String>> = store.table("files").iter()
+            .filter_map(|f| Some((text(f, "id")?, ["path", "abs"].iter().filter_map(|c| text(f, c)).map(|p| p.replace('\\', "/")).collect()))).collect();
         let components: HashSet<(String, String)> = store.table("components").iter()
-            .filter_map(|c| Some((abs_of.get(&text(c, "file")?)?.clone(), text(c, "name")?))).collect();
+            .filter_map(|c| Some((spellings.get(&text(c, "file")?)?, text(c, "name")?)))
+            .flat_map(|(paths, name)| paths.iter().map(move |p| (p.clone(), name.clone()))).collect();
         let hands_none = |args: Option<&Value>| {
             let arg = |i: usize| args.and_then(|a| a.get(i));
             let reads_template = arg(1).and_then(|o| o.get("read")).and_then(|r| r.get("$ref")).and_then(Value::as_str) == Some("TemplateRef");

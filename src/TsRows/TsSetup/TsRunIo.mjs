@@ -135,7 +135,8 @@ export function readCarry(file, part, onRow) {
   return { claims, rollup };
 }
 
-export function writePayload(file, payload) {
+/** `cells` (`TsPaths.mjs::relativeCells`), when given, makes the replacer each table row is written through. */
+export function writePayload(file, payload, cells = null) {
   const fd = openSync(file, 'w');
   let held = [];
   let size = 0;
@@ -167,7 +168,7 @@ export function writePayload(file, payload) {
         for (let i = 0; i < rows.length; i++) {
           if (i) put(',');
           // An undefined ELEMENT is `null` in JSON, which is what `JSON.stringify` writes.
-          put(JSON.stringify(rows[i]) ?? 'null');
+          put(JSON.stringify(rows[i], cells === null || rows[i] === null || typeof rows[i] !== 'object' ? undefined : cells(rows[i], name)) ?? 'null');
         }
         put(']');
       }

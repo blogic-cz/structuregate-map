@@ -21,7 +21,8 @@ export function makeScopes(store, diag) {
   let note = (kind, detail) => diag.note(kind, detail);
   const classById = new Map(store.table('classes').map((c) => [c.id, c]));
   const modules = store.table('ng_modules');
-  const fileIdByAbs = new Map(store.table('files').map((f) => [f.abs, f.id]));
+  // A REF'S FILE AS EITHER SPELLING: a carried row's is relative (rows 132), one this run made absolute.
+  const fileIdByAbs = new Map(store.table('files').flatMap((f) => [[slash(String(f.abs)), f.id], [slash(String(f.path)), f.id]]));
 
   const byFileName = new Map();
   const byName = new Map();
@@ -32,7 +33,7 @@ export function makeScopes(store, diag) {
    * classes under aliases so several classes with the same declared name can coexist. Keying on the
    * alias while probing with the class's own name meant the two strings never met: many real, resolvable
    * render edges were stamped `unknown` - most of the unknown rows. The ref carries its declaring FILE,
-   * which the alias cannot change.
+   * which the alias cannot change - as a `files` id, since a carried ref spells it relative and a fresh one absolute.
    */
   const declaringModuleByFile = new Map();
   const declaringModule = new Map();
@@ -43,7 +44,7 @@ export function makeScopes(store, diag) {
     else byName.set(String(m.name), [m]);
     for (const d of refsOf(m, 'declarations')) {
       if (d?.name) declaringModule.set(d.name, m);
-      if (d?.file) declaringModuleByFile.set(slash(d.file), m);
+      if (d?.file && fileIdByAbs.has(slash(d.file))) declaringModuleByFile.set(fileIdByAbs.get(slash(d.file)), m);
     }
   }
   for (const [name, rows] of byName) {
@@ -224,7 +225,6 @@ export function makeScopes(store, diag) {
     return scope;
   };
 
-  const fileAbsById = new Map(store.table('files').map((f) => [f.id, String(f.abs)]));
   // A STANDALONE component has no NgModule at all: its scope is its own `imports` array. Without this, every
   // render from a standalone component was `unknown` however the module lookup was keyed.
   const standaloneByClass = new Map();
@@ -238,7 +238,7 @@ export function makeScopes(store, diag) {
   /** The NgModule declaring a class - keyed by its FILE, then by its name. */
   const moduleOfClass = (classId) => {
     const fromClass = classById.get(classId);
-    const fromFile = fromClass ? fileAbsById.get(fromClass.file) : undefined;
+    const fromFile = fromClass?.file;
     return (fromFile ? declaringModuleByFile.get(fromFile) : undefined)
       ?? (typeof fromClass?.name === 'string' ? declaringModule.get(fromClass.name) : undefined);
   };

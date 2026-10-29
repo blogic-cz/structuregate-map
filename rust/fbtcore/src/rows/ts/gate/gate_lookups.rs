@@ -172,7 +172,7 @@ pub fn lookups(store: &Store<'_>, idx: &EnumIndex) -> Vec<Lookup> {
 /// positions — as the predicate that lookup proves over `S.<field>`.
 pub fn delegated(tree: &Value, target: Option<&Value>, param: &str, enum_id: &str, all: &[Lookup]) -> Option<Predicate> {
     let target = target?;
-    let (name, file) = (text(target, "name")?, slash(text(target, "file")?));
+    let (name, file) = (text(target, "name")?, crate::rows::ts::feature_writes::ref_file(&text(target, "file")?));
     let lookup = all.iter().find(|l| l.name == name && l.enum_id == enum_id && file.ends_with(&format!("/{}", l.path)))?;
     if kind(tree) != Some("Call") || local(tree.get("receiver")?) != Some(name) {
         return None;

@@ -253,7 +253,7 @@ pub fn declaration_index(store: &Store<'_>) -> impl Fn(Option<&Value>) -> Option
             Some(Value::Number(n)) => n.clone(),
             _ => return None,
         };
-        let abs_path = file_name.replace('\\', "/");
+        let abs_path = crate::rows::ts::feature_writes::ref_file(file_name);
         for (id, candidate) in by_tail.get(&tail(file_name))? {
             if abs_path.ends_with(candidate) {
                 let k = format!("{id} {line}");

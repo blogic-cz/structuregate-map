@@ -20,17 +20,18 @@
 use super::*;
 
 impl World {
-    /// The abs path of each TypeScript file, then every callable by (path, name) and every callable's returns.
+    /// Each TypeScript file's paths - relative to the root, as a ref names it (rows 132), and absolute, as a map written before
+    /// did - then every callable by (path, name) and every callable's returns.
     pub(super) fn load_helpers(&mut self, conn: &Connection, typescript: &HashMap<String, String>) -> rusqlite::Result<()> {
-        if !has_columns(conn, "files", &["id", "abs"]) {
+        if !has_columns(conn, "files", &["id", "path", "abs"]) {
             return Ok(());
         }
-        let mut abs: HashMap<String, String> = HashMap::new();
-        let mut stmt = conn.prepare("SELECT id, abs FROM files")?;
-        for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?)))? {
-            let (id, path) = row?;
+        let mut spellings: HashMap<String, Vec<String>> = HashMap::new();
+        let mut stmt = conn.prepare("SELECT id, path, abs FROM files")?;
+        for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?)))? {
+            let (id, path, abs) = row?;
             if typescript.contains_key(&id) {
-                abs.insert(id, path.replace('\\', "/"));
+                spellings.insert(id, vec![path.replace('\\', "/"), abs.replace('\\', "/")]);
             }
         }
         for table in ["functions", "members"] {
@@ -40,8 +41,10 @@ impl World {
             let mut stmt = conn.prepare(&format!("SELECT id, file, name FROM \"{table}\""))?;
             for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?)))? {
                 let (id, file, name) = row?;
-                if let Some(path) = abs.get(&file) {
-                    self.callees.entry((path.clone(), name)).or_default().push(id.clone());
+                if let Some(paths) = spellings.get(&file) {
+                    for path in paths {
+                        self.callees.entry((path.clone(), name.clone())).or_default().push(id.clone());
+                    }
                     self.callable_file.insert(id, file);
                 }
             }
