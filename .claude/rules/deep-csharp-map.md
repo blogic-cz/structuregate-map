@@ -90,7 +90,8 @@ never guessed further. Never drop by age: the build rewrites only what ran.
 A RESTORED, NEVER-BUILT TREE is the common case, and three rules keep it bound (`csproj/project.rs`, `CsProject.Winners`, `fingerprint` in `mapper/deep/driven.rs`):
 an assembly name shipped by both a package and the framework goes to the HIGHER assembly version, the framework
 on a tie (a `System.Runtime/4.3.0` facade once shadowed the framework's own - thousands of errors, many calls
-unbound); the global usings a build would write (`ImplicitUsings`, `<Using>` items, `Directory.Build.props`)
+unbound); the global usings a build would write (`ImplicitUsings`, `<Using>` items, `Directory.Build.props`, and a package's
+build targets' `<Using>` items - MSTest 4 and Sentry add theirs there, under the project's `ImplicitUsings`)
 are synthesized when no `GlobalUsings.g.cs` exists; and each file's sha is salted with its project's
 `.csproj` / `project.assets.json` / props, so a restore re-reads the rows it invalidates. Three more: a project's `<Compile Remove>`
 stays removed when its compilation came from the REFERENCE cache (it read as compiled, model-less, every call
