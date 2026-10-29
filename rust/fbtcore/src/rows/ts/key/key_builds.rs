@@ -26,12 +26,17 @@ struct Typed {
 
 pub fn rows(store: &Store<'_>) -> Vec<Row> {
     let keys: KeySet = store.table("translations").iter().filter_map(|t| text(t, "key")).collect();
-    let abs: HashMap<String, String> = store.table("files").iter().filter_map(|f| Some((id_of(f, "id")?, text(f, "abs")?))).collect();
+    // A HOLE'S REF NAMES ITS FILE RELATIVE TO THE ROOT (rows 132), as `files.path` does; `abs` too, for a map written before.
+    let mut spellings: HashMap<String, Vec<String>> = HashMap::new();
+    for f in store.table("files").iter() {
+        let Some(id) = id_of(f, "id") else { continue };
+        spellings.insert(id, ["path", "abs"].iter().filter_map(|c| text(f, c)).collect());
+    }
     let mut enum_at: HashMap<(String, i64), String> = HashMap::new();
     for e in store.table("enums").iter() {
         let (Some(id), Some(file), Some(line)) = (id_of(e, "id"), id_of(e, "file"), e.get("line").and_then(Value::as_i64)) else { continue };
-        if let Some(path) = abs.get(&file) {
-            enum_at.insert((path.clone(), line), id);
+        for path in spellings.get(&file).into_iter().flatten() {
+            enum_at.insert((path.clone(), line), id.clone());
         }
     }
     let mut out = Vec::new();

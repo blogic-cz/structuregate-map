@@ -38,7 +38,7 @@ $script:TsFieldFiles = @{
 # `value=name@line:file:id`: the target a literal carries, the file as `rule.ts`, and the row `target_id` reaches.
 function Get-TsFieldTargetSql([string]$Table, [string]$Column) {
     $f = { param($role) Get-TsRootFieldSql "${Table}__target" 's.id' $role }
-    $file = "(CASE WHEN $(& $f 'file') LIKE '%/apps/shop/src/rule.ts' THEN 'rule.ts' ELSE coalesce($(& $f 'file'), '-') END)"
+    $file = "(CASE WHEN $(& $f 'file') LIKE '%apps/shop/src/rule.ts' THEN 'rule.ts' ELSE coalesce($(& $f 'file'), '-') END)"
     return "SELECT s.$Column || '=' || coalesce($(& $f 'name'), '-') || '@' || coalesce($(& $f 'line'), '-') || ':' || $file || ':' || " +
         "coalesce((SELECT 'tm ' || t.name || '@' || t.line FROM type_members t WHERE t.id = s.target_id), '-') AS v FROM $Table s " +
         "JOIN files f ON f.id = s.file AND f.path LIKE '%use.ts'"
@@ -107,7 +107,7 @@ $script:TsFieldReach = @{
 Test-Case 'tsrows: a library member has a target and no target_id, an in-tree one binds its own row (#104)' {
     $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsFieldReach) -Shared
     Assert-Exit $made.Result 0
-    $lit = { param($value) "SELECT 'v=' || coalesce((SELECT CASE WHEN value LIKE '%/node_modules/demo-lib/index.d.ts' THEN 'lib' ELSE 'other' END FROM string_literals__target WHERE owner = s.id AND role = 'file'), '-') || ' id=' || coalesce(s.target_id, '-') AS r FROM string_literals s WHERE s.value = '$value'" }
+    $lit = { param($value) "SELECT 'v=' || coalesce((SELECT CASE WHEN value LIKE '%node_modules/demo-lib/index.d.ts' THEN 'lib' ELSE 'other' END FROM string_literals__target WHERE owner = s.id AND role = 'file'), '-') || ' id=' || coalesce(s.target_id, '-') AS r FROM string_literals s WHERE s.value = '$value'" }
     Assert-Line (Invoke-TsRowsQ $made.Db (& $lit 'hue.reach')) 'v=lib id=-'
     $own = Invoke-TsRowsQ $made.Db "SELECT 'own=' || t.name || '@' || (SELECT f.path FROM files f WHERE f.id = t.file) AS r FROM string_literals s JOIN type_members t ON t.id = s.target_id WHERE s.value = 'hue.own'"
     Assert-Line $own 'own=Name@apps/shop/src/e-lib.ts'

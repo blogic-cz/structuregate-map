@@ -54,3 +54,25 @@ function canonicalOf(p) {
 export function relativeTo(root, p) {
   return slash(path.relative(root, p)) || '.';
 }
+
+const absolute = (p) => p.startsWith('/') || (p.length > 2 && p[1] === ':' && p[2] === '/');
+
+/**
+ * A ROW'S PATHS AS THE MAP SPELLS THEM (rows 132, divergence #120): a `JSON.stringify` replacer that writes every path a
+ * row's STRUCTURE holds relative to the workspace root, as `files.path` is - the `file` of a ref, each of its `also`, and
+ * any string under the root (`$indexed` pairs a name with its file). Node keeps the compiler's absolute paths while it
+ * works, and a map that wrote them named the machine it was built on: two checkouts of one tree disagreed in every ref.
+ * A row's own columns are left alone - `files.abs` and `components.template_abs` say absolute by name - except
+ * `diagnostics.from`, the importing file, which is a path like the `file` beside it.
+ */
+export function relativeCells(root) {
+  const base = slash(root);
+  const under = `${base}/`;
+  const rel = (p) => (typeof p === 'string' && absolute(p) ? relativeTo(base, p) : p);
+  return (row, table) => function replacer(key, value) {
+    if (this === row) return table === 'diagnostics' && key === 'from' ? rel(value) : value;
+    if (key === 'file') return rel(value);
+    if (key === 'also' && Array.isArray(value)) return value.map(rel);
+    return typeof value === 'string' && value.startsWith(under) ? relativeTo(base, value) : value;
+  };
+}

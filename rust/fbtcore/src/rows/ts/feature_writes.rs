@@ -107,6 +107,15 @@ fn per_property<'a>(
 ///
 /// THE CHECK MUST SIT AT A NECESSARY POSITION IN THE VALUE. Walking the whole value for a
 /// check call counted `!(a || b) || (await isOn(X))` as proving X.
+/// A REF'S FILE AS THE SUFFIX MATCHES READ IT: slashed, and led by `/` when relative. A ref names its file relative to the
+/// workspace root (rows 132, as `files.path` does), and every match below asks `file.ends_with("/<path>")` - which an absolute
+/// path, as a map written before named it, answers as it is.
+pub fn ref_file(file: &str) -> String {
+    let file = file.replace('\\', "/");
+    let absolute = file.starts_with('/') || file.as_bytes().get(1) == Some(&b':');
+    if absolute { file } else { format!("/{file}") }
+}
+
 pub fn property_features(
     store: &Store<'_>,
     checks: &[Check],
@@ -147,7 +156,7 @@ pub fn property_features(
                         return;
                     }
                     let Some(t) = x.get("$target").and_then(|t| t.as_object()) else { return };
-                    let normalised = slash(t.get("file"));
+                    let normalised = ref_file(&slash(t.get("file")));
                     if paths.iter().any(|p| normalised.ends_with(p)) {
                         hit = true;
                     }

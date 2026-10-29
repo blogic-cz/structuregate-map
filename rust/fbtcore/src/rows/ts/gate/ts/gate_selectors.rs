@@ -106,7 +106,7 @@ impl<'s> Decls<'s> {
 
     /// The factory a `$call`'s target names: its one function row, through the const that holds it.
     fn factory(&self, target: &Value) -> Option<&'s Row> {
-        let (name, abs) = (text(target, "name")?, text(target, "file")?.replace('\\', "/"));
+        let (name, abs) = (text(target, "name")?, crate::rows::ts::feature_writes::ref_file(&text(target, "file")?));
         let files: Vec<&String> = self.paths.iter().filter(|(_, p)| abs.ends_with(p.as_str())).map(|(id, _)| id).collect();
         if let [file] = files.as_slice()
             && let Some([one]) = self.named.get(&((*file).clone(), name.to_string())).map(|v| v.as_slice())

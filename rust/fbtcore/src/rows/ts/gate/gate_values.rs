@@ -130,7 +130,7 @@ pub fn enum_of_type_ref(idx: &EnumIndex, name: &str, type_ref: Option<&Value>) -
         return None;
     }
     let file = match reference.get("file") {
-        Some(Value::String(f)) if !f.is_empty() => f.replace('\\', "/"),
+        Some(Value::String(f)) if !f.is_empty() => crate::rows::ts::feature_writes::ref_file(f),
         _ => return None,
     };
     for (path, id) in idx.by_decl.get(name)? {

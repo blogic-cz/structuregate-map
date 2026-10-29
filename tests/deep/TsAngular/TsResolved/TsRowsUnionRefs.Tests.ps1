@@ -33,7 +33,7 @@ function Get-TsUnionParamSql([string]$Role, [string]$Key) {
 
 # A ref's `file` is the absolute path of the declaration: `codes` when it is the fixture's `codes.ts`.
 function Get-TsUnionPlaceSql([string]$File) {
-    return "(CASE WHEN $File LIKE '%/apps/shop/src/codes.ts' THEN 'codes' ELSE $File END)"
+    return "(CASE WHEN $File LIKE '%apps/shop/src/codes.ts' THEN 'codes' ELSE $File END)"
 }
 
 # `name@place` of every item of a list of refs, in order: `$From` names the list node `zl`, `$Where` ties it to the row `m`.

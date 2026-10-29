@@ -24,7 +24,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { canonicalPath, relativeTo } from './TsPaths.mjs';
+import { canonicalPath, relativeCells, relativeTo } from './TsPaths.mjs';
 import { directories, findConfig, loadConfig, names, propertyPaths as readPropertyPaths } from './TsConfig.mjs';
 import { compare as compareRegistry, registryFromRows } from './TsRegistry.mjs';
 import { rollupGateChains } from './TsGateChain.mjs';
@@ -360,6 +360,7 @@ async function main() {
   // 126: #138 - a `Map#get` call keeps `$key_expr`/`$entry_exprs` (`TsExpr/TsValue.mjs::lookupKeys`), and a class created from an entry holds
   //     `lookup:<key>@<argument>` on its `renders.return_ways` (`TsDerive/TsDynRender.mjs`).
   // 127: #53 - a key's ways are `key_reach_ways` rows naming a `key_reach_chains` row, no longer `key_reach.paths` nodes (`rust .../key/key_ways.rs`).
+  // 132: every path a row's structure holds is relative to the workspace root, as `files.path` is (`TsPaths.mjs::relativeCells`, divergence #120).
   // 131: a `.d.ts` in the tree is walked (`TsSetup/TsProgram.mjs::projectSourceFiles`): a member a global augmentation declares is a `type_members` row, a call to it names its `target_id`.
   // 130: a `module_ref_from_dependency` row says `standalone` for a package's standalone component or directive (`external_declarables`, `TsDecls/TsLibPipes.mjs`), and names its `module`/`component` and `line`;
   //   and `*ngIf="c; else ref"` gates `ref`'s way on `!(c)`: a `gates` row `ngIfElseNot` on the `ngIf` node, in no node's `gate_chain` (`TsTpl/TsTplExtract.mjs`, `TsTpl/TsGateChain.mjs`).
@@ -397,7 +398,7 @@ async function main() {
   // 99: an immer handler's `writes` follow the helpers it hands its draft to, and the callbacks they call (`TsExpr/TsExprDescribe.mjs::draftWrites`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 131, build: args.build,
+    config: config.file, data: config.data, rows: 132, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.
@@ -1012,7 +1013,7 @@ async function main() {
             identity: store.identityKeys() },
     provenance,
   };
-  writePayload(args.rows, payload);
+  writePayload(args.rows, payload, relativeCells(canonicalPath(path.resolve(fe))));
   for (const table of Object.keys(sending).sort()) emit('MAP-ROWS', table, sending[table].length);
   emit('MAP-DONE', Object.keys(shas).length);
   return 0;

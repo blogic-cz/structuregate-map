@@ -197,7 +197,7 @@ impl TsRows {
     /// and a gate resolved through the first alone had a row in one map and none in the other.
     fn row_of(&self, target: &Map<String, Value>) -> Option<String> {
         let place = |t: &Map<String, Value>| match (t.get("file"), t.get("line")) {
-            (Some(Value::String(file)), Some(Value::Number(line))) => Some((file.replace('\\', "/"), line.to_string())),
+            (Some(Value::String(file)), Some(Value::Number(line))) => Some((crate::rows::ts::feature_writes::ref_file(file), line.to_string())),
             _ => None,
         };
         let mut places: Vec<(String, String)> = place(target).into_iter().collect();
@@ -219,7 +219,7 @@ impl TsRows {
     /// The ONE member called `name` in the file a `{name, file}` target names - the anchor a call's
     /// evaluated `$target` carries, which has no line. Two of that name in the file are nothing.
     pub fn member_named(&self, target: &Value) -> Option<String> {
-        let (name, abs) = (target.get("name")?.as_str()?, target.get("file")?.as_str()?.replace('\\', "/"));
+        let (name, abs) = (target.get("name")?.as_str()?, crate::rows::ts::feature_writes::ref_file(target.get("file")?.as_str()?));
         let (id, _) = self.by_tail.get(&tail(&abs))?.iter().find(|(_, p)| abs.ends_with(p.as_str()))?;
         match self.members_named.get(&format!("{id} {name}"))?.as_slice() {
             [one] => Some(one.clone()),
@@ -234,7 +234,7 @@ impl TsRows {
 
     /// The ONE function a `{name, file}` target names (a call's evaluated `$target`, which has no line).
     pub fn function_named(&self, target: &Value) -> Option<String> {
-        let (name, abs) = (target.get("name")?.as_str()?, target.get("file")?.as_str()?.replace('\\', "/"));
+        let (name, abs) = (target.get("name")?.as_str()?, crate::rows::ts::feature_writes::ref_file(target.get("file")?.as_str()?));
         let (id, _) = self.by_tail.get(&tail(&abs))?.iter().find(|(_, p)| abs.ends_with(p.as_str()))?;
         match self.functions_named.get(&format!("{id} {name}"))?.as_slice() {
             [one] => Some(one.clone()),

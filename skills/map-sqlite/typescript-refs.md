@@ -27,8 +27,9 @@ On `members`, `type_members`, params (`members__params`, `functions__params`), `
   `element`, `unwrapped` or type parameter `constraint` naming several is `{type_refs, type_refs_of}`.
 * A method row also has `return_ref` (the same shape, its return type; `return_refs` when it returns several, as `type_refs`); a static `ngTemplateContextGuard` has `guard_ref` (rows 74), the `type_ref` of its predicate's type (`ctx is Ctx<T>`). `type_ref` follows the TYPE the checker reaches, not the alias
   written: `type Desc = Readonly<{..}>` gives `Readonly`. `alias` (rows 71; one node `{name, file, line}`, as `type_ref`'s own) is the type alias WRITTEN, an import followed:
-  `Desc` here. Every `file` inside a `type_ref` is the ABSOLUTE path the compiler read, never a `files` id: join `type_aliases a`
-  `JOIN files f ON f.id = a.file` on `a.name = alias.name AND a.line = alias.line`, and match the path by its suffix `f.path`. Absent when the written name is a class, interface or enum, and for a union's `type_refs`.
+  `Desc` here. Every `file` inside a `type_ref` - and in every other structure (rows 132) - is the path relative to the workspace root, as
+  `files.path` is, never a `files` id: join `type_aliases a JOIN files f ON f.id = a.file` on `a.name = alias.name AND a.line = alias.line AND f.path = alias.file`.
+  A file outside the root is `../`-relative; one in `node_modules` keeps that folder. Absent when the written name is a class, interface or enum, and for a union's `type_refs`.
 
 ```sql
 -- members whose type is an array of a declared type, and that element's name
@@ -45,7 +46,7 @@ JOIN members__type_ref n ON n.owner = e.owner AND n.parent = e.n AND n.role = 'n
   no raw text of its call: read the file at `line`/`col`.
 * `calls.arg_refs` (rows 79, only when non-empty; `calls__arg_refs`) names the VARIABLE behind an argument, since `args` holds only its evaluated value: one `{position, name, $ref, file, line, col, kind}` per
   argument that is a bare name (through parentheses, `as`, `!`) of a `const`/`let`/`var` - local, module-level or imported, an import alias followed - or of a top-level destructured binding (`kind` `const`, `let`, `var`
-  or `binding`). `position` is the index in `args` (a spread counts as one), `name` the name written, `$ref` the name declared, `file` the declaring file (`files.abs`), `line`/`col` the declaration's NAME. An enum, class or function argument
+  or `binding`). `position` is the index in `args` (a spread counts as one), `name` the name written, `$ref` the name declared, `file` the declaring file (`files.path`), `line`/`col` the declaration's NAME. An enum, class or function argument
   has no item - its `$ref` is in `args`. `JOIN consts k ON k.file = <file id> AND k.line = <line>` for a module-level one, `locals` for a body's. A spread argument names nothing.
 * A conditional in CODE (`?:`, `&&`, `||`, `??`) has an `expressions` row (`ternary`: its condition, `logic`: the left operand of `&&`/`||`/`??`), whether or not a row sits
   under one of its arms (rows 71); `choices` on an arm's row names it.
@@ -72,9 +73,9 @@ an argument, a return, a decorator's object, a nested one), in a `.ts` file only
 checker infers, as `members.type`), `type_ref` (a nested literal is a shape ref), `return_ref` of a method or function-valued property, `key_type` of an `index`, `line`, `col`.
 
 ```sql
--- the members of the literal a shape ref names (:file, :line and :col are the ref's own nodes; `files.abs` is the absolute path)
+-- the members of the literal a shape ref names (:file, :line and :col are the ref's own nodes; a ref's `file` is `files.path`)
 SELECT sm.name, sm.kind, sm.type FROM shapes s JOIN files f ON f.id = s.file
-JOIN shape_members sm ON sm.shape = s.id WHERE f.abs = :file AND s.line = :line AND s.col = :col;
+JOIN shape_members sm ON sm.shape = s.id WHERE f.path = :file AND s.line = :line AND s.col = :col;
 ```
 
 A template read chained through one resolves each hop's `target` to its `shape_members` row (`row` is its `sm:` id, `line` its line):
@@ -120,7 +121,7 @@ as the link `_.cloneDeep` always had. A `local` is `{file, line, col}` of a `loc
 name when it is destructured (`({ a, b: c }) =>`, `([x]) =>`) - for every function-like with a body: a declaration, method, accessor, constructor, arrow, function expression and a nested function. Join it to
 the parameter by place: each item of `members__params` and `functions__params` carries `line` and `col` of its name (of its pattern when destructured), and a destructured one `bindings`, one
 `{name, line, col}` per name it binds (nested patterns included; rows 77: also `default`, the evaluated `= 1`, `type`, the checker's text for the name, and `index`, its position in an ARRAY pattern with holes counted - the same three on a `locals` row's `bindings` and on the per-name `consts` rows of a destructuring `const`; rows 78: a `locals` row's `bindings` is likewise one item per BOUND NAME at any depth, with `property` the path to it (`Input.Params.Tariff`) and `line`/`col`, never one item for an outer element; rows 80: an element at the TOP of an array pattern has `property` null and its `index`, as an array adds nothing to the path) - `JOIN` the item (or binding) whose `line`/`col` equal the read's `param` over the same file, through the owner row (`members.file` or
-`functions.file`; `param.file` is the absolute path, `files.abs`). A shorthand property (`{ client }`) is a read of the variable it names and is bound as that name is (its property key is not a link).
+`functions.file`; `param.file` is `files.path`). A shorthand property (`{ client }`) is a read of the variable it names and is bound as that name is (its property key is not a link).
 An ALIAS OF AN INTERSECTION among the parts of a written intersection is one named part (rows 74): `Item & ViewDto` with `type ViewDto = Dto & { .. }` has `type_refs` `Item`, `ViewDto` - the checker
 flattens it - and the alias row has `type_ref`/`type_refs` of its own parts (`type_aliases__type_ref`, `type_aliases__type_refs`), which a template read walks in its place.
 
