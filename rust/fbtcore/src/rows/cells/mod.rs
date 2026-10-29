@@ -457,6 +457,10 @@ impl Source {
                     if std::env::var("SG_MMAP").is_ok() {
                         c.execute_batch("PRAGMA mmap_size = 68719476736")?;
                     }
+                    // ONE READ TRANSACTION FOR THE SOURCE'S LIFE: a lookup in autocommit took and dropped the file lock
+                    // and checked the file again every time - a tenth of a large closure's time. Nothing writes the
+                    // database while a store holds its sources (`tsderive::closure` drops the store before its write).
+                    c.execute_batch("BEGIN")?;
                     c
                 },
                 sql: format!("SELECT {READ} FROM \"{}\" WHERE owner = ?1 ORDER BY n", schema::escape(child_table)),
