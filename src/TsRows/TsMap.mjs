@@ -360,6 +360,7 @@ async function main() {
   // 126: #138 - a `Map#get` call keeps `$key_expr`/`$entry_exprs` (`TsExpr/TsValue.mjs::lookupKeys`), and a class created from an entry holds
   //     `lookup:<key>@<argument>` on its `renders.return_ways` (`TsDerive/TsDynRender.mjs`).
   // 127: #53 - a key's ways are `key_reach_ways` rows naming a `key_reach_chains` row, no longer `key_reach.paths` nodes (`rust .../key/key_ways.rs`).
+  // 131: a `.d.ts` in the tree is walked (`TsSetup/TsProgram.mjs::projectSourceFiles`): a member a global augmentation declares is a `type_members` row, a call to it names its `target_id`.
   // 130: a `module_ref_from_dependency` row says `standalone` for a package's standalone component or directive (`external_declarables`, `TsDecls/TsLibPipes.mjs`), and names its `module`/`component` and `line`;
   //   and `*ngIf="c; else ref"` gates `ref`'s way on `!(c)`: a `gates` row `ngIfElseNot` on the `ngIf` node, in no node's `gate_chain` (`TsTpl/TsTplExtract.mjs`, `TsTpl/TsGateChain.mjs`).
   // 129: a `module_ref_from_dependency` row for every NgModule and standalone component, not only those a render's scope asked of (`TsDerive/TsModuleScope.mjs::walkAll`).
@@ -396,7 +397,7 @@ async function main() {
   // 99: an immer handler's `writes` follow the helpers it hands its draft to, and the callbacks they call (`TsExpr/TsExprDescribe.mjs::draftWrites`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 130, build: args.build,
+    config: config.file, data: config.data, rows: 131, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

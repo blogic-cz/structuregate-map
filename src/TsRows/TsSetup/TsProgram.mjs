@@ -256,11 +256,14 @@ export function programFilePaths(program, feRoot) {
   return out;
 }
 
-/** Project source files only: no `.d.ts`, nothing outside the FE tree (lib/@types noise). */
+/**
+ * Project source files only: nothing outside the FE tree (lib/@types noise). The tree's OWN `.d.ts` is walked: a global
+ * augmentation it declares (`interface Array<T> { first(): T }`) is what every `.first()` call runs, and unwalked it had
+ * no row for a call's `target_id` to name.
+ */
 export function projectSourceFiles(program, feRoot) {
   const root = slash(path.resolve(feRoot)).toLowerCase();
   return program.getSourceFiles().filter((sf) => {
-    if (sf.isDeclarationFile) return false;
     const f = slash(path.resolve(sf.fileName)).toLowerCase();
     return f.startsWith(root) && !f.includes('/node_modules/');
   });
