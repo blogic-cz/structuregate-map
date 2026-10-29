@@ -50,8 +50,10 @@ pub fn read(csproj: &str, consumer: Option<&str>) -> Option<Value> {
         }
         return Some(built);
     }
+    let implicit = implicit_usings(&document, &folder).unwrap_or_default();
     let mut packaged = output(&folder, &framework);
-    packaged.extend(restored(&folder, &framework));
+    let (references, package_usings) = restored(&folder, &framework, &implicit);
+    packaged.extend(references);
     packaged.extend(framework::hinted(&folder, &document));
     // A `net4x` PROJECT COMPILES AGAINST THE .NET FRAMEWORK, not the .NET pack.
     let platform = match framework::version(&framework) {
@@ -64,7 +66,7 @@ pub fn read(csproj: &str, consumer: Option<&str>) -> Option<Value> {
     let usings = if generated.iter().any(|g| g.to_ascii_lowercase().ends_with("globalusings.g.cs")) {
         String::new()
     } else {
-        global_usings(&document, &sdk, &folder)
+        global_usings(&document, &sdk, &folder, &implicit, package_usings)
     };
     let attributes = if generated.iter().any(|g| g.to_ascii_lowercase().ends_with(".assemblyinfo.cs")) {
         String::new()
@@ -126,10 +128,12 @@ fn newest_below(root: &str, framework: &str, extension: &str) -> Vec<String> {
 
 /// What `restore` resolved, read out of its own record - a project that has never been built still has its
 /// packages in the NuGet folder.
-fn restored(folder: &str, framework: &str) -> Vec<String> {
-    let Some(root) = super::assets::of(folder) else { return Vec::new() };
+/// Every assembly the restore resolved, and the `<Using>` items the packages' build files add.
+fn restored(folder: &str, framework: &str, implicit: &str) -> (Vec<String>, Vec<super::targets::Using>) {
+    let Some(root) = super::assets::of(folder) else { return Default::default() };
     let folders: Vec<&String> = root.package_folders.keys().collect();
     let mut found = Vec::new();
+    let mut usings = Vec::new();
     for target in root.targets.values() {
         for (name, library) in target {
             let Some(described) = root.libraries.get(name) else { continue };
@@ -144,7 +148,9 @@ fn restored(folder: &str, framework: &str) -> Vec<String> {
                     }
                     let item = item.replace('/', "\\");
                     if let Some(candidate) = folders.iter().map(|p| combine(&[p, relative, &item])).find(|c| disk::is_file(c)) {
-                        found.extend(super::targets::references(&candidate));
+                        let added = super::targets::read(&candidate, &[("ImplicitUsings", implicit), ("Language", "C#")]);
+                        found.extend(added.references);
+                        usings.extend(added.usings);
                     }
                 }
             }
@@ -164,7 +170,7 @@ fn restored(folder: &str, framework: &str) -> Vec<String> {
             }
         }
     }
-    found
+    (found, usings)
 }
 
 /// The `.csproj` files this project references, as written in its own item list.
@@ -266,14 +272,19 @@ fn newest_pack(pack: &str, framework: Option<&str>) -> Option<String> {
     None
 }
 
+/// `ImplicitUsings` as the project or its `Directory.Build.props` sets it.
+fn implicit_usings(document: &roxmltree::Document, folder: &str) -> Option<String> {
+    disk::property(document, "ImplicitUsings")
+        .or_else(|| props(folder).as_deref().and_then(disk::parse).and_then(|p| disk::property(&p, "ImplicitUsings")))
+}
+
 /// `GlobalUsings.g.cs` as the SDK generates it: the flavour's implicit namespaces when `ImplicitUsings` is on,
-/// then every `<Using Include>` with its `Alias`/`Static`, minus every `<Using Remove>`.
-fn global_usings(document: &roxmltree::Document, sdk: &str, folder: &str) -> String {
+/// then every `<Using Include>` with its `Alias`/`Static`, minus every `<Using Remove>`, then the packages' own -
+/// imported after the project, so no `Remove` of the project reaches them.
+fn global_usings(document: &roxmltree::Document, sdk: &str, folder: &str, implicit: &str, packages: Vec<super::targets::Using>) -> String {
     let props_text = props(folder);
     let props = props_text.as_deref().and_then(disk::parse);
-    let implicitly = disk::property(document, "ImplicitUsings")
-        .or_else(|| props.as_ref().and_then(|p| disk::property(p, "ImplicitUsings")))
-        .is_some_and(|v| matches!(v.to_lowercase().as_str(), "enable" | "true"));
+    let implicitly = matches!(implicit.to_lowercase().as_str(), "enable" | "true");
     let mut usings: Vec<String> = Vec::new();
     if implicitly {
         usings.extend(BASE_USINGS.map(String::from));
@@ -286,29 +297,38 @@ fn global_usings(document: &roxmltree::Document, sdk: &str, folder: &str) -> Str
     }
     let mut lines: Vec<String> = Vec::new();
     let mut removed: Vec<String> = Vec::new();
+    let mut kept: Vec<String> = Vec::new();
+    let mut add = |item: super::targets::Using, usings: &mut Vec<String>, removed: &mut Vec<String>| {
+        if !item.remove.is_empty() {
+            removed.push(item.remove);
+        }
+        if item.include.is_empty() {
+            return;
+        }
+        let (include, alias) = (item.include, item.alias);
+        if !alias.is_empty() {
+            lines.push(format!("global using {alias} = global::{include};"));
+        } else if item.is_static {
+            lines.push(format!("global using static global::{include};"));
+        } else {
+            usings.push(include);
+        }
+    };
     for source in props.iter().chain(std::iter::once(document)) {
         for item in disk::elements(source, "Using") {
-            let include = item.attribute("Include").map(str::trim).unwrap_or("");
-            if let Some(remove) = item.attribute("Remove").map(str::trim).filter(|r| !r.is_empty()) {
-                removed.push(remove.to_string());
-            }
-            if include.is_empty() {
-                continue;
-            }
-            let alias = item.attribute("Alias").map(str::trim).unwrap_or("");
-            let is_static = item.attribute("Static").is_some_and(|s| s.trim().eq_ignore_ascii_case("true"));
-            if !alias.is_empty() {
-                lines.push(format!("global using {alias} = global::{include};"));
-            } else if is_static {
-                lines.push(format!("global using static global::{include};"));
-            } else {
-                usings.push(include.to_string());
-            }
+            add(super::targets::using_of(item), &mut usings, &mut removed);
         }
     }
-    let mut kept: Vec<String> = Vec::new();
-    for using in usings {
+    for using in usings.drain(..) {
         if !removed.contains(&using) && !kept.contains(&using) {
+            kept.push(using);
+        }
+    }
+    for item in packages {
+        add(item, &mut usings, &mut Vec::new());
+    }
+    for using in usings {
+        if !kept.contains(&using) {
             kept.push(using);
         }
     }

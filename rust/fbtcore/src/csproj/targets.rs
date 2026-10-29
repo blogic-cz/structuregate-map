@@ -3,6 +3,10 @@
 //! `compile` asset: MSTest.TestFramework 3.7 does that for the assembly where `TestContext` lives, and on a
 //! restored, never-built tree `TestContext.CancellationTokenSource` read as a member that does not exist.
 //!
+//! AND ITS `<Using>` ITEMS: MSTest.TestFramework 4 and Sentry add their namespace as an implicit global using
+//! (under `ImplicitUsings`, which the PROJECT sets - so its value is handed in), and on a never-built tree every
+//! `[TestClass]` and `SentrySdk` of a file that never writes the `using` was CS0246 and every call unbound.
+//!
 //! A SUBSET, NOT AN EVALUATOR. Properties come from the file's own `PropertyGroup`s and
 //! `$(MSBuildThisFileDirectory)`; a condition is honoured when it is a plain `'a' == 'b'` / `'a' != 'b'` /
 //! `Exists('path')` joined by `and` / `or`. Anything else makes the condition FALSE and the item is skipped:
@@ -12,14 +16,39 @@ use super::disk::{self, combine};
 use std::collections::HashMap;
 use std::path::Path;
 
-pub fn references(file: &str) -> Vec<String> {
-    let Some(text) = disk::text(file) else { return Vec::new() };
-    let Some(document) = disk::parse(&text) else { return Vec::new() };
+/// A `<Using>` item as written: `Include` with its `Alias`/`Static`, or a `Remove`.
+pub struct Using {
+    pub include: String,
+    pub alias: String,
+    pub is_static: bool,
+    pub remove: String,
+}
+
+pub fn using_of(item: roxmltree::Node) -> Using {
+    let attribute = |name| item.attribute(name).map(str::trim).unwrap_or("").to_string();
+    Using { include: attribute("Include"), alias: attribute("Alias"), is_static: attribute("Static").eq_ignore_ascii_case("true"), remove: attribute("Remove") }
+}
+
+/// What a package's build file adds to the compilation: assemblies, and global usings.
+#[derive(Default)]
+pub struct Added {
+    pub references: Vec<String>,
+    pub usings: Vec<Using>,
+}
+
+/// `project`: the properties the project itself sets that a package's conditions read (`ImplicitUsings`).
+pub fn read(file: &str, project: &[(&str, &str)]) -> Added {
+    let mut added = Added::default();
+    let Some(text) = disk::text(file) else { return added };
+    let Some(document) = disk::parse(&text) else { return added };
     let folder = disk::parent(file).unwrap_or_default();
     let mut properties = Properties::default();
+    for (name, value) in project {
+        properties.set(name, value.to_string());
+    }
     properties.set("MSBuildThisFileDirectory", format!("{folder}{}", std::path::MAIN_SEPARATOR));
     properties.set("MSBuildThisFile", disk::file_name(file));
-    let mut found = Vec::new();
+    let found = &mut added.references;
     for element in document.root_element().children().filter(|n| n.is_element()) {
         if !holds(element, &properties) {
             continue;
@@ -34,6 +63,11 @@ pub fn references(file: &str) -> Vec<String> {
                 }
             }
             "ItemGroup" => {
+                for item in element.children().filter(|n| n.is_element() && n.tag_name().name() == "Using") {
+                    if holds(item, &properties) {
+                        added.usings.push(using_of(item));
+                    }
+                }
                 for item in element.children().filter(|n| n.is_element() && n.tag_name().name() == "Reference") {
                     if !holds(item, &properties) {
                         continue;
@@ -54,7 +88,7 @@ pub fn references(file: &str) -> Vec<String> {
             _ => {}
         }
     }
-    found
+    added
 }
 
 /// The file's properties, their names case-insensitive as MSBuild's are.
@@ -109,16 +143,20 @@ fn evaluate(condition: &str, properties: &Properties) -> bool {
     false
 }
 
-/// `text` cut at every `separator` outside quotes, case-insensitively.
+/// `text` cut at every `separator` outside quotes and brackets, case-insensitively: Sentry writes
+/// `A and B and (C or D)`, which cut at the ` or ` inside the brackets was two conditions neither of them true.
 fn split<'a>(text: &'a str, separator: &str) -> Vec<&'a str> {
     let mut parts = Vec::new();
-    let (mut start, mut quoted, mut i) = (0, false, 0);
+    let (mut start, mut quoted, mut brackets, mut i) = (0, false, 0usize, 0);
     let bytes = text.as_bytes();
     while i < bytes.len() {
-        if bytes[i] == b'\'' {
-            quoted = !quoted;
+        match bytes[i] {
+            b'\'' => quoted = !quoted,
+            b'(' if !quoted => brackets += 1,
+            b')' if !quoted => brackets = brackets.saturating_sub(1),
+            _ => {}
         }
-        if !quoted && text.get(i..i + separator.len()).is_some_and(|s| s.eq_ignore_ascii_case(separator)) {
+        if !quoted && brackets == 0 && text.get(i..i + separator.len()).is_some_and(|s| s.eq_ignore_ascii_case(separator)) {
             parts.push(&text[start..i]);
             start = i + separator.len();
             i = start;
@@ -168,6 +206,9 @@ mod tests {
         assert!(evaluate("'$(Tfm)' == 'NET8.0'", &properties));
         assert!(evaluate("'$(Tfm)' != 'net9.0' and '$(Tfm)' == 'net8.0'", &properties));
         assert!(!evaluate("'$([MSBuild]::Foo())' == 'x'", &properties));
+        properties.set("Language", "C#".into());
+        assert!(evaluate("$(Language) == 'C#' and $(Off) != 'false' and ($(Tfm) == 'x' or $(Tfm) == 'net8.0')", &properties));
+        assert!(!evaluate("$(Language) == 'C#' and ($(Tfm) == 'x' or $(Tfm) == 'y')", &properties));
         assert_eq!(expand("a$(Tfm)b$(Missing)c", &properties), "anet8.0bc");
     }
 }

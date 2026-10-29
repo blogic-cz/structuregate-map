@@ -18,6 +18,20 @@ namespace StructureGate;
 /// </summary>
 internal sealed partial class CsRows
 {
+    /// <summary>
+    /// `[assembly: InternalsVisibleTo("Demo.Tests")]` and `[module: ..]` decorate no declaration: they sit on the file,
+    /// and the walk over declarations never reached them. `target` and `target_kind` are the specifier itself.
+    /// </summary>
+    public override void VisitCompilationUnit(CompilationUnitSyntax node)
+    {
+        foreach (var list in node.AttributeLists)
+        {
+            var on = list.Target?.Identifier.ValueText ?? "assembly";
+            Attributes(new SyntaxList<AttributeListSyntax>(list), on, on);
+        }
+        base.VisitCompilationUnit(node);
+    }
+
     /// <summary>A member's row - one per declarator for a field, so `int a, b;` is two.</summary>
     private void Members(MemberDeclarationSyntax node)
     {

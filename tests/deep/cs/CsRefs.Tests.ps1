@@ -307,6 +307,44 @@ Test-Case 'csrefs: an assembly a package adds from its own build targets is comp
     Assert-Line $bound 'symbol=System.Threading.CancellationTokenSource.Cancel'
 }
 
+Test-Case 'csrefs: a global using a package''s build targets add under the project''s ImplicitUsings is compiled' {
+    # MSTest.TestFramework 4 and Sentry add their namespace as `<Using Include>` from buildTransitive/*.targets, under
+    # `'$(ImplicitUsings)' == 'enable'` - a property only the PROJECT sets. On a restored, never-built tree every
+    # `[TestClass]` of a file that never writes the `using` was CS0246 and every call in it unbound.
+    $tree = Use-Tree @{
+        'Demo.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings></PropertyGroup></Project>'
+        'Probe.cs'    = "namespace Demo;" + $nl + "public static class Probe" + $nl + "{" + $nl +
+                        "    public static string Make() => new StringBuilder().Append('x').ToString();" + $nl +
+                        "    public static void Keep() => new ConcurrentBag<int>().Add(1);" + $nl + "}" + $nl
+    }
+    $package = Join-Path $tree 'pkgs\fake.usings\1.0.0\buildTransitive'
+    [void](New-Item -ItemType Directory -Path $package -Force)
+    [System.IO.File]::WriteAllText((Join-Path $package 'Fake.targets'), @'
+<Project>
+  <ItemGroup Condition="'$(ImplicitUsings)' == 'true' Or '$(ImplicitUsings)' == 'enable'">
+    <Using Include="System.Text" />
+  </ItemGroup>
+  <ItemGroup Condition="$(Language) == 'C#' and $(FakeOff) != 'false' and ($(ImplicitUsings) == 'enable' or $(ImplicitUsings) == 'true')">
+    <Using Include="System.Collections.Concurrent" />
+  </ItemGroup>
+</Project>
+'@)
+    $packages = (Join-Path $tree 'pkgs') -replace '\\', '\\'
+    $assets = '{"version":3,"targets":{"net10.0":{"Fake.Usings/1.0.0":{"type":"package",' +
+              '"build":{"buildTransitive/Fake.targets":{}}}}},' +
+              '"libraries":{"Fake.Usings/1.0.0":{"type":"package","path":"fake.usings/1.0.0"}},' +
+              '"packageFolders":{"' + $packages + '\\":{}}}'
+    [void](New-Item -ItemType Directory -Path (Join-Path $tree 'obj') -Force)
+    [System.IO.File]::WriteAllText((Join-Path $tree 'obj\project.assets.json'), $assets)
+    $built = New-CsRefsDb $tree
+    Assert-Equal (Get-CsRefsErrors $built.Db) 'errors=0' 'System.Text is a global using'
+    $bound = Invoke-Gate --map-query $built.Db --sql "SELECT 'symbol=' || symbol AS x FROM calls WHERE callee = 'Append'" --width 200
+    Assert-Line $bound 'symbol=System.Text.StringBuilder.Append'
+    # Sentry's shape: the SDK's `$(Language)`, unquoted, and an `or` inside brackets under an `and`.
+    $kept = Invoke-Gate --map-query $built.Db --sql "SELECT 'symbol=' || symbol AS x FROM calls WHERE callee = 'Add'" --width 200
+    Assert-Line $kept 'symbol=System.Collections.Concurrent.ConcurrentBag<System.Int32>.Add'
+}
+
 Test-Case 'csrefs: a member read after ?. is a ref, named with its receiver as a . read is (#119)' {
     # `o?.IsPaid` is a binding under a conditional access, not a member access: the walk passed only the latter on, so
     # every read through `?.` - property, field, a chain of them - had no row and "who reads this member" missed it.

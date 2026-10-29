@@ -197,6 +197,28 @@ namespace Demo.Models
     Assert-Equal (Get-CsCasesValue $db ($row -f 'Changed')) 'event|["e"]|1' 'Changed'
 }
 
+Test-Case 'cscases: an assembly or module attribute is a decorators row; a default literal is no string' {
+    $source = @'
+using System;
+using System.Runtime.CompilerServices;
+[assembly: InternalsVisibleTo("Demo.Tests")]
+[module: CLSCompliant(false)]
+namespace Demo.Models
+{
+    public class Order
+    {
+        public int Pick(int a = default) => a == default ? Take("x", default) : 0;
+        private static int Take(string s, string t) => 0;
+    }
+}
+'@
+    $db = New-CsCasesDb @{ 'Order.cs' = $source; 'Demo.csproj' = $script:CsCasesProject } -Shared
+    $row = "SELECT target || '|' || target_kind || '|' || $(Get-NodeRootListSql 'decorators__arg_values' 'decorators.id') FROM decorators WHERE name = '{0}'"
+    Assert-Equal (Get-CsCasesValue $db ($row -f 'InternalsVisibleTo')) 'assembly|assembly|["Demo.Tests"]' 'assembly'
+    Assert-Equal (Get-CsCasesValue $db ($row -f 'CLSCompliant')) 'module|module|["false"]' 'module'
+    Assert-Equal (Get-CsCasesValue $db "SELECT group_concat(value, ',') FROM (SELECT value FROM string_literals ORDER BY value)") 'Demo.Tests,x' 'strings'
+}
+
 # EVERY STRUCTURED CELL THE C# HALF WRITES, in one file: an enum with an attributed member, attributes with
 # positional, named and array arguments, a dictionary's index initializer, collection expressions, tuples,
 # case sections with several labels, a switch expression, an interpolated SQL template, catch clauses.

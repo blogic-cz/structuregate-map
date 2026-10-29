@@ -25,7 +25,8 @@ internal sealed partial class CsRows
         var context = LiteralContext(literal);
         switch (literal.Token.Value)
         {
-            case string spelled when spelled.Trim().Length > 0:
+            // `default` IS NO STRING: its keyword token's value is the text "default".
+            case string spelled when spelled.Trim().Length > 0 && !literal.IsKind(SyntaxKind.DefaultLiteralExpression):
                 Row("string_literals", "s", ("line", Line(literal)), ("value", spelled), ("length", spelled.Length),
                     ("use", context.Context), ("callee", context.Callee), ("target", context.Target));
                 break;
