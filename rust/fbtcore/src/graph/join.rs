@@ -138,10 +138,11 @@ impl Tables<'_> {
                 let hit = match hits.len() {
                     1 => Some(hits[0].clone()),
                     0 => None,
-                    _ => self.taken(file, &hits, &module(suffix)),
+                    _ => self.beside(file, &hits, suffix).or_else(|| self.taken(file, &hits, &module(suffix))),
                 };
                 match hit {
                     Some(hit) if hit != file.rel => {
+                        edges.extend(self.packages(file, &hit, suffix));
                         edges.insert(hit);
                     }
                     Some(_) => {}
@@ -201,6 +202,34 @@ impl Tables<'_> {
     /// Of several files spelling a module, the ONE that binds every name the import takes from it:
     /// `from util import a, write` with three `util.py` reads the one where both exist, since the
     /// others would raise ImportError on that line. A plain `import util` has nothing to tell them by.
+    /// A SCRIPT'S OWN FOLDER IS FIRST ON `sys.path`: of several files a suffix names, the one beside the importer is
+    /// what python runs - `from office.helpers import x` in `a/scripts/main.py` reads `a/scripts/office/helpers/`, as the
+    /// deep map's binder (`PyBind.py::Tree.module`) already said while this graph called the name ambiguous.
+    fn beside(&self, file: &File, hits: &[String], suffix: &str) -> Option<String> {
+        if file.language != "python" {
+            return None;
+        }
+        let home = folder(&file.rel);
+        let near = if home.is_empty() { suffix.to_string() } else { format!("{home}/{suffix}") };
+        hits.contains(&near).then_some(near)
+    }
+
+    /// THE PACKAGES ON THE WAY: `demo.sub.leaf` found as `src/demo/sub/leaf.py` runs `src/demo/__init__.py` and
+    /// `src/demo/sub/__init__.py` first, as a root-relative import does in the half (`PyMap.py::packages`) - but not
+    /// one holding the importer, which python ran before the importer.
+    fn packages(&self, file: &File, hit: &str, suffix: &str) -> Vec<String> {
+        if file.language != "python" {
+            return Vec::new();
+        }
+        let base = &hit[..hit.len() - suffix.len()];
+        let dotted = module(suffix);
+        let parts: Vec<&str> = dotted.split('.').collect();
+        (1..parts.len())
+            .map(|i| format!("{base}{}/__init__.py", parts[..i].join("/")))
+            .filter(|init| self.files.contains_key(init) && !file.rel.starts_with(&init[..init.len() - "__init__.py".len()]))
+            .collect()
+    }
+
     fn taken(&self, file: &File, targets: &[String], module: &str) -> Option<String> {
         let taken = file.names.get(module).filter(|t| !t.is_empty())?;
         let binding: Vec<&String> = targets

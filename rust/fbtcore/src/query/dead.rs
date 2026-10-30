@@ -14,11 +14,13 @@
 //!     CONSTANT is not spared by that: `getattr(config, item.attr)` reaches the names its callers
 //!     spell as literals, which the literal rule already keeps, and sparing all of config.py hid a dead
 //!     `MAX_RETRIES`. A computed `"on_" + event` names defs, which is why they keep the wildcard;
-//!   * a launcher calls it (`functions.launched`);
+//!   * a launcher calls it (`functions.launched`) - an entry point, or pytest's `test*` defs and fixtures;
 //!   * a DOTTED decorator hands it to an object (`@app.get`, `@router.post`, `@x.setter`);
 //!   * it is a dunder, which the language calls by protocol;
 //!   * it is a METHOD that overrides one an ancestor defines, or whose class has an ancestor this map does
 //!     not hold - a call to the base's method runs it, and a base outside the tree may call anything;
+//!   * it is a method of a MIXIN a class with such a base inherits: `class Walker(Mixin, ast.NodeVisitor)` runs
+//!     `Mixin.visit_Global` through the base's own `visit_<Node>` dispatch;
 //!   * an import that is USED binds it (`imports.bind`). An import nothing in its file reads is dead code
 //!     itself: several defs were kept alive by nothing else, so each candidate now names the unused imports
 //!     that go with it. A RE-EXPORT needs no rule of its own - an import of it elsewhere binds through to
@@ -96,8 +98,8 @@ pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, limit: usi
         .collect();
     uses.push(format!("SELECT file, {} FROM calls", HEAD.replace('V', "callee")));
     let used_imports = if imports_bound {
-        "SELECT i.* FROM imports i WHERE EXISTS (SELECT 1 FROM uses u WHERE u.file = i.file \
-         AND u.head = CASE WHEN i.alias <> '' THEN i.alias ELSE i.name END)"
+        // ONE SET, NOT A PROBE PER IMPORT: as a correlated EXISTS, SQLite 3.53 ran the whole `uses` union again for each import.
+        "SELECT i.* FROM imports i WHERE (i.file, CASE WHEN i.alias <> '' THEN i.alias ELSE i.name END) IN (SELECT file, head FROM uses)"
     } else {
         "SELECT * FROM imports WHERE 0"
     };
@@ -120,7 +122,9 @@ pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, limit: usi
     if !reads.is_empty() {
         let rows = reads.join(" UNION ALL ");
         let binds = binds.join(" UNION ALL ");
-        names.push(format!("SELECT {} FROM ({rows}) p WHERE p.bind = ''", TAIL.replace('V', "p.read")));
+        // `+p.bind`: pushed into each member as `b.value = ''`, the bare compare let the planner start from the value
+        // index - nearly every bind is '' - and find each row's owner by a CASE no index holds, one scan per node.
+        names.push(format!("SELECT {} FROM ({rows}) p WHERE +p.bind = ''", TAIL.replace('V', "p.read")));
         bound.push(format!(
             "SELECT substr(b.bind, 1, instr(b.bind, '::') - 1), substr(b.bind, instr(b.bind, '::') + 2) \
              FROM ({binds}) b WHERE b.bind <> ''"
@@ -202,7 +206,8 @@ pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, limit: usi
            AND NOT (fn.cls <> '' AND fn.func = '' AND ( \
              {owner} IN (SELECT cls FROM outside) \
              OR EXISTS (SELECT 1 FROM ancestors a WHERE a.child = {owner} \
-               AND (a.anc IN (SELECT cls FROM outside) OR a.anc || '.' || fn.name IN (SELECT key FROM defs))))) \
+               AND (a.anc IN (SELECT cls FROM outside) OR a.anc || '.' || fn.name IN (SELECT key FROM defs))) \
+             OR EXISTS (SELECT 1 FROM ancestors a WHERE a.anc = {owner} AND a.child IN (SELECT cls FROM outside)))) \
          {consts} \
          ORDER BY 1, 2",
         names = names.join(" UNION "),

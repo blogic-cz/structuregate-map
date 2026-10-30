@@ -1,7 +1,7 @@
 """PyLaunch.py - the python files a LAUNCHER enters, which no import in the tree ever names.
 
 An installer runs `cli:main` because `pyproject.toml` says so; PyInstaller freezes `app.py` because a `.spec`
-lists it; `setup(entry_points=...)` does the same as the first. None of the three is an import, so each
+lists it; `setup(entry_points=...)` does the same as the first; pytest enters `test_*.py` and calls its `test*` defs. None of the three is an import, so each
 target read as a file nothing reads and a def nothing calls - an entry point reported as dead code.
 
 EVERY ONE OF THEM IS PARSED, never scanned: `pyproject.toml` by `tomllib` (python 3.11+; an older host maps
@@ -142,4 +142,38 @@ def launched(tree: Tree, rels: list, notes: list) -> dict:
             parsed = parse(tree.abs_of(rel))
             if parsed:
                 entries(os.path.dirname(rel), setup_specs(parsed))
+        elif collected(rel):
+            parsed = parse(tree.abs_of(rel))
+            out.setdefault(rel, set()).update(tests(parsed) if parsed else set())
+            # A TEST IN A PACKAGE IS IMPORTED AS ITS MODULE: pytest runs `tests/__init__.py`, and each one above it, first.
+            folder = os.path.dirname(rel)
+            while folder and folder + "/__init__.py" in listed:
+                out.setdefault(folder + "/__init__.py", set())
+                folder = os.path.dirname(folder)
     return out
+
+
+def collected(rel: str) -> bool:
+    """A file PYTEST ENTERS by its defaults - `test_*.py`, `*_test.py` and every `conftest.py` - which no import names.
+    unittest's discovery names the same `test*.py` files."""
+    name = os.path.basename(rel)
+    return name == "conftest.py" or (name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py")))
+
+
+def tests(parsed: ast.Module) -> set:
+    """What pytest calls in a collected file: a module-level `test*` def, a `test*` method of a `Test*` class, and a
+    fixture anywhere - a def it runs because a test names it as a parameter, never because code calls it."""
+    found = set()
+
+    def fixture(node) -> bool:
+        return any(dotted(d.func if isinstance(d, ast.Call) else d) in ("pytest.fixture", "fixture") for d in node.decorator_list)
+
+    for node in parsed.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (node.name.startswith("test") or fixture(node)):
+            found.add(node.name)
+        elif isinstance(node, ast.ClassDef):
+            for member in node.body:
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+                        (node.name.startswith("Test") and member.name.startswith("test")) or fixture(member)):
+                    found.add(node.name + "." + member.name)
+    return found

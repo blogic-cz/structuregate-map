@@ -12,6 +12,7 @@ It is IMPORTED, never launched, so it is staged into the same folder as `PyRows.
 from __future__ import annotations
 
 import ast
+import json
 
 # An expression smaller than this is a bare name or a literal - `x`, `1` - and a row for each would
 # multiply the table while answering nothing the identifier columns cannot already answer.
@@ -21,6 +22,40 @@ MIN_EXPRESSION_NODES = 3
 SHAPE_KINDS = (ast.expr, ast.operator, ast.cmpop, ast.boolop, ast.unaryop)
 
 NEWLINE = chr(10)
+
+# THE CALLS THAT IMPORT A MODULE NAMED IN A STRING: `x = importlib.import_module("pkg.mod")` and
+# `x = pytest.importorskip("pkg.mod")` are `import pkg.mod as x`; `__import__("pkg.mod")` hands back `pkg`.
+IMPORTERS = ("importlib.import_module", "import_module", "__import__", "pytest.importorskip")
+
+
+def qualnames(module) -> set:
+    """Every def and class a module writes, by qualname - under any statement, an `if`, a `try` or a loop included."""
+    found = set()
+    pending = [(module, "")]
+    while pending:
+        node, prefix = pending.pop()
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                found.add(prefix + child.name)
+                pending.append((child, prefix + child.name + "."))
+            else:
+                pending.append((child, prefix))
+    return found
+
+
+def payload_text(payload) -> str:
+    """A payload as ONE JSON string, written in one write: `json.dump` streams through the pure-python encoder,
+    chunk by chunk - ~3x slower than `dumps`, which encodes in C, on a payload of thousands of rows.
+
+    A LONE SURROGATE IN A STRING - `"[\\ud800-\\udfff]"` is valid python, and its value is no UTF-8 at all, so the
+    write refused it and the whole half stored nothing. A pair written as two escapes is the one character it
+    spells; a surrogate alone is U+FFFD, as any UTF-8 reader shows it."""
+    text = json.dumps(payload, ensure_ascii=False)
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        text = text.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+    return text
 
 
 def segment(lines: list, node) -> str:
