@@ -48,7 +48,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from PyAst import MIN_EXPRESSION_NODES, NEWLINE, dotted, facts, segment, shape, sizes, used_names  # noqa: E402
+from PyAst import MIN_EXPRESSION_NODES, NEWLINE, dotted, facts, payload_text, segment, shape, sizes, used_names  # noqa: E402
 import PyDeps  # noqa: E402
 from PyBind import Binder, Tree  # noqa: E402
 from PyLaunch import launched  # noqa: E402
@@ -261,35 +261,10 @@ class Walker(Statements, ast.NodeVisitor):
                                                   target=target, target_kind=target_kind,
                                                   args=[self.src(a) for a in given], source=self.src(dec)))
 
-    def visit_Import(self, node) -> None:
-        for alias in node.names:
-            local = alias.asname or alias.name.split(".")[0]
-            self.rows.add("imports", "i", dict(self.where(), line=node.lineno, module=alias.name,
-                                               name="", alias=alias.asname or "", level=0, bind="",
-                                               used=1 if local in self.used else 0,
-                                               from_path=self.binder.tree.module(self.binder.rel, alias.name),
-                                               guarded=1 if id(node) in self.guarded else 0))
-        self.generic_visit(node)
-
-    def visit_ImportFrom(self, node) -> None:
-        for alias in node.names:
-            # `bind` is the SYMBOL the name imports, as `binds` is for a read: `from jobs import work` is
-            # jobs.py's `work`, and by name alone it protected every `work` in the tree from --dead.
-            bind = self.rows.bound(alias.asname or alias.name) if alias.name != "*" else ""
-            # `from_path` is the FILE the name is taken from - `pkg/__init__.py` for a re-export - so
-            # --unused-imports can follow a re-export to whoever imports it next.
-            tree, rel, module = self.binder.tree, self.binder.rel, node.module or ""
-            source = tree.relative(rel, node.level, module) if node.level else tree.module(rel, module)
-            self.rows.add("imports", "i", dict(self.where(), line=node.lineno, module=module,
-                                               name=alias.name, alias=alias.asname or "", bind=bind,
-                                               level=node.level or 0, from_path=source,
-                                               used=1 if (alias.asname or alias.name) in self.used else 0,
-                                               guarded=1 if id(node) in self.guarded else 0))
-        self.generic_visit(node)
-
     def visit_Assign(self, node) -> None:
         for target in node.targets:
             self.assignment(node, target, "assign")
+        self.string_import(node)
         if len(node.targets) == 1:
             self.value_of = (node.value, dotted(node.targets[0]))
         self.generic_visit(node)
@@ -585,9 +560,7 @@ def main() -> int:
     }
     try:
         with open(args.rows, "w", encoding="utf-8", newline=NEWLINE) as handle:
-            # ONE STRING, THEN ONE WRITE. `json.dump` streams through the pure-python encoder, chunk by chunk:
-            # ~3x slower than `dumps`, which encodes in C, on a payload of thousands of rows.
-            handle.write(json.dumps(payload, ensure_ascii=False))
+            handle.write(payload_text(payload))
     except OSError as error:
         emit("MAP-FATAL", "the payload could not be written - %s" % error)
         return 0

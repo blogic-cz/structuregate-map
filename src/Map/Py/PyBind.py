@@ -20,7 +20,7 @@ import ast
 import os
 
 import PyDeps
-from PyAst import dotted
+from PyAst import IMPORTERS, dotted, qualnames
 
 DIRECTORY_CACHE = {}
 
@@ -311,6 +311,8 @@ class Binder:
         # The calls being typed right now - see `typed`.
         self.typing: set = set()
         self.scopes: list = [("module", "", self.names(module.body, "", []))]
+        self.module = module
+        self.written = None
 
     def enter_function(self, node, qualname: str) -> None:
         spec = node.args
@@ -319,7 +321,8 @@ class Binder:
         self.scopes.append(("func", qualname, self.names(node.body, qualname + ".", params)))
 
     def enter_class(self, node, qualname: str) -> None:
-        methods = {n.name for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        # A CLASS IN THE BODY IS REACHED AS A METHOD IS: `self.Inner()` makes the nested class.
+        methods = {n.name for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
         self.scopes.append(("class", qualname, methods))
 
     def leave(self) -> None:
@@ -342,6 +345,15 @@ class Binder:
                 continue
             target = node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1 else (
                 node.target if isinstance(node, ast.AnnAssign) else None)
+            imported = getattr(node, "value", None)
+            if isinstance(target, ast.Name) and isinstance(imported, ast.Call) and dotted(imported.func) in IMPORTERS \
+                    and imported.args and isinstance(imported.args[0], ast.Constant) and isinstance(imported.args[0].value, str):
+                # `mod = pytest.importorskip("mod")` IS `import mod`: its `mod.tool()` reaches the def, and the import
+                # of `tool` the module re-exports stops reading as unused.
+                name = imported.args[0].value
+                bound[target.id] = ("mod", name.split(".")[0] if dotted(imported.func) == "__import__" else name)
+                pending.append(imported)
+                continue
             if isinstance(target, ast.Name) and isinstance(getattr(node, "value", None), ast.Call):
                 # `STORE = Store()` - the value is an instance of whatever the call names.
                 bound[target.id] = self.variable(prefix, target.id, dotted(node.value.func))
@@ -430,6 +442,12 @@ class Binder:
         # def at all, and binding to it made the real `Handler.run` read as called by nobody.
         if path != self.rel and not is_def(self.tree, path, qual):
             return "", ""
+        # IN ITS OWN FILE TOO: `Box.SLOTS.get()` reached `Box` and named a `Box.SLOTS.get` no def is - the dict's.
+        if path == self.rel:
+            if self.written is None:
+                self.written = qualnames(self.module)
+            if qual not in self.written:
+                return "", ""
         return path, qual
 
     def through(self, alias: str, tail: str) -> tuple:

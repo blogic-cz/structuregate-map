@@ -8,6 +8,9 @@ context-manager audit had nothing to run on. Each statement is a row here, carry
 WHAT A HANDLER CATCHES IS READ OFF THE CHAIN. `except subprocess.TimeoutExpired:` is an attribute, not a
 name; keeping names only left many `try` rows with no handler at all.
 
+`import` and `from .. import` are rows here too, and so is `mod = importlib.import_module("mod")` - the import a
+string names (`PyAst.IMPORTERS`).
+
 A mixin of `Walker`, so every row is written while the scope stack stands - see `PyRows.Walker`. It is
 IMPORTED, never launched, and staged and embedded with `PyRows.py` - see PyBind.py.
 """
@@ -15,7 +18,7 @@ from __future__ import annotations
 
 import ast
 
-from PyAst import dotted, facts
+from PyAst import IMPORTERS, dotted, facts
 from PyComments import noqa_of
 
 # What a handler can hold and still do nothing: `pass`, `...`, or a lone string.
@@ -36,7 +39,49 @@ def own_nodes(body: list):
 
 
 class Statements:
-    """The visitors; `Walker` supplies `rows`, `where`, `src`, `touched`, `branch`, `guarded`, `comments`."""
+    """The visitors; `Walker` supplies `rows`, `where`, `src`, `touched`, `branch`, `guarded`, `comments`, `binder`, `used`."""
+
+    def visit_Import(self, node) -> None:
+        for alias in node.names:
+            local = alias.asname or alias.name.split(".")[0]
+            self.rows.add("imports", "i", dict(self.where(), line=node.lineno, module=alias.name,
+                                               name="", alias=alias.asname or "", level=0, bind="",
+                                               used=1 if local in self.used else 0,
+                                               from_path=self.binder.tree.module(self.binder.rel, alias.name),
+                                               guarded=1 if id(node) in self.guarded else 0))
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node) -> None:
+        for alias in node.names:
+            # `bind` is the SYMBOL the name imports, as `binds` is for a read: `from jobs import work` is
+            # jobs.py's `work`, and by name alone it protected every `work` in the tree from --dead.
+            bind = self.rows.bound(alias.asname or alias.name) if alias.name != "*" else ""
+            # `from_path` is the FILE the name is taken from - `pkg/__init__.py` for a re-export - so
+            # --unused-imports can follow a re-export to whoever imports it next.
+            tree, rel, module = self.binder.tree, self.binder.rel, node.module or ""
+            source = tree.relative(rel, node.level, module) if node.level else tree.module(rel, module)
+            self.rows.add("imports", "i", dict(self.where(), line=node.lineno, module=module,
+                                               name=alias.name, alias=alias.asname or "", bind=bind,
+                                               level=node.level or 0, from_path=source,
+                                               used=1 if (alias.asname or alias.name) in self.used else 0,
+                                               guarded=1 if id(node) in self.guarded else 0))
+        self.generic_visit(node)
+
+    def string_import(self, node) -> None:
+        """`mod = pytest.importorskip("mod")` IS `import mod as mod`: a row of its own, so `mod.tool` read in this
+        file takes `tool` from mod.py, and the re-export there stops reading as unused (`--unused-imports`)."""
+        value = node.value
+        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name) or not isinstance(value, ast.Call) \
+                or dotted(value.func) not in IMPORTERS or not value.args or not isinstance(value.args[0], ast.Constant) \
+                or not isinstance(value.args[0].value, str):
+            return
+        local, module = node.targets[0].id, value.args[0].value
+        if dotted(value.func) == "__import__":
+            module = module.split(".")[0]
+        self.rows.add("imports", "i", dict(self.where(), line=node.lineno, module=module, name="", alias=local, level=0,
+                                           bind="", used=1 if local in self.used else 0,
+                                           from_path=self.binder.tree.module(self.binder.rel, module),
+                                           guarded=1 if id(node) in self.guarded else 0))
 
     def caught(self, handler) -> list:
         """What one handler catches, one entry per type - `""` for a bare `except:`."""

@@ -53,9 +53,12 @@ module-level instance (`STORE.get()` is `Store.get`). EMPTY when the tree cannot
 parameter, an inherited method. **Every `reads` has a `binds` beside it**, position for position: the
 `file::qualname` each read names, or "" - so config.py's `ROOT` is told from every other `ROOT` by
 a join of `<table>__binds` to `<table>__reads` on `owner` and `ord`, never by the name. `imports.bind` and `classes.bases_bind` are the same for an imported
-name and a base class; `--dead` walks the latter to keep an override, and a method of a class whose base is
-outside the map, off its list. `getattr(mod, name)` gives `target_name = '*'` - any def in that file.
-`functions.launched = 1` is a def a launcher calls. `--find` follows `imports.bind` (an alias, or a
+name and a base class; `--dead` walks the latter to keep an override, a method of a class whose base is
+outside the map, and a method of a mixin such a class inherits (`class Walker(Mixin, ast.NodeVisitor)`), off its list. `getattr(mod, name)` gives `target_name = '*'` - any def in that file.
+`functions.launched = 1` is a def a launcher calls - an entry point, or what pytest calls in `test_*.py`,
+`*_test.py` and `conftest.py`: a `test*` def, a `test*` method of a `Test*` class, a fixture.
+`mod = importlib.import_module("mod")`, `pytest.importorskip("mod")` and `__import__("mod")` are `imports` rows
+(`alias` the name bound), so `mod.tool()` binds and the re-export of `tool` in mod.py counts as used. `--find` follows `imports.bind` (an alias, or a
 re-import of one, to the def), and `--reads X` matches `binds` as well as `reads`, so a read through
 `from m import X as Y` is a read of X.
 

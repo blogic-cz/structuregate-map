@@ -24,7 +24,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from PyAst import (NEWLINE, block_span, char_column, dotted, line_table, looked_up, path_parts, sizes, span,  # noqa: E402,F401
+from PyAst import (IMPORTERS, NEWLINE, block_span, char_column, dotted, line_table, looked_up, path_parts, sizes, span,  # noqa: E402,F401
                    span_end, span_start, walked)
 from PyBind import Binder, Tree, declares, exists_exact, module_path, relative_path  # noqa: E402
 from PyLaunch import entry_spec, launched  # noqa: E402
@@ -262,7 +262,7 @@ def imports(root: str, rel: str, tree: ast.Module) -> None:
 
 
 def dynamic(root: str, rel: str, tree: ast.Module) -> None:
-    """`importlib.import_module(x)` and `__import__(x)`.
+    """`importlib.import_module(x)`, `pytest.importorskip(x)` and `__import__(x)` - `PyAst.IMPORTERS`.
 
     A LITERAL ARGUMENT IS A REAL EDGE and is resolved like any other import. A COMPUTED one is not guessed
     at - it is REPORTED, because it is exactly the reason a module with no importers may still have one, and
@@ -272,7 +272,7 @@ def dynamic(root: str, rel: str, tree: ast.Module) -> None:
         if not isinstance(node, ast.Call) or not node.args:
             continue
         name = dotted(node.func)
-        if name not in ("importlib.import_module", "import_module", "__import__"):
+        if name not in IMPORTERS:
             continue
         first = node.args[0]
         if isinstance(first, ast.Constant) and isinstance(first.value, str):

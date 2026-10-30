@@ -51,6 +51,9 @@ def signatures(tree, rel: str) -> dict:
                     "classmethod": "classmethod" in marks,
                 }
                 walk(node.body, prefix + node.name + ".", False)
+            else:
+                # A DEF UNDER AN `if`, A LOOP OR A `try` is still the scope's: `if flag: def helper(a, b)` is `outer.helper`.
+                walk(list(ast.iter_child_nodes(node)), prefix, in_class)
 
     walk(parsed.body, "", False)
     return found
