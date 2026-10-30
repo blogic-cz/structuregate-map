@@ -80,6 +80,11 @@ Test-Case 'tsrows keys: a closure node table has no shape index until --map-inde
     Assert-NoLine $ix 'ix=ix_render_path__hops_role'
     Assert-Line $ix 'ix=ix_render_path__hops_value'
     Assert-Line $ix 'ix=ix_expressions__ast_role'
+    # A node with no value is not in the value index (divergence #118), and a value compared still reads through it.
+    $partial = Invoke-TsRowsQ $made.Db "SELECT 'partial=' || (sql LIKE '%WHERE value IS NOT NULL') AS p FROM sqlite_master WHERE name = 'ix_expressions__ast_value'"
+    Assert-Line $partial 'partial=1'
+    $plan = Invoke-TsRowsQ $made.Db "EXPLAIN QUERY PLAN SELECT owner FROM expressions__ast WHERE value = 'demo.root.title'"
+    if (-not @($plan.Lines | Where-Object { $_.Contains('ix_expressions__ast_value') }).Count) { throw "a compared value does not read the value index: $($plan.Lines -join ' | ')" }
     $asked = Invoke-Gate --map-index $made.Db render_path__hops
     Assert-Exit $asked 0
     Assert-Line (Invoke-TsRowsQ $made.Db $indexQ) 'ix=ix_render_path__hops_role'
