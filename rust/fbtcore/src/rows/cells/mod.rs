@@ -164,7 +164,7 @@ pub fn create(db: &Connection, table: &str, column: &str) -> Result<String> {
     Ok(child_table)
 }
 
-/// THE UNIQUE `(owner, n)` KEY AND THE `(value, owner, n)` AND `(role, parent, owner, n)` INDEXES (the last not on a closure table), made AFTER the rows
+/// THE UNIQUE `(owner, n)` KEY AND THE `(value, owner, n)` (only a node with a value) AND `(role, parent, owner, n)` INDEXES (the last not on a closure table), made AFTER the rows
 /// are in. The key finds a cell and a node, and refuses a node written twice. `(role, parent)` answers a SHAPE across
 /// every owner - each root `$ref`, each `$template` list (#71): the key serves only a lookup inside one owner. Both
 /// end in the key because a rowid table's index carries only the rowid: without `owner` a join on it filtered by role
@@ -185,7 +185,9 @@ pub fn index_values(db: &Connection) -> Result<()> {
         crate::trace::metric!("store: index a node table", child_table, {
             key_index(db, &child_table)?;
             let t = schema::escape(&child_table);
-            db.execute_batch(&format!("CREATE INDEX IF NOT EXISTS \"ix_{t}_value\" ON \"{t}\" (value, owner, n)"))?;
+            // AN OBJECT OR A LIST NODE HAS NO VALUE, AND ITS NODE IS NOT IN THE VALUE INDEX (divergence #118): every reader
+            // compares the value (`=`, `IN`), which SQLite reads as `value IS NOT NULL`, so none loses the index.
+            db.execute_batch(&format!("CREATE INDEX IF NOT EXISTS \"ix_{t}_value\" ON \"{t}\" (value, owner, n) WHERE value IS NOT NULL"))?;
             // A CLOSURE TABLE'S NODES HAVE NO SHAPE INDEX unless one was asked for (`shape`, divergence #109).
             if let Some(shape) = shape::shape_index(db, &table, &child_table) {
                 db.execute_batch(&shape)?;
