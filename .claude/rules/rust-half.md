@@ -44,7 +44,7 @@ in `BanRegex` — a new module folder is covered without anyone adding it.
 `rows/http/` (`endpoints.rs`, `calls.rs`, `matching.rs`) is the pass `pass: http links` in `mapper/deep/mod.rs` that
 joins the halves: C# `decorators` (`arg_values`, the CsRows fold of each attribute argument) and `classes.bases` give
 `http_endpoints`; TypeScript `calls` to `@angular/common/http`, folded through `members`, `locals`, `consts` and the
-callable's parameters, give `http_calls` (a callable whose primitive's url reads a parameter is a wrapper and its
+callable's parameters, and C# `calls` bound to `System.Net.Http` (`cscalls.rs`, #143), give `http_calls` (a callable whose primitive's url reads a parameter is a wrapper and its
 callers are the rows); `http_links` is their match. The three tables are DROPped and CREATEd by every run that does not
 REPLAY them: the pass is keyed on what it reads (`rows/http/inputs.rs`: the build, every C# file's sha, and a token the TypeScript
 store moves only when a row of `TS_INPUTS` may have - a partial run compares what it removed with what it wrote).

@@ -46,7 +46,7 @@ before concluding a method is dead.
   `Migrations/` on a large solution: compiled so the rest binds, no rows of its own), `razor` (`component`/`view` for a
   `.razor`/`.cshtml`, compiled as the C# the Razor compiler generates and walked as the MARKUP file at its
   own lines), `errors`, `semantic`.
-* `http_endpoints`: every attribute-routed action (`[Route]`/`[Http*]`), one row per class route - see SKILL.md.
+* `http_endpoints`: every attribute-routed action (`[Route]`/`[Http*]`), one row per class route; `http_calls`: every `HttpClient` request (#143), and `http_links` the endpoint each reaches - see `nodes.md`.
 * `dispatch`, `enum_type_links` and `name_type_links` - WHICH CODE RUNS where the call names no class (a mediator's handler, a class
   picked by an enum member's name or by a name string): [csharp-runs.md](csharp-runs.md).
 * `razor_renders`: a component that renders another (`component` the full type name, `tag`, `attributes`).

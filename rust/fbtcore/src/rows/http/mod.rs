@@ -1,12 +1,14 @@
-//! WHICH C# ACTION AN ANGULAR HTTP CALL REACHES - one pass over the finished rows of both halves.
+//! WHICH C# ACTION AN HTTP CALL REACHES - one pass over the finished rows of both halves.
 //!
 //! `http_endpoints` is every attribute-routed action (`endpoints.rs`), `http_calls` every `@angular/common/http`
 //! call, a wrapper's callers standing for the wrapper's own call (`calls.rs`), and `http_links` which call reaches
 //! which endpoint (`matching.rs`). Rewritten whole by each run that does not replay it (`inputs.rs`): it reads nothing
 //! but the rows the halves stored.
-//! A database with no TypeScript still gets its C# endpoints; `http_calls` and `http_links` are then empty.
+//! `http_calls` holds the C# `HttpClient` calls too (`cscalls.rs`), so a database with no TypeScript still gets its
+//! endpoints, its calls and the links between them.
 
 mod calls;
+mod cscalls;
 mod endpoints;
 pub mod inputs;
 mod matching;
@@ -50,9 +52,13 @@ pub fn write(conn: &Connection) -> rusqlite::Result<Counts> {
     )?;
     let (csharp, typescript) = (files_of(conn, "csharp")?, files_of(conn, "typescript")?);
     // THE ENDPOINTS ARE A FACT ABOUT THE C# TREE ALONE (#59): a C#-only consumer asks which action serves a URL
-    // too. Only the calls and the links need the TypeScript half.
+    // too.
     let endpoints = endpoints::load(conn, &csharp)?;
-    let sites = if typescript.is_empty() { Vec::new() } else { calls::load(conn, &typescript)? };
+    // THE CALLS OF BOTH HALVES (#143): a C# `HttpClient` call asks a url as an Angular one does.
+    let mut sites = if typescript.is_empty() { Vec::new() } else { calls::load(conn, &typescript)? };
+    if !csharp.is_empty() {
+        sites.extend(cscalls::load(conn, &csharp)?);
+    }
     let linked = matching::link(&endpoints, &sites);
     let mut counts = Counts { endpoints: endpoints.len(), calls: sites.len(), ..Counts::default() };
     {

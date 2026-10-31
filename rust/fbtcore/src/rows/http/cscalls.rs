@@ -1,0 +1,253 @@
+//! THE `System.Net.Http` CALLS OF A C# TREE (#143), each with the url it asks for as a pattern - the C# side of `http_calls`.
+//!
+//! A PRIMITIVE is a call Roslyn bound to `HttpClient` or to `HttpClientJsonExtensions` whose name says its verb (`Get*`,
+//! `Post*`, `Put*`, `Patch*`, `Delete*`); its url is the argument bound to `requestUri`. A `Send`/`SendAsync` takes its verb
+//! and url from the `new HttpRequestMessage(HttpMethod.X, url)` it is handed - written in its argument, or the one the
+//! local it names was declared with. A url is FOLDED as the half folded it: a constant is itself, an interpolation its
+//! text with each hole `{}` (`arguments.template`, the query cut), and anything else an unknown `*`. A url that IS a
+//! parameter of the method it is written in makes that method a WRAPPER: it writes no call itself, and every call OF it
+//! does, with the url its caller binds to that parameter and `via` the wrapper's `functions` id - so a wrapper of a
+//! wrapper is followed too. A call is OF a wrapper by its bound symbol, which is the wrapper's qualname; a qualname two
+//! methods share (an overload) is no wrapper, since the symbol cannot say which of them runs.
+
+use super::calls::Site;
+use crate::rows::dups::{scalar_sql, text, Column};
+use rusqlite::types::Value as SqlValue;
+use rusqlite::Connection;
+use serde_json::Value;
+use std::collections::{HashMap, HashSet};
+
+const CLASSES: [&str; 2] = ["System.Net.Http.HttpClient.", "System.Net.Http.Json.HttpClientJsonExtensions."];
+const VERBS: [(&str, &str); 5] = [("Get", "GET"), ("Post", "POST"), ("Put", "PUT"), ("Patch", "PATCH"), ("Delete", "DELETE")];
+/// A request message's construction: its constructor, or the type alone where Roslyn bound no overload.
+const MESSAGE: [&str; 2] = ["System.Net.Http.HttpRequestMessage.HttpRequestMessage", "System.Net.Http.HttpRequestMessage"];
+const METHOD: &str = "System.Net.Http.HttpMethod.";
+const URI: &str = "System.Uri.Uri";
+
+struct Call {
+    id: String,
+    file: String,
+    line: i64,
+    end: i64,
+    symbol: String,
+    /// The innermost `functions` row holding the call: its id, qualname and first line.
+    member: String,
+    qualname: String,
+    start: i64,
+}
+
+struct Arg {
+    name: String,
+    position: i64,
+    file: String,
+    line: i64,
+    value: Value,
+    kind: String,
+    symbol: String,
+}
+
+/// What an argument's url is: a pattern, or the name of a parameter of the method it is written in.
+enum Url {
+    Pattern(String),
+    Param(String),
+}
+
+pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusqlite::Result<Vec<Site>> {
+    let functions = query(conn, "functions", &["id", "file", "line", "end_line", "qualname"])?;
+    let mut holding: HashMap<&str, Vec<&Vec<String>>> = HashMap::new();
+    for f in &functions {
+        holding.entry(f[1].as_str()).or_default().push(f);
+    }
+    let mut qualnames: HashMap<&str, Vec<&str>> = HashMap::new();
+    for f in &functions {
+        qualnames.entry(f[4].as_str()).or_default().push(f[0].as_str());
+    }
+    let calls: Vec<Call> = query(conn, "calls", &["id", "file", "line", "end_line", "symbol"])?
+        .into_iter()
+        .filter(|c| csharp.contains_key(&c[1]))
+        .map(|c| {
+            let (line, end) = (c[2].parse().unwrap_or(0), c[3].parse().unwrap_or(0));
+            let inner = holding.get(c[1].as_str()).and_then(|fs| {
+                fs.iter()
+                    .filter(|f| f[2].parse::<i64>().unwrap_or(0) <= line && line <= f[3].parse::<i64>().unwrap_or(0))
+                    .max_by_key(|f| f[2].parse::<i64>().unwrap_or(0))
+            });
+            let (member, qualname, start) =
+                inner.map(|f| (f[0].clone(), f[4].clone(), f[2].parse().unwrap_or(0))).unwrap_or_default();
+            Call { id: c[0].clone(), file: c[1].clone(), line, end, symbol: c[4].clone(), member, qualname, start }
+        })
+        .collect();
+    let args = arguments(conn)?;
+    let params: HashSet<(String, String)> =
+        query(conn, "parameters", &["qualname", "name"])?.into_iter().map(|p| (p[0].clone(), p[1].clone())).collect();
+    let locals = query(conn, "locals", &["file", "line", "name"])?;
+    let none = Vec::new();
+    let of = |c: &Call| args.get(&c.id).unwrap_or(&none);
+    // AN ARGUMENT BY THE PARAMETER IT BINDS; where Roslyn bound no overload, by its place; for a request message, also the
+    // member its object initializer sets (`new HttpRequestMessage { RequestUri = .. }`, `Method`), inside the construction.
+    let pick = |c: &Call, name: &str| -> Option<&Arg> {
+        let place = [("method", 0), ("requestUri", 1)].iter().find(|(n, _)| *n == name).map(|(_, p)| *p);
+        let member = name[..1].to_uppercase() + &name[1..];
+        of(c).iter().find(|a| a.name == name).or_else(|| {
+            let message = MESSAGE.contains(&c.symbol.as_str());
+            message
+                .then(|| of(c).iter().find(|a| a.name.is_empty() && Some(a.position) == place))
+                .flatten()
+                .or_else(|| {
+                    let set = message.then(|| args.get("")).flatten()?;
+                    set.iter().find(|a| a.name == member && a.file == c.file && c.line <= a.line && a.line <= c.end)
+                })
+        })
+    };
+    let value_of = |a: &Arg, qualname: &str| -> Option<Url> {
+        match (&a.value, a.kind.as_str()) {
+            (Value::String(s), "const" | "folded") => Some(Url::Pattern(s.clone())),
+            (Value::Array(alternatives), _) => Some(Url::Pattern(folded(alternatives))),
+            (_, "symbol") if params.contains(&(qualname.to_string(), a.symbol.clone())) => Some(Url::Param(a.symbol.clone())),
+            _ => None,
+        }
+    };
+    let url_of = |c: &Call, name: &str| -> Option<Url> {
+        let a = pick(c, name)?;
+        // A URL WRAPPED IN `new Uri(url, UriKind..)` is the string the `Uri` is made of.
+        let wrapped = || {
+            let uri = calls.iter().find(|u| u.symbol == URI && u.file == a.file && u.line == a.line && u.member == c.member)?;
+            of(uri).iter().find(|u| u.name == "uriString" || (u.name.is_empty() && u.position == 0))
+        };
+        Some(value_of(a, &c.qualname).or_else(|| value_of(wrapped()?, &c.qualname)).unwrap_or_else(|| Url::Pattern("*".into())))
+    };
+    // THE REQUEST A `Send` IS HANDED: the `HttpRequestMessage` built in its argument, or with the local it names.
+    let message = |c: &Call| -> Option<&Call> {
+        let a = pick(c, "request")?;
+        // The local's declaration is the last of that name in the same method before the call.
+        let declared = locals
+            .iter()
+            .filter(|l| a.kind == "symbol" && l[0] == c.file && l[2] == a.symbol)
+            .filter_map(|l| l[1].parse::<i64>().ok())
+            .filter(|line| c.start <= *line && *line <= c.line)
+            .max();
+        calls.iter().find(|m| {
+            MESSAGE.contains(&m.symbol.as_str())
+                && m.member == c.member
+                && match declared {
+                    Some(line) => m.line == line,
+                    None => c.line <= m.line && m.line <= c.end,
+                }
+        })
+    };
+    // THE PRIMITIVES: each call's verb and the url it asks for.
+    let mut asked: HashMap<usize, (String, Url)> = HashMap::new();
+    for (n, c) in calls.iter().enumerate() {
+        let Some(name) = CLASSES.iter().find_map(|k| c.symbol.strip_prefix(k)) else { continue };
+        let name = name.split('<').next().unwrap_or(name);
+        if name.starts_with("Send") {
+            let Some(m) = message(c) else { continue };
+            let verb = pick(m, "method").and_then(|a| a.symbol.strip_prefix(METHOD)).map(str::to_uppercase);
+            if let Some(url) = url_of(m, "requestUri") {
+                asked.insert(n, (verb.unwrap_or_else(|| "ANY".into()), url));
+            }
+        } else if let Some((_, verb)) = VERBS.iter().find(|(prefix, _)| name.starts_with(prefix)) {
+            if let Some(url) = url_of(c, "requestUri") {
+                asked.insert(n, (verb.to_string(), url));
+            }
+        }
+    }
+    // THE WRAPPERS, to a fixed point: a method whose request's url is its own parameter, by qualname -> (id, parameter, verb).
+    let unique = |q: &str| qualnames.get(q).filter(|ids| ids.len() == 1).map(|ids| ids[0].to_string());
+    let mut wrappers: HashMap<String, (String, String, String)> = HashMap::new();
+    for (n, (verb, url)) in &asked {
+        if let (Url::Param(p), Some(id)) = (url, unique(&calls[*n].qualname)) {
+            wrappers.entry(calls[*n].qualname.clone()).or_insert((id, p.clone(), verb.clone()));
+        }
+    }
+    loop {
+        let mut found = vec![];
+        for c in &calls {
+            let Some((_, p, verb)) = wrappers.get(c.symbol.split('<').next().unwrap_or("")) else { continue };
+            if let (Some(Url::Param(own)), Some(id)) = (url_of(c, p), unique(&c.qualname)) {
+                if !wrappers.contains_key(&c.qualname) {
+                    found.push((c.qualname.clone(), (id, own, verb.clone())));
+                }
+            }
+        }
+        if found.is_empty() {
+            break;
+        }
+        wrappers.extend(found);
+    }
+    // THE ROWS: a primitive nobody parameterises, and every call of a wrapper that hands it a url of its own.
+    let paths = super::files_of(conn, "csharp")?;
+    let mut sites = vec![];
+    for (n, c) in calls.iter().enumerate() {
+        let (verb, via, url) = match (asked.get(&n), wrappers.get(c.symbol.split('<').next().unwrap_or(""))) {
+            (Some((verb, Url::Pattern(url))), _) => (verb.clone(), String::new(), url.clone()),
+            (None, Some((id, p, verb))) => match url_of(c, p) {
+                Some(Url::Pattern(url)) => (verb.clone(), id.clone(), url),
+                _ => continue,
+            },
+            _ => continue,
+        };
+        sites.push(Site {
+            file: paths.get(&c.file).cloned().unwrap_or_default(),
+            call: c.id.clone(),
+            member: c.member.clone(),
+            line: c.line,
+            verb,
+            url: url.split('?').next().unwrap_or("").to_string(),
+            via,
+        });
+    }
+    sites.sort_by(|a, b| (&a.file, a.line, &a.call).cmp(&(&b.file, b.line, &b.call)));
+    Ok(sites)
+}
+
+/// An interpolation's alternatives as one pattern: each piece's text, a hole `{}`; alternatives that disagree are `*`.
+fn folded(alternatives: &[Value]) -> String {
+    let spelled: HashSet<String> = alternatives
+        .iter()
+        .map(|alt| {
+            alt.as_array()
+                .map(|pieces| pieces.iter().map(|p| p.as_str().map(str::to_string).unwrap_or_else(|| "{}".into())).collect())
+                .unwrap_or_default()
+        })
+        .map(|s: String| s.split('?').next().unwrap_or("").to_string())
+        .collect();
+    if spelled.len() == 1 { spelled.into_iter().next().unwrap_or_default() } else { "*".into() }
+}
+
+/// Every argument of a call, by call id: the parameter it binds, its folded value or template, and the symbol it reads.
+fn arguments(conn: &Connection) -> rusqlite::Result<HashMap<String, Vec<Arg>>> {
+    if crate::rows::schema::existing_columns(conn, "arguments").unwrap_or_default().is_empty() {
+        return Ok(HashMap::new());
+    }
+    let picked: Vec<String> =
+        ["id", "call", "name", "const", "const_kind", "symbol", "template", "position", "file", "line"].iter().map(|c| scalar_sql(conn, "arguments", "a", c)).collect();
+    let sql = format!("SELECT {} FROM arguments a", picked.join(", "));
+    let mut templates = Column::new(conn, "arguments", "template")?;
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query([])?;
+    let mut out: HashMap<String, Vec<Arg>> = HashMap::new();
+    while let Some(r) = rows.next()? {
+        let kind = text(r, 4)?;
+        let held = templates.value(&text(r, 0)?, &r.get::<_, SqlValue>(6)?)?;
+        let value = match held {
+            Value::Array(_) if !matches!(kind.as_str(), "const" | "folded") => held,
+            _ => Value::String(text(r, 3)?),
+        };
+        let (position, line) = (text(r, 7)?.parse().unwrap_or(-1), text(r, 9)?.parse().unwrap_or(0));
+        out.entry(text(r, 1)?).or_default().push(Arg { name: text(r, 2)?, position, file: text(r, 8)?, line, value, kind, symbol: text(r, 5)? });
+    }
+    Ok(out)
+}
+
+/// Every row of a table, the columns asked for as text - a column the table lacks is "" (the TypeScript half writes
+/// `calls` and `functions` too, with columns of its own), a table no half wrote is no rows.
+fn query(conn: &Connection, table: &str, columns: &[&str]) -> rusqlite::Result<Vec<Vec<String>>> {
+    if crate::rows::schema::existing_columns(conn, table).unwrap_or_default().is_empty() {
+        return Ok(Vec::new());
+    }
+    let picked: Vec<String> = columns.iter().map(|c| scalar_sql(conn, table, "t", c)).collect();
+    let mut stmt = conn.prepare(&format!("SELECT {} FROM \"{table}\" t", picked.join(", ")))?;
+    let rows = stmt.query_map([], |r| (0..columns.len()).map(|i| text(r, i)).collect::<rusqlite::Result<Vec<String>>>())?;
+    rows.collect()
+}
