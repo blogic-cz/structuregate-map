@@ -38,7 +38,9 @@ use std::path::Path;
 // 30: a generated file's method bodies are not bound for `diagnostics`: its syntax and declaration errors only.
 // 33: a `default` literal is no `string_literals` row; `[assembly: ..]`/`[module: ..]` are `decorators` rows; a package's
 // build targets add their `<Using>` items to the synthesized global usings.
-pub(super) const CS_ROWS_VERSION: &str = "33";
+// 34: a base constructor call (`: Base<T>(..)`, `: base(..)`) is a `calls` row with its `arguments`; a primary constructor's
+// parameters are `parameters` rows; a generated file `--map-include-generated` names is walked.
+pub(super) const CS_ROWS_VERSION: &str = "34";
 /// The same for the SQL extractor. 7: `sql_dynamic`, an object created by dynamic SQL.
 // 8: a CTE name is the statement's own - never a `sql_refs` row, and never hiding a table in a later statement.
 // 9: `sql_statements` (a row per statement, `fingerprint` filled by `rows/sqlshape/`), its tree `sql_nodes`, and
@@ -69,6 +71,7 @@ pub struct Hashed<'a> {
     paths: BTreeMap<String, String>,
     facts: HashMap<String, reasons::File>,
     excluded: Vec<String>,
+    walked: Vec<String>,
     parts: Parts,
     owned: Vec<String>,
     before: Option<reasons::Before>,
@@ -88,7 +91,7 @@ impl Hashed<'_> {
 }
 
 /// The C# files hashed, each with its project's fingerprint folded in - see `Hashed`.
-pub fn hash<'a>(db: &str, files: &[(String, String)], hashes: &'a Hashes, exclude: &[String]) -> Hashed<'a> {
+pub fn hash<'a>(db: &str, files: &[(String, String)], hashes: &'a Hashes, exclude: &[String], generated: &[String]) -> Hashed<'a> {
     let hashing = crate::trace::stage("csharp: hash the files and projects");
     let inputs = super::inputs::Inputs::open(db, hashes);
     // EVERY FILE AT ONCE: a file's hash, its markup inputs and its project are independent of every other's.
@@ -124,6 +127,9 @@ pub fn hash<'a>(db: &str, files: &[(String, String)], hashes: &'a Hashes, exclud
     // AN EXCLUDED FILE'S SHA SAYS SO: adding a pattern re-reads the files it now matches - to drop their rows -
     // and removing one re-reads them to write the rows back, and no other file moves either way.
     let mut excluded = Vec::new();
+    // A GENERATED FILE `--map-include-generated` NAMES IS WALKED (#140) - the C# half alone knows a file is generated, so
+    // every match is handed over and the half walks the generated ones among them.
+    let mut walked = Vec::new();
     for (rel, abs, sha, project) in hashed {
         let project = project.map(|p| spelled[&p.to_lowercase()].clone());
         let fingerprint = project.as_ref().and_then(|p| fingerprints.get(p));
@@ -131,18 +137,22 @@ pub fn hash<'a>(db: &str, files: &[(String, String)], hashes: &'a Hashes, exclud
         if matched {
             excluded.push(rel.clone());
         }
-        shas.insert(rel.clone(), reasons::salted(&sha, fingerprint.map(String::as_str), CS_ROWS_VERSION, matched));
-        facts.insert(rel.clone(), reasons::File { content: sha, project, excluded: matched });
+        let named = crate::sources::glob::excluded(generated, &rel);
+        if named {
+            walked.push(rel.clone());
+        }
+        shas.insert(rel.clone(), reasons::marked(&sha, fingerprint.map(String::as_str), CS_ROWS_VERSION, matched, named));
+        facts.insert(rel.clone(), reasons::File { content: sha, project, excluded: matched, walked: named });
         paths.insert(rel, abs);
     }
     drop(hashing);
-    Hashed { inputs, shas, paths, facts, excluded, parts, owned, before }
+    Hashed { inputs, shas, paths, facts, excluded, walked, parts, owned, before }
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn csharp(into: &mut Collector, db: &str, root: &str, hashed: Hashed, roots: &[String], skip: &[String], forced: bool, ask: &mut Ask) {
     const LANGUAGE: &str = "csharp rows";
-    let Hashed { inputs: _inputs, shas, paths, facts, excluded, parts, owned, before } = hashed;
+    let Hashed { inputs: _inputs, shas, paths, facts, excluded, walked, parts, owned, before } = hashed;
     let errors_before = into.errors.len();
     let reading_state = crate::trace::stage("csharp: read what the database recorded");
     let Some(mut state) = state(into, db, "csharp", LANGUAGE) else { return };
@@ -176,7 +186,7 @@ pub fn csharp(into: &mut Collector, db: &str, root: &str, hashed: Hashed, roots:
     // WHICH PROJECT COMPILES WHICH FILE, worked out once by the caller - and the order files are sent in.
     let opening = crate::trace::stage("csharp: open the session");
     ask(&json!({ "mode": "csharp-open", "paths": paths, "shas": shas, "counters": state.counters, "excluded": excluded,
-        "roots": roots, "skip": skip }));
+        "generated": walked, "roots": roots, "skip": skip }));
     drop(opening);
     let order = |ask: &mut Ask, rels: Vec<&String>| -> Vec<String> {
         let _ordering = crate::trace::stage("csharp: order the files by project");

@@ -72,6 +72,7 @@ struct Run {
     map_no_text: bool,
     map_atlas_dir: Option<String>,
     map_exclude: Vec<String>,
+    map_include_generated: Vec<String>,
     map_reread: Vec<String>,
     sql_config: Option<String>,
     cs_config: Option<String>,
@@ -240,6 +241,7 @@ fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
         row_fts: input.map_row_fts,
         atlas_dir: input.map_atlas_dir.clone(),
         exclude: input.map_exclude.clone(),
+        include_generated: input.map_include_generated.clone(),
         reread: input.map_reread.clone(),
         sql_config: input.sql_config.clone(),
         cs_config: input.cs_config.clone(),
@@ -270,13 +272,13 @@ fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
     // NOTHING IS PARSED WHEN NOTHING CHANGED - AND NOTHING CAME OR WENT, AND THE GATE IS THE SAME: a moved
     // file keeps its mtime, so the file SET is compared as well, and a newer exe is a changed rule set over
     // the same sources, so its own mtime counts as one more input (`stale.rs`).
-    into.inventory = inventory(&walked);
+    into.inventory = stale::inventory(&walked);
     let map_path = Path::new(&input.map_out);
     if input.map_if_stale && map_path.is_file() {
         let map_modified = std::fs::metadata(map_path).and_then(|m| m.modified()).ok();
         let baseline = input.baseline_path.as_ref().and_then(|b| std::fs::metadata(b).and_then(|m| m.modified()).ok());
         let kept = if input.map_check { check::kept(map_path) } else { Some(Vec::new()) };
-        match stale::why(map_modified, newest, stale::exe_modified(), &recorded(map_path), &into.inventory, baseline) {
+        match stale::why(map_modified, newest, stale::exe_modified(), &stale::recorded(map_path), &into.inventory, baseline) {
             None if kept.is_some() => {
                 let sources = sharp.len() + buckets.iter().map(|b| b.script.len() + b.python.len() + b.shell.len() + b.rust.len() + b.markdown.len()).sum::<usize>();
                 crate::trace::set("structuregate.map.current", true);
@@ -473,32 +475,6 @@ fn absolute(input: &Run, rel: &str) -> String {
     };
     let joined = base.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
     joined.to_string_lossy().into_owned()
-}
-
-/// WHICH FILES A MAP COVERS, as one hash written FIRST in the map, so `--map-if-stale` reads it without
-/// parsing the rest. A MOVE KEEPS A FILE'S MTIME and a deletion leaves nothing to be newer, so the set of
-/// files is what is compared.
-fn inventory(walked: &[String]) -> String {
-    let mut sorted = walked.to_vec();
-    sorted.sort();
-    blake3::hash(sorted.join("\n").as_bytes()).to_hex()[..16].to_string()
-}
-
-/// What the map at `path` recorded - its first property, read off the head of the file - or "".
-fn recorded(path: &Path) -> String {
-    // THE HEAD ONLY: the map runs to megabytes, and its first property is all this asks.
-    let mut bytes = Vec::with_capacity(4096);
-    let Ok(file) = std::fs::File::open(path) else { return String::new() };
-    if std::io::Read::read_to_end(&mut std::io::Read::take(file, 4096), &mut bytes).is_err() {
-        return String::new();
-    }
-    let head = String::from_utf8_lossy(&bytes).into_owned();
-    let rest = head.trim_start();
-    let Some(rest) = rest.strip_prefix('{') else { return String::new() };
-    let Some(rest) = rest.trim_start().strip_prefix("\"inventory\"") else { return String::new() };
-    let Some(rest) = rest.trim_start().strip_prefix(':') else { return String::new() };
-    let Some(rest) = rest.trim_start().strip_prefix('"') else { return String::new() };
-    rest.find('"').map(|end| rest[..end].to_string()).unwrap_or_default()
 }
 
 fn cs_file(cs: CsMap, free: Free, abs: &str, rel: &str) -> Value {

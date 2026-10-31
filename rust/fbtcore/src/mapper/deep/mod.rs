@@ -49,6 +49,8 @@ pub struct Deep {
     pub atlas_dir: Option<String>,
     /// `--map-exclude`: globs over a C# file's map path. A match is listed and not walked - see `driven.rs`.
     pub exclude: Vec<String>,
+    /// `--map-include-generated`: globs over a C# file's map path. A GENERATED match is walked all the same (#140).
+    pub include_generated: Vec<String>,
     /// `--map-reread`: the halves that read every file again this run.
     pub reread: Vec<String>,
     /// `--sql-config`, for the caller's SQL half; beside the exe when it is not given.
@@ -233,7 +235,7 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
     let forced = deep.reread.iter().any(|h| h == "csharp");
     let mut sharp = (!files.sharp.is_empty() || Path::new(db).is_file()).then(|| {
         let _hashing = crate::trace::stage("csharp: hash the files and projects");
-        driven::hash(db, &files.sharp, &hashes, &deep.exclude)
+        driven::hash(db, &files.sharp, &hashes, &deep.exclude, &deep.include_generated)
     });
     let moving = sharp.as_ref().map_or(0, |h| h.moving(db, forced));
     let mut python_early = python_early;

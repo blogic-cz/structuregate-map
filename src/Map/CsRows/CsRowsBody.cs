@@ -107,6 +107,15 @@ internal sealed partial class CsRows
                 Call(implicitly, null, implicitly.ArgumentList);
                 Constructs(implicitly);
                 break;
+            // A BASE CONSTRUCTOR IS CALLED TOO, with arguments a derived class fixes (#141): `class OrderConfig() :
+            // ConfigBase<Order>(Tables.Orders, Schemas.Sales)` and `: base(Tables.Orders)` hand the base its table name.
+            // `type` is the base AS CONSTRUCTED, `Demo.ConfigBase<Demo.Order>`, so its type parameters can be read off.
+            case PrimaryConstructorBaseTypeSyntax primary:
+                Call(primary, primary.Type, primary.ArgumentList, CsSemantics.Type(model, primary.Type));
+                break;
+            case ConstructorInitializerSyntax initializer:
+                Call(initializer, null, initializer.ArgumentList, "", initializer.ThisOrBaseKeyword.ValueText);
+                break;
             // Strings, chars and numbers, each with what it is DOING there - see CsLiterals.cs.
             case LiteralExpressionSyntax literal: Literal(literal); break;
         }
@@ -354,11 +363,11 @@ internal sealed partial class CsRows
     ///
     /// `kwargs` counts the arguments passed BY NAME, which is what the python column counts too.
     /// </summary>
-    private void Call(ExpressionSyntax node, SyntaxNode? callee, ArgumentListSyntax? arguments)
+    private void Call(SyntaxNode node, SyntaxNode? callee, ArgumentListSyntax? arguments, string? type = null, string keyword = "")
     {
         // `new(...)` names no type in the text at all; the type it resolves to is the callee a reader
         // means. Written name first, resolved name only where there is no written one.
-        var name = CsFacts.Dotted(callee);
+        var name = keyword.Length > 0 ? keyword : CsFacts.Dotted(callee);
         // A RECEIVER THAT IS ITSELF A CALL cannot be written as a dotted name, and the whole chain's text is
         // not what anybody means by "the callee": `Get().Where(...)` calls `Where`. Falling back to the text
         // put five call sites of one file under a name nothing can join to.
@@ -375,6 +384,8 @@ internal sealed partial class CsRows
         if (target is null && name == "nameof" && arguments?.Arguments.Count == 1)
             target = CsSemantics.NameOf(model, arguments.Arguments[0].Expression);
         Reach(target);
+        // `: base(...)` constructs the type its constructor belongs to.
+        if (type is { Length: 0 } && target?.ContainingType is { } constructed) type = constructed.ToDisplayString(CsSemantics.Typed);
         var call = Row("calls", "call",
             // ANCHORED AT THE NAME CALLED, not at the start of the expression. A chain written down the
             // page - `GetFiles(...)` newline `.Where(...)` newline `.ToList()` - starts on one line and
@@ -385,12 +396,12 @@ internal sealed partial class CsRows
             ("callee", name.Length > 0 ? name : CsFacts.Text(callee)),
             ("symbol", CsSemantics.Name(target)),
             ("signature", CsSemantics.Signature(target)),
-            ("type", CsSemantics.Type(model, node)),
+            ("type", type ?? CsSemantics.Type(model, node)),
             ("args", arguments?.Arguments.Count ?? 0),
             ("kwargs", arguments?.Arguments.Count(a => a.NameColon is not null) ?? 0),
             ("source", CsFacts.Text(node)));
         Arguments(call, target, arguments);
-        RegexCall(node, target, arguments);
+        if (node is ExpressionSyntax expression) RegexCall(expression, target, arguments);
     }
 
     /// <summary>
