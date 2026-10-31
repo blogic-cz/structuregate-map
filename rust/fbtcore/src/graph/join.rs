@@ -106,7 +106,7 @@ impl Tables<'_> {
                     None => {
                         joined.ambiguous.insert(name.clone(), sorted(targets.iter().cloned()));
                     }
-                    Some(picked) if picked != file.rel => {
+                    Some(picked) if picked != file.rel && !self.holding(file, &picked, name) => {
                         edges.insert(picked);
                     }
                     Some(_) => {}
@@ -141,7 +141,7 @@ impl Tables<'_> {
                     _ => self.beside(file, &hits, suffix).or_else(|| self.taken(file, &hits, &module(suffix))),
                 };
                 match hit {
-                    Some(hit) if hit != file.rel => {
+                    Some(hit) if hit != file.rel && !self.holding(file, &hit, &module(suffix)) => {
                         edges.extend(self.packages(file, &hit, suffix));
                         edges.insert(hit);
                     }
@@ -159,6 +159,7 @@ impl Tables<'_> {
                     if let Some(named) = self.owners.get(&owned(file, literal))
                         && let Some(picked) = self.pick(file, named, None)
                         && picked != file.rel
+                        && !self.holding(file, &picked, literal)
                     {
                         edges.insert(picked);
                     }
@@ -215,7 +216,7 @@ impl Tables<'_> {
     }
 
     /// THE PACKAGES ON THE WAY: `demo.sub.leaf` found as `src/demo/sub/leaf.py` runs `src/demo/__init__.py` and
-    /// `src/demo/sub/__init__.py` first, as a root-relative import does in the half (`PyMap.py::packages`) - but not
+    /// `src/demo/sub/__init__.py` first, as a root-relative import does in the half (`PyAst.py::packages`) - but not
     /// one holding the importer, which python ran before the importer.
     fn packages(&self, file: &File, hit: &str, suffix: &str) -> Vec<String> {
         if file.language != "python" {
@@ -228,6 +229,18 @@ impl Tables<'_> {
             .map(|i| format!("{base}{}/__init__.py", parts[..i].join("/")))
             .filter(|init| self.files.contains_key(init) && !file.rel.starts_with(&init[..init.len() - "__init__.py".len()]))
             .collect()
+    }
+
+    /// A PACKAGE HOLDING THE IMPORTER IS NO EDGE, as in the half (`PyAst.py::heads`): `from demo import alpha` written in
+    /// `demo/` reads the submodule, python ran `demo/__init__.py` before the importer, and the edge back would make
+    /// each package that re-exports its submodules a cycle. A name the package itself binds keeps it (`from demo import HELPER`).
+    fn holding(&self, file: &File, target: &str, module: &str) -> bool {
+        let Some(folder) = target.strip_suffix("__init__.py") else { return false };
+        if file.language != "python" || !file.rel.starts_with(folder) {
+            return false;
+        }
+        let binds = self.files.get(target).map(|owner| &owner.binds);
+        !file.names.get(module).is_some_and(|taken| binds.is_some_and(|b| taken.iter().any(|n| b.contains(n))))
     }
 
     fn taken(&self, file: &File, targets: &[String], module: &str) -> Option<String> {

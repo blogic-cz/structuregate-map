@@ -306,3 +306,23 @@ def block_span(table: dict, body: list) -> int:
     if not body:
         return 0
     return max(0, span_end(table, body[-1]) - span_start(table, body[0]))
+
+
+def packages(rel: str, find, module: str) -> list:
+    """The `__init__.py` of every package an import passes through - `a.b.c` runs `a/__init__.py` and
+    `a/b/__init__.py` before `c` - but not one holding the importer, which Python ran before the importer."""
+    parts = module.split(".") if module else []
+    inits = [find(".".join(parts[:i])) for i in range(1, len(parts))]
+    return [init for init in inits if init.endswith("__init__.py") and not holds(init, rel)]
+
+
+def holds(init: str, rel: str) -> bool:
+    """`init` is the `__init__.py` of a package `rel` sits in - one Python ran before `rel`."""
+    return init.endswith("__init__.py") and rel.startswith(init[: -len("__init__.py")])
+
+
+def heads(rel: str, head: str, nested: list) -> list:
+    """`from . import alpha` / `from demo import alpha` written INSIDE `demo/`: when every name is a submodule, the
+    line reads only those, and the package holding the importer is no edge - as on a dotted import (`packages`).
+    A name `__init__.py` itself defines keeps the edge: the line reads it there."""
+    return [] if holds(head, rel) and nested and all(nested) else [head]

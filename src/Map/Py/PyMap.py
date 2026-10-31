@@ -24,8 +24,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from PyAst import (IMPORTERS, NEWLINE, block_span, char_column, dotted, line_table, looked_up, path_parts, sizes, span,  # noqa: E402,F401
-                   span_end, span_start, walked)
+from PyAst import (IMPORTERS, NEWLINE, block_span, char_column, dotted, heads, line_table, looked_up, packages, path_parts, sizes,  # noqa: E402,F401
+                   span, span_end, span_start, walked)
 from PyBind import Binder, Tree, declares, exists_exact, module_path, relative_path  # noqa: E402
 from PyLaunch import entry_spec, launched  # noqa: E402
 from PyInputs import options  # noqa: E402
@@ -188,14 +188,6 @@ def suffixes(name: str) -> list:
     return [joined + ".py", joined + "/__init__.py"]
 
 
-def packages(rel: str, find, module: str) -> list:
-    """The `__init__.py` of every package an import passes through - `a.b.c` runs `a/__init__.py` and
-    `a/b/__init__.py` before `c` - but not one holding the importer, which Python ran before the importer."""
-    parts = module.split(".") if module else []
-    inits = [find(".".join(parts[:i])) for i in range(1, len(parts))]
-    return [init for init in inits if init.endswith("__init__.py") and not rel.startswith(init[: -len("__init__.py")])]
-
-
 def imports(root: str, rel: str, tree: ast.Module) -> None:
     """Every import, wherever it is written, and whether the file already handles its absence.
 
@@ -227,7 +219,7 @@ def imports(root: str, rel: str, tree: ast.Module) -> None:
                 module = node.module or ""
                 find = lambda m, level=node.level: relative_path(root, rel, level, m)  # noqa: E731
                 nested = [find(module + "." + a.name if module else a.name) for a in node.names]
-                for target in [find(module)] + packages(rel, find, module) + nested:
+                for target in heads(rel, find(module), nested) + packages(rel, find, module) + nested:
                     if target:
                         emit(by_path, rel, target)
                 continue
@@ -235,7 +227,8 @@ def imports(root: str, rel: str, tree: ast.Module) -> None:
                 continue
             path = module_path(root, node.module)
             if path:
-                for target in [path] + packages(rel, lambda m: module_path(root, m), node.module):
+                nested = [module_path(root, node.module + "." + alias.name) for alias in node.names]
+                for target in heads(rel, path, nested) + packages(rel, lambda m: module_path(root, m), node.module):
                     emit(by_path, rel, target)
             else:
                 for candidate in suffixes(node.module):
