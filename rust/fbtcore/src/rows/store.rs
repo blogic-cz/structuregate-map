@@ -382,8 +382,8 @@ fn search(db: &Connection, texts: &Texts<'_>, counts: bool, whole: bool) -> Resu
             )?;
         }
         // A HALF REPLACED WHOLE never reaches `drop_files`, so the text of a file it no longer sends stayed searchable:
-        // whatever no `files` row names goes, in ONE scan.
-        if whole {
+        // whatever no `files` row names goes, in ONE scan. A store with no `files` table yet names nothing, and loses nothing.
+        if whole && !schema::existing_columns(db, "files")?.is_empty() {
             db.execute("DELETE FROM file_text WHERE path NOT IN (SELECT path FROM files)", [])?;
         }
     }
