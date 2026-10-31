@@ -61,6 +61,9 @@ outside the map, and a method of a mixin such a class inherits (`class Walker(Mi
 (`alias` the name bound), so `mod.tool()` binds and the re-export of `tool` in mod.py counts as used. `--find` follows `imports.bind` (an alias, or a
 re-import of one, to the def), and `--reads X` matches `binds` as well as `reads`, so a read through
 `from m import X as Y` is a read of X.
+`calls.func` is the SHORT name of the def the call is written in (`inner`), `functions.qualname` the dotted
+one (`outer.inner`): two nested defs of one name in different outers share a `func`, so join a call to
+its def by `file` and the innermost `functions.line`..`end_line` holding `calls.line`, not by `func` alone.
 
 **A settings key carries its path.** `string_literals.key` is the dotted key a lookup string reads
 (`_S["server"]["host"]` is `server.host`; `"url"` in `_svc.get("url")` after `_svc = _S.get("service") or {}`
