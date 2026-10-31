@@ -248,10 +248,14 @@ internal static partial class SqlLinks
     private static Func<string, string, string, string, string, string, List<Site>> Derived(string db)
     {
         var classes = Query(db, "SELECT file, name, qualname, symbol FROM classes") ?? [];
-        return (file, cls, entity, tableArg, schemaArg, writtenSchema) =>
+        return (file, cls, entity, tableArg, schemaArg, writtenSchema) => Sites(file, cls, entity, tableArg, schemaArg, writtenSchema, []);
+
+        // A CLASS BETWEEN hands the name on: its base call passes its own constructor's parameter, so the sites are ITS
+        // derived classes', the entity under its own type parameter's name. `seen` stops a chain that comes back round.
+        List<Site> Sites(string file, string cls, string entity, string tableArg, string schemaArg, string writtenSchema, HashSet<string> seen)
         {
             var owner = classes.FirstOrDefault(c => Str(c[0]) == file && Str(c[1]) == cls);
-            if (owner is null) return [];
+            if (owner is null || !seen.Add($"{file}|{cls}")) return [];
             var ctor = $"{Str(owner[2])}.{cls}";
             var parameters = Query(db, $"SELECT qualname, name, position FROM parameters WHERE qualname = {Quote(ctor)}") ?? [];
             var assigned = Query(db, "SELECT file, cls, func, target, symbol FROM assignments WHERE kind = 'assign' "
@@ -271,7 +275,7 @@ internal static partial class SqlLinks
             var schema = schemaArg.Length > 0 ? Position(schemaArg) : -1;
             // EVERY CONSTRUCTION OF THE BASE: a derived class's base call, and a `new` of a base that is not abstract.
             var type = Str(owner[3]).Split('<')[0];
-            var calls = Query(db, "SELECT c.id, c.file, c.line, c.cls, c.func, c.type, a.position, a.const, a.const_kind FROM calls c "
+            var calls = Query(db, "SELECT c.id, c.file, c.line, c.cls, c.func, c.type, a.position, a.const, a.const_kind, a.symbol FROM calls c "
                 + $"JOIN arguments a ON a.call = c.id WHERE (c.type = {Quote(type)} OR c.type GLOB {Quote(type + "<*")}) "
                 + "ORDER BY c.rowid, a.position") ?? [];
             var open = TypeArgs(Str(owner[3]));
@@ -280,16 +284,22 @@ internal static partial class SqlLinks
             foreach (var made in calls.GroupBy(c => Str(c[0])))
             {
                 var args = made.ToDictionary(c => Num(c[6]), c => Str(c[8]) is "const" or "folded" ? Str(c[7]) : "");
-                var name = args.GetValueOrDefault(table) ?? "";
-                if (name.Length == 0) continue;
+                var symbols = made.ToDictionary(c => Num(c[6]), c => Str(c[9]));
                 var first = made.First();
                 var closed = TypeArgs(Str(first[5]));
                 var what = slot >= 0 && slot < closed.Count ? closed[slot] : entity;
-                sites.Add(new Site(Str(first[0]), Str(first[1]), Num(first[2]), Str(first[3]), Str(first[4]), what, name,
-                    schema >= 0 ? args.GetValueOrDefault(schema) ?? "" : writtenSchema));
+                var fixedSchema = schema >= 0 ? args.GetValueOrDefault(schema) ?? "" : writtenSchema;
+                var name = args.GetValueOrDefault(table) ?? "";
+                if (name.Length == 0)
+                {
+                    sites.AddRange(Sites(Str(first[1]), Str(first[3]), what, symbols.GetValueOrDefault(table) ?? "",
+                        schema >= 0 && fixedSchema.Length == 0 ? symbols.GetValueOrDefault(schema) ?? "" : "", fixedSchema, seen));
+                    continue;
+                }
+                sites.Add(new Site(Str(first[0]), Str(first[1]), Num(first[2]), Str(first[3]), Str(first[4]), what, name, fixedSchema));
             }
             return sites;
-        };
+        }
     }
 
     /// <summary>`Demo.Base&lt;Demo.Order, int&gt;` -> [`Demo.Order`, `int`]: the top-level type arguments, nested ones whole.</summary>

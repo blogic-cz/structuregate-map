@@ -111,7 +111,7 @@ no tree: [sql-statements.md](sql-statements.md).
 Two tables are DERIVED after both halves and rewritten whole each run:
 
 * **`sql_links`** joins C# to the database. `kind`: `ef_table` (a `ToTable(name, schema)` call → the table,
-  `entity` the mapped class, or the one a snapshot's `Entity("Demo.Order", b => ..)` names; a base configuration's `ToTable(tableName, schemaName)` is one row per derived class's base call, for the type it closes, #141), `ef_column` (each column → the entity property of the same name - or the one
+  `entity` the mapped class, or the one a snapshot's `Entity("Demo.Order", b => ..)` names; a base configuration's `ToTable(tableName, schemaName)` is one row per derived class's base call that spells the name, through any class between that hands it on, for the type it closes, #141), `ef_column` (each column → the entity property of the same name - or the one
   `Property(x => x.P).HasColumnName("C")` maps to it - or `no property`; on that column's own `Property` call line,
   else the `ToTable` line; `precision`, `scale`, `max_length`, `required` (1/0), `column_type`, `conversion` as the
   call's chain sets them, NULL where it sets none - EF's default, #128), `ef_trigger` (`HasTrigger`), `sql_text` (a SQL string in C# - Dapper `SqlMapper.*`,
