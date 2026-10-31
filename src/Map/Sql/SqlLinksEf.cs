@@ -80,34 +80,47 @@ internal static partial class SqlLinks
         }
 
         var fluent = FluentColumns(db);
-        const string Arg = "(SELECT a.const FROM arguments a WHERE a.call = c.id AND a.position = {0} AND a.const_kind IN ('const', 'folded'))";
-        foreach (var row in Query(db, "SELECT c.id, c.file, c.line, c.cls, c.func, c.type, " + string.Format(Arg, 0) + ", "
-            + string.Format(Arg, 1) + " FROM calls c WHERE c.symbol GLOB 'Microsoft.EntityFrameworkCore.*.ToTable*'") ?? [])
+        void Table(string call, string file, long line, string cls, string func, string entity, string written, string table)
         {
-            var entity = Generic(Str(row[5]));
-            var allowed = Allowed(ClassAllowed($"{Str(row[1])}|{Str(row[3])}"), byEntity.GetValueOrDefault(entity));
-            var schema = SqlDeep.Schema(Str(row[7]));
-            var table = Str(row[6]);
+            var allowed = Allowed(ClassAllowed($"{file}|{cls}"), byEntity.GetValueOrDefault(entity));
+            var schema = SqlDeep.Schema(written);
             List<(string Status, SqlHit? Hit, string Detail)> each = table.Length == 0 ? [("unknown", null, "the table name is not a constant")]
                 : resolver.ResolveEach(schema, table, allowed, "table", "view");
             foreach (var (status, hit, detail) in each)
             {
-                links.Add(new Link("ef_table", Str(row[1]), Num(row[2]), Str(row[0]), Str(row[3]), Str(row[4]), entity, "", "",
+                links.Add(new Link("ef_table", file, line, call, cls, func, entity, "", "",
                     hit?.Database ?? "", schema, table, "", hit?.Id ?? "", "", status, detail));
                 if (hit is null) continue;
                 foreach (var (column, id) in columns.GetValueOrDefault(hit.Id) ?? [])
                 {
                     // A COLUMN THE MAPPING NAMES (#128) is its `Property` call's line and property, with what the call's chain sets.
-                    var said = (fluent.GetValueOrDefault($"{Str(row[1])}|{Str(row[3])}|{Str(row[4])}|{entity}") ?? fluent.GetValueOrDefault(entity))?.GetValueOrDefault(column);
+                    var said = (fluent.GetValueOrDefault($"{file}|{cls}|{func}|{entity}") ?? fluent.GetValueOrDefault(entity))?.GetValueOrDefault(column);
                     var member = Member(entity, said?.Property ?? column);
-                    links.Add(new Link("ef_column", Str(row[1]), said?.Line ?? Num(row[2]), Str(row[0]), Str(row[3]), Str(row[4]), entity, member, "",
+                    links.Add(new Link("ef_column", file, said?.Line ?? line, call, cls, func, entity, member, "",
                         hit.Database, schema, table, column, hit.Id, id, member.Length > 0 ? "bound" : "no property",
                         member.Length > 0 ? "" : "no property of that name on the entity or its bases - a column EF does not map") { Facets = said });
                 }
             }
         }
+        var derived = Derived(db);
+        var spelled = Named(db);
+        const string Arg = "(SELECT a.{1} FROM arguments a WHERE a.call = c.id AND a.position = {0}{2})";
+        string Folded(int position) => string.Format(Arg, position, "const", " AND a.const_kind IN ('const', 'folded')");
+        string Symbol(int position) => string.Format(Arg, position, "symbol", "");
+        foreach (var row in Query(db, "SELECT c.id, c.file, c.line, c.cls, c.func, c.type, " + Folded(0) + ", " + Folded(1) + ", "
+            + Symbol(0) + ", " + Symbol(1) + " FROM calls c WHERE c.symbol GLOB 'Microsoft.EntityFrameworkCore.*.ToTable*'") ?? [])
+        {
+            // A SNAPSHOT NAMES ITS ENTITY IN A STRING (#140): `b.ToTable(..)` inside `modelBuilder.Entity("Demo.Order", b => ..)`.
+            var entity = Generic(Str(row[5])) is { Length: > 0 } generic ? generic : spelled(Str(row[1]), Num(row[2]));
+            // A NAME THE BASE IS HANDED (#141): one link per class that constructs it with constants, none at the base.
+            var through = Str(row[6]).Length == 0 ? derived(Str(row[1]), Str(row[3]), entity, Str(row[8]), Str(row[9]), Str(row[7])) : [];
+            foreach (var site in through)
+                Table(site.Call, site.File, site.Line, site.Cls, site.Func, site.Entity, site.Schema, site.Table);
+            if (through.Count == 0)
+                Table(Str(row[0]), Str(row[1]), Num(row[2]), Str(row[3]), Str(row[4]), entity, Str(row[7]), Str(row[6]));
+        }
         var dynamic = Dynamic(db);
-        foreach (var row in Query(db, "SELECT c.id, c.file, c.line, c.cls, c.func, " + string.Format(Arg, 0)
+        foreach (var row in Query(db, "SELECT c.id, c.file, c.line, c.cls, c.func, " + Folded(0)
             + " FROM calls c WHERE c.symbol GLOB 'Microsoft.EntityFrameworkCore.*.HasTrigger*'") ?? [])
         {
             var allowed = ClassAllowed($"{Str(row[1])}|{Str(row[3])}");
@@ -207,6 +220,98 @@ internal static partial class SqlLinks
             links.Add(new Link("sql_ref", Str(row[1]), Num(row[2]), Str(row[0]), "", "", "", Str(row[3]), Str(row[4]),
                 hit?.Database ?? scope, Str(row[5]), Str(row[6]), Str(row[7]), hit?.Id ?? "", column, status, detail));
         }
+    }
+
+    /// <summary>
+    /// The entity an EF MODEL SNAPSHOT spells as a string - `modelBuilder.Entity("Demo.Order", b => { b.ToTable("Orders"); })` -
+    /// for a call at a file and line: the innermost such `Entity` call holding it, "" when none does.
+    /// </summary>
+    private static Func<string, long, string> Named(string db)
+    {
+        var spans = (Query(db, "SELECT c.file, c.line, c.end_line, a.const FROM calls c JOIN arguments a ON a.call = c.id AND a.position = 0 "
+            + "WHERE c.symbol GLOB 'Microsoft.EntityFrameworkCore.ModelBuilder.Entity*' AND a.const_kind IN ('const', 'folded')") ?? [])
+            .GroupBy(r => Str(r[0])).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+        return (file, line) => spans.GetValueOrDefault(file)?.Where(r => Num(r[1]) <= line && line <= Num(r[2]))
+            .OrderByDescending(r => Num(r[1])).Select(r => Str(r[3])).FirstOrDefault() ?? "";
+    }
+
+    /// <summary>A derived class's base call that fixes what a base configuration's `ToTable` reads.</summary>
+    private sealed record Site(string Call, string File, long Line, string Cls, string Func, string Entity, string Table, string Schema);
+
+    /// <summary>
+    /// A `ToTable(tableName, schemaName)` IN A BASE CONFIGURATION reads its own constructor's parameters - a primary
+    /// constructor's, or a field its constructor sets from one - and each derived class fixes them in its base call
+    /// (`class OrderConfig() : ConfigBase&lt;Order&gt;(Tables.Orders, Schemas.Sales)`, or `: base(...)`), closing the entity
+    /// type parameter as it does (#141). One site per such call whose table argument is a constant; none when the
+    /// base reads anything else, and then the base's own `unknown` link stands.
+    /// </summary>
+    private static Func<string, string, string, string, string, string, List<Site>> Derived(string db)
+    {
+        var classes = Query(db, "SELECT file, name, qualname, symbol FROM classes") ?? [];
+        return (file, cls, entity, tableArg, schemaArg, writtenSchema) =>
+        {
+            var owner = classes.FirstOrDefault(c => Str(c[0]) == file && Str(c[1]) == cls);
+            if (owner is null) return [];
+            var ctor = $"{Str(owner[2])}.{cls}";
+            var parameters = Query(db, $"SELECT qualname, name, position FROM parameters WHERE qualname = {Quote(ctor)}") ?? [];
+            var assigned = Query(db, "SELECT file, cls, func, target, symbol FROM assignments WHERE kind = 'assign' "
+                + $"AND file = {Quote(file)} AND cls = {Quote(cls)} AND func = {Quote(cls)}") ?? [];
+            // The constructor parameter an argument reads: itself, or the one its field was set from in a constructor.
+            long Position(string symbol)
+            {
+                var name = symbol.Split('.')[^1];
+                var from = symbol.Contains('.')
+                    ? assigned.Where(a => Str(a[0]) == file && Str(a[1]) == cls && Str(a[2]) == cls
+                        && (Str(a[3]) == name || Str(a[3]) == "this." + name)).Select(a => Str(a[4])).FirstOrDefault() ?? ""
+                    : name;
+                return parameters.FirstOrDefault(p => Str(p[0]) == ctor && Str(p[1]) == from) is { } found ? Num(found[2]) : -1;
+            }
+            var table = Position(tableArg);
+            if (table < 0) return [];
+            var schema = schemaArg.Length > 0 ? Position(schemaArg) : -1;
+            // EVERY CONSTRUCTION OF THE BASE: a derived class's base call, and a `new` of a base that is not abstract.
+            var type = Str(owner[3]).Split('<')[0];
+            var calls = Query(db, "SELECT c.id, c.file, c.line, c.cls, c.func, c.type, a.position, a.const, a.const_kind FROM calls c "
+                + $"JOIN arguments a ON a.call = c.id WHERE (c.type = {Quote(type)} OR c.type GLOB {Quote(type + "<*")}) "
+                + "ORDER BY c.rowid, a.position") ?? [];
+            var open = TypeArgs(Str(owner[3]));
+            var slot = open.IndexOf(entity);
+            var sites = new List<Site>();
+            foreach (var made in calls.GroupBy(c => Str(c[0])))
+            {
+                var args = made.ToDictionary(c => Num(c[6]), c => Str(c[8]) is "const" or "folded" ? Str(c[7]) : "");
+                var name = args.GetValueOrDefault(table) ?? "";
+                if (name.Length == 0) continue;
+                var first = made.First();
+                var closed = TypeArgs(Str(first[5]));
+                var what = slot >= 0 && slot < closed.Count ? closed[slot] : entity;
+                sites.Add(new Site(Str(first[0]), Str(first[1]), Num(first[2]), Str(first[3]), Str(first[4]), what, name,
+                    schema >= 0 ? args.GetValueOrDefault(schema) ?? "" : writtenSchema));
+            }
+            return sites;
+        };
+    }
+
+    /// <summary>`Demo.Base&lt;Demo.Order, int&gt;` -> [`Demo.Order`, `int`]: the top-level type arguments, nested ones whole.</summary>
+    private static List<string> TypeArgs(string type)
+    {
+        var open = type.IndexOf('<');
+        if (open < 0 || !type.EndsWith('>')) return [];
+        var parts = new List<string>();
+        var unclosed = 0;
+        var start = open + 1;
+        for (var i = start; i < type.Length - 1; i++)
+        {
+            if (type[i] == '<') unclosed++;
+            else if (type[i] == '>') unclosed--;
+            else if (type[i] == ',' && unclosed == 0)
+            {
+                parts.Add(type[start..i].Trim());
+                start = i + 1;
+            }
+        }
+        parts.Add(type[start..^1].Trim());
+        return parts;
     }
 
     /// <summary>EVERY database a site may reach, from both sources: a mapping class without an attribute

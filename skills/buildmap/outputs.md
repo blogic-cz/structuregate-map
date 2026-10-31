@@ -43,6 +43,10 @@ A match is still COMPILED, so every other file binds against it; it gets a `file
 and no rows of its own. Repeatable; `**` crosses folders, `*` and `?` stay in one, case is ignored. The
 exclusion is folded into the file's sha, so changing a pattern re-reads exactly the files it matches.
 
+`--map-include-generated <glob>` is the other way round: a GENERATED C# file it matches is walked all the same - an EF
+model snapshot is the one file that lists every table of its context (`--map-include-generated "**/*ModelSnapshot.cs"`,
+whose `ToTable` calls then link, #140). It stays `generated = 1`; repeatable, the same glob, folded into the sha the same way.
+
 ## What a refresh says about itself
 
 Every run prints its steps - `the deep map took 60.0 s: hash the tree 0.2 s, typescript 20.0 s, csharp

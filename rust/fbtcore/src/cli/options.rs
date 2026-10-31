@@ -54,6 +54,8 @@ pub struct Options {
     pub map_atlas_dir: Option<String>,
     /// `--map-exclude`, repeatable: C# files the deep map lists and never walks.
     pub map_exclude: Vec<String>,
+    /// `--map-include-generated`, repeatable: generated C# files the deep map walks all the same (#140).
+    pub map_include_generated: Vec<String>,
     /// `--map-reread <halves>`: the deep halves that read every file again this run, whatever they recorded.
     pub map_reread: Vec<String>,
     pub map: bool,
@@ -197,6 +199,7 @@ pub fn parse(args: &[String]) -> Result<Parsed, String> {
             "--map-no-text" => o.map_no_text = true,
             "--map-atlas" => o.map_atlas_dir = Some(full(&next()?)),
             "--map-exclude" => o.map_exclude.push(next()?),
+            "--map-include-generated" => o.map_include_generated.push(next()?),
             "--map-reread" => o.map_reread.extend(list(&next()?).into_iter().map(|h| h.to_lowercase())),
             "--tracked" => o.tracked = true,
             "--include-untracked" => {

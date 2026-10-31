@@ -22,6 +22,8 @@ internal static class DeepMap
     private static Dictionary<string, int> counters = new(StringComparer.Ordinal);
     /// <summary>`--map-exclude`'s matches, decided by rust: listed and never walked.</summary>
     private static HashSet<string> excluded = new(StringComparer.Ordinal);
+    /// <summary>`--map-include-generated`'s matches, decided by rust: a generated one among them is walked all the same.</summary>
+    private static HashSet<string> walked = new(StringComparer.Ordinal);
     /// <summary>Every mapped file by its absolute path - as its tree is named - to its mapped path (`file_refs`).</summary>
     private static Dictionary<string, string> byPath = new(StringComparer.OrdinalIgnoreCase);
 
@@ -35,6 +37,9 @@ internal static class DeepMap
         foreach (var file in input.GetProperty("shas").EnumerateObject()) shas[file.Name] = file.Value.GetString()!;
         excluded = input.TryGetProperty("excluded", out var listed)
             ? [.. listed.EnumerateArray().Select(r => r.GetString()!)]
+            : new HashSet<string>(StringComparer.Ordinal);
+        walked = input.TryGetProperty("generated", out var named)
+            ? [.. named.EnumerateArray().Select(r => r.GetString()!)]
             : new HashSet<string>(StringComparer.Ordinal);
         if (input.GetProperty("counters").ValueKind == JsonValueKind.Object)
         {
@@ -117,7 +122,7 @@ internal static class DeepMap
                     throw new NullReferenceException("thrown by STRUCTUREGATE_TEST_THROW_ON");
                 long timed = 0;
                 CsMetrics.Start(ref timed);
-                CsRows.Read(rows, rel, text, shas[rel], ready.Tree, ready.Model, ready.Project, ready.Compiled, ready.Razor, excluded.Contains(rel), ready.Declared, byPath);
+                CsRows.Read(rows, rel, text, shas[rel], ready.Tree, ready.Model, ready.Project, ready.Compiled, ready.Razor, excluded.Contains(rel), ready.Declared, byPath, walked.Contains(rel));
                 CsMetrics.Stop("csharp: rows of a file", rel, timed);
             }
             catch (Exception e) when (e is not OutOfMemoryException)

@@ -26,11 +26,18 @@ pub(super) type Parts = BTreeMap<String, Vec<(String, String)>>;
 /// THE SHA A FILE IS RECORDED WITH: its content, its project's fingerprint, the rows version - and whether
 /// `--map-exclude` matches it. The one place it is folded, so the reasons below fold it the same way.
 pub(super) fn salted(content: &str, fingerprint: Option<&str>, version: &str, excluded: bool) -> String {
+    marked(content, fingerprint, version, excluded, false)
+}
+
+/// `salted`, and whether `--map-include-generated` matches it (#140): a generated file it names is walked, so toggling the
+/// glob re-reads exactly the files it matches - and a file it never matched keeps the sha it always had.
+pub(super) fn marked(content: &str, fingerprint: Option<&str>, version: &str, excluded: bool, walked: bool) -> String {
     let salted = match fingerprint {
         None => folded(&format!("{content}|{version}")),
         Some(fingerprint) => folded(&format!("{content}|{fingerprint}|{version}")),
     };
-    if excluded { folded(&format!("{salted}|excluded")) } else { salted }
+    let salted = if excluded { folded(&format!("{salted}|excluded")) } else { salted };
+    if walked { folded(&format!("{salted}|generated")) } else { salted }
 }
 
 /// A project's fingerprint, as its parts join into it.
@@ -44,6 +51,8 @@ pub(super) struct File {
     /// Its project's path - the key of `Parts`.
     pub project: Option<String>,
     pub excluded: bool,
+    /// `--map-include-generated` matches it.
+    pub walked: bool,
 }
 
 /// What the last run kept: the rows version and every project's parts.
@@ -104,7 +113,7 @@ impl Cause {
             Cause::Project => "whose project's inputs moved",
             Cause::New => "not recorded before",
             Cause::Version => "written by an older C# extractor",
-            Cause::Exclusion => "whose --map-exclude match moved",
+            Cause::Exclusion => "whose --map-exclude or --map-include-generated match moved",
             Cause::Rebuilt => "in a database that is rebuilt",
             Cause::Unknown => "whose content or project moved (the run before kept no fingerprints to tell which - from this run on it does)",
         }
@@ -128,11 +137,12 @@ pub(super) fn cause(file: &File, recorded: Option<&str>, rebuild: bool, before: 
             None => return Cause::Unknown,
         },
     };
-    if salted(&file.content, then.as_deref(), &before.version, file.excluded) == recorded {
+    let fold = |excluded: bool, walked: bool| marked(&file.content, then.as_deref(), &before.version, excluded, walked);
+    if fold(file.excluded, file.walked) == recorded {
         // THE CONTENT IS WHAT IT WAS: the version or the project moved under it.
         return if before.version != super::driven::CS_ROWS_VERSION { Cause::Version } else if then.is_some() { Cause::Project } else { Cause::Unknown };
     }
-    if salted(&file.content, then.as_deref(), &before.version, !file.excluded) == recorded {
+    if fold(!file.excluded, file.walked) == recorded || fold(file.excluded, !file.walked) == recorded {
         return Cause::Exclusion;
     }
     Cause::Content
@@ -148,7 +158,7 @@ fn older_version(file: &File, recorded: &str, now: &Parts) -> bool {
         },
     };
     let current: u32 = super::driven::CS_ROWS_VERSION.parse().unwrap_or(0);
-    (1..current).rev().any(|version| salted(&file.content, fingerprint.as_deref(), &version.to_string(), file.excluded) == recorded)
+    (1..current).rev().any(|version| marked(&file.content, fingerprint.as_deref(), &version.to_string(), file.excluded, file.walked) == recorded)
 }
 
 /// What the half says about its re-reads: the note, the note by project, and the facts `_meta` keeps.
@@ -236,7 +246,7 @@ mod tests {
         let mut projects = Parts::new();
         projects.insert("/t/demo.csproj".into(), parts(assets_then));
         let before = Before { version: super::super::driven::CS_ROWS_VERSION.into(), projects };
-        (before, File { content: "aaaa".into(), project: Some("/t/demo.csproj".into()), excluded: false })
+        (before, File { content: "aaaa".into(), project: Some("/t/demo.csproj".into()), excluded: false, walked: false })
     }
 
     #[test]

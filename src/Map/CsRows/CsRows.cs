@@ -55,7 +55,7 @@ internal sealed partial class CsRows : CSharpSyntaxWalker
     public static void Read(CsTables rows, string rel, string text, string sha,
         SyntaxTree? parsed = null, SemanticModel? model = null, string project = "", bool compiled = true,
         CsRazor.Output? razor = null, bool excluded = false, IReadOnlyList<Diagnostic>? declared = null,
-        IReadOnlyDictionary<string, string>? rels = null)
+        IReadOnlyDictionary<string, string>? rels = null, bool walked = false)
     {
         // MARKUP IS READ AS THE TREE THE RAZOR COMPILER WROTE FOR IT - see CsRazor. Without one there is no C#
         // to read, and parsing the markup as C# would be rows about text that is not code.
@@ -104,8 +104,9 @@ internal sealed partial class CsRows : CSharpSyntaxWalker
         // model snapshot, and the rows are not free: on a real tree, most of the
         // expression rows came from `.Designer.cs` files, and writing them was slow. The file row
         // stays, and says why it has no rows of its own — a file that simply vanished would read as a file
-        // the map never saw.
-        if (generated) return;
+        // the map never saw. A file `--map-include-generated` names is walked all the same (#140): an EF model snapshot is the
+        // one file that lists every table of its context, and it is still `generated = 1`.
+        if (generated && !walked) return;
 
         var walker = new CsRows(rows, tree, model, file) { space = space is not null ? space.Name.ToString() : "", razor = markup,
             rels = model is null ? null : rels, unneeded = markup ? null : unneeded };
@@ -326,6 +327,9 @@ internal sealed partial class CsRows : CSharpSyntaxWalker
             ("doc", CsFacts.Doc(node)));
         Attributes(node.AttributeLists, name, kind);
         stack.Add(("class", name));
+        // A PRIMARY CONSTRUCTOR'S PARAMETERS are the constructor's, as a declared one's are (`Demo.ConfigBase.ConfigBase`):
+        // a base that reads `tableName` takes it from the derived class's base call by its position (#141).
+        if (node is TypeDeclarationSyntax { ParameterList: { } primary }) Parameters(primary, name);
         descend();
         stack.RemoveAt(stack.Count - 1);
     }

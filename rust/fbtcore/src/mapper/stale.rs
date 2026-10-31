@@ -12,6 +12,7 @@
 //! Pure, so the rule is tested without an exe to touch: the black-box harness runs the dll under
 //! `dotnet.exe`, whose mtime is nobody's publish.
 
+use std::path::Path;
 use std::time::SystemTime;
 
 /// Why the map is not current. In the order they are checked, so the message names the first reason.
@@ -53,6 +54,32 @@ pub fn why(
 /// leaves the other two rules deciding, as before.
 pub fn exe_modified() -> Option<SystemTime> {
     std::env::current_exe().ok().and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok())
+}
+
+/// WHICH FILES A MAP COVERS, as one hash written FIRST in the map, so `--map-if-stale` reads it without
+/// parsing the rest. A MOVE KEEPS A FILE'S MTIME and a deletion leaves nothing to be newer, so the set of
+/// files is what is compared.
+pub(super) fn inventory(walked: &[String]) -> String {
+    let mut sorted = walked.to_vec();
+    sorted.sort();
+    blake3::hash(sorted.join("\n").as_bytes()).to_hex()[..16].to_string()
+}
+
+/// What the map at `path` recorded - its first property, read off the head of the file - or "".
+pub(super) fn recorded(path: &Path) -> String {
+    // THE HEAD ONLY: the map runs to megabytes, and its first property is all this asks.
+    let mut bytes = Vec::with_capacity(4096);
+    let Ok(file) = std::fs::File::open(path) else { return String::new() };
+    if std::io::Read::read_to_end(&mut std::io::Read::take(file, 4096), &mut bytes).is_err() {
+        return String::new();
+    }
+    let head = String::from_utf8_lossy(&bytes).into_owned();
+    let rest = head.trim_start();
+    let Some(rest) = rest.strip_prefix('{') else { return String::new() };
+    let Some(rest) = rest.trim_start().strip_prefix("\"inventory\"") else { return String::new() };
+    let Some(rest) = rest.trim_start().strip_prefix(':') else { return String::new() };
+    let Some(rest) = rest.trim_start().strip_prefix('"') else { return String::new() };
+    rest.find('"').map(|end| rest[..end].to_string()).unwrap_or_default()
 }
 
 #[cfg(test)]
