@@ -48,6 +48,8 @@ jobs:
       # Deploy off: a runner has none of the consumers. The gate's own check is skipped because there is no
       # published gate in buildtools/ yet to run it - this publish is that gate.
       # THE TAG IS THE GATE'S VERSION (#130): compiled in (`rows/keys/source.rs`) and written to every map's `_meta.gate_version`.
+      # NO VULNERABILITY AUDIT HERE: under TreatWarningsAsErrors a feed that cannot be reached for the audit data (NU1900)
+      # failed a release whose code ci.yml had already built - with the audit on - from the same commit.
       - name: publish
         env:
           STRUCTUREGATE_VERSION: ${{ github.ref_name }}
@@ -55,7 +57,7 @@ jobs:
           New-Item -ItemType Directory -Force buildtools | Out-Null
           Copy-Item StructureGate.targets buildtools/
           dotnet publish src/StructureGate.csproj -c Release -r ${{ matrix.rid }} -p:PublishAot=true `
-            -p:SkipStructureGate=true -p:SkipTests=true -p:SkipGateDeploy=true
+            -p:SkipStructureGate=true -p:SkipTests=true -p:SkipGateDeploy=true -p:NuGetAudit=false
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item out/${{ matrix.rid }}/publish/${{ matrix.exe }}, StructureGate.targets dist/
