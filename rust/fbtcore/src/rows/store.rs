@@ -342,7 +342,7 @@ impl Texts<'_> {
     }
 }
 
-fn search(db: &Connection, texts: &Texts<'_>, counts: bool) -> Result<i64> {
+fn search(db: &Connection, texts: &Texts<'_>, counts: bool, whole: bool) -> Result<i64> {
     // `--map-no-text`: NO TABLE, NO INDEX, NOTHING READ OFF THE DISK. The count is 0 and not -1, which says "no FTS5 here".
     if !super::text::effective(db) {
         return Ok(0);
@@ -380,6 +380,11 @@ fn search(db: &Connection, texts: &Texts<'_>, counts: bool) -> Result<i64> {
                 &format!("DELETE FROM file_text WHERE path IN ({marks})"),
                 params.as_slice(),
             )?;
+        }
+        // A HALF REPLACED WHOLE never reaches `drop_files`, so the text of a file it no longer sends stayed searchable:
+        // whatever no `files` row names goes, in ONE scan.
+        if whole {
+            db.execute("DELETE FROM file_text WHERE path NOT IN (SELECT path FROM files)", [])?;
         }
     }
     {
@@ -516,7 +521,7 @@ pub fn write(path: &Path, req: &WriteRequest<'_>) -> Result<Applied> {
     }
     lap("insert", &mut steps);
 
-    let found = search(&db, req.texts, req.counts)?;
+    let found = search(&db, req.texts, req.counts, req.half.is_some())?;
     lap("file text", &mut steps);
 
     let mut written = BTreeMap::new();
