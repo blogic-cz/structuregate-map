@@ -454,8 +454,8 @@ fn handed(hashes: &hashes::Hashes, files: &[(String, String)]) -> String {
 #[allow(clippy::too_many_arguments)]
 fn key(hashes: &hashes::Hashes, set: &crate::embedded::Set, host: &str, arguments: &[String], given: &[(String, String)], outside: &str, under: Option<&Path>) -> Option<String> {
     let scoped = under.and_then(|dir| hashes.under(dir)).map(|files| format!("under:{files}"));
-    // NO WORKSPACE KNOWN: what the half reads (`Hashes::scoped`), never the whole tree - see there.
-    let read = scoped.is_none().then(|| hashes.scoped(given, project_file)).flatten();
+    // NO WORKSPACE KNOWN: what the half reads (`Hashes::scoped`), every path only for the Angular half - see there.
+    let read = scoped.is_none().then(|| hashes.scoped(given, project_file, set.tag == crate::embedded::TSROWS.tag)).flatten();
     let tree = match (&scoped, &read) {
         (Some(scoped), _) => scoped.as_str(),
         (None, Some(read)) => read.as_str(),

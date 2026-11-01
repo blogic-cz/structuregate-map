@@ -150,10 +150,13 @@ THE PASSES OVER THE FINISHED ROWS (SQL links, seed walk, row search, atlas) ARE 
 config, the optional outputs asked for and the running build; their notes and table counts are replayed from `_meta`
 so a skipped run prints the same. The file list is in the key for a DELETE - dropping rows hands out no new id.
 
-A PAYLOAD HALF WHOSE INPUTS DID NOT MOVE IS NOT LAUNCHED (`payload.rs`): its key - every root's tree-map hash, the
-file list it is given, its scripts, `host --version`, its arguments, the borrowed `typescript` - is stored in `_meta`
-as `skip:<lang>`, and only after a run that stored cleanly and added no error, so a file that does not parse is
-reported on every run.
+A PAYLOAD HALF WHOSE INPUTS DID NOT MOVE IS NOT LAUNCHED (`payload.rs`): its key - the files it is given (list and
+content) and the project files (`Hashes::scoped`; every PATH of the tree only for the Angular half, whose workspace's
+templates and stylesheets are inputs - python and the plain TypeScript half re-read by their given files alone), its
+scripts, `host --version`, its arguments, the borrowed `typescript` - is stored in `_meta` as `skip:<lang>`, and only
+after a run that stored cleanly and added no error, so a file that does not parse is reported on every run. The recorded
+key also holds the half's own `files` rows (path, sha: `payload::held`), and a database of another `SCHEMA_VERSION` has no
+key: rows that moved under the key start the half.
 
 **BUMP `CS_ROWS_VERSION` (`rust/fbtcore/src/mapper/deep/driven.rs`) WITH EVERY CHANGE TO WHAT THE C# EXTRACTOR WRITES** - it is folded into each file's
 sha, like PyRows' `ROWS_VERSION`. Without a bump an upgraded gate keeps the old gate's rows wherever the source and

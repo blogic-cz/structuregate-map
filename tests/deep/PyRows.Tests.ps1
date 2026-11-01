@@ -275,6 +275,22 @@ Test-Case 'incremental: a tree where nothing moved does not start python at all'
     Assert-Equal (Get-Scalar $tree "SELECT count(*) FROM calls WHERE callee = 'helper.run'") '3' 'the rows are still there'
 }
 
+# A FILE THE HALF IS NOT GIVEN, added anywhere, starts no python (`Hashes::scoped`, `every_path`): the half re-reads only by its
+# given files, so it was launched to learn nothing. A new `.py` is given, and is read.
+Test-Case 'incremental: a file the python half is not given does not start it, a new module does' {
+    $tree = New-IncTree
+    Assert-Exit (Invoke-Deep $tree) 0
+    [System.IO.File]::WriteAllText((Join-Path $tree 'notes.txt'), 'n')
+    $other = Invoke-Deep $tree
+    Assert-Exit $other 0
+    Assert-Line $other 'the python half had nothing to do'
+    [System.IO.File]::WriteAllText((Join-Path $tree 'c.py'), 'def three():' + [char]10 + '    return other.thing(3)' + [char]10)
+    $added = Invoke-Deep $tree
+    Assert-Exit $added 0
+    Assert-NoLine $added 'the python half had nothing to do'
+    Assert-Equal (Get-Scalar $tree "SELECT count(*) FROM calls WHERE callee = 'other.thing'") '1' 'the new module landed'
+}
+
 Test-Case 'incremental: an edit after a skipped run is read' {
     $tree = New-IncTree
     Assert-Exit (Invoke-Deep $tree) 0

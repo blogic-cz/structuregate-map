@@ -32,9 +32,13 @@ pub struct Half<'a> {
     pub key: Option<String>,
 }
 
-/// The key recorded after this half's last clean run.
+/// The key recorded after this half's last clean run - none in a database of another SCHEMA: its rows are rebuilt by the
+/// half, which a matching key would never start. A key once covered every path, and the tree moving was what started it.
 pub(super) fn recorded(db: &str, lang: &str) -> Option<String> {
     let conn = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    if crate::rows::meta::get(&conn, "schema").as_deref() != Some(crate::rows::store::SCHEMA_VERSION) {
+        return None;
+    }
     crate::rows::meta::get(&conn, &format!("skip:{lang}"))
 }
 
@@ -50,6 +54,22 @@ fn recorded_key(db: &str, lang: &str) -> Option<(String, Vec<String>)> {
 /// A note that says a half stored nothing, and why - kept with the key and said in the map's summary.
 pub fn stored_nothing(note: &str) -> bool {
     note.contains(" half did not run: ") && !note.contains("no Angular workspace")
+}
+
+/// THE KEY AS RECORDED: what the half reads, and the rows it holds - every `files` row of its `lang`, path and sha. A key over
+/// the inputs alone kept a half from starting over a database whose rows had moved under it (another writer's, an older
+/// extractor's): the tree moving was what used to start it.
+fn held(db: &str, lang: &str, key: &str) -> String {
+    let rows = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok().and_then(|conn| {
+        let mut stmt = conn.prepare("SELECT path, sha FROM files WHERE lang = ?1 ORDER BY path").ok()?;
+        let mut hash = blake3::Hasher::new();
+        let rows = stmt.query_map([lang], |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?))).ok()?;
+        for (path, sha) in rows.flatten() {
+            hash.update(format!("{}\t{}\n", path.unwrap_or_default(), sha.unwrap_or_default()).as_bytes());
+        }
+        Some(hash.finalize().to_hex()[..16].to_string())
+    });
+    format!("{key}|{}", rows.unwrap_or_default())
 }
 
 pub(super) fn record(db: &str, lang: &str, key: &str) {
@@ -114,7 +134,7 @@ pub fn early(half: &Half, files: &[(String, String)], db: &str, root: &str, key:
     let beside: Vec<(String, String)> = half.beside.iter().map(|(name, body)| (name.to_string(), body.clone())).collect();
     let thread = std::thread::spawn(move || {
         let key = key();
-        if key.is_some() && recorded_key(&db, &lang).map(|(was, _)| was) == key {
+        if key.as_deref().is_some_and(|k| recorded_key(&db, &lang).is_some_and(|(was, _)| was == held(&db, &lang, k))) {
             return Started { key, ran: None };
         }
         let Ok(state) = calls::state(Path::new(&db), &lang, false) else {
@@ -146,7 +166,7 @@ pub fn run(into: &mut Collector, half: &Half, files: &[(String, String)], db: &s
     // NOTHING THIS HALF READS HAS MOVED: its rows already say what a run would write, so no host is started.
     if let Some(key) = &half.key
         && let Some((was, why)) = recorded_key(db, half.lang)
-        && was == *key
+        && was == held(db, half.lang, key)
     {
         into.notes.push(format!("{} had nothing to do: no file under its roots moved since its rows were written", half.named));
         into.notes.extend(why);
@@ -206,7 +226,7 @@ pub fn run(into: &mut Collector, half: &Half, files: &[(String, String)], db: &s
         && let Some(key) = &half.key
     {
         let why: String = into.notes[notes_before..].iter().filter(|n| stored_nothing(n)).map(|n| format!("\n{}", n.replace('\n', " "))).collect();
-        record(db, half.lang, &format!("{key}{why}"));
+        record(db, half.lang, &format!("{}{why}", held(db, half.lang, key)));
     }
 }
 

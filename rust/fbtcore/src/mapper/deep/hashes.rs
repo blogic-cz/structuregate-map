@@ -94,7 +94,11 @@ impl Hashes {
     /// `angular.json` among them - still moves it), the CONTENT of the files the half is given, and the content of
     /// every file `also` names (the project files). Keyed by the whole tree, a `.cs` edit started node twice to
     /// hear "unchanged" on every turn. None when a root or a given file is not in a snapshot.
-    pub fn scoped(&self, given: &[(String, String)], also: fn(&str) -> bool) -> Option<String> {
+    ///
+    /// `every_path` false leaves the paths out but the project files: a half that re-reads only by its GIVEN files (python's
+    /// `PyDeps.rebound`, the plain TypeScript half's `rebound`, both over the given set) started its host for any file
+    /// added anywhere, to re-read nothing. The given LIST is in the caller's key.
+    pub fn scoped(&self, given: &[(String, String)], also: fn(&str) -> bool, every_path: bool) -> Option<String> {
         self.tree.as_ref()?;
         let mut hasher = blake3::Hasher::new();
         let mut paths: Vec<(&str, &str, &str)> = self.roots.iter()
@@ -103,7 +107,7 @@ impl Hashes {
         paths.sort();
         // `.fbt/` IS THIS TOOL'S OWN, written by the first run: in the set, the second run read as a changed tree and
         // started node to hear "unchanged".
-        for (root, rel, hash) in paths.into_iter().filter(|(_, rel, _)| !rel.starts_with(".fbt/")) {
+        for (root, rel, hash) in paths.into_iter().filter(|(_, rel, _)| !rel.starts_with(".fbt/") && (every_path || also(rel))) {
             hasher.update(root.as_bytes()).update(rel.as_bytes()).update(b"\t");
             if also(rel) {
                 hasher.update(hash.as_bytes());
