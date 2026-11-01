@@ -29,6 +29,7 @@ from PyAst import (IMPORTERS, NEWLINE, block_span, char_column, dotted, heads, l
 from PyBind import Binder, Tree, declares, exists_exact, module_path, relative_path  # noqa: E402
 from PyLaunch import entry_spec, launched  # noqa: E402
 from PyInputs import options  # noqa: E402
+import PyDeps  # noqa: E402
 
 # A body this short is not a duplication worth reporting: two one-line wrappers returning the same attribute
 # are alike by coincidence. A repeated body starts carrying a DECISION someone must remember to change in
@@ -544,7 +545,16 @@ def main() -> int:
         return 0
 
     for rel, abs_path in files:
-        read(root, rel, abs_path)
+        # EVERY PATH THE FILE'S ANSWER WAS BOUND THROUGH (`MAP-TRIED`, `PyDeps`): a path added or gone among them is the only
+        # path change that can move it, and the caller asks it again then - not on every file added anywhere (`kept.rs`).
+        PyDeps.CONSULTED.append(set())
+        try:
+            read(root, rel, abs_path)
+        finally:
+            seen = PyDeps.CONSULTED.pop()
+        tried = sorted(k if k.startswith(PyDeps.ANY) else os.path.relpath(k, root).replace(os.sep, "/") for k in seen)
+        if tried:
+            emit("MAP-TRIED", rel, "\t".join(tried))
     # AFTER every file: a launcher names a file this half was given, never one it was not.
     notes = []
     # ONE ROOT PER RUN HERE, so the tree is that root and nothing else - the join across roots is the
