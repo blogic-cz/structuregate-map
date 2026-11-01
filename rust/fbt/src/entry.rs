@@ -28,8 +28,7 @@ pub type Hash = [u8; 32];
 pub struct Entry {
     /// Path relative to the scan root, `/` separated, original case.
     pub path: String,
-    /// `path` lowercased. All comparisons and joins use this, because Windows
-    /// paths are case insensitive.
+    /// `path` as `key_of` folds it. All comparisons and joins use this.
     pub path_key: String,
     /// `path_key` of the containing directory. `None` for the root itself.
     pub parent_key: Option<String>,
@@ -67,7 +66,13 @@ pub fn normalize(path: &str) -> String {
 
 /// Comparison key for a normalised path.
 pub fn key_of(path: &str) -> String {
-    path.to_lowercase()
+    fold(path)
+}
+
+/// A path's case as the platform compares it: lowercased on Windows, whose paths are case insensitive, and kept as
+/// it is elsewhere - where `Axa/` and `AXA/` are two folders, and one key for both failed every snapshot's store.
+pub fn fold(text: &str) -> String {
+    if cfg!(windows) { text.to_lowercase() } else { text.to_string() }
 }
 
 /// Parent of a node, as a key.

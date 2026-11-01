@@ -3,6 +3,7 @@
     names the files read from disk, what they held and every entry the snapshot names. The first run reads every file,
     a large one `--ext` never maps included; after a one-file edit only that file is read again, so the large one costs
     nothing while its size and mtime stay put.
+    Folders whose names differ only in case keep the snapshot off Windows.
     Its helpers are its own - `-Only DeepHashRead` runs this suite alone.
 #>
 
@@ -18,6 +19,26 @@ Test-Case 'deephashread: the timing note says what the hash read, and an edit re
     Assert-Exit $first 0
     Assert-Line $first '(read 3 file(s), 3.0 MB, of '
     [System.IO.File]::AppendAllText((Join-Path $tree 'src/alpha.rs'), "// edited`n")
+    $edited = Invoke-Gate --root $tree --ext .rs --map-sqlite $db
+    Assert-Exit $edited 0
+    Assert-Line $edited '(read 1 file(s), 38 B, of '
+}
+
+# TWO FOLDERS WHOSE NAMES DIFFER ONLY IN CASE (`fbt::entry::fold`): off Windows they are two, and one key for both failed the
+# snapshot's store - every lookup missed and every half read every file on every run, said only as `of 0 entries`. Windows
+# cannot hold both, so the case has nothing to ask there.
+Test-Case 'deephashread: folders that differ only in case keep the snapshot, and an edit reads one file' {
+    if ($IsWindows) { return }
+    $tree = Use-Tree @{
+        'src/Axa/provider.rs' = "pub fn provider() -> u32 { 1 }`n"
+        'src/AXA/utils.rs' = "pub fn utils() -> u32 { 2 }`n"
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    $first = Invoke-Gate --root $tree --ext .rs --map-sqlite $db
+    Assert-Exit $first 0
+    Assert-NoLine $first 'could not snapshot'
+    Assert-Line $first '(read 2 file(s), '
+    [System.IO.File]::AppendAllText((Join-Path $tree 'src/AXA/utils.rs'), "// edited`n")
     $edited = Invoke-Gate --root $tree --ext .rs --map-sqlite $db
     Assert-Exit $edited 0
     Assert-Line $edited '(read 1 file(s), 38 B, of '

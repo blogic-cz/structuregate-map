@@ -89,9 +89,8 @@ fn relative_to(root_label: &str, target: &Path) -> Option<String> {
         .trim_start_matches("\\\\?\\")
         .replace('\\', "/");
     let prefix = format!("{}/", root_label.trim_end_matches('/'));
-    let rest = abs
-        .to_lowercase()
-        .strip_prefix(&prefix.to_lowercase())?
+    let rest = crate::entry::fold(&abs)
+        .strip_prefix(&crate::entry::fold(&prefix))?
         .to_string();
     let start = abs.len() - rest.len();
     let rel = abs[start..].to_string();
@@ -304,8 +303,11 @@ impl Engine {
             None => (None, None),
         };
         let volume = self.volume_label();
+        // ONE TRANSACTION: a snapshot row committed before its entries failed stayed behind naming nothing, and the
+        // next run compared against it - every file new, every run.
+        let tx = self.conn.transaction()?;
         let id = db::insert_snapshot(
-            &self.conn,
+            &tx,
             &self.root_label,
             created_ns,
             usn,
@@ -313,8 +315,9 @@ impl Engine {
             volume.as_deref(),
             usn_chain,
         )?;
-        db::insert_entries(&mut self.conn, id, entries)?;
-        db::finish_snapshot(&self.conn, id, entries.len() as i64, root_hash)?;
+        db::insert_entries(&tx, id, entries)?;
+        db::finish_snapshot(&tx, id, entries.len() as i64, root_hash)?;
+        tx.commit()?;
         Ok(id)
     }
 

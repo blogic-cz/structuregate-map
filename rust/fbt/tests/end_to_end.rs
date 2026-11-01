@@ -353,3 +353,24 @@ fn an_unchanged_tree_is_not_written_again_and_old_snapshots_go() {
     }
     assert_eq!(held(&tree).0, 2, "only the newest snapshots are kept");
 }
+
+/// TWO FOLDERS WHOSE NAMES DIFFER ONLY IN CASE are two folders off Windows. One key for both failed the store on a
+/// UNIQUE constraint, and every run after compared against a snapshot that named nothing.
+#[cfg(not(windows))]
+#[test]
+fn folders_that_differ_only_in_case_are_two_entries_and_an_edit_reads_one_file() {
+    let t = Tree::new("case");
+    t.write("src/Axa/Provider.cs", "class Provider {}");
+    t.write("src/AXA/Utils.cs", "class Utils {}");
+
+    let mut e = t.engine();
+    let first = update(&mut e);
+    assert!(first.snapshot_id.is_some());
+    assert_eq!(first.read_from_disk, 2);
+
+    t.write("src/AXA/Utils.cs", "class Utils { }");
+    let second = update(&mut e);
+    assert_eq!(by_path(&second).get("src/AXA/Utils.cs"), Some(&ChangeKind::Modified));
+    assert_eq!(second.changes.len(), 1, "{:?}", second.changes);
+    assert_eq!(second.read_from_disk, 1);
+}

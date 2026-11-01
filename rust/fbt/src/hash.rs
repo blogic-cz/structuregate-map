@@ -28,7 +28,7 @@ pub fn hash_file(path: &Path, size: u64) -> std::io::Result<Hash> {
 pub fn hash_link(target: &str) -> Hash {
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"link:");
-    hasher.update(target.to_lowercase().as_bytes());
+    hasher.update(crate::entry::fold(target).as_bytes());
     *hasher.finalize().as_bytes()
 }
 
@@ -79,7 +79,7 @@ pub fn merkle_rollup(entries: &mut [Entry]) -> Option<Hash> {
         hasher.update(b"dir:");
         for ki in kids {
             let child = &entries[ki];
-            hasher.update(child.name().to_lowercase().as_bytes());
+            hasher.update(crate::entry::fold(child.name()).as_bytes());
             hasher.update(&[0x00, child.kind as u8]);
             hasher.update(&child.hash.unwrap_or([0u8; 32]));
         }

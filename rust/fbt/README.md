@@ -144,8 +144,9 @@ target_input(target_id, pattern)
 target_dep(target_id, depends_on)
 ```
 
-`path_key` is the lowercased path and carries every comparison, because Windows
-paths are case insensitive; `path` keeps the real spelling. Paths are stored flat
+`path_key` carries every comparison: the path lowercased on Windows, whose paths
+are case insensitive, and as spelled elsewhere, where `Axa/` and `AXA/` are two
+folders (`entry::fold`); `path` keeps the real spelling. Paths are stored flat
 rather than as an adjacency list, so a diff is one join instead of a recursive
 query, while `parent_key` still serves the merkle rollup and subtree deletes.
 

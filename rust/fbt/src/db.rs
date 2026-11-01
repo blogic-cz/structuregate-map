@@ -132,7 +132,7 @@ pub fn insert_snapshot(
     conn.execute(
         "INSERT INTO snapshot(root, root_key, created_ns, usn, journal_id, volume, usn_chain)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![root, root.to_lowercase(), created_ns, usn, journal_id, volume, usn_chain],
+        params![root, crate::entry::fold(root), created_ns, usn, journal_id, volume, usn_chain],
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -171,7 +171,7 @@ pub fn latest_snapshot(conn: &Connection, root: &str) -> Result<Option<Snapshot>
         "SELECT {SNAPSHOT_COLS} FROM snapshot WHERE root_key = ?1 ORDER BY id DESC LIMIT 1"
     );
     Ok(conn
-        .query_row(&sql, params![root.to_lowercase()], read_snapshot)
+        .query_row(&sql, params![crate::entry::fold(root)], read_snapshot)
         .optional()?)
 }
 
@@ -188,10 +188,11 @@ pub fn list_snapshots(conn: &Connection, limit: i64) -> Result<Vec<Snapshot>> {
 }
 
 /// Write every entry of one scan in a single transaction.
-pub fn insert_entries(conn: &mut Connection, snapshot_id: i64, entries: &[Entry]) -> Result<()> {
-    let tx = conn.transaction()?;
+/// Every entry of a snapshot, inside the caller's transaction - the one that inserted the snapshot row, so an entry
+/// that fails leaves no snapshot behind that names nothing.
+pub fn insert_entries(conn: &Connection, snapshot_id: i64, entries: &[Entry]) -> Result<()> {
     {
-        let mut stmt = tx.prepare(
+        let mut stmt = conn.prepare(
             "INSERT INTO entry
                (snapshot_id, path, path_key, parent_key, kind, size, mtime_ns, file_id, hash)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -210,7 +211,6 @@ pub fn insert_entries(conn: &mut Connection, snapshot_id: i64, entries: &[Entry]
             ])?;
         }
     }
-    tx.commit()?;
     Ok(())
 }
 
