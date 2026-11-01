@@ -108,7 +108,7 @@ the same length, so lines still point into the file; each `:r` becomes an `inclu
 its shape as views (`sql_clauses`, `sql_joins`, `sql_functions`, `sql_ctes`) and `--sql-parse` for one text with
 no tree: [sql-statements.md](sql-statements.md).
 
-Two tables are DERIVED after both halves and rewritten whole each run:
+Two tables are DERIVED after both halves and rewritten whole - `sql_seeds` only when a `.sql` file's rows moved:
 
 * **`sql_links`** joins C# to the database. `kind`: `ef_table` (a `ToTable(name, schema)` call → the table,
   `entity` the mapped class, or the one a snapshot's `Entity("Demo.Order", b => ..)` names; a base configuration's `ToTable(tableName, schemaName)` is one row per derived class's base call that spells the name, through any class between that hands it on, for the type it closes, #141), `ef_column` (each column → the entity property of the same name - or the one

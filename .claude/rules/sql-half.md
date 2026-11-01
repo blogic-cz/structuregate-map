@@ -136,6 +136,9 @@ runs past the literal, so `name` is its prefix). `HasTrigger("T_Items")` with no
 
 ## `sql_seeds` - derived in rust (`rust/fbtcore/src/rows/seeds/`), run by `mapper/deep/` after the SQL half
 
+REWRITTEN WHOLE, but only when a SQL file's rows moved: keyed (`seeds/kept.rs`, #145) by the build, every SQL file's
+id, path and sha, and the ids its rows point at - a C# edit made it most of the run on a tree with large seed scripts.
+
 Input is `sql_steps` (`SqlSeedVisitor.cs`: values/set/temp/drop/flow per file, NOTHING resolved there). Variables
 and temps cross `:r` files, so the pass walks each ROOT (a file no `:r` points at) in SQLCMD order with every
 `:r` spliced in at its line: `@id` declared in a root is known in its child, a `SET` holds until the next. A sum

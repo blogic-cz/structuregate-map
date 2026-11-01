@@ -1,7 +1,7 @@
 //! WHAT THE DEPLOY SCRIPTS WRITE INTO A TABLE: `sql_seeds`, one row per VALUES tuple and the table it lands
 //! in, with its columns and its values - `@variables` resolved where the chain sets them. Derived AFTER the
-//! SQL half from its `sql_steps` and rewritten whole each run, because a value is a fact about a whole `:r`
-//! chain and any file of it may have moved. It reads only rows already in the database, so it is run here,
+//! SQL half from its `sql_steps` and rewritten whole, because a value is a fact about a whole `:r` chain and any
+//! file of it may have moved - by a run where a SQL file's rows did; any other run says it again (`kept.rs`, #145). It reads only rows already in the database, so it is run here,
 //! against the database, with nothing crossing to the caller but a count.
 //!
 //! A `:r` IS A STEP TOO: it runs the other file at that line. A later `UPDATE t SET ... WHERE key IN (...)`
@@ -12,6 +12,7 @@
 //! own text and the row is `partial`, with the `detail` naming it. `bound` means every value is known, every
 //! column is a column of the table, and the table is in the map.
 
+pub mod kept;
 mod tables;
 mod value;
 mod views;
