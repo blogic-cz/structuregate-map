@@ -218,7 +218,10 @@ function Resolve-Import([string]$Rel, $Expression, [string]$Root, [hashtable]$Kn
             if ($suffix -ne '.ps1' -and $suffix -ne '.psm1' -and $suffix -ne '.psd1') { continue }
             # ONLY THE FILES OF THAT NAME can end with the tail (`$script:KnownByName`, built once): scanning every mapped file for
             # every computed path was files x paths on a large tree.
-            $named = $script:KnownByName[$tail.Substring($tail.LastIndexOf('/') + 1)]
+            $name = $tail.Substring($tail.LastIndexOf('/') + 1)
+            # TRIED: any mapped file of this name, added or gone, can move the answer (`MAP-TRIED`, `kept.rs`).
+            Write-Record 'MAP-TRIED' $Rel ('*/' + $name)
+            $named = $script:KnownByName[$name]
             $matched = @(if ($named) { foreach ($candidate in $named) { if ($candidate -eq $tail -or $candidate.EndsWith('/' + $tail)) { $candidate } } })
             if ($matched.Count -eq 1) {
                 Write-Record 'MAP-PATH' $Rel $matched[0]
@@ -246,6 +249,8 @@ function Resolve-Import([string]$Rel, $Expression, [string]$Root, [hashtable]$Kn
     if (-not $full.StartsWith($Root, [StringComparison]::OrdinalIgnoreCase)) { return }
     $target = $full.Substring($Root.Length).TrimStart('\', '/').Replace('\', '/')
     if ($target.Length -eq 0) { return }
+    # TRIED: the one path whose being added or gone moves this answer (`MAP-TRIED`, `kept.rs`).
+    Write-Record 'MAP-TRIED' $Rel $target
     # A path that IS in the map is an edge; one that is not on disk either is a dot-source of a file that
     # does not exist, which the caller reports as BROKEN. A path that exists but was left out of --ext is
     # neither, and saying nothing is the honest answer for it.

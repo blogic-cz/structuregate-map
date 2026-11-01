@@ -57,12 +57,19 @@ Test-Case 'map: an edit re-parses that file alone, and the map is byte-identical
     Assert-Equal ($edited.Map -ceq $full.Map) $true 'the incremental map equals the full one'
 }
 
-Test-Case 'map: a file added or gone asks every file again - an answer resolves against the file set' {
+# A FILE ADDED OR GONE ASKS ONLY THE FILES WHOSE DOT-SOURCES TRIED ITS PATH (`MAP-TRIED`): every file was asked again on any
+# path change, and a log added beside a large tree's scripts re-parsed all of them.
+Test-Case 'map: a file added asks again only the files whose dot-sources tried it, and the map equals a full parse' {
     $tree = New-MapKeptTree
+    [System.IO.File]::WriteAllText((Join-Path $tree 'run.ps1'), ". `$PSScriptRoot/lib/One.ps1`n. `$PSScriptRoot/lib/Two.ps1`n. `$PSScriptRoot/lib/Three.ps1`nGet-Two`n")
     Invoke-MapKept $tree '.ps1' | Out-Null
     [System.IO.File]::WriteAllText((Join-Path $tree 'lib/Four.ps1'), "function Get-Four { 4 }`n")
+    Assert-Equal (Invoke-MapKept $tree '.ps1').Parsed['powershell'] 1 'parsed after a file no dot-source names was added (itself)'
+    [System.IO.File]::WriteAllText((Join-Path $tree 'lib/Three.ps1'), "function Get-Three { 3 }`n")
     $added = Invoke-MapKept $tree '.ps1'
-    Assert-Equal $added.Parsed['powershell'] 4 'parsed after a file was added'
+    Assert-Equal $added.Parsed['powershell'] 2 'parsed after a dot-sourced file appeared (it, and run.ps1)'
+    Remove-Item -Recurse -Force (Join-Path $tree '.fbt')
+    Assert-Equal $added.Map (Invoke-MapKept $tree '.ps1').Map 'the map after the add, against a full parse'
 }
 
 # C# IS KEPT ACROSS A FILE ADDED ELSEWHERE: Roslyn reads the one file and the names are joined in rust, so its answer
@@ -99,6 +106,43 @@ if ($script:MapKeptTs) {
             Assert-Equal (Invoke-MapKept $tree '.ts').Parsed['typescript'] 0 'parsed with nothing moved'
             [System.IO.File]::WriteAllText((Join-Path $tree 'tsconfig.json'), '{"compilerOptions":{"strict":true,"baseUrl":"."}}')
             Assert-Equal (Invoke-MapKept $tree '.ts').Parsed['typescript'] 2 'parsed after tsconfig.json moved'
+        } finally { $env:NODE_PATH = $previous }
+    }
+
+    # A PATH ADDED OR GONE ASKS ONLY THE FILES WHOSE IMPORTS TRIED IT (`MAP-TRIED`): a log or an asset added anywhere re-parsed
+    # every TypeScript file of a large tree; now a file is asked again only when a path its own imports tried appeared or went.
+    Test-Case 'map: a TypeScript file is asked again only when a path its imports tried was added or gone' {
+        $tree = Use-Tree @{
+            'tsconfig.json'  = '{"compilerOptions":{"strict":true}}'
+            'src/a.ts'       = "export const A = 1;`n"
+            'src/b.ts'       = "import { A } from './a';`nexport const B = A;`n"
+            'src/c.ts'       = "import data from './data.json';`nimport { G } from './gone';`nimport * as P from './parts';`nexport const C = [data, G, P];`n"
+            'src/data.json'  = '{"x":1}'
+        }
+        $previous = $env:NODE_PATH
+        $env:NODE_PATH = $script:MapKeptTs
+        $full = {
+            Remove-Item -Recurse -Force (Join-Path $tree '.fbt')
+            (Invoke-MapKept $tree '.ts').Map
+        }
+        try {
+            Assert-Equal (Invoke-MapKept $tree '.ts').Parsed['typescript'] 3 'parsed on the first run'
+            [System.IO.File]::WriteAllText((Join-Path $tree 'notes.txt'), 'n')
+            Assert-Equal (Invoke-MapKept $tree '.ts').Parsed['typescript'] 0 'parsed after an unrelated file was added'
+            # A BROKEN IMPORT NOW RESOLVES: its importer alone is asked, and the map is what a full parse writes.
+            [System.IO.File]::WriteAllText((Join-Path $tree 'src/gone.ts'), "export const G = 1;`n")
+            $added = Invoke-MapKept $tree '.ts'
+            Assert-Equal $added.Parsed['typescript'] 2 'parsed after a file an import tried was added (it, and its importer)'
+            Assert-Equal $added.Map (& $full) 'the map after the add, against a full parse'
+            # A FILE ON DISK THE MAP DOES NOT MAP, gone: the import that found it is broken now.
+            Remove-Item (Join-Path $tree 'src/data.json')
+            $gone = Invoke-MapKept $tree '.ts'
+            Assert-Equal $gone.Parsed['typescript'] 1 'parsed after an unmapped file an import found was removed'
+            if (-not $gone.Map.Contains('src/data.json')) { throw "the import of the removed json is broken in the map:`n$($gone.Map)" }
+            # A FOLDER AN IMPORT NAMES, made by a file inside it.
+            New-Item -ItemType Directory -Force (Join-Path $tree 'src/parts') | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $tree 'src/parts/readme.md'), 'r')
+            Assert-Equal (Invoke-MapKept $tree '.ts').Parsed['typescript'] 1 'parsed after a folder an import names appeared'
         } finally { $env:NODE_PATH = $previous }
     }
 }

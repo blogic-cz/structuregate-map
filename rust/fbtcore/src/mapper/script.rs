@@ -127,8 +127,19 @@ fn begin(into: &mut Collector, half: &Script, files: &[(String, String)], root: 
             let project = if half.language == "typescript" { kept.project() } else { String::new() };
             let reads = half.dependents.and_then(|also| kept.whole("reads", &[], also)).unwrap_or_default();
             let stamp = format!("{}|{}|{script}|{project}|{reads}", half.language, half.host);
-            let keyed: Vec<Option<String>> = files.iter().map(|(rel, _)| kept.key(&stamp, rel)).collect();
+            // A TYPESCRIPT OR POWERSHELL ANSWER READS ONLY THE PATHS ITS IMPORTS TRIED (`MAP-TRIED`): keyed by its own file,
+            // it is asked again when one of them was added or gone - not when any file anywhere was, which re-parsed a large
+            // tree whole. With no last run's paths kept, what moved is not known, and every file is asked.
+                    let narrow = matches!(half.language, "typescript" | "powershell");
+            let keyed: Vec<Option<String>> = files.iter()
+                .map(|(rel, _)| if narrow { kept.own_key(&stamp, rel) } else { kept.key(&stamp, rel) }).collect();
             let mut ask: HashSet<usize> = (0..files.len()).filter(|&i| keyed[i].as_deref().is_none_or(|k| !kept.has(k))).collect();
+            match kept.moved().filter(|_| narrow) {
+                Some(moved) if !moved.is_empty() => ask.extend((0..files.len())
+                    .filter(|&i| keyed[i].as_deref().and_then(|k| kept.peek(k)).is_some_and(|lines| tried_any(lines, moved)))),
+                None if narrow => ask = (0..files.len()).collect(),
+                _ => {}
+            }
             if half.dependents.is_some() {
                 globals = kept.whole(&format!("{stamp}|globals"), &[], |_| false);
                 if !globals.as_deref().is_some_and(|g| kept.has(g)) {
@@ -283,6 +294,16 @@ fn with_importers(kept: &mut Kept, files: &[(String, String)], ask: HashSet<usiz
         }
     }
     out
+}
+
+/// Whether a kept answer's imports tried a path in `moved` (its `MAP-TRIED|rel|<path>\t<path>..` lines). `*/<name>` is
+/// any path of that file name - PowerShell's computed dot-source, matched to a mapped file by its name.
+fn tried_any(lines: &str, moved: &std::collections::HashSet<String>) -> bool {
+    lines.lines().filter_map(|l| l.strip_prefix("MAP-TRIED|")).filter_map(|l| l.split_once('|'))
+        .any(|(_, tried)| tried.split('\t').any(|path| match path.strip_prefix("*/") {
+            Some(name) => moved.iter().any(|m| m.rsplit('/').next() == Some(fbt::entry::fold(name).as_str())),
+            None => moved.contains(&fbt::entry::fold(path)),
+        }))
 }
 
 /// Every file of the map, for a half that is handed only the ones to parse - in the list file's own format.
