@@ -108,6 +108,7 @@ export function resolve(rel, specifier, known, root) {
 
 
 const BACKSLASH = String.fromCharCode(92);
+const TAB = String.fromCharCode(9);
 const NEWLINE = String.fromCharCode(10);
 
 /**
@@ -390,11 +391,13 @@ export function summary(ts, sourceFile, text) {
  * them one hides a real edge — on a tree written with aliases that was every import. Tried only after the
  * relative form, and before the specifier is written off as third-party.
  */
-export function alias(rel, specifier, aliases, known, root) {
+export function alias(rel, specifier, aliases, known, root, tried = []) {
     for (const target of aliasTargets(aliases, specifier)) {
         const asRel = path.relative(root, target).split(path.sep).join('/');
         if (asRel.startsWith('..')) continue;
-        const found = resolve(rel, './' + path.posix.relative(path.posix.dirname(rel), asRel), known, root);
+        const relative = './' + path.posix.relative(path.posix.dirname(rel), asRel);
+        tried.push(...candidatesOf(rel, relative));
+        const found = resolve(rel, relative, known, root);
         if (found.edge) return found.edge;
     }
     return '';
@@ -420,12 +423,16 @@ export function runMap(ts, rel, text, sourceFile, known, root, aliases) {
         if (specifier && specifier.computed) {
             emit('MAP-COMPUTED', rel, line(), specifier.computed);
         } else if (specifier) {
+            // EVERY PATH AN IMPORT TRIED (`MAP-TRIED`, tab-joined): a file added or gone at one of them is the only path
+            // change that can move this file's answer - the caller asks it again then, and no other file (`kept.rs`).
             if (specifier.startsWith('.')) {
                 const found = resolve(rel, specifier, known, root);
-                if (found.edge) emit('MAP-PATH', rel, found.edge);
-                else if (found.broken) emit('MAP-PATH', rel, found.broken);
+                if (found.edge || found.broken) emit('MAP-PATH', rel, found.edge || found.broken);
+                emit('MAP-TRIED', rel, candidatesOf(rel, specifier).join(TAB));
             } else {
-                const aliased = alias(rel, specifier, aliases, known, root);
+                const tried = [];
+                const aliased = alias(rel, specifier, aliases, known, root, tried);
+                if (tried.length) emit('MAP-TRIED', rel, tried.join(TAB));
                 // A bare specifier that no alias claims is a package. The caller reports the ones no file in
                 // the tree declares, which is the file's real third-party dependency list.
                 if (aliased) emit('MAP-PATH', rel, aliased);

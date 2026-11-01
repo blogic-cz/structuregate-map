@@ -5,9 +5,12 @@
 //! is launched only for the files whose key moved; with none, it is not started at all.
 //!
 //! WHAT AN ANSWER DEPENDS ON IS THE KEY, beside the content: the BUILD of this tool, the half, its host and its
-//! staged script (`stamp`), and EVERY PATH THE WALK SAW - a half resolves an import against the file set, and
-//! PowerShell asks the disk whether a dot-sourced path exists, so a file added or gone anywhere asks every file
-//! again, as before. C# is the exception: Roslyn reads the one file, and the names are joined here (`own_key`). TypeScript also reads `tsconfig` `paths`, so its stamp carries the project files (`gate::counts`).
+//! staged script (`stamp`), and EVERY PATH THE WALK SAW - a half resolves an import against the file set and asks
+//! the disk whether a path exists. C# is the exception: Roslyn reads the one file, and the names are joined here
+//! (`own_key`). TypeScript also reads `tsconfig` `paths`, so its stamp carries the project files (`gate::counts`).
+//! TYPESCRIPT AND POWERSHELL SAY WHICH PATHS THEY TRIED (`MAP-TRIED`): keyed by the file alone, an answer is asked again
+//! when a path it tried - or a folder above one - was added or gone since the last run (`moved`, from `map_paths`); a
+//! log or an asset added anywhere re-parsed every TypeScript file of a large tree before.
 //!
 //! ONLY HALVES WHOSE LINES ABOUT A FILE COME FROM THAT FILE are kept. Python's do not - a name is bound by reading
 //! the module it comes from, and a `declares` check opens the file it names - so it parses everything, as before.
@@ -29,6 +32,10 @@ pub struct Kept {
     read: usize,
     /// The map this run is about to replace: who imports what, as the last run resolved it - read once, on demand.
     previous: PathBuf,
+    /// Every path the walk saw this run, and the ones added or gone since the last - each with every folder above it.
+    /// None when no last run's paths are kept: every half then keys by the whole set, as before.
+    paths: Vec<String>,
+    moved: Option<std::collections::HashSet<String>>,
     importers: Option<Option<HashMap<String, Vec<String>>>>,
 }
 
@@ -59,7 +66,24 @@ impl Kept {
             kept.extend(read.into_iter().flatten().flatten());
         }
         let previous = outputs.first().map(PathBuf::from).unwrap_or_default();
-        Some(Kept { store, hashes, base, own, kept, now: Vec::new(), read: 0, previous, importers: None })
+        let before: Option<std::collections::HashSet<String>> = Connection::open(&store).ok().and_then(|conn| {
+            let mut rows = conn.prepare("SELECT path FROM map_paths").ok()?;
+            let read = rows.query_map([], |r| r.get::<_, String>(0)).ok()?;
+            Some(read.flatten().collect())
+        });
+        let moved = before.map(|before| {
+            let now: std::collections::HashSet<&String> = paths.iter().collect();
+            let mut moved = std::collections::HashSet::new();
+            for path in paths.iter().filter(|p| !before.contains(*p)).chain(before.iter().filter(|p| !now.contains(p))) {
+                // FOLDED as the tree map's keys are: on Windows `./Util` names `util.ts`.
+                let folded = fbt::entry::fold(path);
+                let mut at = folded.as_str();
+                moved.insert(at.to_string());
+                while let Some(cut) = at.rfind('/') { at = &at[..cut]; moved.insert(at.to_string()); }
+            }
+            moved
+        });
+        Some(Kept { store, hashes, base, own, kept, now: Vec::new(), read: 0, previous, importers: None, paths, moved })
     }
 
     /// What a TypeScript answer depends on beyond the file: every file that says which compiler or which project.
@@ -140,6 +164,16 @@ impl Kept {
         hash.finalize().to_hex()[..16].to_string()
     }
 
+    /// THE PATHS ADDED OR GONE since the last run, with every folder above each - None when the last run's are not known.
+    pub fn moved(&self) -> Option<&std::collections::HashSet<String>> {
+        self.moved.as_ref()
+    }
+
+    /// The lines kept under `key`, looked at without carrying them on.
+    pub fn peek(&self, key: &str) -> Option<&String> {
+        self.kept.get(key)
+    }
+
     /// Whether lines are kept under `key` - asked before deciding, so a file that is read again anyway is not also
     /// answered from the last run.
     pub fn has(&self, key: &str) -> bool {
@@ -182,11 +216,18 @@ impl Kept {
 
     /// Keep what this run knows, and nothing it no longer asked.
     pub fn keep(self) {
-        if self.read == 0 && self.now.len() == self.kept.len() {
+        if self.read == 0 && self.now.len() == self.kept.len() && self.moved.as_ref().is_some_and(|m| m.is_empty()) {
             return;
         }
         let Ok(mut conn) = Connection::open(&self.store) else { return };
         let Ok(tx) = conn.transaction() else { return };
+        // THE PATHS THIS RUN SAW, for the next to tell what was added or gone.
+        let _ = tx.execute_batch("CREATE TABLE IF NOT EXISTS map_paths (path TEXT PRIMARY KEY); DELETE FROM map_paths;");
+        if let Ok(mut insert) = tx.prepare("INSERT OR IGNORE INTO map_paths (path) VALUES (?1)") {
+            for path in &self.paths {
+                let _ = insert.execute(params![path]);
+            }
+        }
         let _ = tx.execute_batch("CREATE TABLE IF NOT EXISTS map_kept (key TEXT PRIMARY KEY, lines TEXT); DELETE FROM map_kept;");
         if let Ok(mut insert) = tx.prepare("INSERT OR REPLACE INTO map_kept (key, lines) VALUES (?1, ?2)") {
             for (key, lines) in &self.now {
