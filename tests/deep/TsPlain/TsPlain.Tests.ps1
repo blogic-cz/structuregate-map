@@ -100,6 +100,19 @@ Test-Case 'tsplain: an importer is read again when the file it imports goes, and
     Assert-Equal (Get-TsPlainScalar $tree "SELECT count(*) FROM calls WHERE target_path = 'src/price.ts'") '0' 'no call runs a file that is gone'
 }
 
+# A FILE THE HALF IS NOT GIVEN, added anywhere, starts no node (`Hashes::scoped`, `every_path`): the half re-reads only by its given
+# files, so it was launched to learn nothing. A new script is given, and is read.
+Test-Case 'tsplain: a file the half is not given does not start it, a new script does' {
+    $tree = New-TsPlainTree
+    Invoke-TsPlainMap $tree | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $tree 'notes.txt'), 'n')
+    Assert-Line (Invoke-TsPlainMap $tree) 'the plain typescript half had nothing to do'
+    [System.IO.File]::WriteAllText((Join-Path $tree 'src/more.ts'), "export const MORE = 1;`n")
+    $added = Invoke-TsPlainMap $tree
+    Assert-NoLine $added 'the plain typescript half had nothing to do'
+    Assert-Equal (Get-TsPlainScalar $tree "SELECT count(*) FROM files WHERE path = 'src/more.ts'") '1' 'the new script landed'
+}
+
 Test-Case 'tsplain: an unchanged tree re-reads nothing, and a changed file REPLACES its rows' {
     $tree = New-TsPlainTree
     Invoke-TsPlainMap $tree | Out-Null
