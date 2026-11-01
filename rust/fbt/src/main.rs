@@ -379,10 +379,11 @@ fn print_summary(r: &Refresh) {
         _ => "",
     };
     eprintln!(
-        "{} entries, {} change(s), {} read from disk, root {}{}, {} in {} ms",
+        "{} entries, {} change(s), {} read from disk ({} bytes), root {}{}, {} in {} ms",
         r.entry_count,
         r.changes.len(),
         r.read_from_disk,
+        r.bytes_read,
         root_hash,
         same,
         r.method.label(),
@@ -401,6 +402,7 @@ fn print_json(r: &Refresh) -> Result<()> {
         "method": r.method.label(),
         "entries": r.entry_count,
         "read_from_disk": r.read_from_disk,
+        "bytes_read": r.bytes_read,
         "root_hash": r.root_hash.map(|h| hash::hex(&h)),
         "previous_root_hash": r.previous_root_hash.map(|h| hash::hex(&h)),
         "elapsed_ms": r.elapsed_ms,

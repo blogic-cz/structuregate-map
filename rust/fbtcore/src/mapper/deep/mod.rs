@@ -216,10 +216,10 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
     };
     let (hashes, python_early, plain_early) = match early {
         Some(early) => {
-            clock.add("hash the tree", early.hashed_ms);
+            clock.hashed(early.hashed_ms, &early.hashes);
             (Arc::clone(&early.hashes), early.python, early.plain)
         }
-        None => (Arc::new(clock.time("hash the tree", || tree_hashes(deep, files))), None, None),
+        None => (Arc::new(clock.hash(|| tree_hashes(deep, files))), None, None),
     };
     // EVERY SCRIPT FILE OUTSIDE THE ANGULAR WORKSPACE is the plain half's (all of them where there is none); when
     // none is left its rows are dropped, because they describe files it no longer answers for.

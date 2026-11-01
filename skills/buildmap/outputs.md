@@ -49,9 +49,11 @@ whose `ToTable` calls then link, #140). It stays `generated = 1`; repeatable, th
 
 ## What a refresh says about itself
 
-Every run prints its steps - `the deep map took 60.0 s: hash the tree 0.2 s, typescript 20.0 s, csharp
-35.0 s, sql 1.8 s, passes over the finished rows 3.0 s` - and each half that worked says why. C# counts its
-re-reads by CAUSE and names the projects that forced them:
+Every run prints its steps - `the deep map took 60.0 s: hash the tree 0.2 s (read 3 file(s), 41.2 KB, of 9120 entries),
+typescript 20.0 s, csharp 35.0 s, sql 1.8 s, passes over the finished rows 3.0 s` - and each half that worked says why.
+The hash covers EVERY file under the roots, not only `--ext`'s, and reads only those whose size or mtime moved: a
+large `read` figure on a run that changed little names what keeps moving. C# counts its re-reads by CAUSE and names
+the projects that forced them:
 
 ```
 the deep C# half re-reads 120 file(s): 20 whose content moved, 100 whose project's inputs moved - e.g. …
@@ -66,7 +68,7 @@ moved" from "content moved". Other causes: `not recorded before`, `written by an
 setup (compiler, node, config, rows version) moved.
 
 `_meta` key `last_refresh` keeps it (node rows in `_meta__value`; `--map-query <db> --tables --width 0` prints it as JSON), replaced by every run that did work: `when`, `took_ms`,
-`steps_ms`, `passes` (`ran`/`replayed`), `reread`, `csharp` (`causes`, `projects`), `typescript`, `trace`.
+`steps_ms`, `passes` (`ran`/`replayed`), `reread`, `hash` (`entries`, `files_read`, `bytes_read`), `csharp` (`causes`, `projects`), `typescript`, `trace`.
 The full trace is `<db>.last-run.jsonl` beside the database; read it with `structuregate --trace-report <file>`.
 Neither key feeds the passes over the finished rows, so a run that changed nothing still replays them.
 

@@ -21,15 +21,27 @@ pub struct Hashes {
     roots: Vec<(String, HashMap<String, String>)>,
     /// Every root's merkle hash, in order - None when any root could not be snapshotted.
     tree: Option<String>,
+    /// What bringing the snapshots up to date cost, over every root.
+    pub read: Read,
+}
+
+/// HOW MUCH THE HASH READ (#144): the entries the snapshots name, the files read from disk and what those held. The
+/// timing note says it, so a hash phase that dwarfs every half shows whether a few large files or many small ones did it.
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub struct Read {
+    pub entries: usize,
+    pub files: usize,
+    pub bytes: u64,
 }
 
 impl Hashes {
     /// Every root's snapshot, brought up to date. A root the tree map cannot open answers nothing, and its
     /// files are read instead.
     pub fn of(roots: &[String], skip: &[String], avoid: &[&str]) -> Hashes {
-        let taken: Vec<(String, HashMap<String, String>, String)> = roots.iter().filter_map(|root| snapshot(root, skip, avoid)).collect();
-        let tree = (taken.len() == roots.len() && !roots.is_empty()).then(|| taken.iter().map(|(_, _, h)| h.as_str()).collect::<Vec<_>>().join("+"));
-        Hashes { roots: taken.into_iter().map(|(r, f, _)| (r, f)).collect(), tree }
+        let taken: Vec<(String, HashMap<String, String>, String, Read)> = roots.iter().filter_map(|root| snapshot(root, skip, avoid)).collect();
+        let tree = (taken.len() == roots.len() && !roots.is_empty()).then(|| taken.iter().map(|(_, _, h, _)| h.as_str()).collect::<Vec<_>>().join("+"));
+        let read = taken.iter().fold(Read::default(), |sum, (_, _, _, r)| Read { entries: sum.entries + r.entries, files: sum.files + r.files, bytes: sum.bytes + r.bytes });
+        Hashes { roots: taken.into_iter().map(|(r, f, _, _)| (r, f)).collect(), tree, read }
     }
 
     /// WHAT THE WHOLE TREE IS NOW, as one string: the merkle hash of every root. Equal to what a half's
@@ -111,7 +123,7 @@ impl Hashes {
     }
 }
 
-fn snapshot(root: &str, skip: &[String], avoid: &[&str]) -> Option<(String, HashMap<String, String>, String)> {
+fn snapshot(root: &str, skip: &[String], avoid: &[&str]) -> Option<(String, HashMap<String, String>, String, Read)> {
     let root_path = std::fs::canonicalize(root).ok()?;
     let prefix = format!("{}/", label_of(&root_path).trim_end_matches('/'));
     let mut skip_paths = Vec::new();
@@ -139,6 +151,7 @@ fn snapshot(root: &str, skip: &[String], avoid: &[&str]) -> Option<(String, Hash
     stage.set("structuregate.hash.method", refreshed.method.label());
     stage.set("structuregate.hash.entries", refreshed.entry_count as i64);
     stage.set("structuregate.hash.read", refreshed.read_from_disk as i64);
+    stage.set("structuregate.hash.bytes", refreshed.bytes_read as i64);
     stage.set("structuregate.hash.changes", refreshed.changes.len() as i64);
     if let Some(note) = &refreshed.usn_note {
         stage.set("structuregate.hash.journal", note.as_str());
@@ -151,7 +164,8 @@ fn snapshot(root: &str, skip: &[String], avoid: &[&str]) -> Option<(String, Hash
         .filter(|(_, e)| e.kind == fbt::entry::Kind::File)
         .filter_map(|(key, e)| e.hash.map(|h| (key, fbt::hash::hex(&h))))
         .collect();
-    Some((prefix, files, merkle))
+    let read = Read { entries: refreshed.entry_count, files: refreshed.read_from_disk, bytes: refreshed.bytes_read };
+    Some((prefix, files, merkle, read))
 }
 
 /// A path as the tree map keys it: absolute, `/`-separated, lowercase, no `\\?\` prefix.

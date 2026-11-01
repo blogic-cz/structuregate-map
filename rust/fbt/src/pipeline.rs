@@ -53,6 +53,8 @@ pub struct Refresh {
     pub entry_count: usize,
     /// Nodes whose content was read from disk this run.
     pub read_from_disk: usize,
+    /// What the files among them hold, in bytes: a few large files can cost more than every source file.
+    pub bytes_read: u64,
     pub elapsed_ms: u128,
     /// Set when the result was written as a new snapshot.
     pub snapshot_id: Option<i64>,
@@ -172,7 +174,7 @@ impl Engine {
                         // files is then replayed next time. Replaying a change is
                         // harmless; skipping one is not.
                         journal_at_start.or(Some((r.journal_id, r.next_usn))),
-                        r.touched,
+                        (r.touched, r.bytes),
                         store,
                         include_dirs,
                         started,
@@ -198,7 +200,7 @@ impl Engine {
             &prev,
             &prev_entries,
             journal_at_start,
-            result.hashed,
+            (result.hashed, result.hashed_bytes),
             store,
             include_dirs,
             started,
@@ -233,6 +235,7 @@ impl Engine {
             previous_root_hash: None,
             entry_count,
             read_from_disk,
+            bytes_read: result.hashed_bytes,
             elapsed_ms: started.elapsed().as_millis(),
             snapshot_id,
             usn_note: None,
@@ -248,7 +251,7 @@ impl Engine {
         prev: &Snapshot,
         prev_entries: &HashMap<String, Entry>,
         journal: Option<(i64, i64)>,
-        read_from_disk: usize,
+        (read_from_disk, bytes_read): (usize, u64),
         store: bool,
         include_dirs: bool,
         started: std::time::Instant,
@@ -281,6 +284,7 @@ impl Engine {
             previous_root_hash: prev.root_hash,
             entry_count,
             read_from_disk,
+            bytes_read,
             elapsed_ms: started.elapsed().as_millis(),
             snapshot_id,
             usn_note,
