@@ -190,11 +190,13 @@ pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Arc<str>, 
             }
             None => own,
         };
+        // A HANDED TEMPLATE'S WAY HOLDS THE BRANCHES ITS ASSIGNMENT STANDS UNDER (#146): they ride `branches`, never `gates`.
+        let (lifted, held): (Vec<String>, Vec<String>) = held.into_iter().partition(|g| outlets.is_branch(g));
         let gates: Vec<Arc<str>> = held.iter().map(|g| ids.of(g)).collect();
         let to = ids.of(&to);
         let id = id_of(r, "id").unwrap_or_default();
         let mut branches: Vec<Arc<str>> = Vec::new();
-        for b in returned.get(&id).into_iter().chain(called.get(&id)).flatten() {
+        for b in returned.get(&id).into_iter().chain(called.get(&id)).flatten().chain(&lifted) {
             let b = ids.of(b);
             if !branches.contains(&b) {
                 branches.push(b);
