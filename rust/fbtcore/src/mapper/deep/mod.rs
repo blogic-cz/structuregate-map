@@ -386,7 +386,7 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
     let before = derived::before(into);
     // EACH PASS ITS OWN SPAN: their sum was one number, and it grew several times over on a large tree with nothing to say which.
     // THE SEEDS FIRST: dynamic SQL that creates an object per seeded row is linked by those rows.
-    pass("pass: sql seeds and typed views", || seeds(into, db));
+    pass("pass: sql seeds and typed views", || seeds(into, db, &deep.build));
     {
         let _pass = crate::trace::stage("pass: sql links");
         let answer = serde_json::from_str(&ask(&json!({ "mode": "sql-links", "notes": into.notes, "db": db }))).unwrap_or_default();

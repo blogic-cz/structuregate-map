@@ -32,9 +32,27 @@ pub(super) fn rows_meta(into: &mut Collector, conn: &rusqlite::Connection) {
     }
 }
 
-/// WHAT THE DEPLOY SCRIPTS WRITE INTO A TABLE, walked from the SQL half's rows.
-pub(super) fn seeds(into: &mut Collector, db: &str) {
-    match crate::rows::seeds::run(db) {
+/// WHAT THE DEPLOY SCRIPTS WRITE INTO A TABLE, walked from the SQL half's rows - SAID AGAIN rather than run when none of
+/// those rows moved (`rows/seeds/kept.rs`, #145).
+pub(super) fn seeds(into: &mut Collector, db: &str, build: &str) {
+    use crate::rows::seeds::kept;
+    let conn = rusqlite::Connection::open(db).ok();
+    let key = conn.as_ref().and_then(|conn| kept::key(conn, build));
+    let replayed = conn.as_ref().zip(key.as_deref()).and_then(|(conn, key)| kept::replayed(conn, key));
+    if replayed.is_some() {
+        crate::trace::set("structuregate.deep.seeds_replayed", true);
+    }
+    let answer = replayed.map(Ok).unwrap_or_else(|| {
+        let answer = crate::rows::seeds::run(db);
+        if let (Some(conn), Some(key), Ok(made)) = (&conn, &key, &answer)
+            && made.get("skipped").is_none()
+        {
+            // A KEY NOT KEPT is a pass run again next time, never a wrong replay.
+            let _ = kept::remember(conn, key, made);
+        }
+        answer
+    });
+    match answer {
         Err(why) => into.errors.push(format!("SQL SEEDS were not written — {why}")),
         Ok(answer) if answer.get("skipped").is_some() => {}
         Ok(answer) => {
