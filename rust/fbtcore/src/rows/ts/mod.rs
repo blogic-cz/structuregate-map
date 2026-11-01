@@ -115,6 +115,8 @@ pub mod key_literals;
 pub mod key_returned;
 #[path = "key/routes/key_outlets.rs"]
 pub mod key_outlets;
+#[path = "key/routes/key_handover.rs"]
+pub mod key_handover;
 #[path = "key/routes/key_routes.rs"]
 pub mod key_routes;
 #[path = "key/routes/key_node_ways.rs"]

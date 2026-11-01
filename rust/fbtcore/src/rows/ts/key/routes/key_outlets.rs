@@ -6,14 +6,15 @@
 //! `*ngTemplateOutlet`, `*ngIf="..; then ref"` - each outlet's chain is a WAY in to the contents, and so is an
 //! `*ngIf="c; else ref"`, its `ngIf` gate swapped for the `!(c)` gate the extractor wrote beside it (#115). A ref
 //! read anywhere else (an event handler; a child's input; a `@ViewChild`/`@ContentChild` query) renders where
-//! the map cannot follow, so its contents keep their own chain, as before. Every fact read here is a row node already writes.
+//! the map cannot follow, so its contents keep their own chain, as before - except a ref queried by name and handed to a child that
+//! outlets it (`key_handover`, #146). Every fact read here is a row node already writes.
 
 use super::store::{Row, Store};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 /// The inputs of Angular's own `NgTemplateOutlet` and `NgIf` that RENDER a template handed to them.
-const OUTLET_INPUTS: [&str; 2] = ["ngTemplateOutlet", "ngIfThen"];
+pub(crate) const OUTLET_INPUTS: [&str; 2] = ["ngTemplateOutlet", "ngIfThen"];
 /// `*ngIf="c; else ref"` renders `ref` under `!(c)`: the way through it holds the node's `ngIfElseNot` gate in place of its `ngIf` (#115).
 const ELSE_INPUT: &str = "ngIfElse";
 const ELSE_GATE: &str = "ngIfElseNot";
@@ -22,7 +23,7 @@ const HANDOVER: [&str; 5] = ["ngTemplateOutlet", "ngTemplateOutletContext", "ngT
 /// The decorators that hand a template to the class - by its ref name, or by type (then every template of it, unless the type is a component).
 const QUERIES: [&str; 4] = ["ViewChild", "ViewChildren", "ContentChild", "ContentChildren"];
 
-fn text(row: &Row, field: &str) -> Option<String> {
+pub(crate) fn text(row: &Row, field: &str) -> Option<String> {
     match row.get(field) { Some(Value::String(s)) if !s.is_empty() => Some(s.clone()), _ => None }
 }
 fn strings(row: &Row, field: &str) -> Vec<String> {
@@ -42,7 +43,7 @@ fn named(row: &Row, field: &str) -> Vec<(String, String)> {
     }
 }
 /// The expression is the bare read of `name` and nothing else - `cond ? a : b` is no outlet of either.
-fn bare_read(ast: Option<&Value>, name: &str) -> bool {
+pub(crate) fn bare_read(ast: Option<&Value>, name: &str) -> bool {
     let Some(ast) = ast else { return false };
     let inner = ast.get("ast").unwrap_or(ast);
     inner.get("k").and_then(|k| k.as_str()) == Some("Read")
@@ -62,6 +63,10 @@ pub struct Outlets {
     negation: HashMap<String, (String, HashSet<String>)>,
     /// Node -> the hand-over gate ids it carries.
     handover: HashMap<String, HashSet<String>>,
+    /// An `ng-template` the class hands to a child that outlets it (#146, `key_handover`) -> each way in.
+    handed: HashMap<String, Vec<super::key_handover::Handed>>,
+    /// The `branches` ids a handed way holds - a way is a list of gate AND branch ids, which an edge keeps apart.
+    branch_ids: HashSet<String>,
 }
 
 impl Outlets {
@@ -87,6 +92,7 @@ impl Outlets {
         let class_of: HashMap<String, String> = store.table("templates").iter()
             .filter_map(|t| Some((text(t, "id")?, text(t, "class")?))).collect();
         let mut queried: HashSet<(String, String)> = HashSet::new();
+        let mut by_name: super::key_handover::Queried = HashMap::new();
         let mut by_type: HashSet<String> = HashSet::new();
         // A COMPONENT OF THE TREE never sits on an `ng-template`, so a query by its type hands no template over - unless it reads one
         // (`{ read: TemplateRef }`). `TemplateRef` itself, a directive (it may sit on one) or a type the tree does not declare still does.
@@ -107,7 +113,10 @@ impl Outlets {
             for d in m.get("decorators").and_then(|d| d.as_array()).into_iter().flatten() {
                 if !d.get("name").and_then(|x| x.as_str()).is_some_and(|x| QUERIES.contains(&x)) { continue; }
                 match d.get("args").and_then(|a| a.get(0)).and_then(|a| a.as_str()) {
-                    Some(name) => { queried.insert((class.clone(), name.to_string())); }
+                    Some(name) => {
+                        queried.insert((class.clone(), name.to_string()));
+                        if let Some(field) = text(m, "name") { by_name.entry((class.clone(), name.to_string())).or_default().push(field); }
+                    }
                     None if hands_none(d.get("args")) => {}
                     None => { by_type.insert(class.clone()); }
                 }
@@ -116,6 +125,15 @@ impl Outlets {
         let mut refused: HashSet<(String, String)> = candidate.keys()
             .filter(|(tpl, name)| class_of.get(tpl).is_some_and(|c| by_type.contains(c) || queried.contains(&(c.clone(), name.clone()))))
             .cloned().collect();
+        // A REF QUERIED BY NAME AND READ BY NOTHING IN ITS OWN TEMPLATE may be one the class hands to a child (#146).
+        let read_in_template: HashSet<(String, String)> = store.table("expressions").iter()
+            .filter_map(|e| Some((text(e, "template")?, strings(e, "identifiers"))))
+            .flat_map(|(t, names)| names.into_iter().map(move |n| (t.clone(), n))).collect();
+        let handed_refs: HashMap<(String, String), String> = candidate.iter()
+            .filter(|(k, _)| !read_in_template.contains(*k) && class_of.get(&k.0).is_some_and(|c| !by_type.contains(c) && queried.contains(&(c.clone(), k.1.clone()))))
+            .map(|(k, v)| (k.clone(), v.clone())).collect();
+        o.handed = super::key_handover::find(store, &handed_refs, &class_of, &by_name);
+        o.branch_ids = o.handed.values().flatten().flat_map(|h| h.branches.iter().cloned()).collect();
         let mut found: HashMap<(String, String), Vec<(String, bool)>> = HashMap::new();
         let mut negated: HashMap<String, String> = HashMap::new();
         let mut ifs: HashMap<String, HashSet<String>> = HashMap::new();
@@ -165,14 +183,19 @@ impl Outlets {
         match self.under(node, gates, &mut Vec::new()) { Under::Ways(w) => Some(w), Under::No | Under::Cycle => None }
     }
 
+    /// Whether `id` in a way is a `branches` row rather than a gate (#146).
+    pub fn is_branch(&self, id: &str) -> bool {
+        self.branch_ids.contains(id)
+    }
+
     fn under(&self, node: &str, gates: &[String], stack: &mut Vec<String>) -> Under {
-        if self.outlets.is_empty() { return Under::No; }
+        if self.outlets.is_empty() && self.handed.is_empty() { return Under::No; }
         let mut cur = Some(node.to_string());
         let mut seen = HashSet::new();
         let tpl = loop {
             let Some(id) = cur else { return Under::No };
             if !seen.insert(id.clone()) { return Under::No; }
-            if self.outlets.contains_key(&id) { break id; }
+            if self.outlets.contains_key(&id) || self.handed.contains_key(&id) { break id; }
             cur = self.parent.get(&id).cloned();
         };
         // AN OUTLET INSIDE THE TEMPLATE IT RENDERS (a recursive tree) is no way: it only adds gates to an outer one.
@@ -182,7 +205,25 @@ impl Outlets {
         let own = gates.strip_prefix(above.as_slice()).unwrap_or(gates);
         stack.push(tpl.clone());
         let mut ways: Vec<Vec<String>> = Vec::new();
-        for (o, is_else) in &self.outlets[&tpl] {
+        // A HANDED TEMPLATE: the binding element's ways in the parent, then the child outlet's, then the assignment's branches.
+        for h in self.handed.get(&tpl).into_iter().flatten() {
+            let at = |n: &str, stack: &mut Vec<String>| {
+                let chain = self.chain.get(n).cloned().unwrap_or_default();
+                match self.under(n, &chain, stack) { Under::No => Some(vec![chain]), Under::Cycle => None, Under::Ways(w) => Some(w) }
+            };
+            let (Some(above), Some(inside)) = (at(&h.binding, stack), at(&h.outlet, stack)) else { continue };
+            let drop = self.handover.get(&h.outlet);
+            for a in &above {
+                for i in &inside {
+                    let mut way = a.clone();
+                    for g in i.iter().filter(|g| !drop.is_some_and(|d| d.contains(*g))).chain(&h.branches).chain(own) {
+                        if !way.contains(g) { way.push(g.clone()); }
+                    }
+                    if !ways.contains(&way) { ways.push(way); }
+                }
+            }
+        }
+        for (o, is_else) in self.outlets.get(&tpl).into_iter().flatten() {
             let chain = self.chain.get(o).cloned().unwrap_or_default();
             let bases = match self.under(o, &chain, stack) { Under::No => vec![chain], Under::Cycle => continue, Under::Ways(w) => w };
             let drop = self.handover.get(o);
