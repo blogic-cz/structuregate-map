@@ -30,6 +30,8 @@ pub struct IncrementalResult {
     pub relevant: usize,
     /// Nodes re-read from disk.
     pub touched: usize,
+    /// What the files among them hold, in bytes.
+    pub bytes: u64,
     pub elapsed_ms: u128,
 }
 
@@ -117,6 +119,14 @@ pub fn update(
         }
     }
 
+    // WHAT WAS READ is every file a candidate names and every file under a grafted subtree: the ancestors added on
+    // the way are directories, which hold no bytes.
+    let bytes: u64 = map
+        .values()
+        .filter(|e| e.kind == Kind::File)
+        .filter(|e| candidates.contains(&e.path) || subtrees.iter().any(|s| e.path.starts_with(&format!("{s}/"))))
+        .map(|e| e.size)
+        .sum();
     let mut entries: Vec<Entry> = map.into_values().collect();
     entries.sort_by(|a, b| a.path_key.cmp(&b.path_key));
     let root_hash = hash::merkle_rollup(&mut entries);
@@ -128,6 +138,7 @@ pub fn update(
         next_usn,
         relevant,
         touched,
+        bytes,
         elapsed_ms: t0.elapsed().as_millis(),
     })
 }

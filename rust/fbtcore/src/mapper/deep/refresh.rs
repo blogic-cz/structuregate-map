@@ -9,6 +9,7 @@
 //! here, never from the trace, which may be off.
 
 use super::super::protocol::Collector;
+use super::hashes::{Hashes, Read};
 use serde_json::{json, Value};
 use std::path::Path;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -19,11 +20,16 @@ pub const KEY: &str = "last_refresh";
 pub struct Clock {
     started: Instant,
     steps: Vec<(String, u64)>,
+    /// What the tree's hash read, said beside its time.
+    hashed: Option<Read>,
 }
+
+/// The step the tree's hash is timed as.
+const HASH: &str = "hash the tree";
 
 impl Clock {
     pub fn start() -> Clock {
-        Clock { started: Instant::now(), steps: Vec::new() }
+        Clock { started: Instant::now(), steps: Vec::new(), hashed: None }
     }
 
     /// One step, timed. A step timed twice (the plain half's two turns) adds up.
@@ -32,6 +38,19 @@ impl Clock {
         let out = work();
         self.add(name, started.elapsed().as_millis() as u64);
         out
+    }
+
+    /// The tree's hash, taken now and timed, with what it read.
+    pub fn hash(&mut self, take: impl FnOnce() -> Hashes) -> Hashes {
+        let hashes = self.time(HASH, take);
+        self.hashed = Some(hashes.read);
+        hashes
+    }
+
+    /// The tree's hash, taken before the run's turn in `ms`.
+    pub fn hashed(&mut self, ms: u64, hashes: &Hashes) {
+        self.add(HASH, ms);
+        self.hashed = Some(hashes.read);
     }
 
     pub fn add(&mut self, name: &str, ms: u64) {
@@ -46,7 +65,10 @@ impl Clock {
 /// the finished rows were said again rather than run.
 pub fn said(into: &mut Collector, db: &str, clock: Clock, replayed: bool) {
     let took = clock.started.elapsed().as_millis() as u64;
-    let steps: Vec<String> = clock.steps.iter().map(|(name, ms)| format!("{name} {}", seconds(*ms))).collect();
+    let steps: Vec<String> = clock.steps.iter().map(|(name, ms)| match (name.as_str(), clock.hashed) {
+        (HASH, Some(read)) => format!("{name} {} ({})", seconds(*ms), read_by(read)),
+        _ => format!("{name} {}", seconds(*ms)),
+    }).collect();
     into.notes.push(format!("the deep map took {}: {}", seconds(took), steps.join(", ")));
     // A RUN THAT DID NOTHING - no file re-read, the passes replayed, no error - KEEPS THE LAST ONE'S ACCOUNT: the
     // database and the trace beside it are left untouched, as they were before either existed. Rewriting them each
@@ -66,6 +88,7 @@ pub fn said(into: &mut Collector, db: &str, clock: Clock, replayed: bool) {
         "steps_ms": clock.steps.iter().map(|(name, ms)| (name.clone(), Value::from(*ms))).collect::<serde_json::Map<_, _>>(),
         "passes": if replayed { "replayed" } else { "ran" },
         "reread": into.reread.max(0),
+        "hash": clock.hashed.map(|read| json!({"entries": read.entries, "files_read": read.files, "bytes_read": read.bytes})),
         "errors": into.errors.len(),
         "trace": crate::trace::last_run(db),
     });
@@ -127,6 +150,28 @@ fn roots_value(roots: &[(String, String)]) -> String {
         .map(|(_, dir)| std::path::absolute(dir).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| dir.clone()))
         .collect();
     Value::from(dirs).to_string()
+}
+
+/// What the tree's hash read - `read 3 file(s), 190.7 MB, of 1204 entries`: the files of every root it read from disk, what
+/// they held, and every file and folder the snapshots name.
+fn read_by(read: Read) -> String {
+    format!("read {} file(s), {}, of {} entries", read.files, size(read.bytes), read.entries)
+}
+
+/// Bytes in the largest unit that keeps a whole number in front - `512 B`, `4.0 KB`, `190.7 MB`, `2.3 GB`.
+fn size(bytes: u64) -> String {
+    let units = ["B", "KB", "MB", "GB", "TB"];
+    let mut at = 0;
+    let mut whole = bytes;
+    while whole >= 1024 && at + 1 < units.len() {
+        whole /= 1024;
+        at += 1;
+    }
+    if at == 0 {
+        return format!("{bytes} B");
+    }
+    let tenths = bytes * 10 / 1024u64.pow(at as u32);
+    format!("{}.{} {}", tenths / 10, tenths % 10, units[at])
 }
 
 /// Milliseconds as seconds with one decimal - `0.4 s`, `125.3 s`.
@@ -201,5 +246,14 @@ mod tests {
         assert_eq!(clock.steps, vec![("csharp".to_string(), 1_350)]);
         assert_eq!(seconds(1_350), "1.3 s");
         assert_eq!(seconds(125_312), "125.3 s");
+    }
+
+    #[test]
+    fn the_hash_says_what_it_read_in_its_largest_unit() {
+        assert_eq!(size(0), "0 B");
+        assert_eq!(size(1_023), "1023 B");
+        assert_eq!(size(4_096), "4.0 KB");
+        assert_eq!(size(200_000_000), "190.7 MB");
+        assert_eq!(read_by(Read { entries: 1_204, files: 3, bytes: 200_000_000 }), "read 3 file(s), 190.7 MB, of 1204 entries");
     }
 }

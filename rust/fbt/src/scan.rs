@@ -7,7 +7,7 @@ use anyhow::Result;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
 #[derive(Clone, Debug)]
@@ -41,6 +41,8 @@ pub struct ScanResult {
     pub root_hash: Option<Hash>,
     /// Files whose content was read this scan.
     pub hashed: usize,
+    /// What those files hold, in bytes.
+    pub hashed_bytes: u64,
     /// Files whose hash came from the previous snapshot.
     pub reused: usize,
     pub walk_ms: u128,
@@ -69,11 +71,12 @@ pub fn scan(root: &Path, opts: &ScanOptions, cache: Option<&Cache<'_>>) -> Resul
 
     let t1 = Instant::now();
     let hashed = AtomicUsize::new(0);
+    let hashed_bytes = AtomicU64::new(0);
     let reused = AtomicUsize::new(0);
 
     let mut entries: Vec<Entry> = raw
         .par_iter()
-        .map(|r| build_entry(root, r, opts, cache, &hashed, &reused))
+        .map(|r| build_entry(root, r, opts, cache, (&hashed, &hashed_bytes), &reused))
         .collect();
 
     let root_hash = hash::merkle_rollup(&mut entries);
@@ -83,6 +86,7 @@ pub fn scan(root: &Path, opts: &ScanOptions, cache: Option<&Cache<'_>>) -> Resul
         entries,
         root_hash,
         hashed: hashed.load(Ordering::Relaxed),
+        hashed_bytes: hashed_bytes.load(Ordering::Relaxed),
         reused: reused.load(Ordering::Relaxed),
         walk_ms,
         hash_ms,
@@ -94,7 +98,7 @@ fn build_entry(
     r: &RawEntry,
     opts: &ScanOptions,
     cache: Option<&Cache<'_>>,
-    hashed: &AtomicUsize,
+    (hashed, hashed_bytes): (&AtomicUsize, &AtomicU64),
     reused: &AtomicUsize,
 ) -> Entry {
     let path = r.rel.clone();
@@ -111,6 +115,7 @@ fn build_entry(
                 Some(h)
             } else {
                 hashed.fetch_add(1, Ordering::Relaxed);
+                hashed_bytes.fetch_add(r.size, Ordering::Relaxed);
                 let abs = root.join(&path);
                 Some(
                     hash::hash_file(&abs, r.size)
