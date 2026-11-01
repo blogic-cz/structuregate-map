@@ -22,6 +22,8 @@ pub struct Clock {
     steps: Vec<(String, u64)>,
     /// What the tree's hash read, said beside its time.
     hashed: Option<Read>,
+    /// Each root the tree map could not snapshot, and why.
+    unsnapshotted: Vec<String>,
 }
 
 /// The step the tree's hash is timed as.
@@ -29,7 +31,7 @@ const HASH: &str = "hash the tree";
 
 impl Clock {
     pub fn start() -> Clock {
-        Clock { started: Instant::now(), steps: Vec::new(), hashed: None }
+        Clock { started: Instant::now(), steps: Vec::new(), hashed: None, unsnapshotted: Vec::new() }
     }
 
     /// One step, timed. A step timed twice (the plain half's two turns) adds up.
@@ -42,8 +44,9 @@ impl Clock {
 
     /// The tree's hash, taken now and timed, with what it read.
     pub fn hash(&mut self, take: impl FnOnce() -> Hashes) -> Hashes {
-        let hashes = self.time(HASH, take);
-        self.hashed = Some(hashes.read);
+        let started = Instant::now();
+        let hashes = take();
+        self.hashed(started.elapsed().as_millis() as u64, &hashes);
         hashes
     }
 
@@ -51,6 +54,7 @@ impl Clock {
     pub fn hashed(&mut self, ms: u64, hashes: &Hashes) {
         self.add(HASH, ms);
         self.hashed = Some(hashes.read);
+        self.unsnapshotted.clone_from(&hashes.failed);
     }
 
     pub fn add(&mut self, name: &str, ms: u64) {
@@ -70,6 +74,11 @@ pub fn said(into: &mut Collector, db: &str, clock: Clock, replayed: bool) {
         _ => format!("{name} {}", seconds(*ms)),
     }).collect();
     into.notes.push(format!("the deep map took {}: {}", seconds(took), steps.join(", ")));
+    // A ROOT WITH NO SNAPSHOT IS SAID: every lookup then missed and every half took every file as new, on every run, and
+    // the only trace of it was `of 0 entries` - two folders whose names differed only in case did that for weeks.
+    for why in &clock.unsnapshotted {
+        into.notes.push(format!("the tree map could not snapshot {why} - nothing in it can be told unchanged, so every half reads it whole"));
+    }
     // A RUN THAT DID NOTHING - no file re-read, the passes replayed, no error - KEEPS THE LAST ONE'S ACCOUNT: the
     // database and the trace beside it are left untouched, as they were before either existed. Rewriting them each
     // turn moved a file inside the tree on every run (a gate's pass cache then never hits) and replaced the slow run's

@@ -220,9 +220,11 @@ impl Session {
         created_ns: i64,
         keep: i64,
     ) -> Result<i64> {
-        let id = db::insert_snapshot(&self.conn, root_label, created_ns, None, None, None, 0)?;
-        db::insert_entries(&mut self.conn, id, entries)?;
-        db::finish_snapshot(&self.conn, id, entries.len() as i64, root_hash)?;
+        let tx = self.conn.transaction()?;
+        let id = db::insert_snapshot(&tx, root_label, created_ns, None, None, None, 0)?;
+        db::insert_entries(&tx, id, entries)?;
+        db::finish_snapshot(&tx, id, entries.len() as i64, root_hash)?;
+        tx.commit()?;
         if keep > 0 {
             db::prune(&self.conn, keep)?;
         }

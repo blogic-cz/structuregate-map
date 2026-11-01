@@ -17,12 +17,14 @@ use std::collections::HashMap;
 use std::path::Path;
 
 pub struct Hashes {
-    /// `(root label, lowercased, ending in '/') -> {relative path key -> content hash}`.
+    /// `(root label, folded as the tree map keys it, ending in '/') -> {relative path key -> content hash}`.
     roots: Vec<(String, HashMap<String, String>)>,
     /// Every root's merkle hash, in order - None when any root could not be snapshotted.
     tree: Option<String>,
     /// What bringing the snapshots up to date cost, over every root.
     pub read: Read,
+    /// Each root that could not be snapshotted, and why - said in the run's notes, never dropped in silence.
+    pub failed: Vec<String>,
 }
 
 /// HOW MUCH THE HASH READ (#144): the entries the snapshots name, the files read from disk and what those held. The
@@ -38,10 +40,13 @@ impl Hashes {
     /// Every root's snapshot, brought up to date. A root the tree map cannot open answers nothing, and its
     /// files are read instead.
     pub fn of(roots: &[String], skip: &[String], avoid: &[&str]) -> Hashes {
-        let taken: Vec<(String, HashMap<String, String>, String, Read)> = roots.iter().filter_map(|root| snapshot(root, skip, avoid)).collect();
+        let mut failed = Vec::new();
+        let taken: Vec<(String, HashMap<String, String>, String, Read)> = roots.iter()
+            .filter_map(|root| snapshot(root, skip, avoid).map_err(|why| failed.push(format!("{root} - {why}"))).ok())
+            .collect();
         let tree = (taken.len() == roots.len() && !roots.is_empty()).then(|| taken.iter().map(|(_, _, h, _)| h.as_str()).collect::<Vec<_>>().join("+"));
         let read = taken.iter().fold(Read::default(), |sum, (_, _, _, r)| Read { entries: sum.entries + r.entries, files: sum.files + r.files, bytes: sum.bytes + r.bytes });
-        Hashes { roots: taken.into_iter().map(|(r, f, _, _)| (r, f)).collect(), tree, read }
+        Hashes { roots: taken.into_iter().map(|(r, f, _, _)| (r, f)).collect(), tree, read, failed }
     }
 
     /// WHAT THE WHOLE TREE IS NOW, as one string: the merkle hash of every root. Equal to what a half's
@@ -123,8 +128,9 @@ impl Hashes {
     }
 }
 
-fn snapshot(root: &str, skip: &[String], avoid: &[&str]) -> Option<(String, HashMap<String, String>, String, Read)> {
-    let root_path = std::fs::canonicalize(root).ok()?;
+/// One root's snapshot, or why the tree map could not take it.
+fn snapshot(root: &str, skip: &[String], avoid: &[&str]) -> Result<(String, HashMap<String, String>, String, Read), String> {
+    let root_path = std::fs::canonicalize(root).map_err(|e| format!("the root could not be resolved: {e}"))?;
     let prefix = format!("{}/", label_of(&root_path).trim_end_matches('/'));
     let mut skip_paths = Vec::new();
     // WHAT THIS TOOL WRITES INTO THE TREE - the map's own database with its SQLite siblings, the file-level
@@ -142,10 +148,10 @@ fn snapshot(root: &str, skip: &[String], avoid: &[&str]) -> Option<(String, Hash
     extra_skip.push(".fbt".into());
     let options = ScanOptions { use_gitignore: false, no_default_skip: true, extra_skip, skip_paths, rehash_all: false };
     let store = root_path.join(".fbt").join("deep.sqlite");
-    let mut engine = Engine::open(&store, &root_path, options).ok()?;
+    let mut engine = Engine::open(&store, &root_path, options).map_err(|e| format!("{} could not be opened: {e:#}", store.display()))?;
     crate::tree::ignored(&root_path);
     let stage = crate::trace::stage(&format!("deep: hash {}", root_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
-    let refreshed = engine.refresh(true, true, false).ok()?;
+    let refreshed = engine.refresh(true, true, false).map_err(|e| format!("the snapshot was not taken: {e:#}"))?;
     // HOW THE SNAPSHOT WAS BROUGHT UP TO DATE, said in the trace: the journal or a walk, over how many entries, and how
     // many files it had to read - a large tree spent seconds here on a run that changed nothing, and nothing said why.
     stage.set("structuregate.hash.method", refreshed.method.label());
@@ -156,23 +162,23 @@ fn snapshot(root: &str, skip: &[String], avoid: &[&str]) -> Option<(String, Hash
     if let Some(note) = &refreshed.usn_note {
         stage.set("structuregate.hash.journal", note.as_str());
     }
-    let merkle = refreshed.root_hash.as_ref().map(fbt::hash::hex)?;
-    let latest = engine.latest().ok()??;
-    let entries = fbt::db::load_entries(&engine.conn, latest.id).ok()?;
+    let merkle = refreshed.root_hash.as_ref().map(fbt::hash::hex).ok_or("the snapshot has no root hash")?;
+    let latest = engine.latest().ok().flatten().ok_or("no snapshot was stored")?;
+    let entries = fbt::db::load_entries(&engine.conn, latest.id).map_err(|e| format!("the snapshot could not be read: {e:#}"))?;
     let files = entries
         .into_iter()
         .filter(|(_, e)| e.kind == fbt::entry::Kind::File)
         .filter_map(|(key, e)| e.hash.map(|h| (key, fbt::hash::hex(&h))))
         .collect();
     let read = Read { entries: refreshed.entry_count, files: refreshed.read_from_disk, bytes: refreshed.bytes_read };
-    Some((prefix, files, merkle, read))
+    Ok((prefix, files, merkle, read))
 }
 
-/// A path as the tree map keys it: absolute, `/`-separated, lowercase, no `\\?\` prefix.
+/// A path as the tree map keys it: absolute, `/`-separated, folded as its keys are (`fbt::entry::fold`), no `\\?\` prefix.
 fn label(path: &Path) -> Option<String> {
     Some(label_of(&std::path::absolute(path).ok()?))
 }
 
 fn label_of(path: &Path) -> String {
-    path.to_string_lossy().trim_start_matches("\\\\?\\").replace('\\', "/").to_lowercase()
+    fbt::entry::fold(&path.to_string_lossy().trim_start_matches("\\\\?\\").replace('\\', "/"))
 }
