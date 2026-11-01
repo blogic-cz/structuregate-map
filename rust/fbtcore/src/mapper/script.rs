@@ -124,13 +124,14 @@ fn begin(into: &mut Collector, half: &Script, files: &[(String, String)], root: 
     let mut globals: Option<String> = None;
     match keeping {
         Some(kept) => {
+            // A TYPESCRIPT, POWERSHELL OR PYTHON ANSWER READS ONLY THE PATHS ITS IMPORTS TRIED (`MAP-TRIED`): keyed by its own
+            // file, it is asked again when one of them was added or gone - not when any file anywhere was, which re-parsed a
+            // large tree whole. With no last run's paths kept, what moved is not known, and every file is asked.
+            let narrow = matches!(half.language, "typescript" | "powershell" | "python");
             let project = if half.language == "typescript" { kept.project() } else { String::new() };
-            let reads = half.dependents.and_then(|also| kept.whole("reads", &[], also)).unwrap_or_default();
+            let reads = half.dependents.and_then(|also| if narrow { kept.own_whole("reads", &[], also) } else { kept.whole("reads", &[], also) })
+                .unwrap_or_default();
             let stamp = format!("{}|{}|{script}|{project}|{reads}", half.language, half.host);
-            // A TYPESCRIPT OR POWERSHELL ANSWER READS ONLY THE PATHS ITS IMPORTS TRIED (`MAP-TRIED`): keyed by its own file,
-            // it is asked again when one of them was added or gone - not when any file anywhere was, which re-parsed a large
-            // tree whole. With no last run's paths kept, what moved is not known, and every file is asked.
-                    let narrow = matches!(half.language, "typescript" | "powershell");
             let keyed: Vec<Option<String>> = files.iter()
                 .map(|(rel, _)| if narrow { kept.own_key(&stamp, rel) } else { kept.key(&stamp, rel) }).collect();
             let mut ask: HashSet<usize> = (0..files.len()).filter(|&i| keyed[i].as_deref().is_none_or(|k| !kept.has(k))).collect();
@@ -141,8 +142,13 @@ fn begin(into: &mut Collector, half: &Script, files: &[(String, String)], root: 
                 _ => {}
             }
             if half.dependents.is_some() {
-                globals = kept.whole(&format!("{stamp}|globals"), &[], |_| false);
-                if !globals.as_deref().is_some_and(|g| kept.has(g)) {
+                // THE RUN'S OWN LINES (a launcher's entry points) answer for the set of files the half maps, not every path.
+                let set = blake3::hash(files.iter().map(|(rel, _)| rel.as_str()).collect::<Vec<_>>().join("\n").as_bytes()).to_hex();
+                globals = if narrow { kept.own_whole(&format!("{stamp}|globals|{set}"), &[], |_| false) }
+                    else { kept.whole(&format!("{stamp}|globals"), &[], |_| false) };
+                // THE RUN'S LINES ARE READ OVER EVERY FILE OF THE MAP (`--known-file`), whichever are parsed: a narrow half only
+                // has to run, and parses every file only when none other is asked.
+                if !globals.as_deref().is_some_and(|g| kept.has(g)) && (!narrow || ask.is_empty()) {
                     ask = (0..files.len()).collect();
                 } else if !ask.is_empty() {
                     ask = with_importers(kept, files, ask);
@@ -296,12 +302,16 @@ fn with_importers(kept: &mut Kept, files: &[(String, String)], ask: HashSet<usiz
     out
 }
 
-/// Whether a kept answer's imports tried a path in `moved` (its `MAP-TRIED|rel|<path>\t<path>..` lines). `*/<name>` is
-/// any path of that file name - PowerShell's computed dot-source, matched to a mapped file by its name.
+/// Whether a kept answer's imports tried a path in `moved` (its `MAP-TRIED|rel|<path>\t<path>..` lines). `*/<spelling>` is
+/// any path ending in it - PowerShell's computed dot-source and python's `Tree.unique`, matched by name.
 fn tried_any(lines: &str, moved: &std::collections::HashSet<String>) -> bool {
     lines.lines().filter_map(|l| l.strip_prefix("MAP-TRIED|")).filter_map(|l| l.split_once('|'))
         .any(|(_, tried)| tried.split('\t').any(|path| match path.strip_prefix("*/") {
-            Some(name) => moved.iter().any(|m| m.rsplit('/').next() == Some(fbt::entry::fold(name).as_str())),
+            // `*/<spelling>`: every path ENDING in the spelling - a file name, or python's `pkg/mod.py`.
+            Some(name) => {
+                let name = fbt::entry::fold(name);
+                moved.iter().any(|m| *m == name || m.ends_with(&format!("/{name}")))
+            }
             None => moved.contains(&fbt::entry::fold(path)),
         }))
 }

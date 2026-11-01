@@ -151,6 +151,24 @@ if ($script:MapKeptTs) {
 # imports, so an edit re-reads the file and every file importing it through any chain (by the last map's edges) - and
 # a launcher (`pyproject.toml`) moving re-reads everything. Its entry points are the RUN's, kept apart from the files'.
 if ($script:Python) {
+    # A PATH ADDED OR GONE ASKS ONLY THE FILES WHOSE BINDING PROBED IT (`MAP-TRIED`, from `PyDeps`): any file added anywhere
+    # re-read every python file; now only the importers of a module that appeared, or one whose probe it was.
+    Test-Case 'map: a python file is asked again only when a path its imports probed was added or gone' {
+        $tree = Use-Tree @{
+            'pkg/__init__.py' = "`n"
+            'app.py'          = "from pkg import missing`n`ndef main():`n    return missing`n"
+            'other.py'        = "import os`nX = os.sep`n"
+        }
+        Assert-Equal (Invoke-MapKept $tree '.py').Parsed['python'] 3 'parsed on the first run'
+        [System.IO.File]::WriteAllText((Join-Path $tree 'notes.txt'), 'n')
+        Assert-Equal (Invoke-MapKept $tree '.py').Parsed['python'] 0 'parsed after an unrelated file was added'
+        [System.IO.File]::WriteAllText((Join-Path $tree 'pkg/missing.py'), "VALUE = 1`n")
+        $added = Invoke-MapKept $tree '.py'
+        Assert-Equal $added.Parsed['python'] 2 'parsed after the module an import probed appeared (it, and app.py)'
+        Remove-Item -Recurse -Force (Join-Path $tree '.fbt')
+        Assert-Equal $added.Map (Invoke-MapKept $tree '.py').Map 'the map after the add, against a full parse'
+    }
+
     Test-Case 'map: python re-reads the edited module and what imports it, and keeps a launcher entry point' {
         $tree = Use-Tree @{
             'pkg/__init__.py' = "`n"

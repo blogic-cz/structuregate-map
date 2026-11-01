@@ -8,12 +8,13 @@
 //! staged script (`stamp`), and EVERY PATH THE WALK SAW - a half resolves an import against the file set and asks
 //! the disk whether a path exists. C# is the exception: Roslyn reads the one file, and the names are joined here
 //! (`own_key`). TypeScript also reads `tsconfig` `paths`, so its stamp carries the project files (`gate::counts`).
-//! TYPESCRIPT AND POWERSHELL SAY WHICH PATHS THEY TRIED (`MAP-TRIED`): keyed by the file alone, an answer is asked again
+//! TYPESCRIPT, POWERSHELL AND PYTHON SAY WHICH PATHS THEY TRIED (`MAP-TRIED`; python's from `PyDeps`, every probe of its
+//! binding, transitively): keyed by the file alone, an answer is asked again
 //! when a path it tried - or a folder above one - was added or gone since the last run (`moved`, from `map_paths`); a
 //! log or an asset added anywhere re-parsed every TypeScript file of a large tree before.
 //!
-//! ONLY HALVES WHOSE LINES ABOUT A FILE COME FROM THAT FILE are kept. Python's do not - a name is bound by reading
-//! the module it comes from, and a `declares` check opens the file it names - so it parses everything, as before.
+//! A HALF WHOSE ANSWER READS ANOTHER FILE'S CONTENT (python binds a name by reading the module it comes from) is asked
+//! again with every file importing a moved one, through any chain (`script::with_importers`).
 //! Only a run that finished is kept, and only one root: with several, a path is keyed by its root prefix.
 
 use rusqlite::{params, Connection};
@@ -120,6 +121,16 @@ impl Kept {
     /// reads beyond them (`pyproject.toml`, a `.spec`). Nothing moved, nothing is parsed. None when the snapshot
     /// does not name one of them - the half then runs.
     pub fn whole(&self, stamp: &str, files: &[(String, String)], also: fn(&str) -> bool) -> Option<String> {
+        self.whole_under(&self.base, stamp, files, also)
+    }
+
+    /// `whole`, without the file set: for a half that says which paths it tried (`MAP-TRIED`), whose answers are asked
+    /// again by those paths alone.
+    pub fn own_whole(&self, stamp: &str, files: &[(String, String)], also: fn(&str) -> bool) -> Option<String> {
+        self.whole_under(&self.own, stamp, files, also)
+    }
+
+    fn whole_under(&self, base: &str, stamp: &str, files: &[(String, String)], also: fn(&str) -> bool) -> Option<String> {
         let mut named: Vec<(String, &String)> = Vec::new();
         for (rel, _) in files {
             let path = fbt::entry::key_of(&fbt::entry::normalize(rel));
@@ -130,7 +141,7 @@ impl Kept {
         named.sort();
         named.dedup();
         let mut hash = blake3::Hasher::new();
-        hash.update(format!("{}\twhole\t{stamp}\n", self.base).as_bytes());
+        hash.update(format!("{base}\twhole\t{stamp}\n").as_bytes());
         for (path, content) in named {
             hash.update(format!("{path}\t{content}\n").as_bytes());
         }
