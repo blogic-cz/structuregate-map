@@ -166,3 +166,29 @@ fn a_run_that_fails_before_its_closure_leaves_nothing_to_keep() {
     let receipt = apply(&db, &ws.root(), payload(true, true)).unwrap();
     assert!(verdict(&receipt.notes).contains("no closure was recorded"), "{:?}", receipt.notes);
 }
+
+/// A partial payload that adds one file nothing else names.
+fn added(path: &str, ext: &str) -> TsPayload {
+    let mut tables = Map::new();
+    tables.insert("files".to_string(), json!([{"id": "f:3", "path": path, "ext": ext, "owner_file": "f:3", "parsed": false}]));
+    let mut shas = payload(false, true).shas;
+    shas.insert(path.to_string(), json!("3"));
+    TsPayload { all: false, partial: true, affected: vec![path.to_string()], shas, tables, setup: Some("setup-a".to_string()), ..Default::default() }
+}
+
+#[test]
+fn a_file_no_pass_can_see_leaves_the_closure_as_it_was() {
+    let db = tmp("unseen");
+    let ws = Workspace::new("unseen");
+    apply(&db, &ws.root(), payload(false, true)).unwrap();
+
+    // AN IMAGE OR A NOTE beside the source: not parsed, not a text the trace reads, no other cell.
+    std::fs::write(ws.0.join("logo.svg"), "<svg/>").unwrap();
+    let receipt = apply(&db, &ws.root(), added("logo.svg", "svg")).unwrap();
+    assert!(verdict(&receipt.notes).contains("kept the closure it stored"), "{:?}", receipt.notes);
+
+    // A SOURCE FILE the trace reads is another matter, parsed or not.
+    std::fs::write(ws.0.join("c.ts"), "export const c = 'demo.title';\n").unwrap();
+    let receipt = apply(&db, &ws.root(), added("c.ts", "ts")).unwrap();
+    assert!(verdict(&receipt.notes).contains("`files` moved"), "{:?}", receipt.notes);
+}
