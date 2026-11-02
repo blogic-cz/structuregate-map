@@ -33,6 +33,11 @@ export function shapeOf(ts, sf) {
 }
 
 /** The shape of a file as it is on disk now, parsed without a program - what the plan run asks. Null when unreadable. */
+/** What a file the database has never seen must be to move what a template resolves (`TsMap.mjs`, the plan): a script
+ *  declares a selector or an NgModule, an `.html` is a template a component may already name, a `.json` a locale or a
+ *  config. Anything else - an image, a stylesheet rust parses whole on every run, a note - reads only what moved. */
+export const DECLARING = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.html', '.json']);
+
 export function shapeOfText(ts, abs, text) {
   if (typeof text !== 'string') return null;
   return shapeOf(ts, ts.createSourceFile(abs, text, ts.ScriptTarget.Latest, true));

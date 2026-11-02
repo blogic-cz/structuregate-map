@@ -79,7 +79,10 @@ stale rows.** An importer also depends on the file declaring each name and every
 AN EDIT TO A `scope` FILE (selector, pipe, directive, NgModule - what a template resolves through) GOES THE SHORT
 WAY WHILE ITS SHAPE HOLDS (`src/TsRows/TsSetup/TsShape.mjs`, `files.shape`): every token outside a function body,
 hashed by node on both runs. A comment or a method body keeps it; a selector, an input, a `templateUrl`, a
-decorator or a const a decorator names moves it, and the run reads everything.
+decorator or a const a decorator names moves it, and the run reads everything. A NEW FILE NO PROGRAM CAN HOLD
+(`TsShape.mjs::DECLARING`: anything but a script, an `.html` or a `.json`) reads only what moved and builds no program
+(`TsReads.mjs::skipping`); a kept row is compared AS IT IS WRITTEN (`Store.verifyUntouched` through `relativeCells`), so a
+pass that recomputes a path in it the same (`TsTplFills.mjs`) is no change - spelt absolute in node, it asked every partial run again.
 
 **A CARRIED ROW COMES BACK WITHOUT THE STRUCTURES NO PASS READS** (`src/TsRows/TsSetup/TsCarried.mjs`, handed to
 `rows/partial/uncarried.rs` through the plan): such a cell is its kind alone, a STUB that refuses every look inside;

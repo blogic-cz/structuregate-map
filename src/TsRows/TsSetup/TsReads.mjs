@@ -16,8 +16,10 @@
  * are what Angular reads, so their text is part of it too.
  */
 import { createHash } from 'node:crypto';
+import path from 'node:path';
 
 import { canonicalPath, relativeTo } from './TsPaths.mjs';
+import { DECLARING } from './TsShape.mjs';
 
 const NONE = Object.freeze([]);
 
@@ -355,8 +357,10 @@ function decoratorTexts(ts, sf) {
  * then builds itself.
  */
 export function skipping(state, planned, now, projects) {
+  // A FILE NO PROGRAM CAN HOLD (an image, a stylesheet, a note: `DECLARING`) needs no owner - it touches no project, and one
+  // `.txt` added in a large workspace built every program of it.
   const can = planned.cut && Array.isArray(state.program_notes) && state.owners
-    && planned.changed.every((rel) => now.has(rel) && state.owners[rel] !== undefined);
+    && planned.changed.every((rel) => !DECLARING.has(path.extname(rel).toLowerCase()) || (now.has(rel) && state.owners[rel] !== undefined));
   if (!can) return { skip: null, ahead: projects };
   const skip = { owners: state.owners, reached: state.reached ?? [], notes: state.program_notes };
   const touched = new Set([...planned.changed, ...planned.affected].map((rel) => skip.owners[rel]).filter(Boolean));
