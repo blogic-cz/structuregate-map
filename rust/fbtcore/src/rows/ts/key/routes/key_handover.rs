@@ -52,22 +52,6 @@ pub fn find(store: &Store<'_>, refs: &HashMap<(String, String), String>, class_o
     let takes: HashSet<String> = store.table("members").iter()
         .filter(|m| m.get("params").and_then(Value::as_array).is_some_and(|p| !p.is_empty()))
         .filter_map(|m| text(m, "id")).collect();
-    // `member id -> every assignment to it`: `(class, the value's own text when it is a property access, what it stands under)`.
-    let mut writes: HashMap<String, Vec<(Option<String>, Option<String>, Vec<Vec<String>>)>> = HashMap::new();
-    for a in store.table("assignments").iter() {
-        let Some(target) = text(a, "target_id") else { continue };
-        let value = a.get("value");
-        let access = value.filter(|v| v.get("$kind").and_then(Value::as_str) == Some("PropertyAccessExpression"))
-            .and_then(|v| v.get("$expr")).and_then(Value::as_str).map(str::to_string);
-        writes.entry(target).or_default().push((text(a, "class"), access, through_callers(branches.chain_of(a), text(a, "member"), &branches, &handlers, &takes)));
-    }
-    let mut renders: HashMap<String, String> = HashMap::new();
-    for r in store.table("renders").iter() {
-        if let (Some(node), Some(to)) = (text(r, "node"), text(r, "to")) { renders.insert(node, to); }
-    }
-    let class_of_component: HashMap<String, String> = store.table("components").iter()
-        .filter_map(|c| Some((text(c, "id")?, text(c, "class")?))).collect();
-    let template_of: HashMap<String, String> = class_of.iter().map(|(t, c)| (c.clone(), t.clone())).collect();
     // HOW OFTEN EACH FILE READS A PROPERTY OF EACH NAME (`files.prop_reads`), and the files that hand `this` away.
     let mut prop_reads: HashMap<String, HashMap<String, i64>> = HashMap::new();
     let mut indexed: HashSet<String> = HashSet::new();
@@ -82,6 +66,37 @@ pub fn find(store: &Store<'_>, refs: &HashMap<(String, String), String>, class_o
     let read_elsewhere = |file: &str, name: &str| prop_reads.iter().any(|(f, c)| f != file && c.get(name).is_some_and(|n| *n > 0));
     let file_of_class: HashMap<String, String> = store.table("classes").iter()
         .filter_map(|c| Some((text(c, "id")?, text(c, "file")?))).collect();
+    // EVERY STATEMENT CALL RESOLVED TO A METHOD TAKING PARAMETERS, and how many resolved calls of each name each file holds.
+    let mut stated: HashMap<String, Vec<String>> = HashMap::new();
+    let mut resolved: HashMap<(String, String), i64> = HashMap::new();
+    for c in store.table("calls").iter() {
+        let Some(target) = text(c, "target_id") else { continue };
+        if let (Some(file), Some(method)) = (text(c, "file"), text(c, "method")) { *resolved.entry((file, method)).or_default() += 1; }
+        if takes.contains(&target) && let Some(id) = text(c, "id") { stated.entry(target).or_default().push(id); }
+    }
+    // A METHOD READ BY MORE THAN ITS RESOLVED CALLS (`setTimeout(this.apply)`, an unresolved `x.apply(..)`, `this` handed away) may be
+    // called with anything: one of its ways keeps the test as written.
+    let opaque: HashSet<String> = members.iter().filter(|(id, ..)| takes.contains(id))
+        .filter(|(_, class, name, _)| file_of_class.get(class).is_none_or(|f| indexed.contains(f))
+            || prop_reads.iter().any(|(f, counts)| counts.get(name).is_some_and(|n| *n > resolved.get(&(f.clone(), name.clone())).copied().unwrap_or(0))))
+        .map(|(id, ..)| id.clone()).collect();
+    let callers = Callers { branches: &branches, handlers: &handlers, stated: &stated, takes: &takes, opaque: &opaque };
+    // `member id -> every assignment to it`: `(class, the value's own text when it is a property access, what it stands under)`.
+    let mut writes: HashMap<String, Vec<(Option<String>, Option<String>, Vec<Vec<String>>)>> = HashMap::new();
+    for a in store.table("assignments").iter() {
+        let Some(target) = text(a, "target_id") else { continue };
+        let value = a.get("value");
+        let access = value.filter(|v| v.get("$kind").and_then(Value::as_str) == Some("PropertyAccessExpression"))
+            .and_then(|v| v.get("$expr")).and_then(Value::as_str).map(str::to_string);
+        writes.entry(target).or_default().push((text(a, "class"), access, callers.ways(branches.chain_of(a), text(a, "member"))));
+    }
+    let mut renders: HashMap<String, String> = HashMap::new();
+    for r in store.table("renders").iter() {
+        if let (Some(node), Some(to)) = (text(r, "node"), text(r, "to")) { renders.insert(node, to); }
+    }
+    let class_of_component: HashMap<String, String> = store.table("components").iter()
+        .filter_map(|c| Some((text(c, "id")?, text(c, "class")?))).collect();
+    let template_of: HashMap<String, String> = class_of.iter().map(|(t, c)| (c.clone(), t.clone())).collect();
     let gate_at: HashSet<(String, String)> = store.table("gates").iter()
         .filter_map(|g| Some((text(g, "node")?, text(g, "name")?))).collect();
     // Every template expression, by its template: `(node, kind, name, identifiers, is the bare read of each)`.
@@ -187,19 +202,36 @@ fn follow(binding: &str, input: &str, seen: &mut HashSet<(String, String)>, at: 
     if out.is_empty() { None } else { Some(out) }
 }
 
-/// WHAT AN ASSIGNMENT STANDS UNDER, ONE LIST PER CALLER (#146): a branch testing the assigning method's own parameter (`if
-/// (isSpecial(kind))` in `apply(kind)`) says nothing until a caller names the value - so each template handler calling the method is
-/// a way of its own, the branch read as `arg:<branch>@<handler>` (`key_args`: the handler's argument in place of the parameter). A
-/// method no handler calls keeps the branch as it is: a TypeScript statement calling it hands values, not the trees `key_args` reads.
-fn through_callers(chain: Vec<String>, member: Option<String>, branches: &super::key_branches::Branches, handlers: &HashMap<String, Vec<String>>, takes: &HashSet<String>) -> Vec<Vec<String>> {
-    let member = member.unwrap_or_default();
-    // A METHOD WITH PARAMETERS ONLY: a test in one without is of fields, which every way reads the same.
-    let own = |b: &String| takes.contains(&member) && branches.condition(b).is_some_and(|(_, _, m)| m == Some(member.as_str()));
-    let callers = handlers.get(&member).filter(|c| !c.is_empty() && chain.iter().any(own));
-    match callers {
-        None => vec![chain],
-        Some(callers) => callers.iter()
+/// Who calls the methods an assignment may stand in.
+struct Callers<'a> {
+    branches: &'a super::key_branches::Branches,
+    /// Method -> each template handler calling it.
+    handlers: &'a HashMap<String, Vec<String>>,
+    /// Method -> each statement call resolved to it.
+    stated: &'a HashMap<String, Vec<String>>,
+    /// The methods that take a parameter.
+    takes: &'a HashSet<String>,
+    /// The methods read where no resolved call accounts for it.
+    opaque: &'a HashSet<String>,
+}
+
+impl Callers<'_> {
+    /// WHAT AN ASSIGNMENT STANDS UNDER, ONE LIST PER CALLER (#146, #124): a branch testing the assigning method's own parameter (`if
+    /// (isSpecial(kind))` in `apply(kind)`) says nothing until a caller names the value - so each caller is a way of its own, the
+    /// branch read as `arg:<branch>@<site>` (`key_args`: the caller's argument in place of the parameter): a template handler
+    /// calling the method, or a statement call (`!<calls id>`, its `this.` chains rebuilt as trees). A method nothing calls keeps
+    /// the branch as it is; one read where no resolved call accounts for it keeps it too, as one way more.
+    fn ways(&self, chain: Vec<String>, member: Option<String>) -> Vec<Vec<String>> {
+        let member = member.unwrap_or_default();
+        // A METHOD WITH PARAMETERS ONLY: a test in one without is of fields, which every way reads the same.
+        let own = |b: &String| self.takes.contains(&member) && self.branches.condition(b).is_some_and(|(_, _, m)| m == Some(member.as_str()));
+        let sites: Vec<String> = self.handlers.get(&member).into_iter().flatten().cloned()
+            .chain(self.stated.get(&member).into_iter().flatten().map(|c| format!("!{c}"))).collect();
+        if sites.is_empty() || !chain.iter().any(own) { return vec![chain]; }
+        let mut ways: Vec<Vec<String>> = sites.iter()
             .map(|site| chain.iter().map(|b| if own(b) { format!("arg:{b}@{site}") } else { b.clone() }).collect())
-            .collect(),
+            .collect();
+        if self.opaque.contains(&member) { ways.push(chain); }
+        ways
     }
 }
