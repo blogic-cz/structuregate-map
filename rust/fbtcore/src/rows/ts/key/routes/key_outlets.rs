@@ -53,6 +53,15 @@ pub(crate) fn bare_read(ast: Option<&Value>, name: &str) -> bool {
 
 enum Under { No, Cycle, Ways(Vec<Vec<String>>) }
 
+/// Every way of `before` followed by every way of `after`: a relayed hand-over holds each element's chain it went through (#146).
+fn joined(before: &[Vec<String>], after: &[Vec<String>]) -> Vec<Vec<String>> {
+    before.iter().flat_map(|b| after.iter().map(move |a| {
+        let mut way = b.clone();
+        for g in a { if !way.contains(g) { way.push(g.clone()); } }
+        way
+    })).collect()
+}
+
 #[derive(Default)]
 pub struct Outlets {
     parent: HashMap<String, String>,
@@ -211,7 +220,7 @@ impl Outlets {
                 let chain = self.chain.get(n).cloned().unwrap_or_default();
                 match self.under(n, &chain, stack) { Under::No => Some(vec![chain]), Under::Cycle => None, Under::Ways(w) => Some(w) }
             };
-            let (Some(above), Some(inside)) = (at(&h.binding, stack), at(&h.outlet, stack)) else { continue };
+            let (Some(above), Some(inside)) = (h.bindings.iter().try_fold(vec![Vec::new()], |ways, b| Some(joined(&ways, &at(b, stack)?))), at(&h.outlet, stack)) else { continue };
             let drop = self.handover.get(&h.outlet);
             for a in &above {
                 for i in &inside {
