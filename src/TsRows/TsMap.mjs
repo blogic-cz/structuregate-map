@@ -48,7 +48,7 @@ import { rollupComponentReach } from './TsReach.mjs';
 import { rollupI18nCalls } from './TsI18nCalls.mjs';
 import { rollupCallParams, rollupRefIds } from './TsRefs.mjs';
 import { cutShort, emptyChanged, repointProjects, startRereads, skipping } from './TsReads.mjs';
-import { shapeOfText } from './TsShape.mjs';
+import { DECLARING, shapeOfText } from './TsShape.mjs';
 import { affectedFiles, fingerprint, inventory, knownLines, markParsed, plannedHashes } from './TsInventory.mjs';
 import { discoverProjects, findTypescriptRoot, findWorkspaceRoot, isAngularRoot } from './TsProjects.mjs';
 import { loadToolchain, resolveToolchain, TYPESCRIPT_ONLY, versionMismatch } from './TsResolve.mjs';
@@ -454,7 +454,9 @@ async function main() {
         return null;
       }
     };
-    const moved = changed.filter((rel) => !was.has(rel)
+    // A NEW FILE THAT CAN DECLARE NOTHING - an image, a stylesheet (rust parses those whole on every run), a note - reads
+    // only what moved: one `.txt` added in a large workspace read every file of it again.
+    const moved = changed.filter((rel) => (!was.has(rel) && DECLARING.has(path.extname(rel).toLowerCase()))
       || (scope.has(rel) && (!shapes[rel] || shapeNow(rel) !== shapes[rel])));
     // WHY THE HALF RUNS, said by the caller: how many files moved, by extension, and whether the setup did.
     why = { setup_moved: recorded.length > 0 && !sameSetup, recorded: recorded.length, changed: changed.length, template: moved.length, exts: {} };
@@ -511,7 +513,7 @@ async function main() {
   // why it is a question about the database rather than a constant. A PARTIAL RUN NEVER RESTARTS THEM:
   // the rows it is about to load already carry ids, and numbering from 1 again would hand a new row an
   // id one of them points at.
-  const store = new Store(partial ? (state.counters ?? {}) : (state.alone ? {} : (state.counters ?? {})), state.floor ?? 0);
+  const store = new Store(partial ? (state.counters ?? {}) : (state.alone ? {} : (state.counters ?? {})), state.floor ?? 0, relativeCells(canonicalPath(path.resolve(fe))));
   const affected = partial ? new Set(planned.affected) : null;
   let repointLater = null;
   // THE PROGRAMS BEFORE THE ROWS: a partial run builds them while rust is still writing what it hands back (`prewarm`),

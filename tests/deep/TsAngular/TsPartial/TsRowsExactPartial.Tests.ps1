@@ -110,9 +110,29 @@ import { NgModule } from '@angular/core';
 import { AlphaComponent } from './alpha.component';
 import { BetaComponent } from './beta.component';
 import { OrderComponent } from './order.component';
+import { RulesComponent } from './rules.component';
+import { HostComponent } from './host.component';
 import { RoutingModule } from './routing.module';
-@NgModule({ declarations: [AlphaComponent, BetaComponent, OrderComponent], imports: [RoutingModule], bootstrap: [OrderComponent] })
+@NgModule({ declarations: [AlphaComponent, BetaComponent, OrderComponent, RulesComponent, HostComponent], imports: [RoutingModule], bootstrap: [OrderComponent, HostComponent] })
 export class AppModule {}
+'@
+        # A FUNCTION A TEMPLATE TYPES (rows 107, `TsDerive/TsInputs/TsTplFills.mjs`): `rules()` declares no return type, so its arrow's
+        # `target` is found through `[rules]="rules()"` and recomputed on every run - a kept row whose path it spelt absolute read as moved.
+        'apps/shop/src/rule.ts' = "export interface Rule { Message: (value: string) => string; }`n"
+        'apps/shop/src/rules.component.ts' = @'
+import { Component, Input } from '@angular/core';
+import { Rule } from './rule';
+@Component({ selector: 'demo-rules', template: '<p>{{ rules.length }}</p>' })
+export class RulesComponent {
+  @Input() rules: Rule[] = [];
+}
+'@
+        'apps/shop/src/host.component.ts' = @'
+import { Component } from '@angular/core';
+@Component({ selector: 'demo-host', template: '<demo-rules [rules]="rules()"></demo-rules>' })
+export class HostComponent {
+  rules() { return [{ Message: (value: string) => value }]; }
+}
 '@
         'apps/shop/src/main.ts' = @'
 import { AppModule } from './app.module';
@@ -169,11 +189,13 @@ function Get-TsExactRows([string]$Db) {
 
 # The workspace mapped, `$Edit` given a comment, mapped again (a PARTIAL run, unless the store reads everything - which
 # `$Env` may ask of it), its map moved aside, and the same tree mapped from nothing.
-function Invoke-TsExactRun([string]$Edit, [hashtable]$Env = @{}) {
+# `-Add` writes `$Edit` as a new file instead.
+function Invoke-TsExactRun([string]$Edit, [hashtable]$Env = @{}, [switch]$Add) {
     $tree = New-TsExactWorkspace
     Assert-Exit (New-TsRowsDb $tree).Result 0
     $path = Join-Path $tree $Edit
-    Set-Content -LiteralPath $path -Value ((Get-Content -LiteralPath $path -Raw) + "// edited`n") -NoNewline
+    if ($Add) { Set-Content -LiteralPath $path -Value 'a note' }
+    else { Set-Content -LiteralPath $path -Value ((Get-Content -LiteralPath $path -Raw) + "// edited`n") -NoNewline }
     foreach ($name in $Env.Keys) { Set-Item -Path "Env:$name" -Value $Env[$name] }
     try {
         $partial = New-TsRowsDb $tree
@@ -241,6 +263,49 @@ Test-Case 'tsrows: a partial run leaves an untouched project unbuilt and writes 
     $partial = Get-TsExactRows $run.PartialDb
     if (-not @($partial | Where-Object { $_.StartsWith('diagnostics=') -and $_.Contains('demo-missing-package') }).Count) { throw 'the unbuilt program''s note is gone' }
     Assert-TsExactRows $partial (Get-TsExactRows $run.FullDb) 'every row after editing alpha.component.ts, the ui program unbuilt'
+}
+
+# A NEW FILE NO PROGRAM CAN HOLD reads only what moved and builds no program (`TsShape.mjs::DECLARING`): one `.txt` added in a large
+# workspace read every file of it again, and the partial run that replaced that built every project's program.
+Test-Case 'tsrows: a new file no program holds is a partial run that builds no program, and writes the full run''s rows' {
+    $run = Invoke-TsExactRun 'apps/shop/src/notes.txt' -Add
+    Assert-NoLine $run.Partial 'reads everything'
+    Assert-Line $run.Partial 'left 2 project program(s) unbuilt'
+    # THE ONE DIFFERENCE A PARTIAL RUN KEEPS (typescript-half.md): the new `files` row takes the next free id, where a full run numbers it
+    # in path order and every later file one higher - so each map's file ids are read as the paths they name, and every row is compared.
+    $byPath = { param($rows)
+        $paths = @{}
+        foreach ($row in $rows) {
+            if (-not $row.StartsWith('files=')) { continue }
+            $cells = $row.Substring(6).Split(',')
+            $paths[$cells[0]] = $cells[1]
+        }
+        @($rows | ForEach-Object { $line = $_; foreach ($id in $paths.Keys) { $line = $line.Replace($id, $paths[$id]) }; $line } | Sort-Object)
+    }
+    Assert-TsExactRows (& $byPath (Get-TsExactRows $run.PartialDb)) (& $byPath (Get-TsExactRows $run.FullDb)) 'every row after a note was added'
+}
+
+# A KEPT ROW A PASS RECOMPUTES THE SAME is untouched (`Store.verifyUntouched`, compared as it is written): the arrow `rules()` returns gets
+# its `target` again on every run, spelt absolute in node and relative in the map, and every partial run was asked again over every hop.
+Test-Case 'tsrows: a kept row a pass recomputes the same does not ask the run again, and the rows are the full run''s' {
+    $run = Invoke-TsExactRun 'apps/shop/src/beta.component.ts'
+    Assert-NoLine $run.Partial 'reading every hop of dependents again'
+    $partial = Get-TsExactRows $run.PartialDb
+    if (-not @($partial | Where-Object { $_.StartsWith('functions=') -and $_.Contains("'template'") }).Count) { throw 'no arrow targeted through a template' }
+    Assert-TsExactRows $partial (Get-TsExactRows $run.FullDb) 'every row after editing beta.component.ts'
+}
+
+# A SECOND EDIT COUNTS ITSELF ALONE: the run before recorded the first one's file as read.
+Test-Case 'tsrows: a partial run after a partial run reads only what moved since the last' {
+    $tree = New-TsExactWorkspace
+    Assert-Exit (New-TsRowsDb $tree).Result 0
+    foreach ($edit in 'apps/shop/src/beta.component.ts', 'apps/shop/src/alpha.component.ts') {
+        $path = Join-Path $tree $edit
+        Set-Content -LiteralPath $path -Value ((Get-Content -LiteralPath $path -Raw) + "// edited`n") -NoNewline
+        $run = New-TsRowsDb $tree
+        Assert-Exit $run.Result 0
+        Assert-Line $run.Result 'reads what moved: 1 file(s) moved since its rows were written'
+    }
 }
 
 }

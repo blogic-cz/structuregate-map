@@ -194,9 +194,11 @@ function uniqueKeyFor(rows) {
 }
 
 export class Store {
-  constructor(counters, floor = 0) {
+  constructor(counters, floor = 0, cells = null) {
     this.counters = { ...counters };
     this.floor = floor;
+    // HOW A ROW IS WRITTEN (`TsPaths.mjs::relativeCells`): a kept row is compared as it would be stored - see `verifyUntouched`.
+    this.cells = cells;
     // WHICH FILE IS BEING EXTRACTED - see `enterFile`. Null outside one, which is the rollups.
     this.currentFile = null;
     // ROWS HANDED BACK rather than produced here, and what each looked like on arrival - see `load`.
@@ -323,7 +325,10 @@ export class Store {
       for (const row of rows) {
         if (!this.hydrated.has(row) || !row.id) continue;
         const held = this.loadedAs.get(row.id);
-        const text = asStored(() => JSON.stringify(row));
+        // AS IT WOULD BE WRITTEN: node holds the compiler's absolute paths and spells them relative only in the payload, and a
+        // carried row comes back relative - a pass that recomputed a path in a kept row (`TsTplFills.mjs`) read as a change it
+        // was not, and every edit of a large workspace was parsed twice.
+        const text = asStored(() => JSON.stringify(row, this.cells ? this.cells(row, name) : undefined));
         if (held === text) continue;
         const was = held === undefined ? '{}' : storedForm(JSON.parse(held));
         if (was === storedForm(JSON.parse(text))) continue;
