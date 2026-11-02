@@ -62,3 +62,47 @@ public record Order(int OrderId);
         '28|DELETE|/lines/old||Drop', '33|PATCH|/lines/patch||Patch')
     if (($rows -join "`n") -ne ($want -join "`n")) { throw "http_calls:`nexpected:`n$($want -join "`n")`ngot:`n$($rows -join "`n")" }
 }
+
+# THE URL A C# CALL IS BUILT INTO (`CsTemplate.cs`, rows 35): `string.Empty` is the base address alone; a ternary is either arm and a
+# local only ever appended to is its initializer, so both cut at the query to one path; a base the run time knows joined to the method's
+# own parameter - by `+` or `string.Concat` - makes the method a wrapper, and each caller is a row with its own url.
+Test-Case 'httpcscalls: an empty url, a ternary, an appended local and a base joined to a parameter each give their path' {
+    $tree = Use-Tree @{
+        'App/App.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+        'App/Api.cs' = @'
+using System.Net.Http;
+using System.Threading.Tasks;
+namespace Demo;
+
+public class LineApi(HttpClient client, string root)
+{
+    private readonly string _base = root;
+    public Task<HttpResponseMessage> Ping() => client.GetAsync(string.Empty);
+    public Task<HttpResponseMessage> Pick(bool all, int id)
+    {
+        var url = all ? "/lines/pick" : $"/lines/pick?id={id}";
+        return client.GetAsync(url);
+    }
+    public Task<HttpResponseMessage> Page(int page, bool wide)
+    {
+        var url = $"/lines/page?page={page}";
+        if (wide) url += "&wide=1";
+        return client.GetAsync(url);
+    }
+    public Task<string> Fetch(string path) => client.GetStringAsync(_base + path);
+    public Task<HttpResponseMessage> Send(string endpoint) => client.GetAsync(string.Concat(_base, endpoint));
+    public Task<string> Based() => Fetch("/lines/based");
+    public Task<HttpResponseMessage> Joined() => Send("/lines/joined");
+}
+'@
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    $q = Invoke-Gate --map-query $db --width 0 --limit 0 --sql ("SELECT 'v=' || c.line || '|' || c.verb || '|' || c.url || '|' || " +
+        "coalesce((SELECT f.name FROM functions f WHERE f.id = c.via), '') || '|' || (SELECT f.name FROM functions f WHERE f.id = c.member) AS r " +
+        "FROM http_calls c ORDER BY c.line")
+    Assert-Exit $q 0
+    $rows = @($q.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | ForEach-Object { $_.Trim().Substring(2) })
+    $want = @('8|GET|||Ping', '12|GET|/lines/pick||Pick', '18|GET|/lines/page||Page', '22|GET|/lines/based|Fetch|Based', '23|GET|/lines/joined|Send|Joined')
+    if (($rows -join "`n") -ne ($want -join "`n")) { throw "http_calls:`nexpected:`n$($want -join "`n")`ngot:`n$($rows -join "`n")" }
+}

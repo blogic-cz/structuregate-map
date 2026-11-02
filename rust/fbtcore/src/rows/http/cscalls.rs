@@ -102,7 +102,13 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
     let value_of = |a: &Arg, qualname: &str| -> Option<Url> {
         match (&a.value, a.kind.as_str()) {
             (Value::String(s), "const" | "folded") => Some(Url::Pattern(s.clone())),
+            // A BASE THE RUN TIME KNOWS AND THE CALLER'S URL (`_cfg.Url + url`, `string.Concat(_base, endpoint)`): holes alone, each
+            // string ending in this method's parameter - the method is a wrapper of it, as a bare parameter makes it.
+            (Value::Array(alternatives), _) if handed(alternatives).is_some_and(|p| params.contains(&(qualname.to_string(), p.clone()))) =>
+                handed(alternatives).map(Url::Param),
             (Value::Array(alternatives), _) => Some(Url::Pattern(folded(alternatives))),
+            // `string.Empty`: the base address alone, as `""` is.
+            (_, "symbol") if a.symbol == "System.String.Empty" => Some(Url::Pattern(String::new())),
             (_, "symbol") if params.contains(&(qualname.to_string(), a.symbol.clone())) => Some(Url::Param(a.symbol.clone())),
             _ => None,
         }
@@ -199,6 +205,18 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
     }
     sites.sort_by(|a, b| (&a.file, a.line, &a.call).cmp(&(&b.file, b.line, &b.call)));
     Ok(sites)
+}
+
+/// The one parameter every alternative of a holes-only template ends in (its hole's `symbol`), or None.
+fn handed(alternatives: &[Value]) -> Option<String> {
+    let mut named: Option<String> = None;
+    for alt in alternatives {
+        let pieces = alt.as_array().filter(|p| !p.is_empty() && p.iter().all(Value::is_object))?;
+        let last = pieces.last()?.get("symbol")?.as_str()?.to_string();
+        if named.as_ref().is_some_and(|n| *n != last) { return None; }
+        named = Some(last);
+    }
+    named
 }
 
 /// An interpolation's alternatives as one pattern: each piece's text, a hole `{}`; alternatives that disagree are `*`.
