@@ -65,7 +65,7 @@ use std::path::Path;
 
 /// WHICH FILES ARE CARRIED AS TEXT. The same set the row writer carries, stated in both
 /// places because neither can see the other's.
-const TEXT_EXTS: &[&str] = &[
+pub(crate) const TEXT_EXTS: &[&str] = &[
     "ts", "html", "scss", "js", "json", "css", "md", "yaml", "xml", "properties", "config", "sh",
 ];
 

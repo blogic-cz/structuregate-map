@@ -106,7 +106,7 @@ derivation records what its passes READ - each column asked of a row (`Store::re
 `_closure_reads`, and what it was derived under (setup, feature API, options, the running build, the spec's word on those columns) in
 `_meta` `closure:typescript`. A partial run hashes the rows it removes before they go and the rows it writes in their
 place, per table in rowid order, every read cell with a structure as its nodes, plus what the dead-key trace makes of
-each affected file's text (`file_text` before, the disk after; a map built with `--map-no-text` holds none, so it derives again): all equal, and the four tables stay. That needs the
+each affected file's text (`file_text` before, the disk after; a map built with `--map-no-text` holds none, so it derives again): all equal, and the four tables stay. A `files` row no pass sees - unparsed, an extension the trace does not read, nothing else filled (an image, a `.txt`) - is left out, so adding one keeps them too. That needs the
 same ids back: EVERY per-file table with a unique key is claimed (`identityKeys`), not only those another file names,
 with sparse ALTERNATIVES for the rows a first key leaves out (`identityOf`: a template expression has no line), and a
 rollup takes its old ids back in the order it made them (`rollupId`, handed over by `carry` as `rollup`), a project by its

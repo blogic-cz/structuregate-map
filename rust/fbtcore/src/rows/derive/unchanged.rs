@@ -13,10 +13,16 @@
 //! every id with it. One cell apart and the closure is derived. So is everything this cannot see: a table read whole
 //! (another half's rows with it), no record from the last derivation, a different configuration. A run that fails
 //! between the two leaves no record (`forget` runs first), so the next one derives.
+//!
+//! A `files` ROW NO PASS CAN SEE is not compared: one the extraction did not parse, whose extension the trace does not
+//! read (`keyreach::TEXT_EXTS`) and whose every other read cell is empty - an image, a `.txt` added beside the source.
+//! Every pass over `files` maps an id to its path, a path a row names back to its id, or reads a text file; none of
+//! them reaches such a row, so adding, editing or removing one leaves the closure as it was.
 
 use super::cells;
 use super::half::HALF_COLUMN;
 use super::schema;
+use super::ts::keyreach::TEXT_EXTS;
 use super::ts::sourcetrace;
 use super::ts::store::Reads;
 use anyhow::Result;
@@ -163,6 +169,9 @@ pub fn digest(db: &Connection, table: &str, columns: &BTreeSet<String>, half: &s
     let nodes: Vec<(String, String)> = cells::columns_of(db, table).into_iter().filter(|(c, _)| columns.contains(c)).collect();
 
     let mut wheres: Vec<String> = Vec::new();
+    if table == "files" && has("parsed") && has("ext") {
+        wheres.push(seen_file(db, &plain, &nodes));
+    }
     let mut params: Vec<&dyn ToSql> = vec![&half];
     if !scope.all {
         let mut any: Vec<String> = Vec::new();
@@ -232,6 +241,26 @@ pub fn digest(db: &Connection, table: &str, columns: &BTreeSet<String>, half: &s
     Ok(hasher.finalize().to_hex().to_string())
 }
 
+/// A `files` row some pass can see: parsed, of an extension the trace reads, or with any other read cell filled.
+fn seen_file(db: &Connection, plain: &[&String], nodes: &[(String, String)]) -> String {
+    let texts: Vec<String> = TEXT_EXTS.iter().map(|e| format!("'{e}'")).collect();
+    let mut seen = vec!["coalesce(t.parsed, 0) <> 0".to_string(), format!("lower(coalesce(t.ext, '')) IN ({})", texts.join(", "))];
+    for column in plain.iter().filter(|c| !["id", "path", "abs", "ext", "parsed"].contains(&c.as_str())) {
+        seen.push(format!("coalesce(t.\"{}\", 0) NOT IN (0, '')", schema::escape(column)));
+    }
+    let owner = cells::owner_expr(db, "files", "t");
+    for (_, child) in nodes {
+        seen.push(format!("EXISTS (SELECT 1 FROM \"{}\" n WHERE n.owner = {owner})", schema::escape(child)));
+    }
+    format!("({})", seen.join(" OR "))
+}
+
+/// Whether the trace reads a path's text at all (`keyreach::read_texts`).
+fn traced_path(path: &str) -> bool {
+    let ext = Path::new(path).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    TEXT_EXTS.contains(&ext.as_str())
+}
+
 /// THE TRACE'S VIEW OF ONE FILE'S TEXT: the dotted names and words its live lines spell, as sets - the trace keeps
 /// the first file a name appears in, and a file's own order says nothing about that.
 fn traced(text: &str) -> (BTreeSet<String>, BTreeSet<String>) {
@@ -287,7 +316,7 @@ impl Before {
             old.insert(table.clone(), digest(db, table, columns, half, &rewrites.removed(table))?);
         }
         let mut texts: BTreeMap<String, Option<(BTreeSet<String>, BTreeSet<String>)>> =
-            rewrites.paths.iter().map(|p| (p.clone(), None)).collect();
+            rewrites.paths.iter().filter(|p| traced_path(p)).map(|p| (p.clone(), None)).collect();
         // A MAP BUILT WITH `--map-no-text` HOLDS NO TEXT TO COMPARE, so every affected path stays `None` and `moved`
         // answers "no text was held": the closure is derived again on every partial run that rewrites a file. The same
         // rows as keeping it, only slower (`rows/cells/text.rs`).
@@ -299,6 +328,9 @@ impl Before {
             let mut rows = stmt.query(params.as_slice())?;
             while let Some(row) = rows.next()? {
                 let (path, content): (String, String) = (row.get(0)?, row.get(1)?);
+                if !traced_path(&path) {
+                    continue;
+                }
                 // TWO COPIES OF ONE PATH say nothing certain about either: compared as none at all.
                 let fresh = texts.get(&path).is_some_and(Option::is_none);
                 texts.insert(path, if fresh { Some(traced(&content)) } else { None });
