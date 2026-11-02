@@ -25,8 +25,9 @@ internal static class CsTemplate
 {
     /// <summary>Literal text, or - when `Hole` - the C# source of a value only the run time knows.</summary>
     /// <summary>A piece of a string: literal text, or a hole's C# source - with, where the hole is a field, the
-    /// field's symbol, so the links can read its value off the `consts` row a referenced project wrote.</summary>
-    public sealed record Piece(string Text, bool Hole, string Symbol = "", bool Parameter = false);
+    /// field's symbol, so the links can read its value off the `consts` row a referenced project wrote.
+    /// `Format` marks a parameter that is the FORMAT of a `string.Format` - its `{n}` are holes only the caller's text shows.</summary>
+    public sealed record Piece(string Text, bool Hole, string Symbol = "", bool Parameter = false, bool Format = false);
 
     /// <summary>The template of an argument whose value did not fold, as a STRUCTURE the store keeps as node rows
     /// (`arguments__template`): a list of the strings the argument can be, each a list of pieces - a string, or a
@@ -42,11 +43,16 @@ internal static class CsTemplate
         // knows and the url the caller hands in, which is what makes the method a wrapper of the call (`rows/http/cscalls.rs`).
         var handed = strings is not null && strings.All(s => s.Count > 0 && s.All(p => p.Hole) && s[^1].Parameter);
         if (strings is null || (!handed && !strings.Any(s => s.Any(p => !p.Hole && p.Text.Trim().Length > 0)))) return "";
-        return strings.Select(pieces => (object)pieces.Select(piece => piece.Hole
-            ? (object)(piece.Symbol.Length > 0
-                ? new (string Key, object? Value)[] { ("hole", piece.Text), ("symbol", piece.Symbol) }
-                : new (string Key, object? Value)[] { ("hole", piece.Text) })
-            : piece.Text).ToList()).ToList();
+        return strings.Select(pieces => (object)pieces.Select(piece => piece.Hole ? (object)HoleNode(piece) : piece.Text).ToList()).ToList();
+    }
+
+    /// <summary>A hole as its node: its source, the symbol it reads, and `format` where it is a `string.Format`'s format.</summary>
+    private static (string Key, object? Value)[] HoleNode(Piece piece)
+    {
+        var node = new List<(string Key, object? Value)> { ("hole", piece.Text) };
+        if (piece.Symbol.Length > 0) node.Add(("symbol", piece.Symbol));
+        if (piece.Format) node.Add(("format", "string.Format"));
+        return [.. node];
     }
 
     /// <summary>Every string an expression can be, or null when it is one value only the run time knows.</summary>
@@ -64,8 +70,14 @@ internal static class CsTemplate
                 return Chain(model, binary, path);
             case InvocationExpressionSyntax invocation when Concatenated(model, invocation) is { } parts:
                 return parts.Aggregate(new List<List<Piece>> { new() }, (strings, part) => Product(strings, Strings(model, part, path) ?? [[Hole(part, model)]]));
-            case InvocationExpressionSyntax invocation:
-                return Format(model, invocation, e => CsFolding.Of(model, e)) is { } pieces ? [pieces] : null;
+            case InvocationExpressionSyntax invocation when Format(model, invocation, e => CsFolding.Of(model, e)) is { } pieces:
+                return [pieces];
+            // A FORMAT THE CALLER HANDS IN (`string.Format(endpoint, args)`): one hole, the parameter, marked - the http pass reads
+            // the caller's text as the url, each `{n}` in it a hole (`rows/http/cscalls.rs`).
+            case InvocationExpressionSyntax invocation when HandedFormat(model, invocation) is { } format:
+                return [[Hole(format, model) with { Format = true }]];
+            case InvocationExpressionSyntax:
+                return null;
             // A TERNARY IS EITHER ARM: `c ? "/api/files" : $"/api/files?basePath={p}"` is the strings of both.
             case ConditionalExpressionSyntax conditional:
                 return Strings(model, conditional.WhenTrue, path) is { } whenTrue && Strings(model, conditional.WhenFalse, path) is { } whenFalse
@@ -274,6 +286,14 @@ internal static class CsTemplate
         && method.Parameters.All(p => p.Type.SpecialType == SpecialType.System_String)
         && invocation.ArgumentList.Arguments.All(a => a.NameColon is null)
             ? [.. invocation.ArgumentList.Arguments.Select(a => a.Expression)] : null;
+
+    /// <summary>The format of a `string.Format` when it is a parameter of the method it is written in, or null.</summary>
+    private static ExpressionSyntax? HandedFormat(SemanticModel model, InvocationExpressionSyntax invocation) =>
+        model.GetSymbolInfo(invocation).Symbol is IMethodSymbol { Name: "Format", ContainingType.SpecialType: SpecialType.System_String } method
+        && method.Parameters.Length > 0 && method.Parameters[0].Type.SpecialType == SpecialType.System_String
+        && invocation.ArgumentList.Arguments is [{ NameColon: null } first, ..]
+        && CsSemantics.Bound(model, first.Expression) is IParameterSymbol
+            ? first.Expression : null;
 
     /// <summary>The model for the tree a node lives in - a model answers about its own tree only.</summary>
     private static SemanticModel? Owner(SemanticModel model, SyntaxNode node) =>

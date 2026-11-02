@@ -42,7 +42,8 @@ use std::path::Path;
 // parameters are `parameters` rows; a generated file `--map-include-generated` names is walked.
 // 35: `arguments.template` reads a ternary as both arms, and a local only ever `+=`-appended to as its initializer, alone and
 // with a hole after it.
-pub(super) const CS_ROWS_VERSION: &str = "35";
+// 36: a `string.Format` whose format is a parameter is that parameter as one hole, marked `format`.
+pub(super) const CS_ROWS_VERSION: &str = "36";
 /// The same for the SQL extractor. 7: `sql_dynamic`, an object created by dynamic SQL.
 // 8: a CTE name is the statement's own - never a `sql_refs` row, and never hiding a table in a later statement.
 // 9: `sql_statements` (a row per statement, `fingerprint` filled by `rows/sqlshape/`), its tree `sql_nodes`, and
