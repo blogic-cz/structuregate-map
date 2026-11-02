@@ -139,6 +139,25 @@ Test-Case 'tsrows: a handed template assigned under a test of a parameter takes 
     Assert-Line $r 'demo.special.title | !!slot | - | kind not_in ["Gamma"]'
 }
 
+# A STATEMENT CALL IS A CALLER TOO (#124): `this.apply(this.kind)` hands the field as a template handler would.
+Test-Case 'tsrows: a handed template assigned under a test of a parameter takes what a statement call hands it' {
+    $made = New-TsRowsDb (New-TsHandedTree 'ngOnInit() { this.apply(this.kind); } apply(kind: Kind) { if (isSpecial(kind)) { this.slot = this.special; } }')
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsHandedSql
+    Assert-Line $r 'demo.special.title | !!slot | - | kind not_in ["Gamma"]'
+}
+
+# A CALLER NO TREE STANDS FOR (an enum literal), or a read of the method no call accounts for (`.bind`), may hand anything: a way
+# of its own restricts nothing, so neither does the template handler's `kind` any longer.
+Test-Case 'tsrows: a handed template keeps no restriction a caller the map cannot read would break' {
+    foreach ($init in 'this.apply(Kind.Alpha);', 'setTimeout(this.apply.bind(this, Kind.Alpha));') {
+        $made = New-TsRowsDb (New-TsHandedTree "ngOnInit() { $init } apply(kind: Kind) { if (isSpecial(kind)) { this.slot = this.special; } }" '<button (click)="apply(kind)">go</button>')
+        Assert-Exit $made.Result 0
+        $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsHandedSql
+        Assert-Line $r 'demo.special.title | !!slot | - | -'
+    }
+}
+
 # THE QUERIED FIELD READ ANYWHERE ELSE renders the template where the map cannot follow: its contents keep their own chain.
 Test-Case 'tsrows: a handed template the class also reads elsewhere keeps its own chain' {
     $made = New-TsRowsDb (New-TsHandedTree 'apply(kind: Kind) { if (isSpecial(kind)) { this.slot = this.special; } } show(at: any) { at.createEmbeddedView(this.special); }')

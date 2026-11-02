@@ -23,7 +23,7 @@ use crate::rows::IndexSet;
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// The condition of every `arg:<branch>@<site>[@<template expression>]` link in `links`.
+/// The condition of every `arg:<branch>@<site>[@<template expression>]` link in `links`; a site `!<calls id>` is a statement call.
 ///
 /// AND, per link, the ONE callee parameter its condition reads (`param:<callee>#<index>`): the restriction is on that
 /// parameter whatever each caller spelled, so `value_folds` keys it so. A condition reading none or several has no entry.
@@ -53,6 +53,19 @@ pub fn arg_conds<'l>(
     let mut returned_by: HashMap<String, String> = HashMap::new();
     for table in ["returns", "assignments"] {
         returned_by.extend(store.table(table).iter().filter_map(|r| Some((id_of(r, "expression")?, id_of(r, "member")?))));
+    }
+    // A STATEMENT CALL A HAND-OVER NAMES (`!<calls id>`, `key_handover`): the member it is written in, and its arguments as trees -
+    // a `this.` chain only, as a bare name there is a local and no field. None: an argument no tree stands for.
+    let named: std::collections::HashSet<&str> = links.iter().flat_map(|l| l.split(['@', '~'])).filter_map(|h| h.strip_prefix('!')).collect();
+    let mut stated: HashMap<String, Option<Value>> = HashMap::new();
+    if !named.is_empty() {
+        for c in store.table("calls").iter() {
+            let Some(id) = id_of(c, "id").filter(|id| named.contains(id.as_str())) else { continue };
+            if let Some(member) = id_of(c, "member") { returned_by.insert(format!("!{id}"), member); }
+            let args: Option<Vec<Value>> = c.get("args").and_then(Value::as_array).into_iter().flatten()
+                .map(|a| a.get("$expr").and_then(Value::as_str).filter(|e| e.starts_with("this.")).and_then(chain_tree)).collect();
+            stated.insert(format!("!{id}"), args.map(|args| serde_json::json!({"k": "Call", "args": args})));
+        }
     }
     let locals = Locals::new(store, &rows, idx, &params);
     // member -> every target it assigns: a parameter written is not what its call handed.
@@ -115,6 +128,7 @@ pub fn arg_conds<'l>(
                 }
                 let hop = hops[k];
                 let found = match hop.strip_prefix('^') {
+                    None if hop.starts_with('!') => stated.get(hop).cloned().flatten(),
                     None => ast(hop).filter(|c| matches!(c.get("k").and_then(Value::as_str), Some("Call" | "SafeCall"))),
                     Some(inner) => ast(inner).and_then(|tree| {
                         let at = owner(hop);
