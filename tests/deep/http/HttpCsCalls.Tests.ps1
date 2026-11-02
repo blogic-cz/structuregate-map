@@ -106,3 +106,39 @@ public class LineApi(HttpClient client, string root)
     $want = @('8|GET|||Ping', '12|GET|/lines/pick||Pick', '18|GET|/lines/page||Page', '22|GET|/lines/based|Fetch|Based', '23|GET|/lines/joined|Send|Joined')
     if (($rows -join "`n") -ne ($want -join "`n")) { throw "http_calls:`nexpected:`n$($want -join "`n")`ngot:`n$($rows -join "`n")" }
 }
+
+# A FORMAT THE CALLER HANDS IN (`CsTemplate.cs`, rows 36): `string.Format(endpoint, args)` through a local makes the method a wrapper of
+# `endpoint` that FORMATS it, so each caller's `{n}` is a hole `{}`; the wrapper asks with GET and DELETE, so its callers ask with ANY.
+Test-Case 'httpcscalls: a url formatted from a parameter is a wrapper and each caller is a row with its holes' {
+    $tree = Use-Tree @{
+        'App/App.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+        'App/Api.cs' = @'
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Threading.Tasks;
+namespace Demo;
+
+public class OrderApi(HttpClient client)
+{
+    private async Task<T?> Send<T>(string endpoint, bool drop, params object[] args)
+    {
+        var path = string.Format(endpoint, args);
+        if (drop) return await client.DeleteFromJsonAsync<T>($"{path}");
+        return await client.GetFromJsonAsync<T>($"{path}");
+    }
+    protected Task<T?> Read<T>(string endpoint, params object[] args) => Send<T>(endpoint, false, args);
+    public Task<string?> One(int id) => Read<string>("/orders/{0}/lines/{1:D}?x={{y}}", id, 2);
+    public Task<string?> Two(int id) => Send<string>("/orders/{0}", true, id);
+}
+'@
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    $q = Invoke-Gate --map-query $db --width 0 --limit 0 --sql ("SELECT 'v=' || c.line || '|' || c.verb || '|' || c.url || '|' || " +
+        "coalesce((SELECT f.name FROM functions f WHERE f.id = c.via), '') || '|' || (SELECT f.name FROM functions f WHERE f.id = c.member) AS r " +
+        "FROM http_calls c ORDER BY c.line")
+    Assert-Exit $q 0
+    $rows = @($q.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | ForEach-Object { $_.Trim().Substring(2) })
+    $want = @('15|ANY|/orders/{}/lines/{}|Read|One', '16|ANY|/orders/{}|Send|Two')
+    if (($rows -join "`n") -ne ($want -join "`n")) { throw "http_calls:`nexpected:`n$($want -join "`n")`ngot:`n$($rows -join "`n")" }
+}
