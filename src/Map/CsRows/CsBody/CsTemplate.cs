@@ -26,7 +26,7 @@ internal static class CsTemplate
     /// <summary>Literal text, or - when `Hole` - the C# source of a value only the run time knows.</summary>
     /// <summary>A piece of a string: literal text, or a hole's C# source - with, where the hole is a field, the
     /// field's symbol, so the links can read its value off the `consts` row a referenced project wrote.</summary>
-    public sealed record Piece(string Text, bool Hole, string Symbol = "");
+    public sealed record Piece(string Text, bool Hole, string Symbol = "", bool Parameter = false);
 
     /// <summary>The template of an argument whose value did not fold, as a STRUCTURE the store keeps as node rows
     /// (`arguments__template`): a list of the strings the argument can be, each a list of pieces - a string, or a
@@ -38,7 +38,10 @@ internal static class CsTemplate
         List<List<Piece>>? strings;
         try { strings = Strings(model, expression, new HashSet<ISymbol>(SymbolEqualityComparer.Default)); }
         catch (ArgumentException) { return ""; }
-        if (strings is null || !strings.Any(s => s.Any(p => !p.Hole && p.Text.Trim().Length > 0))) return "";
+        // HOLES ALONE SAY NOTHING - except where each string ends in the method's own PARAMETER (`_cfg.Url + url`): a base the run time
+        // knows and the url the caller hands in, which is what makes the method a wrapper of the call (`rows/http/cscalls.rs`).
+        var handed = strings is not null && strings.All(s => s.Count > 0 && s.All(p => p.Hole) && s[^1].Parameter);
+        if (strings is null || (!handed && !strings.Any(s => s.Any(p => !p.Hole && p.Text.Trim().Length > 0)))) return "";
         return strings.Select(pieces => (object)pieces.Select(piece => piece.Hole
             ? (object)(piece.Symbol.Length > 0
                 ? new (string Key, object? Value)[] { ("hole", piece.Text), ("symbol", piece.Symbol) }
@@ -59,8 +62,14 @@ internal static class CsTemplate
                 return Interpolated(model, interpolated, path);
             case BinaryExpressionSyntax binary when CsFolding.IsConcatenation(model, binary):
                 return Chain(model, binary, path);
+            case InvocationExpressionSyntax invocation when Concatenated(model, invocation) is { } parts:
+                return parts.Aggregate(new List<List<Piece>> { new() }, (strings, part) => Product(strings, Strings(model, part, path) ?? [[Hole(part, model)]]));
             case InvocationExpressionSyntax invocation:
                 return Format(model, invocation, e => CsFolding.Of(model, e)) is { } pieces ? [pieces] : null;
+            // A TERNARY IS EITHER ARM: `c ? "/api/files" : $"/api/files?basePath={p}"` is the strings of both.
+            case ConditionalExpressionSyntax conditional:
+                return Strings(model, conditional.WhenTrue, path) is { } whenTrue && Strings(model, conditional.WhenFalse, path) is { } whenFalse
+                    ? [.. whenTrue, .. whenFalse] : null;
             case IdentifierNameSyntax or MemberAccessExpressionSyntax:
                 return Named(model, expression, path);
             default:
@@ -150,9 +159,47 @@ internal static class CsTemplate
             }
             return null;
         }
-        if (symbol is null || CsFolding.Initializer(symbol) is not { } initializer || CsFolding.Written(symbol, model.Compilation)) return null;
-        return Owner(model, initializer) is { } owner ? Following(path, symbol, () => Strings(owner, initializer, path)) : null;
+        if (symbol is null || CsFolding.Initializer(symbol) is not { } initializer) return null;
+        if (Owner(model, initializer) is not { } owner) return null;
+        if (!CsFolding.Written(symbol, model.Compilation)) return Following(path, symbol, () => Strings(owner, initializer, path));
+        // A LOCAL ONLY EVER APPENDED TO (`url += $"&page={p}"`) is its initializer, or its initializer and something after it: what
+        // the appends add is a hole, each string it can start with is kept whole.
+        if (symbol is not ILocalSymbol || Appends(symbol, model) is not { } append) return null;
+        return Following(path, symbol, () => Strings(owner, initializer, path) is { } start
+            ? [.. start, .. start.Select(s => Joined([.. s, Hole(append, model)]))] : null);
     }
+
+    /// <summary>The value of the first `+=` to a local, when every write to it after its declaration is a `+=` - no `=`, no
+    /// `++`, no `ref`/`out` - or null.</summary>
+    private static ExpressionSyntax? Appends(ISymbol symbol, SemanticModel model)
+    {
+        ExpressionSyntax? first = null;
+        foreach (var reference in symbol.DeclaringSyntaxReferences)
+        {
+            var scope = reference.GetSyntax().FirstAncestorOrSelf<MemberDeclarationSyntax>();
+            if (scope is null || Owner(model, scope) is not { } owner) return null;
+            foreach (var node in scope.DescendantNodes())
+            {
+                ExpressionSyntax? target = node switch
+                {
+                    AssignmentExpressionSyntax assignment => assignment.Left,
+                    PrefixUnaryExpressionSyntax or PostfixUnaryExpressionSyntax => null,
+                    ArgumentSyntax { RefKindKeyword.RawKind: not 0 } argument => argument.Expression,
+                    _ => null,
+                };
+                if (node is PrefixUnaryExpressionSyntax prefix && Binds(owner, prefix.Operand, symbol)) return null;
+                if (node is PostfixUnaryExpressionSyntax postfix && Binds(owner, postfix.Operand, symbol)) return null;
+                if (target is null || !Binds(owner, target, symbol)) continue;
+                if (node is not AssignmentExpressionSyntax add || !add.IsKind(SyntaxKind.AddAssignmentExpression)) return null;
+                first ??= add.Right;
+            }
+        }
+        return first;
+    }
+
+    private static bool Binds(SemanticModel model, ExpressionSyntax expression, ISymbol symbol) =>
+        expression is IdentifierNameSyntax name && name.Identifier.Text == symbol.Name
+        && SymbolEqualityComparer.Default.Equals(CsSemantics.Bound(model, expression), symbol);
 
     /// <summary>The strings of a collection written out in the code - an array, a collection expression -
     /// directly or through a name that is never written again.</summary>
@@ -220,6 +267,14 @@ internal static class CsTemplate
         return strings;
     }
 
+    /// <summary>`string.Concat(a, b, ..)` over strings, as its arguments in order - as a `+` chain of them is (`Chain`); null for any other
+    /// call, or one handed an array or a named argument.</summary>
+    private static List<ExpressionSyntax>? Concatenated(SemanticModel model, InvocationExpressionSyntax invocation) =>
+        model.GetSymbolInfo(invocation).Symbol is IMethodSymbol { Name: "Concat", ContainingType.SpecialType: SpecialType.System_String } method
+        && method.Parameters.All(p => p.Type.SpecialType == SpecialType.System_String)
+        && invocation.ArgumentList.Arguments.All(a => a.NameColon is null)
+            ? [.. invocation.ArgumentList.Arguments.Select(a => a.Expression)] : null;
+
     /// <summary>The model for the tree a node lives in - a model answers about its own tree only.</summary>
     private static SemanticModel? Owner(SemanticModel model, SyntaxNode node) =>
         node.SyntaxTree == model.SyntaxTree ? model
@@ -228,8 +283,13 @@ internal static class CsTemplate
     private static List<List<Piece>> Product(List<List<Piece>> left, List<List<Piece>> right) =>
         [.. left.SelectMany(l => right.Select(r => Joined([.. l, .. r])))];
 
-    private static Piece Hole(ExpressionSyntax expression, SemanticModel model) =>
-        new(CsFacts.Text(expression), true, CsSemantics.Bound(model, expression) is IFieldSymbol field ? CsSemantics.Name(field) : "");
+    private static Piece Hole(ExpressionSyntax expression, SemanticModel model) => CsSemantics.Bound(model, expression) switch
+    {
+        IFieldSymbol field => new(CsFacts.Text(expression), true, CsSemantics.Name(field)),
+        // A PARAMETER by its name, as `parameters.name` spells it.
+        IParameterSymbol parameter => new(CsFacts.Text(expression), true, parameter.Name, true),
+        _ => new(CsFacts.Text(expression), true),
+    };
 
     /// <summary>Adjacent literal text as one piece, and no empty text.</summary>
     private static List<Piece> Joined(List<Piece> pieces)

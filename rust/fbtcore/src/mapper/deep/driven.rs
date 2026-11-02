@@ -40,7 +40,9 @@ use std::path::Path;
 // build targets add their `<Using>` items to the synthesized global usings.
 // 34: a base constructor call (`: Base<T>(..)`, `: base(..)`) is a `calls` row with its `arguments`; a primary constructor's
 // parameters are `parameters` rows; a generated file `--map-include-generated` names is walked.
-pub(super) const CS_ROWS_VERSION: &str = "34";
+// 35: `arguments.template` reads a ternary as both arms, and a local only ever `+=`-appended to as its initializer, alone and
+// with a hole after it.
+pub(super) const CS_ROWS_VERSION: &str = "35";
 /// The same for the SQL extractor. 7: `sql_dynamic`, an object created by dynamic SQL.
 // 8: a CTE name is the statement's own - never a `sql_refs` row, and never hiding a table in a later statement.
 // 9: `sql_statements` (a row per statement, `fingerprint` filled by `rows/sqlshape/`), its tree `sql_nodes`, and

@@ -202,7 +202,8 @@ internal static partial class SqlLinks
     /// <summary>The strings `arguments.template` says an argument can be, as pieces; none without a template. A hole
     /// naming a field whose declaration folded (`folded`, by symbol) is that value.</summary>
     private static List<List<(string Text, bool Hole)>> Strings(List<List<TemplatePiece>>? template, Dictionary<string, string> folded) =>
-        template is null ? [] : [.. template.Select(s => s.Select(p =>
+        // A TEMPLATE OF HOLES ALONE (a base and a parameter, kept for the http pass) is no SQL text: as if there were none.
+        template is null || template.All(s => s.All(p => p.Hole)) ? [] : [.. template.Select(s => s.Select(p =>
             !p.Hole ? (p.Text, false)
             : p.Symbol.Length > 0 && folded.TryGetValue(p.Symbol, out var value) ? (value, false)
             : (p.Text, true)).ToList())];
