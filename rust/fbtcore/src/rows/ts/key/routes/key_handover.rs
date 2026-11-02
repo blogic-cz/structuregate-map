@@ -4,22 +4,24 @@
 //! holds it then, and it renders wherever the class hands it. One hand-over is followed: the ref queried BY NAME into a
 //! field, that field (or one the class assigns it to, `this.slot = this.special`) bound as a bare read to a child
 //! component's input, and the child reading that input only as a bare `[ngTemplateOutlet]`/`*ngTemplateOutlet` - or in a
-//! condition (`*ngIf="!!slot"`), which renders nothing. Each way in is then the binding element's chain in the parent,
-//! the child outlet's chain, and the branches the assignment stands under. Anything else - a second write of the field,
-//! another read of it or of the ref, a child that writes its input - keeps the contents' own chain, as before.
+//! condition (`*ngIf="!!slot"`), which renders nothing - or RELAYING it as a bare read to a component of its own, which is followed
+//! the same way. Each way in is then the binding element's chain in the parent, each relaying element's in its child, the last
+//! child outlet's chain, and the branches the assignment stands under. Anything else - a second write of the field, another read
+//! of it or of the ref, a child that writes its input, one holder the map cannot follow - keeps the contents' own chain, as before.
 
 use super::key_outlets::{bare_read, text, OUTLET_INPUTS};
-use super::store::Store;
+use super::store::{Row, Store};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 /// One way a handed template reaches the screen.
 pub struct Handed {
-    /// The parent's element binding the field to the child's input.
-    pub binding: String,
-    /// The child's outlet node rendering the input.
+    /// The parent's element binding the field to the child's input, then each child's element relaying it on to its own child.
+    pub bindings: Vec<String>,
+    /// The last child's outlet node rendering the input.
     pub outlet: String,
-    /// The branches of the assignment that put the template in the field, innermost first; none for the queried field itself.
+    /// What the assignment that put the template in the field stands under (`Branches::chain_of`: branches, cases, arms); none for
+    /// the queried field itself.
     pub branches: Vec<String>,
 }
 
@@ -34,16 +36,30 @@ pub fn find(store: &Store<'_>, refs: &HashMap<(String, String), String>, class_o
     let members: Vec<(String, String, String, Option<String>)> = store.table("members").iter()
         .filter_map(|m| Some((text(m, "id")?, text(m, "class")?, text(m, "name")?, text(m, "value"))))
         .collect();
-    let parent_of: HashMap<String, String> = store.table("branches").iter()
-        .filter_map(|b| Some((text(b, "id")?, text(b, "parent")?))).collect();
-    // `member id -> every assignment to it`: `(class, the value's own text when it is a property access, its branch)`.
-    let mut writes: HashMap<String, Vec<(Option<String>, Option<String>, Option<String>)>> = HashMap::new();
+    // WHAT AN ASSIGNMENT STANDS UNDER, as a key's own write does (#4, `Branches::chain_of`): its `if`s, its `case`s, an arm.
+    let branches = store.shared("branches", super::key_branches::Branches::new);
+    // EVERY TEMPLATE HANDLER CALLING A METHOD (`(click)="apply(kind)"`, the method by its `target.row`): its call hands the method's parameters.
+    let mut handlers: HashMap<String, Vec<String>> = HashMap::new();
+    for e in store.table("expressions").iter() {
+        let (Some(id), Some(ast)) = (text(e, "id"), e.get("ast")) else { continue };
+        let call = super::astreads::unwrap(ast);
+        if call.get("k").and_then(Value::as_str) != Some("Call") { continue; }
+        if let Some(method) = call.get("receiver").and_then(|r| r.get("target")).and_then(|t| t.get("row")).and_then(Value::as_str) {
+            handlers.entry(method.to_string()).or_default().push(id);
+        }
+    }
+    // THE METHODS THAT TAKE A PARAMETER: only their branches can test what a caller hands.
+    let takes: HashSet<String> = store.table("members").iter()
+        .filter(|m| m.get("params").and_then(Value::as_array).is_some_and(|p| !p.is_empty()))
+        .filter_map(|m| text(m, "id")).collect();
+    // `member id -> every assignment to it`: `(class, the value's own text when it is a property access, what it stands under)`.
+    let mut writes: HashMap<String, Vec<(Option<String>, Option<String>, Vec<Vec<String>>)>> = HashMap::new();
     for a in store.table("assignments").iter() {
         let Some(target) = text(a, "target_id") else { continue };
         let value = a.get("value");
         let access = value.filter(|v| v.get("$kind").and_then(Value::as_str) == Some("PropertyAccessExpression"))
             .and_then(|v| v.get("$expr")).and_then(Value::as_str).map(str::to_string);
-        writes.entry(target).or_default().push((text(a, "class"), access, text(a, "branch")));
+        writes.entry(target).or_default().push((text(a, "class"), access, through_callers(branches.chain_of(a), text(a, "member"), &branches, &handlers, &takes)));
     }
     let mut renders: HashMap<String, String> = HashMap::new();
     for r in store.table("renders").iter() {
@@ -70,16 +86,12 @@ pub fn find(store: &Store<'_>, refs: &HashMap<(String, String), String>, class_o
         .filter_map(|g| Some((text(g, "node")?, text(g, "name")?))).collect();
     // Every template expression, by its template: `(node, kind, name, identifiers, is the bare read of each)`.
     let expressions = store.table("expressions");
-    let mut reads: HashMap<String, Vec<&super::store::Row>> = HashMap::new();
+    let mut reads: HashMap<String, Vec<&Row>> = HashMap::new();
     for e in expressions.iter() {
         if let Some(t) = text(e, "template") { reads.entry(t).or_default().push(e); }
     }
-    let names = |e: &super::store::Row| -> Vec<String> {
-        match e.get("identifiers") {
-            Some(Value::Array(items)) => items.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
-            _ => Vec::new(),
-        }
-    };
+    let at = Child { renders: &renders, class_of_component: &class_of_component, template_of: &template_of, class_of, file_of_class: &file_of_class,
+        members: &members, written: &|id: &str| writes.contains_key(id), indexed: &indexed, read_in: &read_in, reads: &reads, gate_at: &gate_at };
     for ((tpl, name), node) in refs {
         let Some(class) = class_of.get(tpl) else { continue };
         let Some([field]) = queried.get(&(class.clone(), name.clone())).map(Vec::as_slice) else { continue };
@@ -98,44 +110,20 @@ pub fn find(store: &Store<'_>, refs: &HashMap<(String, String), String>, class_o
             let Some(all) = writes.get(id) else { continue };
             let unset = value.as_deref().is_none_or(|v| v == "null" || v == "undefined");
             if !unset || !all.iter().all(|(wc, access, _)| wc.as_ref() == Some(class) && access.as_deref() == Some(read.as_str())) { continue; }
-            let ways = all.iter().map(|(_, _, branch)| {
-                let mut chain = Vec::new();
-                let mut cur = branch.clone();
-                let mut seen = HashSet::new();
-                while let Some(b) = cur.filter(|b| seen.insert(b.clone())) { cur = parent_of.get(&b).cloned(); chain.push(b); }
-                chain
-            }).collect();
+            let ways = all.iter().flat_map(|(_, _, chains)| chains.iter().cloned()).collect();
             holders.push((n.clone(), ways));
         }
         let mut ways: Vec<Handed> = Vec::new();
         let mut refused = false;
-        let own = reads.get(tpl).map(Vec::as_slice).unwrap_or(&[]);
+        let own = at.reads.get(tpl).map(Vec::as_slice).unwrap_or(&[]);
         for (holder, assigned) in &holders {
             for e in own.iter().filter(|e| names(e).contains(holder)) {
                 let bound = matches!(text(e, "kind").as_deref(), Some("input")) && bare_read(e.get("ast"), holder);
                 let (Some(binding), Some(input)) = (text(e, "node").filter(|_| bound), text(e, "name")) else { refused = true; break };
-                let child_tpl = renders.get(&binding).and_then(|k| class_of_component.get(k)).and_then(|c| template_of.get(c));
-                let Some(child_tpl) = child_tpl else { refused = true; break };
-                // THE CHILD MUST NOT WRITE ITS INPUT, and reads it only to render it or to test it.
-                let child_class = &class_of[child_tpl];
-                // NOR READS IT IN TYPESCRIPT: `this.slot` handed on there renders it somewhere else.
-                let child_file = file_of_class.get(child_class);
-                let written = members.iter().any(|(id, c, n, _)| c == child_class && *n == input && writes.contains_key(id))
-                    || child_file.is_none_or(|f| indexed.contains(f) || read_in(f, &input) > 0);
-                let mut outlets = Vec::new();
-                for r in reads.get(child_tpl).map(Vec::as_slice).unwrap_or(&[]).iter().filter(|r| names(r).contains(&input)) {
-                    let (Some(at), Some(kind), Some(what)) = (text(r, "node"), text(r, "kind"), text(r, "name")) else { refused = true; break };
-                    if matches!(kind.as_str(), "input" | "template_attr") && OUTLET_INPUTS.contains(&what.as_str()) && bare_read(r.get("ast"), &input) {
-                        outlets.push(at);
-                    } else if !gate_at.contains(&(at, what)) {
-                        refused = true;
-                        break;
-                    }
-                }
-                if refused || written || outlets.is_empty() { refused = true; break; }
-                for outlet in outlets {
+                let Some(outlets) = follow(&binding, &input, &mut HashSet::new(), &at) else { refused = true; break };
+                for (bindings, outlet) in outlets {
                     for branches in assigned {
-                        ways.push(Handed { binding: binding.clone(), outlet: outlet.clone(), branches: branches.clone() });
+                        ways.push(Handed { bindings: bindings.clone(), outlet: outlet.clone(), branches: branches.clone() });
                     }
                 }
             }
@@ -144,4 +132,74 @@ pub fn find(store: &Store<'_>, refs: &HashMap<(String, String), String>, class_o
         if !refused && !ways.is_empty() { out.insert(node.clone(), ways); }
     }
     out
+}
+
+/// What `follow` reads of the tree: the render edges, the classes, their writes and reads, the gates.
+struct Child<'a> {
+    renders: &'a HashMap<String, String>,
+    class_of_component: &'a HashMap<String, String>,
+    template_of: &'a HashMap<String, String>,
+    class_of: &'a HashMap<String, String>,
+    file_of_class: &'a HashMap<String, String>,
+    members: &'a [(String, String, String, Option<String>)],
+    written: &'a dyn Fn(&str) -> bool,
+    indexed: &'a HashSet<String>,
+    read_in: &'a dyn Fn(&str, &str) -> i64,
+    reads: &'a HashMap<String, Vec<&'a Row>>,
+    gate_at: &'a HashSet<(String, String)>,
+}
+
+fn names(e: &Row) -> Vec<String> {
+    match e.get("identifiers") {
+        Some(Value::Array(items)) => items.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+        _ => Vec::new(),
+    }
+}
+
+// WHERE A CHILD RENDERS THE INPUT `binding` HANDS IT: `(bindings, outlet)` per outlet, `bindings` from `binding` on through every
+// child relaying the input as a bare read to a component of its own (#146). None: some read of it the map cannot follow.
+fn follow(binding: &str, input: &str, seen: &mut HashSet<(String, String)>, at: &Child<'_>) -> Option<Vec<(Vec<String>, String)>> {
+    let child_tpl = at.renders.get(binding).and_then(|k| at.class_of_component.get(k)).and_then(|c| at.template_of.get(c))?;
+    // A RELAY BACK INTO A TEMPLATE IT CAME THROUGH renders under no outlet of its own.
+    if !seen.insert((child_tpl.clone(), input.to_string())) { return None; }
+    // THE CHILD MUST NOT WRITE ITS INPUT, NOR READ IT IN TYPESCRIPT: `this.slot` handed on there renders it somewhere else.
+    let child_class = &at.class_of[child_tpl];
+    let child_file = at.file_of_class.get(child_class);
+    let written = at.members.iter().any(|(id, c, n, _)| c == child_class && n == input && (at.written)(id))
+        || child_file.is_none_or(|f| at.indexed.contains(f) || (at.read_in)(f, input) > 0);
+    if written { return None; }
+    let mut out = Vec::new();
+    // IT READS IT ONLY TO RENDER IT, TO TEST IT, OR TO HAND IT ON.
+    for r in at.reads.get(child_tpl).map(Vec::as_slice).unwrap_or(&[]).iter().filter(|r| names(r).iter().any(|n| n == input)) {
+        let (node, kind, what) = (text(r, "node")?, text(r, "kind")?, text(r, "name")?);
+        let bare = bare_read(r.get("ast"), input);
+        if matches!(kind.as_str(), "input" | "template_attr") && OUTLET_INPUTS.contains(&what.as_str()) && bare {
+            out.push((vec![binding.to_string()], node));
+        } else if kind == "input" && bare && at.renders.contains_key(&node) {
+            for (mut on, outlet) in follow(&node, &what, seen, at)? {
+                on.insert(0, binding.to_string());
+                out.push((on, outlet));
+            }
+        } else if !at.gate_at.contains(&(node, what)) {
+            return None;
+        }
+    }
+    if out.is_empty() { None } else { Some(out) }
+}
+
+/// WHAT AN ASSIGNMENT STANDS UNDER, ONE LIST PER CALLER (#146): a branch testing the assigning method's own parameter (`if
+/// (isSpecial(kind))` in `apply(kind)`) says nothing until a caller names the value - so each template handler calling the method is
+/// a way of its own, the branch read as `arg:<branch>@<handler>` (`key_args`: the handler's argument in place of the parameter). A
+/// method no handler calls keeps the branch as it is: a TypeScript statement calling it hands values, not the trees `key_args` reads.
+fn through_callers(chain: Vec<String>, member: Option<String>, branches: &super::key_branches::Branches, handlers: &HashMap<String, Vec<String>>, takes: &HashSet<String>) -> Vec<Vec<String>> {
+    let member = member.unwrap_or_default();
+    // A METHOD WITH PARAMETERS ONLY: a test in one without is of fields, which every way reads the same.
+    let own = |b: &String| takes.contains(&member) && branches.condition(b).is_some_and(|(_, _, m)| m == Some(member.as_str()));
+    let callers = handlers.get(&member).filter(|c| !c.is_empty() && chain.iter().any(own));
+    match callers {
+        None => vec![chain],
+        Some(callers) => callers.iter()
+            .map(|site| chain.iter().map(|b| if own(b) { format!("arg:{b}@{site}") } else { b.clone() }).collect())
+            .collect(),
+    }
 }
