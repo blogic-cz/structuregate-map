@@ -238,6 +238,36 @@ Test-Case 'tsrows: an input flag read per edge still restricts when the parents 
     Assert-Line $n 'demo.extra paths 1'
 }
 
+# AN INPUT SET ON A COMPONENT CREATED IN CODE IS THAT EDGE'S BINDING (#147, `key/key_bound.rs`): Alpha creates the modal and sets
+# `ref.instance.showExtra = true`, Beta creates it and sets nothing, so on Beta's way the flag is its initializer `false` and
+# `*ngIf="showExtra"` is no way. Gamma sets it to a field of its own, which keeps the way with that condition.
+Test-Case 'tsrows: an input set on the instance of a component created in code restricts that way, and one left unset is its initializer' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/modal.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-modal', standalone: true, template: '<label *ngIf=`"showExtra`">{{ \'demo.extraOption\' | money }}</label><p>{{ \'demo.always\' | money }}</p>' })`n" +
+            "export class DemoModalComponent { @Input() showExtra = false; }`n"
+        'apps/shop/src/panels.component.ts' = "import { Component, ViewContainerRef } from '@angular/core';`n" +
+            "import { DemoModalComponent } from './modal.component';`n" +
+            "@Component({ selector: 'demo-alpha', standalone: true, template: '<button (click)=`"open()`">a</button>' })`n" +
+            "export class AlphaPanelComponent {`n  constructor(private at: ViewContainerRef) {}`n" +
+            "  open() { const ref = this.at.createComponent(DemoModalComponent); ref.instance.showExtra = true; }`n}`n" +
+            "@Component({ selector: 'demo-beta', standalone: true, template: '<button (click)=`"open()`">b</button>' })`n" +
+            "export class BetaPanelComponent {`n  constructor(private at: ViewContainerRef) {}`n" +
+            "  open() { this.at.createComponent(DemoModalComponent); }`n}`n" +
+            "@Component({ selector: 'demo-gamma', standalone: true, template: '<button (click)=`"open()`">g</button>' })`n" +
+            "export class GammaPanelComponent {`n  wide = false;`n  constructor(private at: ViewContainerRef) {}`n" +
+            "  open() { const ref = this.at.createComponent(DemoModalComponent); ref.instance.showExtra = this.wide; }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"extraOption":"x","always":"y"}}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $n = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT key || ' paths ' || n_paths AS p FROM key_reach WHERE key LIKE 'demo.%'"
+    Assert-Line $n 'demo.always paths 3'
+    Assert-Line $n 'demo.extraOption paths 2'
+    $b = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT k.key || ' branch ' || b.value AS br FROM key_reach k JOIN key_reach__always_branches b ON b.owner = '#' || k.rowid AND b.parent = 0 WHERE k.key LIKE 'demo.%'"
+    Assert-NoLine $b 'demo.always branch'
+}
+
 # A `gateInputs` PROPERTY HIDES NOTHING AT `false`. `[disabled]="isDisabled"` is a declared gate in A; the modal binds
 # `[isDisabled]="false"`, which folded to the literal `false` and dropped the modal's way as if `*ngIf="false"` stood
 # there. `demo.shown` is the control: B's `*ngIf="isShown"` bound to `false` by the modal still IS no way.
