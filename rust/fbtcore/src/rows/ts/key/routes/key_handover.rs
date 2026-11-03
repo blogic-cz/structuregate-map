@@ -68,11 +68,15 @@ pub fn find(store: &Store<'_>, refs: &HashMap<(String, String), String>, class_o
         .filter_map(|c| Some((text(c, "id")?, text(c, "file")?))).collect();
     // EVERY STATEMENT CALL RESOLVED TO A METHOD TAKING PARAMETERS, and how many resolved calls of each name each file holds.
     let mut stated: HashMap<String, Vec<String>> = HashMap::new();
+    let mut within: HashMap<String, String> = HashMap::new();
     let mut resolved: HashMap<(String, String), i64> = HashMap::new();
     for c in store.table("calls").iter() {
         let Some(target) = text(c, "target_id") else { continue };
         if let (Some(file), Some(method)) = (text(c, "file"), text(c, "method")) { *resolved.entry((file, method)).or_default() += 1; }
-        if takes.contains(&target) && let Some(id) = text(c, "id") { stated.entry(target).or_default().push(id); }
+        if takes.contains(&target) && let Some(id) = text(c, "id") {
+            if let Some(member) = text(c, "member") { within.insert(id.clone(), member); }
+            stated.entry(target).or_default().push(id);
+        }
     }
     // A METHOD READ BY MORE THAN ITS RESOLVED CALLS (`setTimeout(this.apply)`, an unresolved `x.apply(..)`, `this` handed away) may be
     // called with anything: one of its ways keeps the test as written.
@@ -80,7 +84,7 @@ pub fn find(store: &Store<'_>, refs: &HashMap<(String, String), String>, class_o
         .filter(|(_, class, name, _)| file_of_class.get(class).is_none_or(|f| indexed.contains(f))
             || prop_reads.iter().any(|(f, counts)| counts.get(name).is_some_and(|n| *n > resolved.get(&(f.clone(), name.clone())).copied().unwrap_or(0))))
         .map(|(id, ..)| id.clone()).collect();
-    let callers = Callers { branches: &branches, handlers: &handlers, stated: &stated, takes: &takes, opaque: &opaque };
+    let callers = Callers { branches: &branches, handlers: &handlers, stated: &stated, within: &within, takes: &takes, opaque: &opaque };
     // `member id -> every assignment to it`: `(class, the value's own text when it is a property access, what it stands under)`.
     let mut writes: HashMap<String, Vec<(Option<String>, Option<String>, Vec<Vec<String>>)>> = HashMap::new();
     for a in store.table("assignments").iter() {
@@ -209,6 +213,8 @@ struct Callers<'a> {
     handlers: &'a HashMap<String, Vec<String>>,
     /// Method -> each statement call resolved to it.
     stated: &'a HashMap<String, Vec<String>>,
+    /// Statement call -> the member it is written in.
+    within: &'a HashMap<String, String>,
     /// The methods that take a parameter.
     takes: &'a HashSet<String>,
     /// The methods read where no resolved call accounts for it.
@@ -225,13 +231,36 @@ impl Callers<'_> {
         let member = member.unwrap_or_default();
         // A METHOD WITH PARAMETERS ONLY: a test in one without is of fields, which every way reads the same.
         let own = |b: &String| self.takes.contains(&member) && self.branches.condition(b).is_some_and(|(_, _, m)| m == Some(member.as_str()));
-        let sites: Vec<String> = self.handlers.get(&member).into_iter().flatten().cloned()
-            .chain(self.stated.get(&member).into_iter().flatten().map(|c| format!("!{c}"))).collect();
+        let (sites, open) = self.sites(&member, &mut HashSet::from([member.clone()]));
         if sites.is_empty() || !chain.iter().any(own) { return vec![chain]; }
         let mut ways: Vec<Vec<String>> = sites.iter()
             .map(|site| chain.iter().map(|b| if own(b) { format!("arg:{b}@{site}") } else { b.clone() }).collect())
             .collect();
-        if self.opaque.contains(&member) { ways.push(chain); }
+        if open { ways.push(chain); }
         ways
+    }
+
+    /// Every call site of `member`, outermost hop first, and whether one of the methods on the way is read where no call accounts
+    /// for it. A STATEMENT CALL IN A METHOD THAT TAKES PARAMETERS may hand them on (`load(k) { this.apply(k); }`): each caller of that
+    /// method is a hop above it (`<caller>~!<call>`, `key_args`); one nothing calls, or one already on the way, is the call alone.
+    fn sites(&self, member: &str, walking: &mut HashSet<String>) -> (Vec<String>, bool) {
+        let mut out: Vec<String> = self.handlers.get(member).into_iter().flatten().cloned().collect();
+        let mut open = self.opaque.contains(member);
+        for c in self.stated.get(member).into_iter().flatten() {
+            let held = self.within.get(c).filter(|m| self.takes.contains(*m) && !walking.contains(*m));
+            let (above, opened) = match held {
+                Some(m) => {
+                    walking.insert(m.clone());
+                    let found = self.sites(m, walking);
+                    walking.remove(m);
+                    found
+                }
+                None => (Vec::new(), false),
+            };
+            open |= opened;
+            if above.is_empty() { out.push(format!("!{c}")); }
+            out.extend(above.into_iter().map(|a| format!("{a}~!{c}")));
+        }
+        (out, open)
     }
 }

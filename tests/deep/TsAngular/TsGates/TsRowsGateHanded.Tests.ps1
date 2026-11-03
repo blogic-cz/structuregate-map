@@ -147,11 +147,51 @@ Test-Case 'tsrows: a handed template assigned under a test of a parameter takes 
     Assert-Line $r 'demo.special.title | !!slot | - | kind not_in ["Gamma"]'
 }
 
-# A CALLER NO TREE STANDS FOR (an enum literal), or a read of the method no call accounts for (`.bind`), may hand anything: a way
+# A CALLER NO TREE STANDS FOR (a call's result), or a read of the method no call accounts for (`.bind`), may hand anything: a way
 # of its own restricts nothing, so neither does the template handler's `kind` any longer.
 Test-Case 'tsrows: a handed template keeps no restriction a caller the map cannot read would break' {
-    foreach ($init in 'this.apply(Kind.Alpha);', 'setTimeout(this.apply.bind(this, Kind.Alpha));') {
-        $made = New-TsRowsDb (New-TsHandedTree "ngOnInit() { $init } apply(kind: Kind) { if (isSpecial(kind)) { this.slot = this.special; } }" '<button (click)="apply(kind)">go</button>')
+    foreach ($init in 'ngOnInit() { this.apply(this.pick()); } pick(): Kind { return Kind.Alpha; }', 'ngOnInit() { setTimeout(this.apply.bind(this, Kind.Alpha)); }') {
+        $made = New-TsRowsDb (New-TsHandedTree "$init apply(kind: Kind) { if (isSpecial(kind)) { this.slot = this.special; } }" '<button (click)="apply(kind)">go</button>')
+        Assert-Exit $made.Result 0
+        $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsHandedSql
+        Assert-Line $r 'demo.special.title | !!slot | - | -'
+    }
+}
+
+# AN ENUM MEMBER A CALLER HANDS SETTLES THE TEST (`key_args::settled`): `this.apply(Kind.Gamma)` fails `isSpecial`, so that way is
+# none and the handler's `kind` alone restricts - with no handler, nothing renders the template at all, as `*ngIf="false"` (`key_dead`);
+# `this.apply(Kind.Alpha)` passes it, so its way renders whatever any field holds.
+Test-Case 'tsrows: an enum member a statement call hands a handed template settles the test it is assigned under' {
+    $apply = 'apply(kind: Kind) { if (isSpecial(kind)) { this.slot = this.special; } }'
+    $made = New-TsRowsDb (New-TsHandedTree "ngOnInit() { this.apply(Kind.Gamma); } $apply" '<button (click)="apply(kind)">go</button>')
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsHandedSql
+    Assert-Line $r 'demo.parent.inside | !!slot | - | kind not_in ["Gamma"]'
+    $made = New-TsRowsDb (New-TsHandedTree "ngOnInit() { this.apply(Kind.Gamma); } $apply")
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsHandedSql
+    Assert-Line $r 'demo.special.title | - | - | -'
+    Assert-Line $r 'demo.parent.inside | - | - | -'
+    foreach ($extra in '', '<button (click)="apply(kind)">go</button>') {
+        $made = New-TsRowsDb (New-TsHandedTree "ngOnInit() { this.apply(Kind.Alpha); } $apply" $extra)
+        Assert-Exit $made.Result 0
+        $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsHandedSql
+        Assert-Line $r 'demo.parent.inside | !!slot | - | -'
+    }
+}
+
+# A PARAMETER HANDED ON IS A HOP (`key_handover::Callers::sites`, #48's `~`): `load(k) { this.apply(k); }` puts what each caller of
+# `load` hands where `apply`'s parameter is. Nothing calling `load`, or `load` writing `k` first, leaves no value to name.
+Test-Case 'tsrows: a handed template assigned under a test of a parameter takes what a caller hands the method that passes it on' {
+    $apply = 'apply(kind: Kind) { if (isSpecial(kind)) { this.slot = this.special; } }'
+    $made = New-TsRowsDb (New-TsHandedTree "ngOnInit() { this.load(this.kind); } load(k: Kind) { this.apply(k); } $apply")
+    Assert-Exit $made.Result 0
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsHandedSql
+    Assert-Line $r 'demo.special.title | !!slot | - | kind not_in ["Gamma"]'
+    Assert-Line $r 'demo.parent.inside | !!slot | - | kind not_in ["Gamma"]'
+    $equals = 'apply(kind: Kind) { if (kind === Kind.Alpha) { this.slot = this.special; } }'
+    foreach ($load in "load(k: Kind) { this.apply(k); } $apply", "load(k: Kind) { this.apply(k); } $equals", "ngOnInit() { this.load(this.kind); } load(k: Kind) { k = Kind.Alpha; this.apply(k); } $apply") {
+        $made = New-TsRowsDb (New-TsHandedTree $load)
         Assert-Exit $made.Result 0
         $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsHandedSql
         Assert-Line $r 'demo.special.title | !!slot | - | -'
