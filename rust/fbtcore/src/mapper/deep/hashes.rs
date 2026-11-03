@@ -5,7 +5,7 @@
 //! same engine that keys the gate's pass cache.
 //!
 //! ITS SNAPSHOT LIVES IN THE TREE, under `.fbt/deep.sqlite`, beside the gate's, and is bounded by the map's
-//! own `--skip`. The map's database is pruned from the walk by path with its SQLite siblings: it changes
+//! own `--skip`, the root's `.gitignore` and the walk's default skips. The map's database is pruned from the walk by path with its SQLite siblings: it changes
 //! BECAUSE of the run, so a tree holding it could never read as unchanged.
 //!
 //! A FILE THE SNAPSHOT DOES NOT NAME - outside every root, reached through a junction, pruned by a skip - is
@@ -150,7 +150,10 @@ fn snapshot(root: &str, skip: &[String], avoid: &[&str]) -> Result<(String, Hash
     // Nor is the tree map's own state, which the gate rewrites on its own schedule.
     let mut extra_skip = skip.to_vec();
     extra_skip.push(".fbt".into());
-    let options = ScanOptions { use_gitignore: false, no_default_skip: true, extra_skip, skip_paths, rehash_all: false };
+    // NOR WHAT GIT IGNORES OR NO TREE MAPS (#148): `.git`, `node_modules`, build output, an ignored dataset. Walking them
+    // stored every entry of a folder no half reads, and a few ignored folders made a tree of two source files hash for
+    // seconds; a file a half does read from there (`obj/project.assets.json`) is one the snapshot does not name, hashed itself.
+    let options = ScanOptions { use_gitignore: true, no_default_skip: false, extra_skip, skip_paths, rehash_all: false };
     let store = root_path.join(".fbt").join("deep.sqlite");
     let mut engine = Engine::open(&store, &root_path, options).map_err(|e| format!("{} could not be opened: {e:#}", store.display()))?;
     crate::tree::ignored(&root_path);
