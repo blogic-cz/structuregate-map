@@ -139,12 +139,15 @@ Test-Case 'tsrows: a handed template assigned under a test of a parameter takes 
     Assert-Line $r 'demo.special.title | !!slot | - | kind not_in ["Gamma"]'
 }
 
-# A STATEMENT CALL IS A CALLER TOO (#124): `this.apply(this.kind)` hands the field as a template handler would.
+# A STATEMENT CALL IS A CALLER TOO (#124): `this.apply(this.kind)` hands the field as a template handler would. BESIDE a handler, each
+# caller is a path of its own into a component in the contents (#126, `closure::load_edges`), so both restrict it.
 Test-Case 'tsrows: a handed template assigned under a test of a parameter takes what a statement call hands it' {
-    $made = New-TsRowsDb (New-TsHandedTree 'ngOnInit() { this.apply(this.kind); } apply(kind: Kind) { if (isSpecial(kind)) { this.slot = this.special; } }')
-    Assert-Exit $made.Result 0
-    $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsHandedSql
-    Assert-Line $r 'demo.special.title | !!slot | - | kind not_in ["Gamma"]'
+    foreach ($extra in '', '<button (click)="apply(kind)">go</button>') {
+        $made = New-TsRowsDb (New-TsHandedTree 'ngOnInit() { this.apply(this.kind); } apply(kind: Kind) { if (isSpecial(kind)) { this.slot = this.special; } }' $extra)
+        Assert-Exit $made.Result 0
+        $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsHandedSql
+        Assert-Line $r 'demo.special.title | !!slot | - | kind not_in ["Gamma"]'
+    }
 }
 
 # A CALLER NO TREE STANDS FOR (a call's result), or a read of the method no call accounts for (`.bind`), may hand anything: a way
@@ -167,6 +170,7 @@ Test-Case 'tsrows: an enum member a statement call hands a handed template settl
     Assert-Exit $made.Result 0
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsHandedSql
     Assert-Line $r 'demo.parent.inside | !!slot | - | kind not_in ["Gamma"]'
+    Assert-Line $r 'demo.special.title | !!slot | - | kind not_in ["Gamma"]'
     $made = New-TsRowsDb (New-TsHandedTree "ngOnInit() { this.apply(Kind.Gamma); } $apply")
     Assert-Exit $made.Result 0
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsHandedSql

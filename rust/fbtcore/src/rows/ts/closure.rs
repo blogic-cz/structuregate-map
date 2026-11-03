@@ -182,27 +182,32 @@ pub fn load_edges(store: &Store<'_>, branches: &Branches) -> IndexMap<Arc<str>, 
         let Some(to) = id_of(r, "to") else { continue };
         let node = id_of(r, "node");
         let own = node.as_ref().and_then(|n| chains.get(n).cloned()).unwrap_or_default();
-        let held = match node.as_deref().and_then(|n| outlets.rewrite(n, &own)) {
-            Some(ways) => {
-                let mut every = ways.first().cloned().unwrap_or_default();
-                every.retain(|g| ways.iter().all(|w| w.contains(g)));
-                every
-            }
-            None => own,
-        };
-        // A HANDED TEMPLATE'S WAY HOLDS THE BRANCHES ITS ASSIGNMENT STANDS UNDER (#146): they ride `branches`, never `gates`.
-        let (lifted, held): (Vec<String>, Vec<String>) = held.into_iter().partition(|g| outlets.is_branch(g));
-        let gates: Vec<Arc<str>> = held.iter().map(|g| ids.of(g)).collect();
-        let to = ids.of(&to);
-        let id = id_of(r, "id").unwrap_or_default();
-        let mut branches: Vec<Arc<str>> = Vec::new();
-        for b in returned.get(&id).into_iter().chain(called.get(&id)).flatten().chain(&lifted) {
-            let b = ids.of(b);
-            if !branches.contains(&b) {
-                branches.push(b);
+        // A HANDED TEMPLATE'S WAY HOLDS THE BRANCHES ITS ASSIGNMENT STANDS UNDER (#146): they ride `branches`, never `gates`. EACH
+        // WAY'S OWN (#126): one caller's `arg:` link is no other's, so an edge is written once per distinct branch list - the gates
+        // still those every way holds - and a component in the contents has a path per caller, as a key there has a way per caller.
+        let ways = node.as_deref().and_then(|n| outlets.rewrite(n, &own)).unwrap_or_else(|| vec![own]);
+        let mut every = ways.first().cloned().unwrap_or_default();
+        every.retain(|g| ways.iter().all(|w| w.contains(g)) && !outlets.is_branch(g));
+        let mut lifted: Vec<Vec<String>> = Vec::new();
+        for w in &ways {
+            let own: Vec<String> = w.iter().filter(|g| outlets.is_branch(g)).cloned().collect();
+            if !lifted.contains(&own) {
+                lifted.push(own);
             }
         }
-        edges.entry(to).or_default().push(Edge { id: ids.of(&id), parent: ids.of(&parent), gates, branches });
+        let gates: Vec<Arc<str>> = every.iter().map(|g| ids.of(g)).collect();
+        let to = ids.of(&to);
+        let id = id_of(r, "id").unwrap_or_default();
+        for lifted in lifted {
+            let mut branches: Vec<Arc<str>> = Vec::new();
+            for b in returned.get(&id).into_iter().chain(called.get(&id)).flatten().chain(&lifted) {
+                let b = ids.of(b);
+                if !branches.contains(&b) {
+                    branches.push(b);
+                }
+            }
+            edges.entry(Arc::clone(&to)).or_default().push(Edge { id: ids.of(&id), parent: ids.of(&parent), gates: gates.clone(), branches });
+        }
     }
     edges
 }
