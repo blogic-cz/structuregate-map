@@ -207,3 +207,39 @@ namespace Demo
     $want = @('18|GET|/api/v2/orders||One', '22|GET|api/lines/find||Two', '25|GET|/api/v2/items|Three|Four', '26|GET|*||Five', '27|GET|{}lines/{}||Six', '31|GET|/api/v2/release/{}||Seven')
     if (($rows -join "`n") -ne ($want -join "`n")) { throw "http_calls:`nexpected:`n$($want -join "`n")`ngot:`n$($rows -join "`n")" }
 }
+
+# A URL WHOSE ALTERNATIVES DISAGREE (`cscalls.rs::folded`): a ternary of two paths is a row for each, written in the call or handed to a
+# wrapper; alternatives one path once cut at the query are one row.
+Test-Case 'httpcscalls: a url of several paths is a row for each of them' {
+    $tree = Use-Tree @{
+        'App/App.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+        'App/Api.cs' = @'
+using System.Net.Http;
+using System.Threading.Tasks;
+namespace Demo;
+
+public class QuoteApi(HttpClient client)
+{
+    private const string Root = "/api/";
+    public Task<HttpResponseMessage> Pick(bool preview) => client.GetAsync(preview ? "/quotes/preview" : "/quotes/final");
+    public Task<HttpResponseMessage> Send(string url) => client.PostAsync(Root + url, null);
+    public Task<HttpResponseMessage> Choose(bool preview)
+    {
+        var url = preview ? "household/quotation" : "household/quote";
+        return Send(url);
+    }
+    public Task<HttpResponseMessage> Same(bool all) => client.GetAsync(all ? "/same" : "/same?all=1");
+}
+'@
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    $q = Invoke-Gate --map-query $db --width 0 --limit 0 --sql ("SELECT 'v=' || c.line || '|' || c.verb || '|' || c.url || '|' || " +
+        "coalesce((SELECT f.name FROM functions f WHERE f.id = c.via), '') || '|' || (SELECT f.name FROM functions f WHERE f.id = c.member) AS r " +
+        "FROM http_calls c ORDER BY c.line, c.url")
+    Assert-Exit $q 0
+    $rows = @($q.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | ForEach-Object { $_.Trim().Substring(2) })
+    $want = @('8|GET|/quotes/final||Pick', '8|GET|/quotes/preview||Pick', '13|POST|/api/household/quotation|Send|Choose',
+        '13|POST|/api/household/quote|Send|Choose', '15|GET|/same||Same')
+    if (($rows -join "`n") -ne ($want -join "`n")) { throw "http_calls:`nexpected:`n$($want -join "`n")`ngot:`n$($rows -join "`n")" }
+}
