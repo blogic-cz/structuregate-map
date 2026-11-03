@@ -17,6 +17,12 @@
 //! refused. The restriction rides the (ref, path) ways only, so `key_reach` moves and `gate_values` does not.
 //!
 //! An input the child writes itself, and one `bound_inputs` already defines, are left alone.
+//!
+//! A COMPONENT CREATED IN CODE IS BOUND BY WHAT ITS CREATOR SETS ON THE INSTANCE (#147): `ref.instance.showExtra = true`
+//! in the function whose `createComponent` (or factory call) drew the edge is that edge's binding, and an edge whose creator
+//! sets nothing leaves the input at its initializer - but only while every write of the input sits in some creator of that
+//! class, no `setInput` names it, and the creator creates that class once: a write anywhere else may be on this instance too.
+//! A write under a condition, in a loop or of a value that is no literal binds nothing either way.
 
 use super::astreads::unwrap;
 use super::closure::RenderPath;
@@ -107,11 +113,12 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
     let polarity = super::gate_values::class_polarity(store);
     let written = written_members(store);
     let defined = bound_inputs(store, &written);
+    let set = instance_writes(store);
     // class -> (input alias -> member id, initializer literal)
     let mut inputs: IndexMap<String, IndexMap<String, (String, Option<Value>)>> = IndexMap::default();
     for m in store.table("members").iter() {
         let (Some(id), Some(class)) = (cell(m, "id"), cell(m, "class")) else { continue };
-        if cell(m, "kind").as_deref() != Some("property") || written.contains(&id) || defined.contains_key(&id) {
+        if cell(m, "kind").as_deref() != Some("property") || set.own.contains(&id) || defined.contains_key(&id) {
             continue;
         }
         let Some(alias) = input_alias(m) else { continue };
@@ -151,20 +158,32 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
             gates_of.entry(comp).or_default().push((id, g));
         }
     }
+    // class -> creating function -> how many edges it draws into the class
+    let mut creators: IndexMap<String, IndexMap<String, usize>> = IndexMap::default();
+    let creator_of = |r: &Row| if cell(r, "node").is_none() { cell(r, "call").and_then(|c| set.fn_of_call.get(&c).cloned()) } else { None };
     for r in store.table("renders").iter() {
-        let (Some(id), Some(to), Some(class), Some(node)) = (cell(r, "id"), cell(r, "to"), cell(r, "to_class"), cell(r, "node")) else { continue };
+        if let (Some(class), Some(f)) = (cell(r, "to_class"), creator_of(r)) {
+            *creators.entry(class).or_default().entry(f).or_default() += 1;
+        }
+    }
+    for r in store.table("renders").iter() {
+        let (Some(id), Some(to), Some(class)) = (cell(r, "id"), cell(r, "to"), cell(r, "to_class")) else { continue };
         let (Some(own), Some(gs)) = (inputs.get(&class), gates_of.get(&to)) else { continue };
+        let (node, creator) = (cell(r, "node"), creator_of(r));
         // member row -> this edge's value for it
         let mut with: IndexMap<String, Value> = IndexMap::default();
         for (alias, (member, init)) in own {
-            match bound.get(&(node.clone(), alias.clone())) {
-                Some(Some(tree)) => with.insert(member.clone(), tree.clone()),
-                Some(None) => continue,
-                None => match init {
-                    Some(v) => with.insert(member.clone(), json!({"k": "Literal", "v": v})),
-                    None => continue,
+            let value = match (&node, &creator) {
+                (Some(node), _) if !written.contains(member) => match bound.get(&(node.clone(), alias.clone())) {
+                    Some(tree) => tree.clone(),
+                    None => init.as_ref().map(|v| json!({"k": "Literal", "v": v})),
                 },
+                (None, Some(f)) => set.on_edge(member, alias, init.as_ref(), f, &creators[&class]),
+                _ => None,
             };
+            if let Some(v) = value {
+                with.insert(member.clone(), v);
+            }
         }
         if with.is_empty() {
             continue;
@@ -201,6 +220,67 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
             } else {
                 out.conds.insert(link, (folded, false));
             }
+        }
+    }
+    out
+}
+
+/// A `setInput` whose name is no literal: `*` is no input's name.
+const ANY_NAME: &str = "*";
+
+/// What code writes into the inputs of the components it creates (#147).
+#[derive(Default)]
+struct InstanceWrites {
+    /// Input member id -> every write from outside its class: the function it sits in, and its value when that is a literal
+    /// written unconditionally.
+    writes: IndexMap<String, Vec<(String, Option<Value>)>>,
+    /// Members their own class writes, which no binding defines.
+    own: crate::rows::IndexSet<String>,
+    /// Input names some `setInput` call passes.
+    by_name: crate::rows::IndexSet<String>,
+    /// Call id -> the function it sits in.
+    fn_of_call: IndexMap<String, String>,
+}
+
+impl InstanceWrites {
+    /// The value a code edge from the creating function `f` gives the input `member`, or nothing when it is not proved.
+    fn on_edge(&self, member: &str, alias: &str, init: Option<&Value>, f: &str, creators: &IndexMap<String, usize>) -> Option<Value> {
+        if creators.get(f) != Some(&1) || self.by_name.contains(alias) || self.by_name.contains(ANY_NAME) {
+            return None;
+        }
+        let writes = self.writes.get(member).map(Vec::as_slice).unwrap_or_default();
+        let mut here = writes.iter().filter(|(w, _)| w == f);
+        match (here.next(), here.next()) {
+            (Some((_, Some(v))), None) => Some(json!({"k": "Literal", "v": v})),
+            (Some(_), _) => None,
+            (None, _) if writes.iter().all(|(w, _)| creators.contains_key(w)) => init.map(|v| json!({"k": "Literal", "v": v})),
+            (None, _) => None,
+        }
+    }
+}
+
+fn instance_writes(store: &Store<'_>) -> InstanceWrites {
+    let mut out = InstanceWrites::default();
+    let class_of: IndexMap<String, String> =
+        store.table("members").iter().filter_map(|m| Some((cell(m, "id")?, cell(m, "class")?))).collect();
+    for a in store.table("assignments").iter() {
+        let Some(target) = cell(a, "target_id") else { continue };
+        if cell(a, "class").is_some() && cell(a, "class") == class_of.get(&target).cloned() {
+            out.own.insert(target);
+            continue;
+        }
+        let plain = cell(a, "operator").as_deref() == Some("=") && ["branch", "loop", "case", "choices"].iter().all(|k| a.get(*k).is_none_or(Value::is_null));
+        let value = a.get("value").filter(|v| plain && matches!(v, Value::Bool(_) | Value::Number(_) | Value::String(_))).cloned();
+        out.writes.entry(target).or_default().push((cell(a, "member").unwrap_or_default(), value));
+    }
+    for c in store.table("calls").iter() {
+        if let (Some(id), Some(f)) = (cell(c, "id"), cell(c, "member")) {
+            out.fn_of_call.insert(id, f);
+        }
+        if cell(c, "method").as_deref() == Some("setInput") {
+            // A NAME NO LITERAL SPELLS may be any input's.
+            let name = c.get("args").and_then(|a| a.get(0)).and_then(Value::as_str).unwrap_or(ANY_NAME);
+            out.by_name.insert(name.to_string());
         }
     }
     out
