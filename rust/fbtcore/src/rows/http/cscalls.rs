@@ -4,7 +4,8 @@
 //! `Post*`, `Put*`, `Patch*`, `Delete*`); its url is the argument bound to `requestUri`. A `Send`/`SendAsync` takes its verb
 //! and url from the `new HttpRequestMessage(HttpMethod.X, url)` it is handed - written in its argument, or the one the
 //! local it names was declared with. A url is FOLDED as the half folded it: a constant is itself, an interpolation its
-//! text with each hole `{}` (`arguments.template`, the query cut), and anything else an unknown `*`. A url that IS a
+//! text with each hole `{}` (`arguments.template`, the query cut) - alternatives that name several paths (a ternary) a row for
+//! each - and anything else an unknown `*`. A url that IS a
 //! parameter of the method it is written in makes that method a WRAPPER: it writes no call itself, and every call OF it
 //! does, with the url its caller binds to that parameter and `via` the wrapper's `functions` id - so a wrapper of a
 //! wrapper is followed too. A wrapper whose url is a `string.Format` of its parameter FORMATS the caller's url: each `{n}`
@@ -49,11 +50,11 @@ struct Arg {
     symbol: String,
 }
 
-/// What an argument's url is: a pattern, or the name of a parameter of the method it is written in - whether the url is a
-/// `string.Format` of it, the text written before it, and the whole url as a pattern.
+/// What an argument's url is: its patterns, or the name of a parameter of the method it is written in - whether the url is a
+/// `string.Format` of it, the text written before it, and the whole url as patterns.
 enum Url {
-    Pattern(String),
-    Param(String, bool, String, String),
+    Pattern(Vec<String>),
+    Param(String, bool, String, Vec<String>),
 }
 
 pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusqlite::Result<Vec<Site>> {
@@ -105,15 +106,15 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
     };
     let value_of = |a: &Arg, qualname: &str| -> Option<Url> {
         match (&a.value, a.kind.as_str()) {
-            (Value::String(s), "const" | "folded") => Some(Url::Pattern(s.clone())),
+            (Value::String(s), "const" | "folded") => Some(Url::Pattern(vec![s.clone()])),
             // A BASE THE RUN TIME KNOWS AND THE CALLER'S URL (`_cfg.Url + url`, `string.Concat(_base, endpoint)`): holes alone, each
             // string ending in this method's parameter - the method is a wrapper of it, as a bare parameter makes it.
             (Value::Array(alternatives), _) if handed(alternatives).is_some_and(|(p, _, _)| params.contains(&(qualname.to_string(), p.clone()))) =>
                 handed(alternatives).map(|(p, formats, prefix)| Url::Param(p, formats, prefix, folded(alternatives))),
             (Value::Array(alternatives), _) => Some(Url::Pattern(folded(alternatives))),
             // `string.Empty`: the base address alone, as `""` is.
-            (_, "symbol") if a.symbol == "System.String.Empty" => Some(Url::Pattern(String::new())),
-            (_, "symbol") if params.contains(&(qualname.to_string(), a.symbol.clone())) => Some(Url::Param(a.symbol.clone(), false, String::new(), "{}".into())),
+            (_, "symbol") if a.symbol == "System.String.Empty" => Some(Url::Pattern(vec![String::new()])),
+            (_, "symbol") if params.contains(&(qualname.to_string(), a.symbol.clone())) => Some(Url::Param(a.symbol.clone(), false, String::new(), vec!["{}".into()])),
             _ => None,
         }
     };
@@ -124,7 +125,7 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
             let uri = calls.iter().find(|u| u.symbol == URI && u.file == a.file && u.line == a.line && u.member == c.member)?;
             of(uri).iter().find(|u| u.name == "uriString" || (u.name.is_empty() && u.position == 0))
         };
-        Some(value_of(a, &c.qualname).or_else(|| value_of(wrapped()?, &c.qualname)).unwrap_or_else(|| Url::Pattern("*".into())))
+        Some(value_of(a, &c.qualname).or_else(|| value_of(wrapped()?, &c.qualname)).unwrap_or_else(|| Url::Pattern(vec!["*".into()])))
     };
     // THE REQUEST A `Send` IS HANDED: the `HttpRequestMessage` built in its argument, or with the local it names.
     let message = |c: &Call| -> Option<&Call> {
@@ -197,26 +198,30 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
     let paths = super::files_of(conn, "csharp")?;
     let mut sites = vec![];
     for (n, c) in calls.iter().enumerate() {
-        let (verb, via, url) = match (asked.get(&n), wrappers.get(c.symbol.split('<').next().unwrap_or(""))) {
-            (Some((verb, Url::Pattern(url))), _) => (verb.clone(), String::new(), url.clone()),
+        let (verb, via, urls): (_, _, Vec<String>) = match (asked.get(&n), wrappers.get(c.symbol.split('<').next().unwrap_or(""))) {
+            (Some((verb, Url::Pattern(urls))), _) => (verb.clone(), String::new(), urls.clone()),
             (Some((verb, Url::Param(_, _, prefix, whole))), _) if uncalled(c, prefix) => (verb.clone(), String::new(), whole.clone()),
             (None, Some((id, p, verb, formats, prefix))) => match url_of(c, p) {
-                Some(Url::Pattern(url)) if *formats => (verb.clone(), id.clone(), format!("{prefix}{}", formatted(&url))),
-                Some(Url::Pattern(url)) => (verb.clone(), id.clone(), format!("{prefix}{url}")),
-                Some(Url::Param(_, _, before, whole)) if uncalled(c, &format!("{prefix}{before}")) => (verb.clone(), id.clone(), format!("{prefix}{whole}")),
+                Some(Url::Pattern(urls)) if *formats => (verb.clone(), id.clone(), urls.iter().map(|u| format!("{prefix}{}", formatted(u))).collect()),
+                Some(Url::Pattern(urls)) => (verb.clone(), id.clone(), urls.iter().map(|u| format!("{prefix}{u}")).collect()),
+                Some(Url::Param(_, _, before, whole)) if uncalled(c, &format!("{prefix}{before}")) => (verb.clone(), id.clone(), whole.iter().map(|w| format!("{prefix}{w}")).collect()),
                 _ => continue,
             },
             _ => continue,
         };
-        sites.push(Site {
-            file: paths.get(&c.file).cloned().unwrap_or_default(),
-            call: c.id.clone(),
-            member: c.member.clone(),
-            line: c.line,
-            verb,
-            url: url.split('?').next().unwrap_or("").to_string(),
-            via,
-        });
+        // ONE ROW PER PATH: the query cut, two alternatives naming one path are one row.
+        let paths_asked: std::collections::BTreeSet<String> = urls.iter().map(|u| u.split('?').next().unwrap_or("").to_string()).collect();
+        for url in paths_asked {
+            sites.push(Site {
+                file: paths.get(&c.file).cloned().unwrap_or_default(),
+                call: c.id.clone(),
+                member: c.member.clone(),
+                line: c.line,
+                verb: verb.clone(),
+                url,
+                via: via.clone(),
+            });
+        }
     }
     sites.sort_by(|a, b| (&a.file, a.line, &a.call).cmp(&(&b.file, b.line, &b.call)));
     Ok(sites)
@@ -261,9 +266,9 @@ fn formatted(url: &str) -> String {
     out
 }
 
-/// An interpolation's alternatives as one pattern: each piece's text, a hole `{}`; alternatives that disagree are `*`.
-fn folded(alternatives: &[Value]) -> String {
-    let spelled: HashSet<String> = alternatives
+/// An interpolation's alternatives as patterns, each path once: each piece's text, a hole `{}`.
+fn folded(alternatives: &[Value]) -> Vec<String> {
+    let spelled: std::collections::BTreeSet<String> = alternatives
         .iter()
         .map(|alt| {
             alt.as_array()
@@ -272,7 +277,7 @@ fn folded(alternatives: &[Value]) -> String {
         })
         .map(|s: String| s.split('?').next().unwrap_or("").to_string())
         .collect();
-    if spelled.len() == 1 { spelled.into_iter().next().unwrap_or_default() } else { "*".into() }
+    spelled.into_iter().collect()
 }
 
 /// Every argument of a call, by call id: the parameter it binds, its folded value or template, and the symbol it reads.
