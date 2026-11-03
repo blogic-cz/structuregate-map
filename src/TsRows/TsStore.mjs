@@ -325,6 +325,10 @@ export class Store {
       for (const row of rows) {
         if (!this.hydrated.has(row) || !row.id) continue;
         const held = this.loadedAs.get(row.id);
+        // BYTE FOR BYTE AS IT ARRIVED, in the engine's own serialization - the one `load` recorded - is untouched, and that is most
+        // rows: a replacer made every one of them a call per key, a few seconds of every partial run. Only a row that differs is
+        // asked the slower question below.
+        if (held !== undefined && asStored(() => JSON.stringify(row)) === held) continue;
         // AS IT WOULD BE WRITTEN: node holds the compiler's absolute paths and spells them relative only in the payload, and a
         // carried row comes back relative - a pass that recomputed a path in a kept row (`TsTplFills.mjs`) read as a change it
         // was not, and every edit of a large workspace was parsed twice.
@@ -433,10 +437,11 @@ export class Store {
    * a structure is not), so the spec it publishes is the one a full run of the same tree would. Republished, a key an
    * edit made unique (`comments`, in a tree whose first comment it wrote) stayed out of the spec until the next full run.
    */
-  identityKeys() {
+  identityKeys(unmoved = new Set(), last = {}) {
     const out = {};
     for (const name of Object.keys(this.tables).filter((table) => table !== 'files').sort()) {
-      const key = uniqueKeyFor(this.tables[name]);
+      // A TABLE NO ROW OF WHICH MOVED keeps the key the last run measured over the same rows (`TsMap.mjs`).
+      const key = unmoved.has(name) ? (last[name] ?? null) : uniqueKeyFor(this.tables[name]);
       // A TABLE WITH NO KEY IS REPORTED BY ITS ABSENCE. Guessing one would re-point a reference at a
       // row that merely looks alike, which is worse than minting a fresh id and resolving again.
       if (key) out[name] = key;

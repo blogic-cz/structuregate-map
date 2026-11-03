@@ -122,7 +122,8 @@ export class AppModule {}
 '@
         # A FUNCTION A TEMPLATE TYPES (rows 107, `TsDerive/TsInputs/TsTplFills.mjs`): `rules()` declares no return type, so its arrow's
         # `target` is found through `[rules]="rules()"` and recomputed on every run - a kept row whose path it spelt absolute read as moved.
-        'apps/shop/src/rule.ts' = "export interface Rule { Message: (value: string) => string; }`n"
+        'apps/shop/src/rule.ts' = "import { RuleBase } from './rule-base';`nexport interface Rule extends RuleBase { Message: (value: string) => string; }`n"
+        'apps/shop/src/rule-base.ts' = "export interface RuleBase { id?: number; }`n"
         'apps/shop/src/rules.component.ts' = @'
 import { Component, Input } from '@angular/core';
 import { Rule } from './rule';
@@ -194,11 +195,12 @@ function Get-TsExactRows([string]$Db) {
 # The workspace mapped, `$Edit` given a comment, mapped again (a PARTIAL run, unless the store reads everything - which
 # `$Env` may ask of it), its map moved aside, and the same tree mapped from nothing.
 # `-Add` writes `$Edit` as a new file instead.
-function Invoke-TsExactRun([string]$Edit, [hashtable]$Env = @{}, [switch]$Add) {
+function Invoke-TsExactRun([string]$Edit, [hashtable]$Env = @{}, [switch]$Add, [string]$Replace = '') {
     $tree = New-TsExactWorkspace
     Assert-Exit (New-TsRowsDb $tree).Result 0
     $path = Join-Path $tree $Edit
     if ($Add) { Set-Content -LiteralPath $path -Value 'a note' }
+    elseif ($Replace) { Set-Content -LiteralPath $path -Value $Replace -NoNewline }
     else { Set-Content -LiteralPath $path -Value ((Get-Content -LiteralPath $path -Raw) + "// edited`n") -NoNewline }
     foreach ($name in $Env.Keys) { Set-Item -Path "Env:$name" -Value $Env[$name] }
     try {
@@ -255,6 +257,16 @@ Test-Case 'tsrows: a partial run publishes the spec a fresh full map of the edit
     # A join to `files` and an anchored table: what a spec derived from the rows the run MADE alone had none of.
     if (-not $partial.joins.'classes.file') { throw 'the partial run''s spec declares no join classes.file' }
     if (-not $partial.anchors.'classes') { throw 'the partial run''s spec anchors no classes' }
+    Assert-Equal ($partial | ConvertTo-Json -Depth 100 -Compress) ($full | ConvertTo-Json -Depth 100 -Compress) 'spec:typescript'
+}
+
+# A TABLE WHOSE ROWS THE EDIT TOOK AWAY IS DERIVED AGAIN (`TsMap.mjs`, `unmoved`): `rule.ts` held the one interface that extends
+# another, and a spec kept from the last run would still say `interfaces.extends_refs` holds a structure.
+Test-Case 'tsrows: a partial run that took a table''s rows away publishes the spec a fresh full map publishes' {
+    $run = Invoke-TsExactRun 'apps/shop/src/rule.ts' -Replace "export class Rule { Message = (value: string) => value; }`n"
+    Assert-Line $run.Partial 'kept the spec of'
+    $partial = Get-TsRowsMeta $run.PartialDb 'spec:typescript'
+    $full = Get-TsRowsMeta $run.FullDb 'spec:typescript'
     Assert-Equal ($partial | ConvertTo-Json -Depth 100 -Compress) ($full | ConvertTo-Json -Depth 100 -Compress) 'spec:typescript'
 }
 

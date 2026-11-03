@@ -126,7 +126,7 @@ fn held(
     identity: Option<&Vec<Vec<String>>>,
     send: bool,
     uncarried: &mut Uncarried,
-) -> Result<(Vec<Held>, Claims)> {
+) -> Result<(Vec<Held>, Claims, usize)> {
     let by_owner = columns.iter().any(|c| c == "owner_file");
     let sql = format!(
         "SELECT rowid, * FROM \"{}\" WHERE \"{}\" = ?1",
@@ -146,6 +146,7 @@ fn held(
 
     let mut out = Vec::new();
     let mut claims: Claims = IndexMap::new();
+    let mut replacing = 0usize;
     let mut rows = stmt.query([lang])?;
     while let Some(record) = rows.next()? {
         // THE WHOLE ROW IS READ BEFORE ANYTHING IS DECIDED ABOUT IT. Stopping at the column that
@@ -206,6 +207,7 @@ fn held(
             out.push((row, stubs));
             continue;
         }
+        replacing += 1;
         // THE ID OF A ROW THAT IS NOT COMING BACK, for a table anything outside a file can name. A
         // declaration still there after the re-extraction is the SAME declaration, and keeping its id
         // is what stops every reference to it from another file having to be resolved again onto a new
@@ -217,7 +219,7 @@ fn held(
             claims.insert(format!("{owner}\u{0}{key}"), id.clone());
         }
     }
-    Ok((out, claims))
+    Ok((out, claims, replacing))
 }
 
 /// The tables node rebuilds whole, as the last run's spec names them.
@@ -305,6 +307,9 @@ pub fn carry_over(
     let rebuilt = rebuilt_of(&db, lang);
     let mut uncarried = uncarried.map_or_else(Uncarried::none, |spec| Uncarried::from_plan(Some(spec)));
     let mut rollup = Map::new();
+    // PER TABLE, HOW MANY ROWS OF THE FILES READ AGAIN IT HELD: a table with none, and none made this run, is the table the last
+    // spec was derived from, and node keeps that table's part of it (`TsMap.mjs`).
+    let mut replaced = Map::new();
     for table in tables_with_half(&db)? {
         // A NODE TABLE goes out inside the rows it belongs to (`held`), never as a table.
         if super::cells::parent_of(&db, &table).is_some() {
@@ -326,7 +331,10 @@ pub fn carry_over(
         // read first, to re-point the files it is handed.
         let send = table == "projects" || !rebuilt.contains(&table);
         // PER TABLE, what reading its rows out costs and what writing them to node does (`metrics`): the carry is most of a partial run.
-        let (rows, claims) = crate::trace::metric!("typescript: read a carried table", table, { held(&db, &table, &columns, lang, &ids, identity.get(&table), send, &mut uncarried)? });
+        let (rows, claims, replacing) = crate::trace::metric!("typescript: read a carried table", table, { held(&db, &table, &columns, lang, &ids, identity.get(&table), send, &mut uncarried)? });
+        if replacing > 0 {
+            replaced.insert(table.clone(), Value::from(replacing));
+        }
         if !claims.is_empty() {
             all_claims.insert(table.clone(), claims);
         }
@@ -359,6 +367,7 @@ pub fn carry_over(
     let mut last = Map::new();
     last.insert("claims".to_string(), Value::Object(claims_of));
     last.insert("rollup".to_string(), Value::Object(rollup));
+    last.insert("replaced".to_string(), Value::Object(replaced));
     write_json(&mut writer, &Value::Object(last))?;
     writer.write_all(b"\n")?;
     writer.flush()?;

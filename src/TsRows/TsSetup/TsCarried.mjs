@@ -20,17 +20,23 @@
 export const UNREAD_WHEN_CARRIED = {
   assignments: { calls: true, reads: true, value: true },
   branches: { condition: true },
+  // READ BY RUST ALONE, from the database: a call's argument refs (`key_args`), an import's barrels (`partial/deps.rs`), a shape
+  // member's write target (`shape_values.rs`), a template literal's holes (`key_builds.rs`) - measured unread by every node pass.
+  // Not `calls.arg_params`: `rollupRefIds` writes it on every call, a carried one too, and the dynamic renders read it.
+  calls: { arg_refs: true },
   class_decorators: { args: true },
   expressions: {
     ast: ['lang', 'ts'], calls: true, identifiers: true, pipes: ['lang', 'ts'], reads: true, strings: true, write_refs: true,
     writes: true,
   },
   gates: { calls: true, reads: true, strings: true },
+  import_names: { via: true },
   locals: { bindings: true, calls: true, reads: true },
   members: { decorators: true },
   returns: { calls: true, reads: true },
+  shape_members: { target: true },
   switch_cases: { discriminant: true, label_exprs: true, labels: true },
-  template_literals: { holes: true, parts: true },
+  template_literals: { expands: true, hole_refs: true, holes: true, parts: true },
 };
 
 /** What `storedForm` holds for a stub: one value, the same before and after, never a structure's text. */

@@ -97,6 +97,7 @@ export function readCarry(file, part, onRow) {
   }
   let claims = {};
   let rollup = {};
+  let replaced = {};
   // A CHUNK CAN SPLIT A CHARACTER. `StringDecoder` holds the tail of a multi-byte sequence until the
   // rest of it arrives; `Buffer.toString` on the boundary would put a replacement character in a row.
   const decoder = new StringDecoder('utf8');
@@ -105,7 +106,7 @@ export function readCarry(file, part, onRow) {
   const take = (line) => {
     if (!line) return;
     const one = JSON.parse(line);
-    if (one.claims) { claims = one.claims; rollup = one.rollup ?? {}; return; }
+    if (one.claims) { claims = one.claims; rollup = one.rollup ?? {}; replaced = one.replaced ?? {}; return; }
     if (one.o) for (const [column, kind] of Object.entries(one.o)) one.r[column] = stub(kind, `${one.t}.${column}`);
     onRow(one.t, one.r);
   };
@@ -132,7 +133,7 @@ export function readCarry(file, part, onRow) {
   } finally {
     closeSync(fd);
   }
-  return { claims, rollup };
+  return { claims, rollup, replaced };
 }
 
 /** `cells` (`TsPaths.mjs::relativeCells`), when given, makes the replacer each table row is written through. */
