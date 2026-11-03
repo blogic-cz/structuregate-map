@@ -72,7 +72,9 @@ Each name is one `metric: <name>` span (`breakdown`) under the root: `structureg
 over threads, so it can exceed the run), `.max_ms`, `.max_item`; every item slower than `SG_METRICS_SLOW_MS` (50) is a
 `metric item: <name>` span with `structuregate.metric.item`, the 2000 slowest. Measured now: `csharp: rows of a file`,
 `roslyn: symbol|type of <Kind> in <ParentKind>`, `store: insert`, `store: index a node table`, `typescript: build a
-program` (and `... ahead`), `typescript: read the carried rows`, `walk every project`, `the template pass`. A new site is
+program` (and `... ahead`), `typescript: read the carried rows`, `walk every project`, `the template pass`, every node step after
+it (`typescript: rollupRoutes`, `.. deriveJoins`, `.. writePayload`, ..: the function's name) and, per table, `typescript: read a carried
+table` / `write a carried table` (rust's half of the carry, `rows/partial/carry.rs`). A new site is
 `metric!(name, item, { body })` in rust, `CsMetrics.Start`/`Stop` in C#, `timed(name, item, fn)` in node - timing only.
 
 A metrics build also COUNTS rust's allocations (`metrics::Counting`, mimalloc underneath) and writes the bytes rust holds twice a

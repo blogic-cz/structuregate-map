@@ -518,7 +518,7 @@ async function main() {
   let repointLater = null;
   // THE PROGRAMS BEFORE THE ROWS: a partial run builds them while rust is still writing what it hands back (`prewarm`),
   // and then loads the rows as they are written (`readCarry`).
-  const projects = discoverProjects(ts, fe);
+  const projects = timed('typescript: discoverProjects', '', () => discoverProjects(ts, fe));
   const { skip, ahead } = partial ? skipping(state, planned, now, projects) : { skip: null, ahead: projects };
   if (partial && args.carryPart) prewarm(ts, ahead, found.nodeModules);
   const diag = new Diagnostics(() => store.currentFile);
@@ -563,7 +563,7 @@ async function main() {
     // rows themselves are the ones being replaced and these are all that is kept of them.
     // AN OUT-OF-SCOPE CANDIDATE IS A RENDER WHILE THIS RUN HOLDS IT (#40): back into `renders`, its claims and its rows
     // above, so the scope is decided over every candidate again - `setAsideOutOfScope` moves it out on the way to the store.
-    const reclaimable = store.loadClaims(claimsBack(carried.claims), state.identity ?? {});
+    const reclaimable = timed('typescript: loadClaims', '', () => store.loadClaims(claimsBack(carried.claims), state.identity ?? {}));
     store.loadRollup(carried.rollup);
     store.holdNames('projects', heldProjects);
     emptyChanged(store, planned.changed);
@@ -582,7 +582,7 @@ async function main() {
   }
 
   // WHICH FILES THIS RUN READS AGAIN beyond the ones that changed - see `TsSetup/TsReads.mjs`.
-  const rereads = (partial && planned.cut) ? startRereads({ ts, fe, store, state, planned, now, only: affected }) : null;
+  const rereads = (partial && planned.cut) ? timed('typescript: startRereads', '', () => startRereads({ ts, fe, store, state, planned, now, only: affected })) : null;
   // WHICH STRINGS ARE PROPERTY PATHS, AND FROM WHERE (rows 98, #109) - application knowledge, an input (`TsConfig.mjs::propertyPaths`).
   const propertyPaths = readPropertyPaths(config, (name) => diag.note('property_path_spec_invalid', { name }));
   const { inAnyProgram, registry, components } = timed('typescript: walk every project', '', () => walkProjects({
@@ -639,7 +639,7 @@ async function main() {
 
   // A TEMPLATE READ BECOMES A DECLARATION. After every template is parsed, because a read can land on a
   // member of a component whose own template has not been reached yet, and after the declarations exist.
-  const reads = rollupTemplateReads(store);
+  const reads = timed('typescript: rollupTemplateReads', '', () => rollupTemplateReads(store));
   emit('MAP-NOTE', `the typescript half resolved ${reads.hops} template read(s) in ${reads.chains} chain(s)`);
 
   // A TEMPLATE OUTSIDE THE INVENTORY ROOT is never walked, so its file row would keep no size at all - and
@@ -673,7 +673,7 @@ async function main() {
   for (const t of store.table('templates')) {
     if (t.path) parsedAbs.add(canonicalPath(path.resolve(fe, t.path)));
   }
-  markParsed(store, parsedAbs);
+  timed('typescript: markParsed', '', () => markParsed(store, parsedAbs));
   // AN .html IN SCOPE THAT NO COMPONENT POINTS AT is still part of the frontend. Parsed as an ORPHAN
   // template rather than left as a file row with no content behind it.
   let orphans = 0;
@@ -694,7 +694,7 @@ async function main() {
   // decides, and this says what the node sits under. AFTER THE ORPHANS, which are templates too: run
   // before them, a full run left an orphan's gated nodes with no chain, and the partial run that was
   // handed those nodes back chained them and refused to store a change to rows it had not made.
-  const chains = rollupGateChains(store);
+  const chains = timed('typescript: rollupGateChains', '', () => rollupGateChains(store));
   emit('MAP-NOTE', `the typescript half put ${chains.nodes} node(s) under a gate `
     + `(deepest chain ${chains.deepest})`);
   // AND NOT AGAIN FOR THE ORPHANS, though it is tempting. They are parsed after the inventory, so the
@@ -702,26 +702,26 @@ async function main() {
   // tool this map reproduces leaves them empty too, and filling them moved those `files` rows away from
   // it. A partial run has those template rows handed back before it starts, and `sizesFromTemplates` skips them
   // (no component) so it leaves them empty as well.
-  markReachable(store, inAnyProgram, diag);
+  timed('typescript: markReachable', '', () => markReachable(store, inAnyProgram, diag));
 
   // THE TRANSLATION FILES, LAST. They are inventory rows until something opens them, and they are opened
   // after reachability precisely so a locale file keeps the `reachable: null` that a .json deserves.
   // THE ROUTES, before the refs rollup: their `component`, guards and lazy targets are references that pass
   // resolves, and `moduleRoots` is what closes the tree across a lazy boundary once they are ids.
-  const moduleRoots = rollupRoutes(store);
+  const moduleRoots = timed('typescript: rollupRoutes', '', () => rollupRoutes(store, canonicalPath(path.resolve(fe))));
 
   // A REFERENCE BECOMES A ROW ID, once every declaration exists: `di.resolved`, `calls.target`,
   // `assignments.target_ref` and `imports.resolved` all name a declaration by file and name until this runs.
   // AFTER the inventory, because an import that resolved into a file only the walk knows about could not be
   // joined before that file had a row.
-  rollupRefIds(store);
+  timed('typescript: rollupRefIds', '', () => rollupRefIds(store));
   // A FEDERATED REMOTE A ROUTE LOADS, through the tree's own `module-federation.config` - once every class has its id.
-  const remotes = rollupRemoteRoutes(ts, store, fe);
+  const remotes = timed('typescript: rollupRemoteRoutes', '', () => rollupRemoteRoutes(ts, store, fe));
   if (remotes.remotes) emit('MAP-NOTE', `the typescript half resolved ${remotes.resolved} of ${remotes.remotes} remote route(s)`);
   // ...and then which PARAMETER each argument fills, which needs the call targets the pass above resolved.
-  rollupCallParams(store);
+  timed('typescript: rollupCallParams', '', () => rollupCallParams(store));
 
-  const tree = rollupRouteTree(store, moduleRoots, diag);
+  const tree = timed('typescript: rollupRouteTree', '', () => rollupRouteTree(store, moduleRoots, diag));
   emit('MAP-NOTE', `the typescript half closed ${tree.lazy} lazy route boundary(ies) and composed `
     + `${tree.absolute} absolute path(s)`);
 
@@ -749,51 +749,51 @@ async function main() {
   emit('MAP-NOTE', `the typescript half skipped ${i18nCalls.skipped ?? -1} call(s) whose refs came `
     + `back with the rest (${affectedIds === null ? 'full run' : `${affectedIds.size} file(s) re-read`})`);
 
-  const locales = collectLocales(store, directories(config, 'locales', fe), diag);
+  const locales = timed('typescript: collectLocales', '', () => collectLocales(store, directories(config, 'locales', fe), diag));
   // A ROUTE PATH'S `{{key}}`s, after the locales they resolve to and before `translations.referenced` counts them.
   emit('MAP-NOTE', `the typescript half found ${rollupRouteKeys(store)} translation key(s) in route paths`);
 
   // A COMPONENT CREATED BY CODE IS A RENDER TOO - before the scope pass, which has a rule for an edge the
   // compiler never matched, and after the refs rollup, whose ids this pass follows.
-  const dynamic = rollupDynamicRenders(store, diag);
+  const dynamic = timed('typescript: rollupDynamicRenders', '', () => rollupDynamicRenders(store, diag));
   emit('MAP-NOTE', `the typescript half found ${dynamic.edges} render edge(s) created in code across `
     + `${dynamic.sites} site(s), ${dynamic.unresolved} with no statically nameable component`);
 
   // WHICH OF SEVERAL SAME-SELECTOR CANDIDATES ANGULAR WOULD USE - before anything that reads `renders.scope`.
   const scoping = makeScopes(store, diag);
-  const scopes = rollupModuleScope(store, diag, scoping);
+  const scopes = timed('typescript: rollupModuleScope', '', () => rollupModuleScope(store, diag, scoping));
   emit('MAP-NOTE', `the typescript half scoped renders: `
     + Object.entries(scopes).map(([k, v]) => `${k}=${v}`).join(', '));
   // WHICH PIPE EACH TEMPLATE USAGE RUNS, by the same scopes (#86) - their notes are made once, above.
   scoping.quiet();
-  const piped = rollupPipeRefs(store, diag, scoping);
+  const piped = timed('typescript: rollupPipeRefs', '', () => rollupPipeRefs(store, diag, scoping));
   emit('MAP-NOTE', `the typescript half resolved ${piped.resolved} of ${piped.usages} template pipe usage(s) by scope`);
 
   // WHICH ENTRY POINTS REACH A COMPONENT, and which inputs a template really binds - both read
   // `renders.scope`, so both run after it. `wholeApp` is true here: this half always maps the whole
   // workspace, which is the only case where "nothing renders this" is a claim and not a scope artefact.
-  const reach = rollupComponentReach(store, { wholeApp: true });
+  const reach = timed('typescript: rollupComponentReach', '', () => rollupComponentReach(store, { wholeApp: true }));
   emit('MAP-NOTE', `the typescript half reached ${reach.classes} class(es) from ${reach.roots} entry `
     + `point(s), ${reach.exclusive} exclusive to one area, ${reach.shared} shared; `
     + `${reach.unused} component(s) nothing renders`);
-  const inputs = rollupInputUsage(store);
+  const inputs = timed('typescript: rollupInputUsage', '', () => rollupInputUsage(store));
   emit('MAP-NOTE', `the typescript half bound ${inputs.bound} input(s) across ${inputs.declared} declared, `
     + `${inputs.unused} never bound`);
   // A VALUE ONLY A TEMPLATE TYPES names the member the bound input declares (rows 107) - after the bindings are matched to their inputs.
-  const fills = rollupTemplateFills(store);
+  const fills = timed('typescript: rollupTemplateFills', '', () => rollupTemplateFills(store));
   if (fills.filled) emit('MAP-NOTE', `the typescript half named the member of ${fills.filled} value(s) a template binding types`);
 
   // THE STATE GRAPH, from the evaluated values of the consts that declare it.
-  const stateGraph = rollupStateGraph(store);
+  const stateGraph = timed('typescript: rollupStateGraph', '', () => rollupStateGraph(store));
   emit('MAP-NOTE', `the typescript half found ${stateGraph.actions} action(s), ${stateGraph.handlers} `
     + `reducer handler(s), ${stateGraph.selectors} selector(s), ${stateGraph.effects} effect(s)`);
 
   // THE INVERTED VIEWS, last: each is a join over tables that all have to be complete first.
-  rollupSelectors(store);
-  rollupRenderGraph(store);
+  timed('typescript: rollupSelectors', '', () => rollupSelectors(store));
+  timed('typescript: rollupRenderGraph', '', () => rollupRenderGraph(store));
   const index = rollupI18nIndex(store);
-  rollupGateIndex(store);
-  const coverage = rollupTranslationCoverage(store);
+  timed('typescript: rollupGateIndex', '', () => rollupGateIndex(store));
+  const coverage = timed('typescript: rollupTranslationCoverage', '', () => rollupTranslationCoverage(store));
   emit('MAP-NOTE', `the typescript half indexed ${index.unique_keys} translation key(s), `
     + `${coverage.defined} defined and ${coverage.missing} undefined, `
     + `${coverage.unused} translation(s) never referenced`);
@@ -872,10 +872,10 @@ async function main() {
   // and the one resolving fewer rows looked exactly like a map that lacked them. Derived LAST, because
   // both are read off the finished rows rather than declared anywhere.
   const tableNames = Object.keys(store.tables).sort();
-  const { jsonColumns, boolColumns } = columnKinds(store, tableNames);
+  const { jsonColumns, boolColumns } = timed('typescript: columnKinds', '', () => columnKinds(store, tableNames));
   const idScheme = store.idScheme();
-  const joins = deriveJoins(store, idScheme, tableNames);
-  const { anchors, unanchored } = deriveAnchors(store, idScheme, joins, tableNames);
+  const joins = timed('typescript: deriveJoins', '', () => deriveJoins(store, idScheme, tableNames));
+  const { anchors, unanchored } = timed('typescript: deriveAnchors', '', () => deriveAnchors(store, idScheme, joins, tableNames));
   emit('MAP-NOTE', `the typescript half proved a file route for ${Object.keys(anchors).length} table(s) `
     + `over ${Object.keys(joins).length} join(s)`
     + (unanchored.length ? `, and none for ${unanchored.join(', ')}` : ''));
@@ -940,7 +940,7 @@ async function main() {
     .map(([name]) => name)])].sort());
 
   if (partial) {
-    const touched = store.verifyUntouched(whole);
+    const touched = timed('typescript: verifyUntouched', '', () => store.verifyUntouched(whole));
     if (uncarried(store, whole)) return 0;
     // A RUN THAT STOPPED SHORT OF EVERY HOP and broke a row it kept is asked again over every hop.
     const stop = rereads ? cutShort(rereads, touched, false) : null;
@@ -1012,10 +1012,10 @@ async function main() {
             rebuilt: partial ? [...rebuilt].sort() : store.rebuiltTables(),
             // WHICH IDS A RE-EXTRACTION MUST NOT CHANGE, and what identifies the row holding one - measured by a
             // partial run too, which holds every row of every per-file table and makes every rollup's again.
-            identity: store.identityKeys() },
+            identity: timed('typescript: identityKeys', '', () => store.identityKeys()) },
     provenance,
   };
-  writePayload(args.rows, payload, relativeCells(canonicalPath(path.resolve(fe))));
+  timed('typescript: writePayload', '', () => writePayload(args.rows, payload, relativeCells(canonicalPath(path.resolve(fe)))));
   for (const table of Object.keys(sending).sort()) emit('MAP-ROWS', table, sending[table].length);
   emit('MAP-DONE', Object.keys(shas).length);
   return 0;
