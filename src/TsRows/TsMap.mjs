@@ -516,6 +516,8 @@ async function main() {
   const store = new Store(partial ? (state.counters ?? {}) : (state.alone ? {} : (state.counters ?? {})), state.floor ?? 0, relativeCells(canonicalPath(path.resolve(fe))));
   const affected = partial ? new Set(planned.affected) : null;
   let repointLater = null;
+  // PER TABLE, how many rows of the files read again the store held (`partial/carry.rs`): null on a full run.
+  let replacedRows = null;
   // THE PROGRAMS BEFORE THE ROWS: a partial run builds them while rust is still writing what it hands back (`prewarm`),
   // and then loads the rows as they are written (`readCarry`).
   const projects = timed('typescript: discoverProjects', '', () => discoverProjects(ts, fe));
@@ -568,6 +570,7 @@ async function main() {
     store.holdNames('projects', heldProjects);
     emptyChanged(store, planned.changed);
     repointLater = heldProjects;
+    replacedRows = carried.replaced ?? {};
     emit('MAP-NOTE', `the typescript half put back ${loaded} row(s) it is not re-extracting and `
       + `left ${skipped} to be derived again, and is reading ${affected.size} file(s) of ${now.size}`);
     if (reclaimable) {
@@ -872,9 +875,25 @@ async function main() {
   // and the one resolving fewer rows looked exactly like a map that lacked them. Derived LAST, because
   // both are read off the finished rows rather than declared anywhere.
   const tableNames = Object.keys(store.tables).sort();
-  const { jsonColumns, boolColumns } = timed('typescript: columnKinds', '', () => columnKinds(store, tableNames));
   const idScheme = store.idScheme();
-  const joins = timed('typescript: deriveJoins', '', () => deriveJoins(store, idScheme, tableNames));
+  // A TABLE NO ROW OF WHICH MOVED is the table the last spec was derived from: no row of a file read again, none made by this
+  // run, no rollup's and none a pass rewrites (`REWRITTEN`, which `verifyUntouched` lets through) - and the same id scheme, which
+  // names every join's targets. Its joins, structured and boolean columns and identity key are the last spec's; only the rest is
+  // scanned, which on a partial run is a few tables of every row of the map.
+  const unmoved = new Set(replacedRows === null || JSON.stringify(state.id_scheme ?? null) !== JSON.stringify(idScheme) ? []
+    : tableNames.filter((t) => !(replacedRows[t] > 0) && !REWRITTEN.includes(t) && !store.rollupTables.has(t)
+      && store.table(t).every((row) => store.hydrated.has(row))));
+  const moved = tableNames.filter((t) => !unmoved.has(t));
+  if (replacedRows !== null) emit('MAP-NOTE', `the typescript half kept the spec of ${unmoved.size} of ${tableNames.length} table(s) no row of which moved`);
+  const keptOf = (spec) => Object.fromEntries(Object.entries(spec ?? {}).filter(([t]) => unmoved.has(t)));
+  const kinds = timed('typescript: columnKinds', '', () => columnKinds(store, moved));
+  // IN THE ORDER A WHOLE DERIVATION WRITES THEM: column kinds by table name as `tableNames` sorts, joins as `deriveJoins` sorts.
+  const byTable = (o) => Object.fromEntries(tableNames.filter((t) => o[t] !== undefined).map((t) => [t, o[t]]));
+  const jsonColumns = byTable({ ...kinds.jsonColumns, ...keptOf(state.json_columns) });
+  const boolColumns = byTable({ ...kinds.boolColumns, ...keptOf(state.bool_columns) });
+  const sortedKeys = (o) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
+  const joins = timed('typescript: deriveJoins', '', () => sortedKeys({ ...deriveJoins(store, idScheme, moved),
+    ...Object.fromEntries(Object.entries(state.joins ?? {}).filter(([key]) => unmoved.has(key.slice(0, key.lastIndexOf('.'))))) }));
   const { anchors, unanchored } = timed('typescript: deriveAnchors', '', () => deriveAnchors(store, idScheme, joins, tableNames));
   emit('MAP-NOTE', `the typescript half proved a file route for ${Object.keys(anchors).length} table(s) `
     + `over ${Object.keys(joins).length} join(s)`
@@ -1012,7 +1031,7 @@ async function main() {
             rebuilt: partial ? [...rebuilt].sort() : store.rebuiltTables(),
             // WHICH IDS A RE-EXTRACTION MUST NOT CHANGE, and what identifies the row holding one - measured by a
             // partial run too, which holds every row of every per-file table and makes every rollup's again.
-            identity: timed('typescript: identityKeys', '', () => store.identityKeys()) },
+            identity: timed('typescript: identityKeys', '', () => store.identityKeys(unmoved, state.identity ?? {})) },
     provenance,
   };
   timed('typescript: writePayload', '', () => writePayload(args.rows, payload, relativeCells(canonicalPath(path.resolve(fe)))));

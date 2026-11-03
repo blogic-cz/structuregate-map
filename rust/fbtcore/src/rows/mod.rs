@@ -141,6 +141,9 @@ pub struct TsState {
     pub bool_columns: Value,
     pub rebuilt: Value,
     pub identity: Value,
+    /// The last spec's joins and id scheme: a partial run keeps a table's joins where none of its rows moved (`TsMap.mjs`).
+    pub joins: Value,
+    pub id_scheme: Value,
     /// What each file's extraction read, surfaced, and which template goes with which component - see `reads`.
     pub readers: Value,
     pub deep_readers: Value,
@@ -192,6 +195,8 @@ pub fn ts_state(db: &Path, lang: &str) -> TsState {
         bool_columns: from_spec("bool_columns", Value::Object(Map::new())),
         rebuilt: from_spec("rebuilt", Value::Array(Vec::new())),
         identity: from_spec("identity", Value::Object(Map::new())),
+        joins: from_spec("joins", Value::Object(Map::new())),
+        id_scheme: from_spec("id_scheme", Value::Object(Map::new())),
         readers: recorded.readers,
         deep_readers: recorded.deep_readers,
         surfaces: recorded.surfaces,
