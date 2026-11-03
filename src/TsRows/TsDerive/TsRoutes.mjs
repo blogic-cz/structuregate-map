@@ -7,6 +7,7 @@
  * `TsDecls/TsTypeRef.mjs`.
  */
 import { hasUnresolved, makeSpreadFolder } from './TsRouteFold.mjs';
+import { relativeCells } from './TsPaths.mjs';
 
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const arr = (v) => (Array.isArray(v) ? v : v === undefined || v === null ? [] : [v]);
@@ -40,9 +41,16 @@ function withoutAddedIds(key, value) {
  * (`$fn_id`, `TsWalk.mjs::linkFunctions`) and the same array reached through a module's `forRoot(appRoutes)` is a copy
  * the link never visited, so every lazy route differed between the two and the array was walked twice - a second row
  * per route, and every lazy root claimed by two loaders, linked to neither.
+ *
+ * EVERY PATH AS THE PAYLOAD SPELLS IT (`relativeCells`, #120): a const carried back from the map holds its `file`s
+ * relative to the workspace, one read again holds them absolute until it is written - so on a partial run that read
+ * `app.module.ts` again, its `forRoot(appRoutes)` copy differed from the carried `appRoutes` and every route was a second row.
  */
-function forSignature(key, value) {
-  return key === '$fn_id' ? undefined : withoutAddedIds(key, value);
+function signer(root) {
+  const relative = relativeCells(root)(null, 'routes');
+  return function forSignature(key, value) {
+    return key === '$fn_id' ? undefined : withoutAddedIds(key, relative.call(this, key, value));
+  };
 }
 
 /**
@@ -54,7 +62,8 @@ function asExtracted(value) {
   return value === null || typeof value !== 'object' ? value : JSON.parse(JSON.stringify(value, withoutAddedIds));
 }
 
-export function rollupRoutes(store) {
+export function rollupRoutes(store, root) {
+  const forSignature = signer(root);
   const foldSpread = makeSpreadFolder(store);
   const emitted = new Set();
   const walkedArrays = new Set();
