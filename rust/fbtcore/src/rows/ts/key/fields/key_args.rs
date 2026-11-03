@@ -54,16 +54,16 @@ pub fn arg_conds<'l>(
     for table in ["returns", "assignments"] {
         returned_by.extend(store.table(table).iter().filter_map(|r| Some((id_of(r, "expression")?, id_of(r, "member")?))));
     }
-    // A STATEMENT CALL A HAND-OVER NAMES (`!<calls id>`, `key_handover`): the member it is written in, and its arguments as trees -
-    // a `this.` chain only, as a bare name there is a local and no field. None: an argument no tree stands for.
+    // A STATEMENT CALL A HAND-OVER NAMES (`!<calls id>`, `key_handover`): the member it is written in, and its arguments as trees
+    // (`stated_arg`). None: an argument no tree stands for.
     let named: std::collections::HashSet<&str> = links.iter().flat_map(|l| l.split(['@', '~'])).filter_map(|h| h.strip_prefix('!')).collect();
     let mut stated: HashMap<String, Option<Value>> = HashMap::new();
     if !named.is_empty() {
         for c in store.table("calls").iter() {
             let Some(id) = id_of(c, "id").filter(|id| named.contains(id.as_str())) else { continue };
+            let own: Vec<String> = id_of(c, "member").and_then(|m| params.get(&m).cloned()).unwrap_or_default();
             if let Some(member) = id_of(c, "member") { returned_by.insert(format!("!{id}"), member); }
-            let args: Option<Vec<Value>> = c.get("args").and_then(Value::as_array).into_iter().flatten()
-                .map(|a| a.get("$expr").and_then(Value::as_str).filter(|e| e.starts_with("this.")).and_then(chain_tree)).collect();
+            let args: Option<Vec<Value>> = c.get("args").and_then(Value::as_array).into_iter().flatten().map(|a| stated_arg(a, &own, idx)).collect();
             stated.insert(format!("!{id}"), args.map(|args| serde_json::json!({"k": "Call", "args": args})));
         }
     }
@@ -151,6 +151,10 @@ pub fn arg_conds<'l>(
         }
         let Some(replaced) = cond else { continue };
         let caller = owner(hops[0]);
+        // A PARAMETER HANDED ON BY THE OUTERMOST STATEMENT CALL has no caller above it to name its value.
+        if hops[0].starts_with('!') && reads_any(&replaced, Some(&names(caller.as_deref().unwrap_or_default()).into_iter().collect())) {
+            continue;
+        }
         let none = IndexSet::default();
         let mut resolved = rows.resolve_in(&replaced, inner.get(callee).unwrap_or(&none), idx, caller.as_deref());
         // A METHOD THE TEMPLATE CALLS: its own parameters are the template's arguments at that call, or the condition names `r.kind`
@@ -323,6 +327,50 @@ impl Locals {
             None => ast.clone(),
         }
     }
+}
+
+/// A STATEMENT CALL'S ARGUMENT AS A TREE: a `this.` chain; a bare name only when it is one of the calling method's own parameters
+/// (`own`), handed on from a call above (`load(k) { this.apply(k); }`, #48's hops) - any other is a local no tree stands for; and an
+/// enum member (`Kind.Gamma`) as the read a caller would write, its receiver the ONE enum of that name declaring the member.
+fn stated_arg(a: &Value, own: &[String], idx: &EnumIndex) -> Option<Value> {
+    if let Some((name, member)) = a.get("$enum").and_then(Value::as_str).and_then(|e| e.split_once('.')) {
+        let mut found = idx.by_id.iter().filter(|(_, e)| e.name.as_deref() == Some(name) && e.domain.contains(member));
+        let (id, _) = found.next()?;
+        if found.next().is_some() {
+            return None;
+        }
+        let receiver = serde_json::json!({"k": "Read", "name": name, "receiver": {"k": "Implicit"}, "target": {"row": id}});
+        return Some(serde_json::json!({"k": "Read", "name": member, "receiver": receiver, "target": {"row": id}}));
+    }
+    let text = a.get("$expr").and_then(Value::as_str)?;
+    (text.starts_with("this.") || own.iter().any(|p| p == text)).then(|| chain_tree(text)).flatten()
+}
+
+/// AN ENUM MEMBER HANDED AS AN ARGUMENT SETTLES THE TEST (`this.apply(Kind.Gamma)` into `if (isSpecial(kind))`): a row of an `arg:`
+/// link whose dimension is the member itself holds or fails by that member alone. One that holds restricts nothing and is dropped -
+/// kept, it published `Kind.Alpha not_in [..]` as if a variable were narrowed; one that fails makes the link a way nothing gets past,
+/// returned for `keyreach` to drop as it drops `*ngIf="false"` (`key_dead`).
+pub fn settled(map: &mut super::value_folds::GateMap, idx: &EnumIndex) -> IndexSet<String> {
+    let mut dead = IndexSet::default();
+    for (link, (_, rows)) in map.iter_mut().filter(|(l, _)| l.starts_with("arg:")) {
+        rows.retain(|r| {
+            let Some(info) = r.get("enum").and_then(Value::as_str).and_then(|e| idx.by_id.get(e)) else { return true };
+            let dim = r.get("dim").and_then(Value::as_str).unwrap_or_default();
+            let named = info.name.as_deref().and_then(|n| dim.strip_prefix(n)).and_then(|d| d.strip_prefix('.'));
+            let Some(member) = named.filter(|m| info.domain.contains(*m) && r.get("set") != Some(&Value::Bool(true))) else { return true };
+            let listed = r.get("values").and_then(Value::as_array).is_some_and(|vs| vs.iter().any(|v| v.as_str() == Some(member)));
+            let holds = match r.get("op").and_then(Value::as_str) {
+                Some("in") => listed,
+                Some("not_in") => !listed,
+                _ => return true,
+            };
+            if !holds {
+                dead.insert(link.clone());
+            }
+            false
+        });
+    }
+    dead
 }
 
 /// The `Read` tree of `this.a.b` or `a.b`, None unless every link is a plain name.

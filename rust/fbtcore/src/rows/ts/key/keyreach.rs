@@ -300,7 +300,7 @@ pub fn build_closure(
     drop(stage);
     let stage = crate::trace::stage("closure: reach and trace");
     let reach = retained!("reach index", reach_index(store));
-    let dead = retained!("dead gates", super::key_dead::dead_gates(store));
+    let dead = retained!("dead gates", super::key_dead::dead_gates(store).into_iter().chain(super::key_args::settled(&mut value_map, &idx)).collect::<IndexSet<_>>());
     let trace = retained!("source trace", source_trace(store, &read_texts(store, root)));
     crate::trace::metrics_mark!("closure: reach and trace");
 
@@ -522,7 +522,7 @@ pub fn ways_of(
                 .filter(|c| c.iter().filter_map(|g| g.strip_prefix("via:")).all(|v| v.split('|').any(|b| p.hops.iter().any(|h| &**h == b))))
                 .filter_map(|c| Some((c, bind_links(bound, p, c.iter().map(String::as_str))?)))
                 .collect();
-            if chains.is_empty() || p.gates.iter().any(|g| dead.contains(&**g)) {
+            if chains.is_empty() || p.gates.iter().chain(p.branches.iter()).any(|g| dead.contains(&**g)) {
                 continue;
             }
             // The ids are shared handles inside the walk - see `closure::load_edges`. The
