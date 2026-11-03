@@ -54,7 +54,15 @@ function statOf(p) {
 }
 /** The path as the disk spells it, each segment matched ignoring case; `caseFirst` takes a folder's first case-insensitive match even where the
  *  exact spelling is there too (`caseInsensitiveMatch` always did), else the exact one first. */
+// ONE WALK PER PATH ASKED: the folded resolution asks the same folders of every file, and matching each segment against its
+// listing again cost more than the listing read it guards.
+const ACTUAL = [new Map(), new Map()];
 function actualPath(file, caseFirst = false) {
+  const memo = ACTUAL[caseFirst ? 1 : 0];
+  if (!memo.has(file)) memo.set(file, actualPathOf(file, caseFirst));
+  return memo.get(file);
+}
+function actualPathOf(file, caseFirst) {
   const full = path.normalize(file);
   let at = path.parse(full).root;
   for (const part of full.slice(at.length).split(path.sep).filter((p) => p !== '')) {

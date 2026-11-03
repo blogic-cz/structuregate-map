@@ -50,9 +50,19 @@ function canonicalOf(p) {
   return canon;
 }
 
+// ONE SPELLING PER ROOT AND PATH: a payload names the same few thousand files in millions of refs.
+const spelled = new Map();
+
 /** A path as the map spells it: relative to the workspace root, forward slashes, `.` for the root itself. */
 export function relativeTo(root, p) {
-  return slash(path.relative(root, p)) || '.';
+  if (!spelled.has(root)) spelled.set(root, new Map());
+  const memo = spelled.get(root);
+  let spelling = memo.get(p);
+  if (spelling === undefined) {
+    spelling = slash(path.relative(root, p)) || '.';
+    memo.set(p, spelling);
+  }
+  return spelling;
 }
 
 const absolute = (p) => p.startsWith('/') || (p.length > 2 && p[1] === ':' && p[2] === '/');
