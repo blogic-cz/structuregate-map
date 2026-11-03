@@ -142,3 +142,68 @@ public class OrderApi(HttpClient client)
     $want = @('15|ANY|/orders/{}/lines/{}|Read|One', '16|ANY|/orders/{}|Send|Two')
     if (($rows -join "`n") -ne ($want -join "`n")) { throw "http_calls:`nexpected:`n$($want -join "`n")`ngot:`n$($rows -join "`n")" }
 }
+
+# A URL A METHOD OF THE TREE RETURNS (`CsTemplate.cs`, rows 37): the call is what the method returns, folded where it is written with
+# each parameter the caller's argument - an extension's receiver and `QueryHelpers.AddQueryString`'s url included; a caller's own
+# parameter handed on keeps the caller a wrapper, and one nothing calls is its own row, its url as written. A parameter the method
+# writes is not what the caller handed, and a virtual method may run another body: neither is followed.
+Test-Case 'httpcscalls: a url a method of the tree returns is folded with the arguments its caller hands it' {
+    $tree = Use-Tree @{
+        'App/App.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+        'App/Query.cs' = @'
+namespace Microsoft.AspNetCore.WebUtilities
+{
+    public static class QueryHelpers
+    {
+        public static string AddQueryString(string uri, string name, string value) => throw new System.NotSupportedException();
+    }
+}
+'@
+        'App/Api.cs' = @'
+using System;
+using System.Net.Http;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.WebUtilities;
+
+namespace Demo
+{
+    public static class UrlExtensions
+    {
+        public static string WithQuery<T>(this T item, string url) => QueryHelpers.AddQueryString(url, "id", item!.ToString()!);
+    }
+
+    public class OrderApi(HttpClient client)
+    {
+        private const string Prefix = "/api/v2";
+        private string Build(string uri) => Prefix + uri;
+        public virtual string Open(string uri) => uri;
+        public Task<HttpResponseMessage> One() => client.GetAsync(Build("/orders"));
+        public Task<string> Two(int id)
+        {
+            var url = id.WithQuery("api/lines/find");
+            return client.GetStringAsync(new Uri(url, UriKind.Relative));
+        }
+        public Task<HttpResponseMessage> Three(string path) => client.GetAsync(Build(path));
+        public Task<HttpResponseMessage> Four() => Three("/items");
+        public Task<HttpResponseMessage> Five() => client.GetAsync(Open("/open"));
+        public Task<HttpResponseMessage> Six(int id) => client.GetAsync($"{client.BaseAddress}lines/{id}");
+        public Task<HttpResponseMessage> Seven(string v)
+        {
+            v = v.Trim();
+            return client.GetAsync($"/api/v2/release/{v}");
+        }
+        public Task<HttpResponseMessage> Eight() => Seven("x");
+    }
+}
+'@
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    $q = Invoke-Gate --map-query $db --width 0 --limit 0 --sql ("SELECT 'v=' || c.line || '|' || c.verb || '|' || c.url || '|' || " +
+        "coalesce((SELECT f.name FROM functions f WHERE f.id = c.via), '') || '|' || (SELECT f.name FROM functions f WHERE f.id = c.member) AS r " +
+        "FROM http_calls c ORDER BY c.line")
+    Assert-Exit $q 0
+    $rows = @($q.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | ForEach-Object { $_.Trim().Substring(2) })
+    $want = @('18|GET|/api/v2/orders||One', '22|GET|api/lines/find||Two', '25|GET|/api/v2/items|Three|Four', '26|GET|*||Five', '27|GET|{}lines/{}||Six', '31|GET|/api/v2/release/{}||Seven')
+    if (($rows -join "`n") -ne ($want -join "`n")) { throw "http_calls:`nexpected:`n$($want -join "`n")`ngot:`n$($rows -join "`n")" }
+}

@@ -8,7 +8,9 @@
 //! parameter of the method it is written in makes that method a WRAPPER: it writes no call itself, and every call OF it
 //! does, with the url its caller binds to that parameter and `via` the wrapper's `functions` id - so a wrapper of a
 //! wrapper is followed too. A wrapper whose url is a `string.Format` of its parameter FORMATS the caller's url: each `{n}`
-//! in it is a hole `{}`. A wrapper whose primitives ask with different verbs asks with `ANY`. A call is OF a wrapper by its bound symbol, which is the wrapper's qualname; a qualname two
+//! in it is a hole `{}`. Text BEFORE the parameter (`Prefix + uri`, past any hole the run time fills first) is a PREFIX each
+//! caller's url is joined to - and a wrapper with a prefix that nothing in the tree calls (an interface's
+//! implementation) is its own row, its url as written (the parameter a hole `{}`), as it was before a caller could be found. A wrapper whose primitives ask with different verbs asks with `ANY`. A call is OF a wrapper by its bound symbol, which is the wrapper's qualname; a qualname two
 //! methods share (an overload) is no wrapper, since the symbol cannot say which of them runs.
 
 use super::calls::Site;
@@ -47,11 +49,11 @@ struct Arg {
     symbol: String,
 }
 
-/// What an argument's url is: a pattern, or the name of a parameter of the method it is written in - and whether the url is a
-/// `string.Format` of it.
+/// What an argument's url is: a pattern, or the name of a parameter of the method it is written in - whether the url is a
+/// `string.Format` of it, the text written before it, and the whole url as a pattern.
 enum Url {
     Pattern(String),
-    Param(String, bool),
+    Param(String, bool, String, String),
 }
 
 pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusqlite::Result<Vec<Site>> {
@@ -106,12 +108,12 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
             (Value::String(s), "const" | "folded") => Some(Url::Pattern(s.clone())),
             // A BASE THE RUN TIME KNOWS AND THE CALLER'S URL (`_cfg.Url + url`, `string.Concat(_base, endpoint)`): holes alone, each
             // string ending in this method's parameter - the method is a wrapper of it, as a bare parameter makes it.
-            (Value::Array(alternatives), _) if handed(alternatives).is_some_and(|(p, _)| params.contains(&(qualname.to_string(), p.clone()))) =>
-                handed(alternatives).map(|(p, formats)| Url::Param(p, formats)),
+            (Value::Array(alternatives), _) if handed(alternatives).is_some_and(|(p, _, _)| params.contains(&(qualname.to_string(), p.clone()))) =>
+                handed(alternatives).map(|(p, formats, prefix)| Url::Param(p, formats, prefix, folded(alternatives))),
             (Value::Array(alternatives), _) => Some(Url::Pattern(folded(alternatives))),
             // `string.Empty`: the base address alone, as `""` is.
             (_, "symbol") if a.symbol == "System.String.Empty" => Some(Url::Pattern(String::new())),
-            (_, "symbol") if params.contains(&(qualname.to_string(), a.symbol.clone())) => Some(Url::Param(a.symbol.clone(), false)),
+            (_, "symbol") if params.contains(&(qualname.to_string(), a.symbol.clone())) => Some(Url::Param(a.symbol.clone(), false, String::new(), "{}".into())),
             _ => None,
         }
     };
@@ -161,14 +163,14 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
         }
     }
     // THE WRAPPERS, to a fixed point: a method whose request's url is its own parameter, by qualname -> (id, parameter, verb,
-    // whether it formats the url).
+    // whether it formats the url, its prefix).
     let unique = |q: &str| qualnames.get(q).filter(|ids| ids.len() == 1).map(|ids| ids[0].to_string());
-    let mut wrappers: HashMap<String, (String, String, String, bool)> = HashMap::new();
+    let mut wrappers: HashMap<String, (String, String, String, bool, String)> = HashMap::new();
     let mut primitives: Vec<_> = asked.iter().collect();
     primitives.sort_by_key(|(n, _)| **n);
     for (n, (verb, url)) in primitives {
-        if let (Url::Param(p, formats), Some(id)) = (url, unique(&calls[*n].qualname)) {
-            let wrapper = wrappers.entry(calls[*n].qualname.clone()).or_insert((id, p.clone(), verb.clone(), *formats));
+        if let (Url::Param(p, formats, prefix, _), Some(id)) = (url, unique(&calls[*n].qualname)) {
+            let wrapper = wrappers.entry(calls[*n].qualname.clone()).or_insert((id, p.clone(), verb.clone(), *formats, prefix.clone()));
             if wrapper.2 != *verb {
                 wrapper.2 = "ANY".into();
             }
@@ -177,10 +179,10 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
     loop {
         let mut found = vec![];
         for c in &calls {
-            let Some((_, p, verb, formats)) = wrappers.get(c.symbol.split('<').next().unwrap_or("")) else { continue };
-            if let (Some(Url::Param(own, also)), Some(id)) = (url_of(c, p), unique(&c.qualname)) {
+            let Some((_, p, verb, formats, prefix)) = wrappers.get(c.symbol.split('<').next().unwrap_or("")) else { continue };
+            if let (Some(Url::Param(own, also, before, _)), Some(id)) = (url_of(c, p), unique(&c.qualname)) {
                 if !wrappers.contains_key(&c.qualname) {
-                    found.push((c.qualname.clone(), (id, own, verb.clone(), *formats || also)));
+                    found.push((c.qualname.clone(), (id, own, verb.clone(), *formats || also, format!("{prefix}{before}"))));
                 }
             }
         }
@@ -190,14 +192,18 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
         wrappers.extend(found);
     }
     // THE ROWS: a primitive nobody parameterises, and every call of a wrapper that hands it a url of its own.
+    let called: HashSet<&str> = calls.iter().map(|c| c.symbol.split('<').next().unwrap_or("")).collect();
+    let uncalled = |c: &Call, prefix: &str| !prefix.is_empty() && !called.contains(c.qualname.as_str());
     let paths = super::files_of(conn, "csharp")?;
     let mut sites = vec![];
     for (n, c) in calls.iter().enumerate() {
         let (verb, via, url) = match (asked.get(&n), wrappers.get(c.symbol.split('<').next().unwrap_or(""))) {
             (Some((verb, Url::Pattern(url))), _) => (verb.clone(), String::new(), url.clone()),
-            (None, Some((id, p, verb, formats))) => match url_of(c, p) {
-                Some(Url::Pattern(url)) if *formats => (verb.clone(), id.clone(), formatted(&url)),
-                Some(Url::Pattern(url)) => (verb.clone(), id.clone(), url),
+            (Some((verb, Url::Param(_, _, prefix, whole))), _) if uncalled(c, prefix) => (verb.clone(), String::new(), whole.clone()),
+            (None, Some((id, p, verb, formats, prefix))) => match url_of(c, p) {
+                Some(Url::Pattern(url)) if *formats => (verb.clone(), id.clone(), format!("{prefix}{}", formatted(&url))),
+                Some(Url::Pattern(url)) => (verb.clone(), id.clone(), format!("{prefix}{url}")),
+                Some(Url::Param(_, _, before, whole)) if uncalled(c, &format!("{prefix}{before}")) => (verb.clone(), id.clone(), format!("{prefix}{whole}")),
                 _ => continue,
             },
             _ => continue,
@@ -216,14 +222,18 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
     Ok(sites)
 }
 
-/// The one parameter every alternative of a holes-only template ends in (its hole's `symbol`), and whether it is a
-/// `string.Format`'s format in every one; or None.
-fn handed(alternatives: &[Value]) -> Option<(String, bool)> {
-    let mut named: Option<(String, bool)> = None;
+/// The one parameter every alternative of a template ends in (its hole's `symbol`), whether it is a `string.Format`'s format,
+/// and the text before it - the holes it starts with left out, each later hole `{}` - all alike in every alternative; or None.
+fn handed(alternatives: &[Value]) -> Option<(String, bool, String)> {
+    let mut named: Option<(String, bool, String)> = None;
     for alt in alternatives {
-        let pieces = alt.as_array().filter(|p| !p.is_empty() && p.iter().all(Value::is_object))?;
-        let hole = pieces.last()?;
-        let last = (hole.get("symbol")?.as_str()?.to_string(), hole.get("format").is_some());
+        let (hole, before) = alt.as_array()?.split_last()?;
+        let prefix: String = before
+            .iter()
+            .skip_while(|p| p.is_object())
+            .map(|p| p.as_str().map(str::to_string).unwrap_or_else(|| "{}".into()))
+            .collect();
+        let last = (hole.get("symbol")?.as_str()?.to_string(), hole.get("format").is_some(), prefix);
         if named.as_ref().is_some_and(|n| *n != last) { return None; }
         named = Some(last);
     }

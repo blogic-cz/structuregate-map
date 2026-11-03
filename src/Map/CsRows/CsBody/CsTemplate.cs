@@ -27,7 +27,7 @@ internal static class CsTemplate
     /// <summary>A piece of a string: literal text, or a hole's C# source - with, where the hole is a field, the
     /// field's symbol, so the links can read its value off the `consts` row a referenced project wrote.
     /// `Format` marks a parameter that is the FORMAT of a `string.Format` - its `{n}` are holes only the caller's text shows.</summary>
-    public sealed record Piece(string Text, bool Hole, string Symbol = "", bool Parameter = false, bool Format = false);
+    public sealed record Piece(string Text, bool Hole, string Symbol = "", bool Parameter = false, bool Format = false, IParameterSymbol? Of = null);
 
     /// <summary>The template of an argument whose value did not fold, as a STRUCTURE the store keeps as node rows
     /// (`arguments__template`): a list of the strings the argument can be, each a list of pieces - a string, or a
@@ -76,8 +76,11 @@ internal static class CsTemplate
             // the caller's text as the url, each `{n}` in it a hole (`rows/http/cscalls.rs`).
             case InvocationExpressionSyntax invocation when HandedFormat(model, invocation) is { } format:
                 return [[Hole(format, model) with { Format = true }]];
-            case InvocationExpressionSyntax:
-                return null;
+            // `QueryHelpers.AddQueryString(url, ..)`: the url, then a query.
+            case InvocationExpressionSyntax invocation when QueryAdded(model, invocation) is { } url:
+                return [.. (Strings(model, url, path) ?? [[Hole(url, model)]]).Select(s => Joined([.. s, new Piece("?", false), Hole(invocation, model)]))];
+            case InvocationExpressionSyntax invocation:
+                return Returned(model, invocation, path);
             // A TERNARY IS EITHER ARM: `c ? "/api/files" : $"/api/files?basePath={p}"` is the strings of both.
             case ConditionalExpressionSyntax conditional:
                 return Strings(model, conditional.WhenTrue, path) is { } whenTrue && Strings(model, conditional.WhenFalse, path) is { } whenFalse
@@ -295,6 +298,66 @@ internal static class CsTemplate
         && CsSemantics.Bound(model, first.Expression) is IParameterSymbol
             ? first.Expression : null;
 
+    /// <summary>`Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString`'s url, or null for any other call.</summary>
+    private static ExpressionSyntax? QueryAdded(SemanticModel model, InvocationExpressionSyntax invocation) =>
+        model.GetSymbolInfo(invocation).Symbol is IMethodSymbol { Name: "AddQueryString" } method
+        && CsSemantics.Name(method.ContainingType) == "Microsoft.AspNetCore.WebUtilities.QueryHelpers"
+        && invocation.ArgumentList.Arguments is [{ NameColon: null } first, ..]
+            ? first.Expression : null;
+
+    /// <summary>
+    /// THE STRINGS A METHOD OF THE TREE RETURNS FOR ONE CALL: each `return` of its body (or its `=>`), folded where it is written, with
+    /// each of its parameters there the strings this call hands it - `BuildUri("/orders")` over `Prefix + uri` is `/api/orders`, and a
+    /// caller's own parameter handed on stays a parameter. Null for a call that may run another body (virtual, abstract, an interface's,
+    /// an override a subclass may override again), a method with no body in the tree, one that writes a parameter or takes one by `ref`.
+    /// </summary>
+    private static List<List<Piece>>? Returned(SemanticModel model, InvocationExpressionSyntax invocation, HashSet<ISymbol> path)
+    {
+        if (model.GetSymbolInfo(invocation).Symbol is not IMethodSymbol { ReturnType.SpecialType: SpecialType.System_String } called) return null;
+        var method = (called.ReducedFrom ?? called).OriginalDefinition;
+        if (method.IsVirtual || method.IsAbstract || method.IsExtern || method.ContainingType.TypeKind == TypeKind.Interface
+            || (method.IsOverride && !method.IsSealed && !method.ContainingType.IsSealed)) return null;
+        if (method.DeclaringSyntaxReferences is not [var reference] || reference.GetSyntax() is not MethodDeclarationSyntax declaration) return null;
+        if (Owner(model, declaration) is not { } owner) return null;
+        if (method.Parameters.Any(p => p.RefKind != RefKind.None || p.IsParams || CsFolding.Written(p, model.Compilation))) return null;
+        List<ExpressionSyntax?> returns = declaration.ExpressionBody is { } arrow ? [arrow.Expression]
+            : [.. declaration.Body?.DescendantNodes(n => n is not (LocalFunctionStatementSyntax or AnonymousFunctionExpressionSyntax))
+                .OfType<ReturnStatementSyntax>().Select(r => r.Expression) ?? []];
+        if (returns.Count == 0 || returns.Any(r => r is null)) return null;
+        // WHAT THE CALL HANDS EACH PARAMETER: an extension's receiver, then each argument by its place or its name; one left out, its default.
+        var handed = new ExpressionSyntax?[method.Parameters.Length];
+        var place = 0;
+        if (called.ReducedFrom is not null)
+        {
+            if (invocation.Expression is not MemberAccessExpressionSyntax access) return null;
+            handed[place++] = access.Expression;
+        }
+        foreach (var argument in invocation.ArgumentList.Arguments)
+        {
+            var at = argument.NameColon is { } named ? method.Parameters.IndexOf(method.Parameters.FirstOrDefault(p => p.Name == named.Name.Identifier.Text)!) : place++;
+            if (at < 0 || at >= handed.Length) return null;
+            handed[at] = argument.Expression;
+        }
+        List<List<Piece>> Given(IParameterSymbol parameter) => handed[parameter.Ordinal] is { } given
+            ? Strings(model, given, path) ?? [[Hole(given, model)]]
+            : parameter.HasExplicitDefaultValue && parameter.ExplicitDefaultValue is string text ? [[new Piece(text, false)]] : [[new Piece(parameter.Name, true)]];
+        return Following(path, method, () =>
+        {
+            var all = new List<List<Piece>>();
+            foreach (var expression in returns)
+            {
+                var strings = Strings(owner, expression!, path) ?? [[Hole(expression!, owner)]];
+                foreach (var pieces in strings)
+                    all.AddRange(pieces.Aggregate(new List<List<Piece>> { new() }, (done, piece) => Product(done,
+                        // A FORMAT handed in stays a hole: what the caller hands is not yet the string the method returns.
+                        piece is { Of: { } own, Format: false } && SymbolEqualityComparer.Default.Equals(own.ContainingSymbol.OriginalDefinition, method)
+                            ? Given(method.Parameters[own.Ordinal])
+                            : piece.Of is not null && piece.Format ? [[new Piece(piece.Text, true)]] : [[piece]])));
+            }
+            return all;
+        });
+    }
+
     /// <summary>The model for the tree a node lives in - a model answers about its own tree only.</summary>
     private static SemanticModel? Owner(SemanticModel model, SyntaxNode node) =>
         node.SyntaxTree == model.SyntaxTree ? model
@@ -306,8 +369,8 @@ internal static class CsTemplate
     private static Piece Hole(ExpressionSyntax expression, SemanticModel model) => CsSemantics.Bound(model, expression) switch
     {
         IFieldSymbol field => new(CsFacts.Text(expression), true, CsSemantics.Name(field)),
-        // A PARAMETER by its name, as `parameters.name` spells it.
-        IParameterSymbol parameter => new(CsFacts.Text(expression), true, parameter.Name, true),
+        // A PARAMETER by its name, as `parameters.name` spells it - one the method writes is no longer what its caller handed it.
+        IParameterSymbol parameter when !CsFolding.Written(parameter, model.Compilation) => new(CsFacts.Text(expression), true, parameter.Name, true, Of: parameter),
         _ => new(CsFacts.Text(expression), true),
     };
 

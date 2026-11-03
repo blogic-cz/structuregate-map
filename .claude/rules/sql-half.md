@@ -120,7 +120,8 @@ database a context or connection reaches is decided at RUN time: `databases[]` (
 
 **SQL BUILT AROUND HOLES.** A string that did not fold is read from `arguments.template`
 (`src/Map/CsRows/CsBody/CsTemplate.cs`: `nameof`, a `const`, a never-written `readonly`, `string.Format`'s `{n}`,
-`string.Concat`'s arguments, a ternary's arms, a local only ever `+=`-appended to (its initializer, alone and with a hole
+`string.Concat`'s arguments, a ternary's arms, a call to a non-virtual method of the tree (what it returns, each parameter the
+caller's argument), a local only ever `+=`-appended to (its initializer, alone and with a hole
 after it) and a `foreach` over literal strings are folded or made holes there; a hole names a field or a parameter in
 `symbol`, and a `string.Format` whose format is a parameter is that one hole, marked `format`). A template of holes ALONE is kept only when each string ends in a parameter (for the http pass's wrappers),
 and SQL reads it as no template. `SqlHoles.cs` fills each hole with `0` and
