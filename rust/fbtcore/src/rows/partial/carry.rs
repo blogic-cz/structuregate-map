@@ -325,7 +325,8 @@ pub fn carry_over(
         // A TABLE NODE REBUILDS WHOLE is put back by no partial run (`TsMap.mjs`), so its rows stay here; `projects` is
         // read first, to re-point the files it is handed.
         let send = table == "projects" || !rebuilt.contains(&table);
-        let (rows, claims) = held(&db, &table, &columns, lang, &ids, identity.get(&table), send, &mut uncarried)?;
+        // PER TABLE, what reading its rows out costs and what writing them to node does (`metrics`): the carry is most of a partial run.
+        let (rows, claims) = crate::trace::metric!("typescript: read a carried table", table, { held(&db, &table, &columns, lang, &ids, identity.get(&table), send, &mut uncarried)? });
         if !claims.is_empty() {
             all_claims.insert(table.clone(), claims);
         }
@@ -333,7 +334,7 @@ pub fn carry_over(
             continue;
         }
         let count = rows.len();
-        for (row, stubs) in rows {
+        crate::trace::metric!("typescript: write a carried table", table, { for (row, stubs) in rows {
             let mut line = Map::new();
             line.insert("t".to_string(), Value::String(table.clone()));
             line.insert("r".to_string(), Value::Object(row));
@@ -342,7 +343,7 @@ pub fn carry_over(
             }
             write_json(&mut writer, &Value::Object(line))?;
             writer.write_all(b"\n")?;
-        }
+        } });
         carried.tables += 1;
         carried.rows += count;
     }
