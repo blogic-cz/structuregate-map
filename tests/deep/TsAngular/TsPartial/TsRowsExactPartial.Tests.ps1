@@ -100,6 +100,10 @@ import { RouterModule } from '@angular/router';
 })
 export class RoutingModule {}
 '@
+        # A CONST OF ROUTES AND A `forRoot` COPY OF IT IN ANOTHER FILE (`TsRoutes.mjs::signer`): read again, `root.routing.ts`'s copy held its
+        # paths absolute and the carried `A_ROUTES` relative, so the copy was walked as an array of its own - a second row per route.
+        'apps/shop/src/a.routes.ts' = "import { AlphaComponent } from './alpha.component';`nexport const A_ROUTES = [{ path: 'a', component: AlphaComponent }];`n"
+        'apps/shop/src/root.routing.ts' = "import { RouterModule } from '@angular/router';`nimport { A_ROUTES } from './a.routes';`nexport const ROOT = RouterModule.forRoot(A_ROUTES);`n"
         'apps/shop/src/lazy.module.ts' = @'
 import { NgModule } from '@angular/core';
 @NgModule({})
@@ -234,6 +238,14 @@ Test-Case 'tsrows: a partial run writes every row a fresh full map of the edited
         if (-not @($partial | Where-Object { $_.StartsWith($needle) }).Count) { throw "no row starting $needle" }
     }
     Assert-TsExactRows $partial (Get-TsExactRows $run.FullDb) 'every row after editing alpha.component.ts'
+}
+
+Test-Case 'tsrows: a partial run reading a forRoot copy of carried routes again writes each route once and keeps the closure' {
+    $run = Invoke-TsExactRun 'apps/shop/src/root.routing.ts'
+    Assert-Line $run.Partial 'kept the closure it stored'
+    $partial = Get-TsExactRows $run.PartialDb
+    if (@($partial | Where-Object { $_.StartsWith('routes=') -and $_.Contains("'a'") }).Count -ne 1) { throw 'the route a is not one row' }
+    Assert-TsExactRows $partial (Get-TsExactRows $run.FullDb) 'every row after editing root.routing.ts'
 }
 
 Test-Case 'tsrows: a partial run publishes the spec a fresh full map of the edited tree publishes' {
