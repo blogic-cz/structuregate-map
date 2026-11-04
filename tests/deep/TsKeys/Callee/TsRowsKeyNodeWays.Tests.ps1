@@ -94,6 +94,30 @@ Test-Case 'tsrows keys: a key reaching a node through a field or a getter names 
     if ($whole.Count) { throw "ways with no literal:`n$($whole -join "`n")" }
 }
 
+# (#135) A FIELD A METHOD WRITES: the initializer is only `[]`, and the rows are built where a method assigns the field
+# (`this.rows = IDS.map(id => ({ name: t(..) })).filter(..)`) or pushes onto it in a loop - the literal is in that method.
+Test-Case 'tsrows keys: a key reaching a node through a field a method assigns or pushes onto names its literal (#135)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace @{
+        'apps/shop/src/table.component.ts' = "import { Component } from '@angular/core';`nimport { NgFor } from '@angular/common';`n" +
+            "export class I18nService { getTranslation(k: string) { return k; } }`nexport enum Kind { A = 1 }`n" +
+            "@Component({ selector: 'app-table', standalone: true, imports: [NgFor], template: '<td *ngFor=`"let row of rows`">{{ row.name }}</td><b *ngFor=`"let m of months`">{{ m.name }}</b>' })`n" +
+            "export class TableComponent {`n  rows: { name: string }[] = [];`n  months: { name: string }[] = [];`n" +
+            "  constructor(private i18n: I18nService) {}`n" +
+            "  build() {`n    this.rows = [Kind.A].map((id) => ({ name: this.i18n.getTranslation(``demo.item_`${id}``) })).filter((r) => !!r.name);`n  }`n" +
+            "  fill(start: number) {`n    for (let n = 1; n <= 2; n++) {`n      this.months.push({ name: this.i18n.getTranslation(``demo.month.`${n + start}``) });`n    }`n  }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"item_1":"I","item_1Tooltip":"IT","month":{"1":"Jan","2":"Feb"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'w=' || w.key || '|' || coalesce(t.line, '-') || '|' || coalesce(w.typed, '-') AS r " +
+        "FROM key_node_ways w LEFT JOIN template_literals t ON t.id = w.literal WHERE w.key LIKE 'demo.%'")
+    Assert-Line $r 'w=demo.item_1|11|1'
+    Assert-Line $r 'w=demo.item_1Tooltip|11|0'
+    Assert-Line $r 'w=demo.month.1|15|0'
+    $whole = @($r.Lines | Where-Object { $_.Trim().StartsWith('w=') -and $_.Trim().EndsWith('|-|-') })
+    if ($whole.Count) { throw "ways with no literal:`n$($whole -join "`n")" }
+}
+
 # (#137) A HOLE THE TEMPLATE'S CALL SPELLS WITH A LITERAL is no wildcard: `label('time')` over `'demo.flight.' + name` builds that one key at
 # that node, so the way is exact (typed 1) - the untyped hole marked it 0, an expansion, though no other key can come of that call.
 Test-Case 'tsrows keys: a hole a template call fills with a literal argument makes its way exact (#137)' {
