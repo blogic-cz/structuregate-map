@@ -17,11 +17,13 @@ file the record was a large share of the database - every key of it needed, sinc
 not re-read when that path appears. So each key is written ONCE, in `keys`, and a file names its keys by
 position: the same record, a fraction of the bytes.
 
-It is IMPORTED by `PyBind.py`, so it is staged and embedded wherever that one is.
+It is IMPORTED by `PyBind.py`, so it is staged and embedded wherever that one is. It also holds the PROBES themselves
+(`exists_exact` and the two import-to-file helpers), which note every path they ask the disk about.
 """
 from __future__ import annotations
 
 import json
+import os
 
 # A stack, one set per resolution in progress: reading one file parses another, and what that one
 # consulted belongs to both.
@@ -117,3 +119,61 @@ def stored(deps: dict) -> str:
     index = {key: i for i, key in enumerate(keys)}
     files = {rel: [index[key] for key in through] for rel, through in deps.items()}
     return json.dumps({INTERNED: 1, "keys": keys, "files": files}, separators=(",", ":"), sort_keys=True)
+
+
+DIRECTORY_CACHE = {}
+
+
+def exists_exact(candidate: str) -> bool:
+    """Is there a file at this path with THIS EXACT NAME?
+
+    `os.path.isfile` answers yes on a case-insensitive filesystem for a name that differs only in case, and
+    that turns a NAME import into a MODULE one: `from registry import STORE` found `registry/store.py`
+    on Windows and drew an edge to a file the code never imports - the real `STORE` is an object inside the
+    package's `__init__.py`. The directory listing is the only authority on how a file is really spelled.
+    """
+    # A MISS IS RECORDED TOO: a module that does not exist yet is exactly the file that, once written,
+    # changes what this import binds.
+    note(candidate)
+    return os.path.basename(candidate) in listing(os.path.dirname(candidate) or ".")
+
+
+def listing(folder: str) -> set:
+    """The names in a folder, listed once per run."""
+    names = DIRECTORY_CACHE.get(folder)
+    if names is None:
+        try:
+            names = set(os.listdir(folder))
+        except OSError:
+            names = set()
+        DIRECTORY_CACHE[folder] = names
+    return names
+
+
+def module_path(root: str, dotted: str) -> str:
+    """A dotted import as the FILE it names, or "" - `pkg.mod` -> `pkg/mod.py` or `pkg/mod/__init__.py`.
+
+    Tried before the flat name join in `PyMap.py`, and the two answer different layouts: a package import
+    resolves here exactly, while a flat bootstrap (every tree on sys.path, siblings imported by bare name)
+    resolves by name there. Guessing between them is not needed - the filesystem says which one this is.
+    """
+    parts = dotted.split(".")
+    base = os.path.join(root, *parts)
+    for candidate in (base + ".py", os.path.join(base, "__init__.py")):
+        if exists_exact(candidate):
+            return os.path.relpath(candidate, root).replace(os.sep, "/")
+    return ""
+
+
+def relative_path(root: str, rel: str, level: int, module: str) -> str:
+    """`from ..pkg import x`, as the file it names. The level counts directories UP from the importing
+    file's own package, which is what makes a relative import unambiguous where a bare name is not."""
+    folder = os.path.dirname(os.path.join(root, rel))
+    for _ in range(level - 1):
+        folder = os.path.dirname(folder)
+    parts = module.split(".") if module else []
+    base = os.path.join(folder, *parts) if parts else folder
+    for candidate in (base + ".py", os.path.join(base, "__init__.py")):
+        if exists_exact(candidate):
+            return os.path.relpath(candidate, root).replace(os.sep, "/")
+    return ""

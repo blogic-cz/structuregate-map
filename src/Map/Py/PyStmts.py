@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import ast
 
-from PyAst import IMPORTERS, dotted, facts
+from PyAst import IMPORTERS, dotted, reads_of
 from PyComments import noqa_of
 
 # What a handler can hold and still do nothing: `pass`, `...`, or a lone string.
@@ -55,11 +55,16 @@ class Statements:
         for alias in node.names:
             # `bind` is the SYMBOL the name imports, as `binds` is for a read: `from jobs import work` is
             # jobs.py's `work`, and by name alone it protected every `work` in the tree from --dead.
-            bind = self.rows.bound(alias.asname or alias.name) if alias.name != "*" else ""
+            # Resolved from THIS statement, not from the scope: a def of the same name later in the function is what
+            # the scope binds, and read from there the import named the def and the imported one read as dead.
+            path, qual = self.binder.resolve_import(node, alias.asname or alias.name) if alias.name != "*" else ("", "")
+            bind = path + "::" + qual if path else ""
             # `from_path` is the FILE the name is taken from - `pkg/__init__.py` for a re-export - so
             # --unused-imports can follow a re-export to whoever imports it next.
             tree, rel, module = self.binder.tree, self.binder.rel, node.module or ""
-            source = tree.relative(rel, node.level, module) if node.level else tree.module(rel, module)
+            # The NAMES it takes decide between several files spelling the module (`Tree.unique`), as they do for `bind`.
+            taken = tuple(a.name for a in node.names if a.name != "*")
+            source = tree.relative(rel, node.level, module) if node.level else tree.module(rel, module, taken)
             self.rows.add("imports", "i", dict(self.where(), line=node.lineno, module=module,
                                                name=alias.name, alias=alias.asname or "", bind=bind,
                                                level=node.level or 0, from_path=source,
@@ -134,7 +139,7 @@ class Statements:
                                             passes=1 if quiet else 0, raises=len(raised),
                                             reraises=1 if reraises else 0, exc_info=1 if exc_info else 0,
                                             calls=calls, comment=comment, noqa=noqa, codes=codes,
-                                            reads=facts(handler.type)["reads"] if handler.type else []))
+                                            **reads_of(handler.type)))
 
     def visit_With(self, node) -> None:
         # ONE ROW PER ITEM: `with open(a) as f, LOCK:` enters two context managers, and the second is the one

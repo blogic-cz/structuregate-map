@@ -48,7 +48,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from PyAst import MIN_EXPRESSION_NODES, NEWLINE, dotted, facts, payload_text, segment, shape, sizes, used_names  # noqa: E402
+from PyAst import BOUND_INSIDE, MIN_EXPRESSION_NODES, NEWLINE, dotted, facts, reads_of, payload_text, segment, shape, sizes, used_names  # noqa: E402
 import PyDeps  # noqa: E402
 from PyBind import Binder, Tree  # noqa: E402
 from PyLaunch import launched  # noqa: E402
@@ -69,7 +69,7 @@ LANG = "python"
 # has to re-read THESE files: a new salt makes every recorded python sha disagree, and each file is read
 # again on the next run. Without it `calls.target_path` existed only for files edited since the upgrade,
 # and a query naming it failed with `no such column` on every tree that had a database already.
-ROWS_VERSION = "18"
+ROWS_VERSION = "19"
 
 
 def emit(*fields: object) -> None:
@@ -97,8 +97,10 @@ class Rows:
         # read names, or "" where the tree cannot say. Added here, where every row passes, so no table that
         # carries `reads` can be written without it - `--reads ROOT` then tells config.py's ROOT from
         # every other file's, and `--dead` counts a callback by the def it is rather than by its name.
+        # A name only a comprehension or a lambda inside the row binds is no symbol of the file (`bound_inside`).
+        local = row.pop(BOUND_INSIDE, ())
         if self.binder is not None and isinstance(row.get("reads"), list):
-            row["binds"] = [self.bound(name) for name in row["reads"]]
+            row["binds"] = ["" if name in local else self.bound(name) for name in row["reads"]]
         n = self.counters.get(prefix, 0) + 1
         self.counters[prefix] = n
         row["id"] = "%s:%d" % (prefix, n)
@@ -108,6 +110,12 @@ class Rows:
     def bound(self, name: str) -> str:
         path, qual = self.binder.resolve_read(name)
         return path + "::" + qual if path else ""
+
+
+def hook(qualname: str) -> bool:
+    """A module-level `pytest_*` def is a PYTEST HOOK: pytest calls it by that name in a conftest or in any module it
+    loads as a plugin (`-p name`, `pytest_plugins`), and no code of the tree does - read as dead, it was every hook."""
+    return qualname.startswith("pytest_") and "." not in qualname
 
 
 class Walker(Statements, ast.NodeVisitor):
@@ -188,7 +196,7 @@ class Walker(Statements, ast.NodeVisitor):
                                               qualname=self.qual(node.name), args=args,
                                               returns=self.src(node.returns) if node.returns else "",
                                               is_async=is_async,
-                                              launched=1 if self.qual(node.name) in self.entries else 0,
+                                              launched=1 if self.qual(node.name) in self.entries or hook(self.qual(node.name)) else 0,
                                               doc=(ast.get_docstring(node) or ""),
                                               end_line=getattr(node, "end_lineno", node.lineno)))
         self.decorators(node, node.name, "function")
@@ -248,7 +256,7 @@ class Walker(Statements, ast.NodeVisitor):
                 line=getattr(arg, "lineno", node.lineno), position=position, name=arg.arg, kind=kind,
                 annotation=self.src(arg.annotation) if arg.annotation else "",
                 default_expr=self.src(default) if default is not None else "",
-                reads=facts(default)["reads"] if default is not None else []))
+                **reads_of(default)))
 
     def decorators(self, node, target: str, target_kind: str) -> None:
         for dec in getattr(node, "decorator_list", []):
@@ -293,7 +301,7 @@ class Walker(Statements, ast.NodeVisitor):
         keys = self.sections.keys_in(node.value)
         self.rows.add("assignments", "a", dict(where, line=node.lineno, target=name, kind=kind,
                                                source=self.src(node.value) if node.value else "",
-                                               reads=rhs["reads"], calls=rhs["calls"], keys=keys))
+                                               **reads_of(node.value), calls=rhs["calls"], keys=keys))
         # A MODULE-LEVEL CAPITAL NAME is a constant, and a constant is a fact about this codebase somebody
         # will want to find without already knowing which file holds it.
         # ONE ROW PER NAME. `QUEUED, RUNNING, DONE, FAILED = range(4)` was one row named by the whole target
@@ -304,7 +312,7 @@ class Walker(Statements, ast.NodeVisitor):
             if const.isupper():
                 self.rows.add("consts", "k", dict(where, line=node.lineno, name=const,
                                                   source=self.src(node.value) if node.value else "",
-                                                  reads=rhs["reads"], calls=rhs["calls"], keys=keys))
+                                                  **reads_of(node.value), calls=rhs["calls"], keys=keys))
         if not self.stack and name == "__all__" and isinstance(node.value, (ast.List, ast.Tuple)):
             for element in node.value.elts:
                 if isinstance(element, ast.Constant) and isinstance(element.value, str):
@@ -326,8 +334,7 @@ class Walker(Statements, ast.NodeVisitor):
         """
         if node is None:
             return {"reads": [], "calls": []}
-        found = facts(node)
-        return {"reads": found["reads"], "calls": found["calls"]}
+        return {**reads_of(node), "calls": facts(node)["calls"]}
 
     def visit_Raise(self, node) -> None:
         name = ""
@@ -381,7 +388,7 @@ class Walker(Statements, ast.NodeVisitor):
         # rides along, so "which calls pass FLAG" is a `binds` query like any other.
         for fields, value in arguments(self.binder.tree, node, callee, target_path, target_name, self.src):
             self.rows.add("arguments", "arg", dict(self.where(), call=call, line=node.lineno, **fields,
-                                                   reads=facts(value)["reads"]))
+                                                   **reads_of(value)))
         # A CALL THAT BUILDS A REGEX is a `regexes` row too, beside its call row - see PyRegex.
         found = regex_call(self.binder, node, self.src)
         if found:

@@ -201,7 +201,40 @@ def facts(node) -> dict:
                 calls.add(target)
         elif isinstance(sub, ast.Constant) and isinstance(sub.value, str) and sub.value:
             strings.append(sub.value)
-    return {"reads": sorted(reads), "calls": sorted(calls), "strings": strings}
+    out = {"reads": sorted(reads), "calls": sorted(calls), "strings": strings}
+    inside = bound_inside(node)
+    if inside:
+        out[BOUND_INSIDE] = inside
+    return out
+
+
+def reads_of(node) -> dict:
+    """`facts`' reads alone, with the names only a comprehension or a lambda inside binds - the `reads` column of a row."""
+    found = facts(node) if node is not None else {"reads": []}
+    return {k: v for k, v in found.items() if k in ("reads", BOUND_INSIDE)}
+
+
+# The key `facts` hands `Rows.add` the names it binds nothing for; popped there, never a column.
+BOUND_INSIDE = "_bound_inside"
+COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def bound_inside(node) -> set:
+    """The names a subtree reads ONLY where a comprehension or a lambda inside it binds them: `{name for name, _ in got}`
+    reads its own `name`, never the module's `name` a `__main__` loop assigns. A walk with its own stack, no depth cap."""
+    inner, outer = set(), set()
+    stack = [(node, frozenset())]
+    while stack:
+        current, bound = stack.pop()
+        if isinstance(current, COMPREHENSIONS):
+            bound = bound | {n.id for g in current.generators for n in ast.walk(g.target) if isinstance(n, ast.Name)}
+        elif isinstance(current, ast.Lambda):
+            spec = current.args
+            bound = bound | {a.arg for a in spec.posonlyargs + spec.args + spec.kwonlyargs + [spec.vararg, spec.kwarg] if a}
+        if isinstance(current, ast.Name) and isinstance(current.ctx, ast.Load):
+            (inner if current.id in bound else outer).add(current.id)
+        stack.extend((child, bound) for child in ast.iter_child_nodes(current))
+    return inner - outer
 
 
 def used_names(tree: ast.Module) -> set:
