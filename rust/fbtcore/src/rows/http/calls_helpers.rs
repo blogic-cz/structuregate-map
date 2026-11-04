@@ -52,8 +52,18 @@ impl World {
         self.load_constructed(conn, typescript)?;
         if has_columns(conn, "returns", read_of("returns")) {
             let mut value = Column::new(conn, "returns", "value")?;
-            for (member, _, _, _, owner, held, _) in read(conn, "returns", "member, '', '', ''", &["value"], "")? {
-                self.returns.entry(member).or_default().push(blank(null_literal(value.value(&owner, &held)?)));
+            let case = if has_columns(conn, "returns", &["case"]) { "\"case\"" } else { "''" };
+            for (member, case, _, _, owner, held, _) in read(conn, "returns", &format!("member, {case}, '', ''"), &["value"], "")? {
+                self.returns.entry(member.clone()).or_default().push(blank(null_literal(value.value(&owner, &held)?)));
+                self.return_cases.entry(member).or_default().push(case);
+            }
+        }
+        if has_columns(conn, "switch_cases", &["id", "discriminant_source", "labels"]) {
+            let mut labels = Column::new(conn, "switch_cases", "labels")?;
+            for (id, on, _, _, owner, held, _) in read(conn, "switch_cases", "id, discriminant_source, '', ''", &["labels"], "")? {
+                if let Value::Array(labels) = labels.value(&owner, &held)? {
+                    self.switches.insert(id, (on, labels));
+                }
             }
         }
         Ok(())
@@ -137,10 +147,30 @@ impl World {
             line: i64::MAX,
             bound: Some(&bound),
         };
-        let urls: HashSet<String> = returns.iter().map(|r| self.fold(r, &inner, seen)).collect();
+        let folded: Vec<String> = returns.iter().map(|r| self.fold(r, &inner, seen)).collect();
         seen.remove(&key);
-        let one = urls.len() == 1;
-        Some(urls.into_iter().next().filter(|_| one).unwrap_or_else(|| "*".into()))
+        let urls: HashSet<&String> = folded.iter().collect();
+        if urls.len() == 1 {
+            return folded.into_iter().next();
+        }
+        Some(self.chosen(id, &names, args, &folded).unwrap_or_else(|| "*".into()))
+    }
+
+    /// A HELPER THAT SWITCHES ON ITS PARAMETER (`switch (kind) { case Kind.Orders: return `${root}orders`; .. }`), called with a
+    /// literal that one case names (`Kind.Orders`, `1`, `'orders'`): the returns of the cases naming it, when they fold to one url.
+    /// A value nobody spells (a parameter of the caller's own) names no case, and the returns stay apart.
+    fn chosen(&self, id: &str, names: &[&String], args: Option<&Vec<Value>>, folded: &[String]) -> Option<String> {
+        let cases = self.return_cases.get(id)?;
+        let mut picked: HashSet<&String> = HashSet::new();
+        for (case, url) in cases.iter().zip(folded) {
+            let Some((on, labels)) = self.switches.get(case) else { continue };
+            let Some(arg) = names.iter().position(|n| *n == on).and_then(|i| args?.get(i)) else { continue };
+            if labels.iter().any(|label| names_label(label, arg)) {
+                picked.insert(url);
+            }
+        }
+        let one = picked.len() == 1;
+        picked.into_iter().next().filter(|_| one).cloned()
     }
 
     /// Does this return of the callable `id` hand its parameter `first` back (see the module doc)?
@@ -168,6 +198,19 @@ impl World {
                 && v.get("$args").and_then(Value::as_array).and_then(|a| a.first()).is_some_and(|a| begins_with(a, first))
         };
         !held.is_empty() && held.into_iter().all(made_of_first)
+    }
+}
+
+/// Does the argument name this case label: the same enum member (`$enum`), or the same literal value?
+fn names_label(label: &Value, arg: &Value) -> bool {
+    let member = |v: &Value| v.get("$enum").and_then(Value::as_str).map(str::to_string);
+    let literal = |v: &Value| match v {
+        Value::String(_) | Value::Number(_) => Some(v.clone()),
+        _ => v.get("value").filter(|v| v.is_string() || v.is_number()).cloned(),
+    };
+    match (member(label), member(arg)) {
+        (Some(l), Some(a)) => l == a,
+        _ => arg.get("$enum").is_none() && literal(arg).is_some_and(|a| literal(label) == Some(a)),
     }
 }
 
