@@ -51,12 +51,16 @@ fn segment(call: &str, endpoint: &str) -> bool {
     endpoint == "{}" || endpoint == "*" || call == "{}" || call.contains('*') || call == endpoint
 }
 
-/// How many of the call's segments name the endpoint's in so many words - None when the path does not match at all.
-/// A parameter or an unknown part matches anything and proves nothing, so it does not count.
-fn literal_hits(call: &[String], endpoint: &[String]) -> Option<usize> {
+/// How many of the call's segments name the endpoint's in so many words, then how many of its parameters fall on a parameter
+/// of the route - None when the path does not match at all. A parameter or an unknown part matches anything and proves nothing,
+/// so it is no literal hit; but a value the caller computes (`orders/${id}`) is the route's `{id}` before it is a fixed
+/// `orders/list` beside it, so of routes the literals tie on, the one taking the call's parameters as parameters wins.
+fn literal_hits(call: &[String], endpoint: &[String]) -> Option<(usize, usize)> {
     let pair = |c: &[String], e: &[String]| {
-        (c.len() == e.len() && c.iter().zip(e).all(|(c, e)| segment(c, e)))
-            .then(|| c.iter().zip(e).filter(|(c, e)| *c == *e && !e.contains('{') && !c.contains('*') && *c != "{}").count())
+        (c.len() == e.len() && c.iter().zip(e).all(|(c, e)| segment(c, e))).then(|| {
+            let literal = c.iter().zip(e).filter(|(c, e)| *c == *e && !e.contains('{') && !c.contains('*') && *c != "{}").count();
+            (literal, c.iter().zip(e).filter(|(c, e)| *c == "{}" && *e == "{}").count())
+        })
     };
     match call.split_first() {
         // THE UNKNOWN BASE stands for any number of leading segments, none included.
@@ -88,12 +92,12 @@ pub(super) fn link(endpoints: &[Endpoint], calls: &[Site]) -> Vec<Vec<usize>> {
             // THE ENDPOINTS THE URL NAMES BEST: `*/enabled-features` matched every route ending in a parameter, and a
             // parameter proves nothing. Only the endpoints with the most literal segments in common are kept, and a
             // match with none in common is none at all.
-            let scored: Vec<(usize, usize)> = (0..endpoints.len())
+            let scored: Vec<(usize, (usize, usize))> = (0..endpoints.len())
                 .filter(|&i| verbs(&call.verb, &endpoints[i].verb))
                 .filter_map(|i| routes[i].iter().filter_map(|r| literal_hits(&segments, r)).max().map(|hits| (i, hits)))
                 .collect();
-            let best = scored.iter().map(|&(_, hits)| hits).max().unwrap_or(0);
-            if best == 0 {
+            let best = scored.iter().map(|&(_, hits)| hits).max().unwrap_or((0, 0));
+            if best.0 == 0 {
                 return vec![];
             }
             scored.into_iter().filter(|&(_, hits)| hits == best).map(|(i, _)| i).collect()

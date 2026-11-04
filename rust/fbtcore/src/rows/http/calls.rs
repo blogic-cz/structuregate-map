@@ -71,8 +71,14 @@ struct World {
     /// (abs path, name) -> every callable of that name, and each callable's `returns` (`calls_helpers.rs`).
     callees: HashMap<(String, String), Vec<String>>,
     returns: HashMap<String, Vec<Value>>,
+    /// callable -> the `switch_cases` id each of its `returns` sits in, in the same order (`calls_helpers.rs::chosen`).
+    return_cases: HashMap<String, Vec<String>>,
+    /// `switch_cases` id -> the name it switches on and its labels.
+    switches: HashMap<String, (String, Vec<Value>)>,
     /// callable -> the `files` id it is declared in (`calls_helpers.rs::built`).
     callable_file: HashMap<String, String>,
+    /// (file, local) -> every `<local>.push(..)`: line, callable, arguments (`calls_joined.rs`).
+    pushes: HashMap<(String, String), Vec<(i64, String, Vec<Value>)>>,
 }
 
 /// Where a value is read: the file, the callable, the class `this` names and the line.
@@ -168,6 +174,7 @@ impl World {
             }
         }
         w.load_helpers(conn, typescript)?;
+        w.load_pushes(conn, typescript)?;
         Ok(w)
     }
 
@@ -209,6 +216,9 @@ impl World {
                 // A CALL OF A HELPER THAT RETURNS ITS FIRST ARGUMENT is that argument (`calls_helpers.rs`): its tail is the query `finished` cuts.
                 if o.get("$call").is_some_and(Value::is_string) && self.forwards_first(o, true) {
                     return o.get("$args").and_then(Value::as_array).and_then(|a| a.first()).map_or("*".into(), |a| self.fold(a, at, seen));
+                }
+                if let Some(joined) = self.joined(o, at, seen) {
+                    return joined;
                 }
                 if let Some(built) = self.built(o, at, seen) {
                     return built;
@@ -432,6 +442,9 @@ pub(super) fn load(conn: &Connection, typescript: &HashMap<String, String>) -> r
 
 #[path = "calls_helpers.rs"]
 mod calls_helpers;
+
+#[path = "calls_joined.rs"]
+mod calls_joined;
 
 #[cfg(test)]
 #[path = "calls_wrapper_tests.rs"]

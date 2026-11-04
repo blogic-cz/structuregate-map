@@ -286,6 +286,48 @@ export class SpelledService {
     Assert-Line $r 'c=GET|*|apart'
     Assert-Line $r 'c=GET|*|moved'
 }
+
+# A URL BUILT AS AN ARRAY (`calls.rs::joined`): the array's elements and what the callable pushes onto it, joined by the separator.
+# A HELPER THAT SWITCHES ON ITS PARAMETER, handed a literal enum member, is that case's return.
+# A PARAMETER TAKES A PARAMETER (`matching.rs::link`): `orders/${id}` reaches `{code}`, not the `List` action beside it.
+Test-Case 'httplinks: a url joined from a pushed array or chosen by a literal case is folded, and a parameter segment reaches the parameter route' {
+    $tree = New-HttpLinksTree
+    $api = Join-Path $tree 'web/apps/shop/src/joined.service.ts'
+    Set-Content -LiteralPath $api -NoNewline -Value (@'
+import { HttpClient } from '@angular/common/http';
+declare const root: string;
+export class JoinedService {
+  constructor(private http: HttpClient) {}
+  pushed(q: string) { const parts = ['api/orders/list']; parts.push(`?q=${q}`); return this.http.get(`${root}${parts.join('')}`); }
+  looped(ids: number[]) { const parts = ['api/orders/list?']; ids.forEach((i) => parts.push(`id=${i}&`)); return this.http.get(`${root}${parts.join('')}`); }
+  slashed() { const parts = ['api', 'orders']; parts.push('list'); return this.http.get(`${root}/${parts.join('/')}`); }
+  byId(id: string) { return this.http.get(`${root}api/orders/${id}`); }
+  byKind() { return this.http.get(`${this.baseOf(Kind.Orders)}/list`); }
+  anyKind(kind: Kind) { return this.http.get(`${this.baseOf(kind)}/list`); }
+  private baseOf(kind: Kind): string {
+    switch (kind) {
+      case Kind.Orders: return `${root}api/orders`;
+      case Kind.Other: return `${root}api/other`;
+    }
+    return '';
+  }
+}
+export enum Kind { Orders = 1, Other = 2 }
+'@)
+    [void](Invoke-HttpLinksMap $tree)
+    $r = Get-HttpLinksRows $tree ("SELECT 'c=' || h.url || '|' || m.name AS r FROM http_calls h JOIN members m ON m.id = h.member WHERE h.file LIKE '%joined.service.ts'")
+    Assert-Line $r 'c=*/api/orders/list|pushed'
+    Assert-Line $r 'c=*/api/orders/list|looped'
+    Assert-Line $r 'c=*/api/orders/list|slashed'
+    # A HELPER SWITCHING ON ITS PARAMETER (`calls_helpers.rs::built`): a literal member is its case's return; a value nobody spells is any.
+    Assert-Line $r 'c=*/api/orders/list|byKind'
+    Assert-Line $r 'c=*/list|anyKind'
+    $l = Get-HttpLinksRows $tree ("SELECT 'link=' || m.name || '->' || e.method || '|' || l.how AS x FROM http_links l JOIN http_calls h ON h.id = l.call " +
+        "JOIN http_endpoints e ON e.id = l.endpoint JOIN members m ON m.id = h.member WHERE h.file LIKE '%joined.service.ts'")
+    Assert-Line $l 'link=pushed->List|exact'
+    Assert-Line $l 'link=byId->One|exact'
+    Assert-NoLine $l 'link=byId->List|ambiguous'
+}
 }
 
 if (Get-Command dotnet -ErrorAction SilentlyContinue) {
