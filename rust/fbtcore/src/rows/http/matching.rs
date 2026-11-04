@@ -141,7 +141,7 @@ mod tests {
     }
 
     fn linked(call: &str, routes: &[&str]) -> Vec<usize> {
-        let endpoints: Vec<Endpoint> = routes.iter().map(|r| Endpoint { file: String::new(), cls: String::new(), method: String::new(), line: 0, verb: "GET".into(), template: r.to_string(), route: endpoint_route(r) }).collect();
+        let endpoints: Vec<Endpoint> = routes.iter().map(|r| Endpoint { file: String::new(), cls: String::new(), method: String::new(), line: 0, verb: "GET".into(), template: r.to_string(), route: endpoint_route(r), func: String::new() }).collect();
         link(&endpoints, &[Site { file: String::new(), call: String::new(), member: String::new(), line: 0, verb: "GET".into(), url: call.to_string(), via: String::new() }]).remove(0)
     }
 

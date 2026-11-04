@@ -16,6 +16,8 @@ pub(super) struct Endpoint {
     pub verb: String,
     pub template: String,
     pub route: String,
+    /// The `functions` id of the action, so a reader goes on from the endpoint without matching names and lines.
+    pub func: String,
 }
 
 const VERBS: [(&str, &str); 7] =
@@ -103,6 +105,7 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
         }
     }
     let paths: HashMap<&String, &String> = decorators.iter().map(|d| (&d.file, &d.path)).collect();
+    let actions = actions(conn, csharp)?;
     let mut out = vec![];
     for ((file, cls, method), m) in &methods {
         let verbs: Vec<(&str, Option<String>)> = match (m.verbs.is_empty(), &m.route) {
@@ -110,6 +113,8 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
             (true, None) => continue,
             _ => m.verbs.clone(),
         };
+        let func = actions.get(&(file.clone(), cls.clone(), method.clone())).and_then(|spans| spans.iter().find(|(_, from, to)| (*from..=*to).contains(&m.line)));
+        let func = func.map(|(id, _, _)| id.clone()).unwrap_or_default();
         let class_routes = class_route(&(file.clone(), cls.clone()), &routes, &classes, &by_symbol, &mut HashSet::new()).unwrap_or_else(|| vec![String::new()]);
         for (verb, own) in verbs {
             let written = own.filter(|t| !t.is_empty()).or_else(|| m.route.clone()).unwrap_or_default();
@@ -129,11 +134,30 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
                     verb: verb.to_string(),
                     route: endpoint_route(&template),
                     template,
+                    func: func.clone(),
                 });
             }
         }
     }
     out.sort_by(|a, b| (&a.file, a.line, &a.verb, &a.template).cmp(&(&b.file, b.line, &b.verb, &b.template)));
+    Ok(out)
+}
+
+/// Every C# method by (file, class, name): its id and the lines it spans, its attributes among them - an overload is told apart by
+/// the span its first attribute sits in.
+fn actions(conn: &Connection, csharp: &HashMap<String, String>) -> rusqlite::Result<HashMap<(String, String, String), Vec<(String, i64, i64)>>> {
+    let mut out: HashMap<(String, String, String), Vec<(String, i64, i64)>> = HashMap::new();
+    if !has_columns(conn, "functions", &["id", "file", "cls", "name", "line", "end_line"]) {
+        return Ok(out);
+    }
+    let mut stmt = conn.prepare("SELECT id, file, cls, name, line, end_line FROM functions")?;
+    let rows = stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, text(r, 4)?, text(r, 5)?)))?;
+    for row in rows {
+        let (id, file, cls, name, line, end) = row?;
+        if csharp.contains_key(&file) {
+            out.entry((file, cls, name)).or_default().push((id, line.parse().unwrap_or(0), end.parse().unwrap_or(0)));
+        }
+    }
     Ok(out)
 }
 
