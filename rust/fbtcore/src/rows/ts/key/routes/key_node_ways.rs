@@ -8,7 +8,8 @@
 //! - `binding` - the `bindings` row of the template expression that places the key (NULL for text content), `input` its name;
 //! - `literal` - the `template_literals` row that built the key on that way: a `tpl:` link of the way, or - for a field or a
 //!   method the template reads, whose ways drop those links - a literal `key_builds` has for the key inside that member's lines or those of
-//!   any member or function it calls, transitively (#135: a getter returning a service call; an `*ngFor` collection is the member it reads);
+//!   any member or function it calls, transitively, and of every method assigning a field it reads (#135: a getter returning a service
+//!   call; an `*ngFor` collection is the member it reads; `this.rows = IDS.map(id => ..)` in a method);
 //!   NULL when the key is written whole or the map cannot tell;
 //! - `typed` - 1 when every hole of that literal is typed (an enum, a union of literals: `key_builds`), so it builds the key exactly; 0 when
 //!   a hole is untyped, or the literal's prefix spells the key but its types say it cannot build it (#132) - an expansion; NULL without a literal.
@@ -64,8 +65,12 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
             callees.entry(from).or_default().insert(to);
         }
     }
+    // ...AND OF EVERY METHOD THAT ASSIGNS THE FIELD the site reads: `this.rows = IDS.map(id => ({ name: t(`demo.item_${id}`) }))` in a
+    // method - the field's own initializer is often only `[]`. (A `push` onto it needs nothing here: its value is on the route already.)
+    let writers = writers(store);
     let reached = |start: &str| -> Vec<&(String, i64, i64)> {
         let mut seen: IndexSet<String> = IndexSet::from_iter([start.to_string()]);
+        seen.extend(writers.get(start).into_iter().flatten().cloned());
         let mut i = 0;
         while let Some(m) = seen.get_index(i).cloned() {
             i += 1;
@@ -127,6 +132,17 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
                     out.push(row);
                 }
             }
+        }
+    }
+    out
+}
+
+/// field member id -> the members that assign it (`assignments.target_id`).
+fn writers(store: &Store<'_>) -> HashMap<String, IndexSet<String>> {
+    let mut out: HashMap<String, IndexSet<String>> = HashMap::new();
+    for a in store.table("assignments").iter() {
+        if let (Some(field), Some(writer)) = (id_of(a, "target_id"), id_of(a, "member")) {
+            out.entry(field).or_default().insert(writer);
         }
     }
     out
