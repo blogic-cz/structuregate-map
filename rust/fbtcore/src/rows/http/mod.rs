@@ -46,7 +46,7 @@ pub fn write(conn: &Connection) -> rusqlite::Result<Counts> {
     }
     conn.execute_batch(
         "DROP TABLE IF EXISTS http_endpoints; DROP TABLE IF EXISTS http_calls; DROP TABLE IF EXISTS http_links;
-         CREATE TABLE http_endpoints (id, file, cls, method, line, verb, template, route);
+         CREATE TABLE http_endpoints (id, file, cls, method, line, verb, template, route, func);
          CREATE TABLE http_calls (id, file, call, member, line, verb, url, via);
          CREATE TABLE http_links (call, endpoint, how);",
     )?;
@@ -62,9 +62,9 @@ pub fn write(conn: &Connection) -> rusqlite::Result<Counts> {
     let linked = matching::link(&endpoints, &sites);
     let mut counts = Counts { endpoints: endpoints.len(), calls: sites.len(), ..Counts::default() };
     {
-        let mut add = conn.prepare("INSERT INTO http_endpoints VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)")?;
+        let mut add = conn.prepare("INSERT INTO http_endpoints VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)")?;
         for (n, e) in endpoints.iter().enumerate() {
-            add.execute(params![format!("he:{}", n + 1), e.file, e.cls, e.method, e.line, e.verb, e.template, e.route])?;
+            add.execute(params![format!("he:{}", n + 1), e.file, e.cls, e.method, e.line, e.verb, e.template, e.route, e.func])?;
         }
         let mut add = conn.prepare("INSERT INTO http_calls VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)")?;
         for (n, s) in sites.iter().enumerate() {

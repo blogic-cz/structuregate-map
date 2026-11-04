@@ -110,7 +110,13 @@ Test-Case 'httplinks: a C# endpoint carries its class route, constants folded an
     Assert-Line $r 'ep=GET|api/calculations/{id}|CalculationController.Get'
     Assert-Line $r 'ep=GET|absolute/ping|CalculationController.Ping'
     Assert-Line $r 'ep=GET|api/Orders/List|OrdersController.List'
-    $v = Get-HttpLinksRows $tree "SELECT 'av=' || $(Get-NodeRootListSql 'decorators__arg_values' 'decorators.id') AS a FROM decorators WHERE name = 'Route' AND target_kind = 'class' AND target = 'CalculationController'"
+    # THE ACTION'S OWN ROW by id: a reader goes on into its calls and parameters without matching names and lines.
+    $f = Get-HttpLinksRows $tree "SELECT 'fn=' || e.method || '|' || fn.cls || '.' || fn.name AS f FROM http_endpoints e JOIN functions fn ON fn.id = e.func"
+    Assert-Line $f 'fn=Save|CalculationController.Save'
+    Assert-Line $f 'fn=One|OrdersController.One'
+    $n = Get-HttpLinksRows $tree "SELECT 'nofunc=' || count(*) AS c FROM http_endpoints WHERE func = ''"
+    Assert-Line $n 'nofunc=0'
+    $v =Get-HttpLinksRows $tree "SELECT 'av=' || $(Get-NodeRootListSql 'decorators__arg_values' 'decorators.id') AS a FROM decorators WHERE name = 'Route' AND target_kind = 'class' AND target = 'CalculationController'"
     Assert-Line $v 'av=["api/calculations"]'
 }
 
