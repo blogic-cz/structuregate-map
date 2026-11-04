@@ -96,4 +96,57 @@ Test-Case 'pyalias: --decorators matches the FILE, and a row carries the decorat
     [void](Get-PyAliasRow $r @('api.py', '2', 'app.post', "'/items', tags=['x']", 'items'))
 }
 
+
+Test-Case 'pyalias: an import binds what it imports, a comprehension its own name and a `global` read the module''s' {
+    # Three ways a read was bound to the wrong symbol or none: the import named the def beside it in the other branch
+    # (and the imported def read as dead), the comprehension's `name` named the module's `__main__` loop variable,
+    # and a function declaring `global _CACHE` read its own local where there is none.
+    $db = New-PyAliasDb @{
+        'beta.py'  = "def scope(row):$nl    return [row]$nl"
+        'alpha.py' = "def build(kind):$nl    if kind:$nl        from beta import scope$nl    else:$nl        def scope(row):$nl            return []$nl    return scope(1)$nl" +
+            "def pick(got):$nl    return {name for name, _s in got}$nl" +
+            "_CACHE = None$nl" + "def load():$nl    global _CACHE$nl    if _CACHE is None:$nl        _CACHE = 1$nl    return _CACHE$nl" +
+            "if __name__ == '__main__':$nl    for name in ['x']:$nl        print(name)$nl"
+    }
+    $i = Invoke-PyAliasQ $db --sql "SELECT 'import=' || name || '|' || bind AS x FROM imports WHERE name = 'scope'"
+    Assert-Line $i 'import=scope|beta.py::scope'
+    $r = Invoke-PyAliasQ $db --sql ("SELECT 'read=' || r.func || '|' || b.value AS x FROM returns r JOIN returns__binds b ON b.owner = r.id " +
+        "WHERE b.node = 'string' AND r.func IN ('pick', 'load')")
+    Assert-Line $r 'read=load|alpha.py::_CACHE'
+    Assert-NoLine $r 'read=pick|alpha.py::name'
+}
+
+
+Test-Case 'pyalias: a module two folders spell is the one that binds the name taken from it' {
+    # No root holds `owner.py`; a bootstrap puts a folder on sys.path. Of the two, only one binds what the line asks for.
+    $db = New-PyAliasDb @{
+        'a/owner.py' = "def f():$nl    return 1$nl"
+        'b/owner.py' = "def g():$nl    return 2$nl"
+        'main.py'    = "import owner$nl" + "from owner import g$nl" + "def run():$nl    return owner.f() + g()$nl"
+    }
+    $i = Invoke-PyAliasQ $db --sql "SELECT 'from=' || name || '|' || from_path AS x FROM imports WHERE name = 'g'"
+    Assert-Line $i 'from=g|b/owner.py'
+    $c = Invoke-PyAliasQ $db --sql "SELECT 'call=' || callee || '|' || target_path AS x FROM calls WHERE callee = 'owner.f'"
+    Assert-Line $c 'call=owner.f|a/owner.py'
+}
+
+
+Test-Case 'pyalias: an argument of a dataclass or a NamedTuple fills the field it lands on' {
+    # Neither writes an `__init__`; the one python gives it is the fields in order, a ClassVar and a field(init=False) not among them.
+    $db = New-PyAliasDb @{
+        'shapes.py' = "from dataclasses import dataclass, field, KW_ONLY$nl" + "from typing import NamedTuple, ClassVar$nl" +
+            "@dataclass$nl" + "class Order:$nl    code: str$nl    total: ClassVar[int] = 0$nl    seen: list = field(init=False)$nl    size: int = 1$nl" +
+            "    _: KW_ONLY$nl    note: str = ''$nl" +
+            "class Pair(NamedTuple):$nl    left: int$nl    right: int$nl" +
+            "def make():$nl    Order('a', 2, note='x')$nl    return Pair(1, right=2)$nl"
+    }
+    $r = Invoke-PyAliasQ $db --sql ("SELECT 'arg=' || c.callee || '|' || a.position || '|' || a.keyword || '|' || a.param AS x " +
+        "FROM arguments a JOIN calls c ON c.id = a.call WHERE c.callee IN ('Order', 'Pair')")
+    Assert-Line $r 'arg=Order|0||code'
+    Assert-Line $r 'arg=Order|1||size'
+    Assert-Line $r 'arg=Order|-1|note|note'
+    Assert-Line $r 'arg=Pair|0||left'
+    Assert-Line $r 'arg=Pair|-1|right|right'
+}
+
 }

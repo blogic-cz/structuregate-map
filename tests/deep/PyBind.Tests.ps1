@@ -152,6 +152,9 @@ Test-Case 'pybind: a file a LAUNCHER names is an entry point, and so is the def 
         'cli.py'         = "def main():" + $nl + "    return 0" + $nl + "def spare():" + $nl + "    return 1" + $nl
         'app.py'         = "X = 1" + $nl
         'tools/job.py'   = "def run():" + $nl + "    return 0" + $nl
+        # A pytest HOOK is called by pytest, by its name, in whatever module it loads as a plugin; a method is no hook.
+        'probe.py'       = "def pytest_sessionstart(session):" + $nl + "    return 0" + $nl +
+                           "class Box:" + $nl + "    def pytest_x(self):" + $nl + "        return 0" + $nl
     }
     $found = Get-PyBindMap $tree
     foreach ($rel in 'cli.py', 'app.py', 'tools/job.py') { Assert-NoLine $found "NO READER $rel" }
@@ -160,6 +163,8 @@ Test-Case 'pybind: a file a LAUNCHER names is an entry point, and so is the def 
     Assert-Line $r 'cli.py>main>1'
     Assert-Line $r 'cli.py>spare>0'
     Assert-Line $r 'tools/job.py>run>1'
+    Assert-Line $r 'probe.py>pytest_sessionstart>1'
+    Assert-Line $r 'probe.py>Box.pytest_x>0'
 }
 
 Test-Case 'pybind: an entry-point string whose module does not bind the attribute names nothing' {

@@ -21,8 +21,8 @@ import os
 
 import PyDeps
 from PyAst import IMPORTERS, dotted, qualnames
-
-DIRECTORY_CACHE = {}
+# Re-exported: `PyMap.py` and `PyLaunch.py` take the path helpers from here, as they did before they moved to `PyDeps.py`.
+from PyDeps import exists_exact, listing, module_path, relative_path  # noqa: F401
 
 # What each file binds at module level, parsed once per run - see `module_scope`.
 MODULE_SCOPE = {}
@@ -37,61 +37,6 @@ MODULE_BINDER = {}
 # The names a method reaches its own class through. Not a keyword in python, only the convention every
 # tree follows - which is why a method written `def go(this)` simply stays unbound.
 RECEIVERS = ("self", "cls")
-
-
-def exists_exact(candidate: str) -> bool:
-    """Is there a file at this path with THIS EXACT NAME?
-
-    `os.path.isfile` answers yes on a case-insensitive filesystem for a name that differs only in case, and
-    that turns a NAME import into a MODULE one: `from registry import STORE` found `registry/store.py`
-    on Windows and drew an edge to a file the code never imports - the real `STORE` is an object inside the
-    package's `__init__.py`. The directory listing is the only authority on how a file is really spelled.
-    """
-    # A MISS IS RECORDED TOO: a module that does not exist yet is exactly the file that, once written,
-    # changes what this import binds.
-    PyDeps.note(candidate)
-    return os.path.basename(candidate) in listing(os.path.dirname(candidate) or ".")
-
-
-def listing(folder: str) -> set:
-    """The names in a folder, listed once per run."""
-    names = DIRECTORY_CACHE.get(folder)
-    if names is None:
-        try:
-            names = set(os.listdir(folder))
-        except OSError:
-            names = set()
-        DIRECTORY_CACHE[folder] = names
-    return names
-
-
-def module_path(root: str, dotted: str) -> str:
-    """A dotted import as the FILE it names, or "" - `pkg.mod` -> `pkg/mod.py` or `pkg/mod/__init__.py`.
-
-    Tried before the flat name join in `PyMap.py`, and the two answer different layouts: a package import
-    resolves here exactly, while a flat bootstrap (every tree on sys.path, siblings imported by bare name)
-    resolves by name there. Guessing between them is not needed - the filesystem says which one this is.
-    """
-    parts = dotted.split(".")
-    base = os.path.join(root, *parts)
-    for candidate in (base + ".py", os.path.join(base, "__init__.py")):
-        if exists_exact(candidate):
-            return os.path.relpath(candidate, root).replace(os.sep, "/")
-    return ""
-
-
-def relative_path(root: str, rel: str, level: int, module: str) -> str:
-    """`from ..pkg import x`, as the file it names. The level counts directories UP from the importing
-    file's own package, which is what makes a relative import unambiguous where a bare name is not."""
-    folder = os.path.dirname(os.path.join(root, rel))
-    for _ in range(level - 1):
-        folder = os.path.dirname(folder)
-    parts = module.split(".") if module else []
-    base = os.path.join(folder, *parts) if parts else folder
-    for candidate in (base + ".py", os.path.join(base, "__init__.py")):
-        if exists_exact(candidate):
-            return os.path.relpath(candidate, root).replace(os.sep, "/")
-    return ""
 
 
 class Tree:
@@ -332,9 +277,15 @@ class Binder:
         """What a block binds, in source order so a later binding wins. A nested def or class binds its
         NAME here and nothing inside it; a comprehension or a lambda has a scope of its own."""
         bound = {name: None for name in params}
+        # A NAME DECLARED `global` OR `nonlocal` IS NOT THE BLOCK'S: `global _CACHE` then `_CACHE = load()` writes
+        # the module's `_CACHE`, and read as a local it left every read of it in that function unbound.
+        declared = set()
         pending = list(reversed(body))
         while pending:
             node = pending.pop()
+            if isinstance(node, (ast.Global, ast.Nonlocal)):
+                declared.update(node.names)
+                continue
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 bound[node.name] = ("def", self.rel, prefix + node.name)
                 continue
@@ -369,6 +320,8 @@ class Binder:
             elif isinstance(node, ast.ExceptHandler) and node.name:
                 bound[node.name] = None
             pending.extend(reversed(list(ast.iter_child_nodes(node))))
+        for name in declared:
+            bound.pop(name, None)
         return bound
 
     def variable(self, prefix: str, name: str, call: str, alias: str = ""):
@@ -414,6 +367,15 @@ class Binder:
                 # as c` is how PyRegex knows the call builds a regex. Nothing here resolves through it.
                 out[alias.asname or alias.name] = ("ext", module, alias.name)
         return out
+
+    def resolve_import(self, node, local: str) -> tuple:
+        """(file, qualname) of the symbol `local` is bound to BY THIS IMPORT STATEMENT, whatever else the scope binds
+        to that name: `from beta import scope` in one branch and `def scope` in the other still imports beta's."""
+        self.scopes.append(("func", "", {local: self.imported(node).get(local)}))
+        try:
+            return self.resolve_read(local)
+        finally:
+            self.scopes.pop()
 
     def resolve(self, callee: str) -> tuple:
         """(file, qualname) the callee runs, or ("", "") when the tree cannot say."""
@@ -537,7 +499,8 @@ class Binder:
             return (path, qual) if qual else ("", "")
         names = binding[1].split(".") + rest
         for cut in range(len(names) - 1, 0, -1):
-            path = self.tree.module(self.rel, ".".join(names[:cut]))
+            # `import owner; owner.scopes()` with several `owner.py` mapped: the one that binds `scopes` (`Tree.unique`).
+            path = self.tree.module(self.rel, ".".join(names[:cut]), (names[cut],))
             if path:
                 return path, ".".join(names[cut:])
         return "", ""

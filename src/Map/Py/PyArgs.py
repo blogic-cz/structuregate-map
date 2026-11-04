@@ -37,7 +37,7 @@ def signatures(tree, rel: str) -> dict:
     def walk(body: list, prefix: str, in_class: bool) -> None:
         for node in body:
             if isinstance(node, ast.ClassDef):
-                found[prefix + node.name] = {"class": True}
+                found[prefix + node.name] = {"class": True, "fields": fields(node)}
                 walk(node.body, prefix + node.name + ".", True)
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 spec = node.args
@@ -59,19 +59,53 @@ def signatures(tree, rel: str) -> dict:
     return found
 
 
+def fields(node: ast.ClassDef):
+    """The `__init__` a `@dataclass` or a `NamedTuple` is GIVEN, as a signature: its annotated fields in order, or None.
+
+    Only a class whose fields are all its own - no base but `NamedTuple` - since a base dataclass puts its fields first, from
+    a file this one may not show. A `ClassVar` and a `field(init=False)` are no parameter; after `_: KW_ONLY`, or under
+    `@dataclass(kw_only=True)`, each is keyword-only. Anything else (`BaseModel`, an `__init__` written) is left as it was.
+    """
+    def named(expr) -> str:
+        return dotted(expr.func if isinstance(expr, ast.Call) else expr).rsplit(".", 1)[-1]
+
+    marks = [d for d in node.decorator_list if named(d) == "dataclass"]
+    bases = [named(b) for b in node.bases]
+    if (marks and bases) or (not marks and bases != ["NamedTuple"]):
+        return None
+    keyword = any(isinstance(d, ast.Call) and any(k.arg == "kw_only" and isinstance(k.value, ast.Constant) and k.value.value is True
+                                                   for k in d.keywords) for d in marks)
+    pos, kwonly = [], []
+    for item in node.body:
+        if not isinstance(item, ast.AnnAssign) or not isinstance(item.target, ast.Name):
+            continue
+        kind = named(item.annotation.value if isinstance(item.annotation, ast.Subscript) else item.annotation)
+        if kind == "KW_ONLY":
+            keyword = True
+            continue
+        hidden = isinstance(item.value, ast.Call) and named(item.value) == "field" and any(
+            k.arg == "init" and isinstance(k.value, ast.Constant) and k.value.value is False for k in item.value.keywords)
+        if kind != "ClassVar" and not hidden:
+            (kwonly if keyword else pos).append(item.target.id)
+    return {"pos": pos, "kwonly": kwonly, "var": "", "kw": "", "method": False, "classmethod": False}
+
+
 def signature_of(tree, path: str, qual: str, callee: str) -> tuple:
     """(signature, how many leading parameters the call supplies itself), or (None, 0).
 
     `Thing(x)` runs `Thing.__init__`, whose `self` the call never passes. `obj.go(x)` and `self.go(x)` pass
     `self` implicitly; `Thing.go(obj, x)` passes it by hand - told apart by whether the callee names the
     class right before the method. A static method takes no `self` either way, a class method always its
-    `cls`. A class with no `__init__` of its own inherits one this file does not show: unmapped.
+    `cls`. A class with no `__init__` of its own inherits one this file does not show: unmapped -
+    unless it is a dataclass or a `NamedTuple`, whose `__init__` its fields are (`fields`).
     """
     found = signatures(tree, path)
     sig = found.get(qual)
     if sig is not None and sig.get("class"):
         init = found.get(qual + ".__init__")
-        return (init, 1) if init else (None, 0)
+        if init:
+            return init, 1
+        return (sig["fields"], 0) if sig.get("fields") else (None, 0)
     if sig is None:
         return None, 0
     if not sig["method"]:

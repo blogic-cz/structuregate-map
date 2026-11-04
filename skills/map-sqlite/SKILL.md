@@ -145,7 +145,7 @@ the caught name is `handlers.name`.
 `name` the code, `source` the message), with `files.errors` counting them per file - not `kind = 'generator'` (C#'s CS8795/CS0762: a source generator's missing body).
 
 `arguments`: one row per argument (`call` joins `calls.id`; `position` -1 for a keyword; `star`; `value` a
-literal's repr) with **`param`, the parameter the CALLEE declares** - bound calls only, `self` handled.
+literal's repr) with **`param`, the parameter the CALLEE declares** - bound calls only, `self` handled, a python dataclass's or `NamedTuple`'s fields its `__init__`.
 
 **The facts are extracted, the text is carried.** An `expressions` row holds `source` *and* what was read
 off it:
