@@ -140,7 +140,8 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
 }
 
 /// field member id -> the members and functions that fill it: those assigning it (`assignments.target_id`), those pushing onto it
-/// (`key_pushes`), and - for an `@Input` - the members every element rendering its class reads in the binding of that input.
+/// (`key_pushes`), and - for an `@Input`, or the getter of an input setter - the members every element rendering its class reads in the
+/// binding of that input.
 fn feeders(store: &Store<'_>) -> HashMap<String, IndexSet<String>> {
     let mut out: HashMap<String, IndexSet<String>> = HashMap::new();
     for a in store.table("assignments").iter() {
@@ -176,9 +177,15 @@ fn feeders(store: &Store<'_>) -> HashMap<String, IndexSet<String>> {
             bound.entry((class.clone(), name.clone())).or_default().extend(read.iter().cloned());
         }
     }
+    // AN INPUT SETTER'S GETTER is fed too: `@Input() set model(items) { this._model = items; }` beside `get model() { return this._model; }`,
+    // which is what the template reads - the member of that name, whichever of the pair it is.
+    let alias_of: HashMap<(String, String), String> = members.iter()
+        .filter_map(|m| Some(((text(m, "class")?, text(m, "name")?), super::gate_input_flags::input_alias(m)?)))
+        .collect();
     for m in members.iter() {
-        let (Some(id), Some(class), Some(alias)) = (id_of(m, "id"), text(m, "class"), super::gate_input_flags::input_alias(m)) else { continue };
-        if let Some(read) = bound.get(&(class, alias)) {
+        let (Some(id), Some(class), Some(name)) = (id_of(m, "id"), text(m, "class"), text(m, "name")) else { continue };
+        let Some(alias) = alias_of.get(&(class.clone(), name)) else { continue };
+        if let Some(read) = bound.get(&(class, alias.clone())) {
             out.entry(id).or_default().extend(read.iter().cloned());
         }
     }
