@@ -143,7 +143,7 @@ The repo is also a Claude Code PLUGIN and its marketplace (`.claude-plugin/`): `
 
 `skills/` is the ORIGIN of each skill. A consumer holds a JUNCTION to it, never a copy — see the README
 section on wiring. Junctions are not walked by the gate, so a junctioned skill is never counted against a
-consumer's limits. `agents/` is the same for the map agents (`python-map-audit`, `python-map-reader`, `angular-map-audit`, `dry-guard`); an
+consumer's limits. `agents/` is the same for the map agents (`python-map-audit`, `python-map-reader`, `angular-map-audit`, `rust-map-audit`, `dry-guard`); an
 agent is one FILE, so a consumer holds a HARD LINK to it in its `.claude/agents/`.
 
 ## Tests
