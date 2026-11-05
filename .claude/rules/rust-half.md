@@ -19,7 +19,7 @@ Roslyn. It is called in process: its line counter by `count/` (the gate) and `ma
 - `mod name;` is an exact edge, resolved like rustc (`modpath.rs`: crate roots and `mod.rs` own their
   folder, `#[path]` is relative to the declaring file). Every other path segment is a NAME.
 - Only items another file can name are declared (`pub`, `pub(crate)`, … and every `macro_rules!`). A
-  `#[cfg(test)]` module declares nothing. A method after `.` is a member, never a use.
+  `#[cfg(test)]` item or module declares nothing, and a bare name a `let`, parameter or pattern binds is a local, never a use. A method after `.` is a member, never a use.
 - `proc_macro2::extra::invalidate_current_thread_spans()` runs after every file. Outside a proc macro the
   lexer keeps every file's text in a thread-local map for the life of the thread otherwise.
 - A file the lexer refuses falls back to the `//` scanner for its count and is `UNPARSED` in the map.
