@@ -82,15 +82,11 @@ pub struct Dimension {
 /// Cycle-guarded by id rather than a depth budget: a malformed parent link would otherwise
 /// spin forever, and a cap would silently drop the legitimately deep cases this walk
 /// exists for.
-pub fn enclosing_dimension<'a>(
-    node: &str,
-    parent: &IndexMap<String, Option<String>>,
-    dims: &'a IndexMap<String, Dimension>,
-) -> Option<&'a Dimension> {
+#[cfg(test)]
+fn enclosing_dimension<'a>(node: &str, parent: &IndexMap<String, Option<String>>, dims: &'a IndexMap<String, Dimension>) -> Option<&'a Dimension> {
     enclosing_switch(node, parent, dims).and_then(|id| dims.get(&id))
 }
 
-/// The node of the nearest enclosing switch, by the same walk.
 fn enclosing_switch(node: &str, parent: &IndexMap<String, Option<String>>, dims: &IndexMap<String, Dimension>) -> Option<String> {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     seen.insert(node.to_string());

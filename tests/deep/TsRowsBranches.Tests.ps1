@@ -172,17 +172,24 @@ Test-Case 'tsrows: a valueless switch default is not_in its cases, and a valuele
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/plans.component.html' = "<ng-container [ngSwitch]=`"plan`"><i *ngSwitchCase=`"Plan.Duo`">{{ 'sw.duo' | money }}</i>" +
             "<i *ngSwitchCase=`"Plan.Team`">{{ 'sw.team' | money }}</i><b *ngSwitchDefault>{{ 'sw.other' | money }}</b></ng-container>" +
-            "<span *demoShow>{{ 'sw.shown' | money }}</span><p>{{ 'sw.always' | money }}</p>`n"
+            "<span *demoShow>{{ 'sw.shown' | money }}</span><u *demoHide>{{ 'sw.hidden' | money }}</u><s *demoHome>{{ 'sw.home' | money }}</s><p>{{ 'sw.always' | money }}</p>`n"
         'apps/shop/src/plans.component.ts' = "import { Component, Directive, Injectable, OnInit, TemplateRef, ViewContainerRef } from '@angular/core';`n" +
             "import { NgSwitch, NgSwitchCase, NgSwitchDefault } from '@angular/common';`n" +
-            "export enum Plan { Solo = 1, Duo = 2, Team = 3, Crew = 4 }`n" +
-            "@Injectable({ providedIn: 'root' })`nexport class Env {`n  isAlpha(): boolean {`n    return true;`n  }`n}`n" +
+            "export enum Plan { Solo = 1, Duo = 2, Team = 3, Crew = 4 }`nexport enum Country { Alpha = 1, Beta = 2, Gamma = 3 }`n" +
+            "@Injectable({ providedIn: 'root' })`nexport class Env {`n  country: string = Country.Alpha;`n  isAlpha(): boolean {`n    return this.country === Country.Alpha;`n  }`n" +
+            "  isHome(): boolean {`n    return !this.country || this.country === Country.Alpha;`n  }`n}`n" +
             "@Directive({ selector: '[demoShow]', standalone: true })`n" +
             "export class DemoShowDirective implements OnInit {`n  constructor(private t: TemplateRef<any>, private v: ViewContainerRef, private env: Env) {}`n" +
             "  ngOnInit() {`n    if (this.env.isAlpha()) {`n      this.v.createEmbeddedView(this.t);`n    } else {`n      this.v.clear();`n    }`n  }`n}`n" +
-            "@Component({ selector: 'app-plans', templateUrl: './plans.component.html', standalone: true, imports: [NgSwitch, NgSwitchCase, NgSwitchDefault, DemoShowDirective] })`n" +
+            "@Directive({ selector: '[demoHome]', standalone: true })`n" +
+            "export class DemoHomeDirective implements OnInit {`n  constructor(private t: TemplateRef<any>, private v: ViewContainerRef, private env: Env) {}`n" +
+            "  ngOnInit() {`n    if (this.env.isHome()) {`n      this.v.createEmbeddedView(this.t);`n    }`n  }`n}`n" +
+            "@Directive({ selector: '[demoHide]', standalone: true })`n" +
+            "export class DemoHideDirective implements OnInit {`n  constructor(private t: TemplateRef<any>, private v: ViewContainerRef, private env: Env) {}`n" +
+            "  ngOnInit() {`n    if (this.env.isAlpha()) {`n      this.v.clear();`n    } else {`n      this.v.createEmbeddedView(this.t);`n    }`n  }`n}`n" +
+            "@Component({ selector: 'app-plans', templateUrl: './plans.component.html', standalone: true, imports: [NgSwitch, NgSwitchCase, NgSwitchDefault, DemoShowDirective, DemoHideDirective, DemoHomeDirective] })`n" +
             "export class PlansComponent {`n  plan: Plan = Plan.Solo;`n  Plan = Plan;`n}`n"
-        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},"sw":{"duo":"a","team":"b","other":"c","shown":"d","always":"e"}}'
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},"sw":{"duo":"a","team":"b","other":"c","shown":"d","hidden":"f","home":"g","always":"e"}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["money"],"gateInputs":["ngSwitch"]}'
     }
     $made = New-TsRowsDb $tree
@@ -192,6 +199,12 @@ Test-Case 'tsrows: a valueless switch default is not_in its cases, and a valuele
         "(SELECT count(*) FROM key_reach__always_gates jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) AS reach FROM key_reach WHERE key LIKE 'sw.%'")
     Assert-Line $r 'sw.duo | plan in ["Duo"]'
     Assert-Line $r 'sw.other | plan in ["Crew","Solo"]'
+    # ...AND THE DIRECTIVE'S OWN CONDITION is the gate's value (#130): `*demoShow` renders under `env.isAlpha()`, `*demoHide` in its `else`.
+    Assert-Line $r 'sw.shown | country in ["Alpha"]'
+    Assert-Line $r 'sw.hidden | country not_in ["Alpha"]'
+    # `!country || country === Alpha` (#131): an unset `country` is no member, so the OR permits Alpha alone - `country` typed `string`,
+    # its enum named only by the other side, as a config field holding the enum's values is.
+    Assert-Line $r 'sw.home | country in ["Alpha"]'
     $g = Invoke-TsRowsQ $made.Db ("SELECT key || ' | gates ' || (SELECT count(*) FROM key_reach__always_gates jn WHERE jn.owner = '#' || key_reach.rowid " +
         "AND jn.parent = 0) AS reach FROM key_reach WHERE key IN ('sw.shown', 'sw.always')")
     Assert-Line $g 'sw.shown | gates 1'
