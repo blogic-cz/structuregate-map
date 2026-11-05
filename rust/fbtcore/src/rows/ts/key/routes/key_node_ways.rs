@@ -82,12 +82,16 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
     };
     // EVERY TEMPLATE LITERAL WITH TEXT OF ITS OWN, by file (#132): one in a member a site reads whose text spells the key, but which `key_builds`
     // says cannot build it, is still the literal that put the key there - an over-expansion, `typed` 0. Its text is matched part by part,
-    // in order: a literal opening with its hole (`${message}2`, #135, filled by a call two hops up) spells the key by its suffix.
+    // in order: a literal opening with its hole (`${message}2`, #135, filled by a call two hops up) spells the key by its suffix - when
+    // that text holds a letter or a digit.
     let mut prefixed: HashMap<String, Vec<(String, i64, Vec<String>)>> = HashMap::new();
     for t in store.table("template_literals").iter() {
         let (Some(id), Some(file), Some(line)) = (id_of(t, "id"), text(t, "file"), t.get("line").and_then(Value::as_i64)) else { continue };
         let parts: Vec<String> = t.get("parts").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
-        if parts.iter().any(|p| !p.is_empty()) {
+        // A LITERAL OPENING WITH ITS HOLE needs a letter or digit of its own (`${message}2`): one whose text is only a separator
+        // (`${base}.${id}`, `${num[0]}.${num[1]}` in a number pipe) spells almost any dotted key.
+        let worded = parts.iter().any(|p| p.chars().any(char::is_alphanumeric));
+        if parts.first().is_some_and(|p| !p.is_empty()) || worded {
             prefixed.entry(file).or_default().push((id, line, parts));
         }
     }

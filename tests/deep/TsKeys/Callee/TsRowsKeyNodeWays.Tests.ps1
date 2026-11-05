@@ -178,6 +178,7 @@ Test-Case 'tsrows keys: a key reaching a node through a child input or a pushed 
 
 # (#135) A HOLE FILLED THROUGH TWO CALLS: the template calls `messageOf('demo.pid.adultWarning')`, which hands `message` on to an exported
 # helper building `${message}2`. The way of `demo.pid.adultWarning2` at the `[warning]` binding names that literal, spelled whole by the call.
+# A literal of `.` alone between two holes (`round`, reached from the same method) spells no key.
 Test-Case 'tsrows keys: a template call literal handed on to a helper whose literal it fills names that literal (#135)' {
     $made = New-TsRowsDb (New-TsRowsWorkspace @{
         'apps/shop/src/variant.functions.ts' = "export class I18nService { getTranslation(k: string) { return k; } }`n" +
@@ -187,7 +188,8 @@ Test-Case 'tsrows keys: a template call literal handed on to a helper whose lite
             "export class PidComponent { @Input() warning = 'demo.pid.adultWarning'; }`n" +
             "@Component({ selector: 'app-host', standalone: true, imports: [PidComponent], template: '<app-pid [warning]=`"messageOf(\'demo.pid.adultWarning\')`"></app-pid>' })`n" +
             "export class HostComponent {`n  alt = false;`n  constructor(private i18n: I18nService) {}`n" +
-            "  messageOf(message: string): string {`n    return this.alt ? variantMessage(message, true, this.i18n) : message;`n  }`n}`n"
+            "  messageOf(message: string): string {`n    this.round(['1', '2']);`n    return this.alt ? variantMessage(message, true, this.i18n) : message;`n  }`n" +
+            "  private round(num: string[]) {`n    return Number(``$`{num[0]}.$`{num[1]}``);`n  }`n}`n"
         'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"pid":{"adultWarning":"A","adultWarning2":"B"}}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
     }) -Shared
@@ -195,4 +197,7 @@ Test-Case 'tsrows keys: a template call literal handed on to a helper whose lite
     $r = Invoke-TsRowsQ $made.Db ("SELECT 'w=' || w.key || '|' || w.route || '|' || coalesce(w.input, '-') || '|' || coalesce(t.line, '-') || '|' || coalesce(w.typed, '-') AS r " +
         "FROM key_node_ways w LEFT JOIN template_literals t ON t.id = w.literal WHERE w.key LIKE 'demo.pid.%'")
     Assert-Line $r 'w=demo.pid.adultWarning2|field_binding|warning|3|0'
+    # ...BUT A LITERAL WHOSE TEXT IS ONLY A SEPARATOR spells nothing: `round` builds no key, and `demo.pid.adultWarning`, written whole, keeps no literal.
+    Assert-Line $r 'w=demo.pid.adultWarning|field_binding|warning|-|-'
+    Assert-NoLine $r '|14|'
 }
