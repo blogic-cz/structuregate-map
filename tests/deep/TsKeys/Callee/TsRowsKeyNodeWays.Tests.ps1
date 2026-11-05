@@ -175,3 +175,24 @@ Test-Case 'tsrows keys: a key reaching a node through a child input or a pushed 
     $whole = @($r.Lines | Where-Object { $_.Trim().StartsWith('w=') -and $_.Trim().EndsWith('|-|-') })
     if ($whole.Count) { throw "ways with no literal:`n$($whole -join "`n")" }
 }
+
+# (#135) A HOLE FILLED THROUGH TWO CALLS: the template calls `messageOf('demo.pid.adultWarning')`, which hands `message` on to an exported
+# helper building `${message}2`. The way of `demo.pid.adultWarning2` at the `[warning]` binding names that literal, spelled whole by the call.
+Test-Case 'tsrows keys: a template call literal handed on to a helper whose literal it fills names that literal (#135)' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace @{
+        'apps/shop/src/variant.functions.ts' = "export class I18nService { getTranslation(k: string) { return k; } }`n" +
+            "export const variantMessage = (message: string, alt: boolean, i18n: I18nService): string =>`n  i18n.getTranslation(alt ? ``$`{message}2`` : message);`n"
+        'apps/shop/src/host.component.ts' = "import { Component, Input } from '@angular/core';`nimport { I18nService, variantMessage } from './variant.functions';`n" +
+            "@Component({ selector: 'app-pid', standalone: true, template: '<span>{{ warning | money }}</span>' })`n" +
+            "export class PidComponent { @Input() warning = 'demo.pid.adultWarning'; }`n" +
+            "@Component({ selector: 'app-host', standalone: true, imports: [PidComponent], template: '<app-pid [warning]=`"messageOf(\'demo.pid.adultWarning\')`"></app-pid>' })`n" +
+            "export class HostComponent {`n  alt = false;`n  constructor(private i18n: I18nService) {}`n" +
+            "  messageOf(message: string): string {`n    return this.alt ? variantMessage(message, true, this.i18n) : message;`n  }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"pid":{"adultWarning":"A","adultWarning2":"B"}}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
+    }) -Shared
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'w=' || w.key || '|' || w.route || '|' || coalesce(w.input, '-') || '|' || coalesce(t.line, '-') || '|' || coalesce(w.typed, '-') AS r " +
+        "FROM key_node_ways w LEFT JOIN template_literals t ON t.id = w.literal WHERE w.key LIKE 'demo.pid.%'")
+    Assert-Line $r 'w=demo.pid.adultWarning2|field_binding|warning|3|0'
+}

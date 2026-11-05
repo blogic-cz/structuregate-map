@@ -80,14 +80,15 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
         }
         seen.iter().filter_map(|m| spans.get(m)).collect()
     };
-    // EVERY TEMPLATE LITERAL WITH A PREFIX, by file (#132): one in a member a site reads whose prefix spells the key, but which `key_builds` says
-    // cannot build it, is still the literal that put the key there - an over-expansion, `typed` 0.
-    let mut prefixed: HashMap<String, Vec<(String, i64, String)>> = HashMap::new();
+    // EVERY TEMPLATE LITERAL WITH TEXT OF ITS OWN, by file (#132): one in a member a site reads whose text spells the key, but which `key_builds`
+    // says cannot build it, is still the literal that put the key there - an over-expansion, `typed` 0. Its text is matched part by part,
+    // in order: a literal opening with its hole (`${message}2`, #135, filled by a call two hops up) spells the key by its suffix.
+    let mut prefixed: HashMap<String, Vec<(String, i64, Vec<String>)>> = HashMap::new();
     for t in store.table("template_literals").iter() {
         let (Some(id), Some(file), Some(line)) = (id_of(t, "id"), text(t, "file"), t.get("line").and_then(Value::as_i64)) else { continue };
-        let first = t.get("parts").and_then(Value::as_array).and_then(|p| p.first()).and_then(Value::as_str).filter(|p| !p.is_empty());
-        if let Some(first) = first {
-            prefixed.entry(file).or_default().push((id, line, first.to_string()));
+        let parts: Vec<String> = t.get("parts").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+        if parts.iter().any(|p| !p.is_empty()) {
+            prefixed.entry(file).or_default().push((id, line, parts));
         }
     }
 
@@ -106,7 +107,7 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
                     literals.extend(built.into_iter().flatten().filter(|b| inside(&b.file, b.line)).map(|b| b.literal.as_str()));
                     if literals.is_empty() {
                         for (file, _, _) in &within {
-                            literals.extend(prefixed.get(file).into_iter().flatten().filter(|(_, l, p)| inside(file, *l) && key.starts_with(p.as_str())).map(|(id, _, _)| id.as_str()));
+                            literals.extend(prefixed.get(file).into_iter().flatten().filter(|(_, l, p)| inside(file, *l) && spells(key, p)).map(|(id, _, _)| id.as_str()));
                         }
                     }
                 }
@@ -137,6 +138,25 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
         }
     }
     out
+}
+
+/// Whether a template literal's `parts` (the text between its holes) can spell `key`: the first part opens it, the last closes it, and
+/// every part between follows in order, each hole standing for text of any length. A literal with no hole spells what it starts.
+fn spells(key: &str, parts: &[String]) -> bool {
+    let (Some(first), Some(last)) = (parts.first(), parts.last()) else { return false };
+    if parts.len() == 1 {
+        return key.starts_with(first.as_str());
+    }
+    let Some(mut rest) = key.strip_prefix(first.as_str()) else { return false };
+    let Some(inner) = rest.strip_suffix(last.as_str()) else { return false };
+    rest = inner;
+    for part in &parts[1..parts.len() - 1] {
+        match rest.find(part.as_str()) {
+            Some(at) => rest = &rest[at + part.len()..],
+            None => return false,
+        }
+    }
+    true
 }
 
 /// field member id -> the members and functions that fill it: those assigning it (`assignments.target_id`), those pushing onto it
@@ -206,5 +226,24 @@ fn own_reads(ast: &Value, out: &mut IndexSet<String>) {
         }
         Value::Array(a) => a.iter().for_each(|v| own_reads(v, out)),
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::spells;
+
+    fn parts(p: &[&str]) -> Vec<String> {
+        p.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_literal_spells_a_key_by_its_text_in_order() {
+        assert!(spells("demo.pid.adultWarning2", &parts(&["", "2"])));
+        assert!(spells("demo.a.x.b", &parts(&["demo.", ".x.", ""])));
+        assert!(!spells("demo.a.b", &parts(&["demo.", ".x.", ""])), "a middle part the key lacks");
+        assert!(!spells("demo.x.a", &parts(&["demo.", "", ".x"])), "the last part closes the key");
+        assert!(!spells("demox", &parts(&["demox", "x"])), "the first and last parts may not overlap");
+        assert!(spells("demo.title", &parts(&["demo."])), "a literal with no hole spells what it starts");
     }
 }
