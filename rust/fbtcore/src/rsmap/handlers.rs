@@ -14,7 +14,7 @@
 //!   fallback    `.unwrap_or(..)`, `_or_default()`, `_or_else`, `.or(..)`, `.or_else(..)` - a value instead
 //!   ok          `.ok()`                                         the error is DROPPED into an Option - `passes`
 //!   map_err     `.map_err(|e| ..)`                              turned into another error
-//!   discard     `let _ = call();`                               ignored - `passes`
+//!   discard     `let _ = call();` or a discarded `if`/`match`  ignored - `passes`
 //!   catch_unwind `std::panic::catch_unwind(..)`                 the one real catch, of a panic
 //!
 //! WHICH TYPE a method is called on is not known here - there is no type checker in this process - so an
@@ -187,11 +187,31 @@ impl<'ast> Visit<'ast> for Acts<'_> {
 
 /// `Err(inner)` - the inner pattern, when the pattern is one.
 fn err_inner(pat: &syn::Pat) -> Option<&syn::Pat> {
+    err_pat(pat)?.elems.first()
+}
+
+/// The `Err(..)` pattern of an arm, also under a single-element `Ok(..)` or `Some(..)`: `Ok(Err(e))` handles the inner error.
+fn err_pat(pat: &syn::Pat) -> Option<&syn::PatTupleStruct> {
     let syn::Pat::TupleStruct(ts) = pat else { return None };
-    if ts.path.segments.last()?.ident != "Err" {
-        return None;
+    let last = ts.path.segments.last()?.ident.to_string();
+    match last.as_str() {
+        "Err" => Some(ts),
+        "Ok" | "Some" if ts.elems.len() == 1 => err_pat(ts.elems.first()?),
+        _ => None,
     }
-    ts.elems.first()
+}
+
+/// Every `let` of an `if` condition - one, or each link of a let-chain `let a = x && let Err(e) = y`.
+fn lets(cond: &syn::Expr) -> Vec<&syn::ExprLet> {
+    match cond {
+        syn::Expr::Let(l) => vec![l],
+        syn::Expr::Binary(b) if matches!(b.op, syn::BinOp::And(_)) => {
+            let mut all = lets(&b.left);
+            all.extend(lets(&b.right));
+            all
+        }
+        _ => vec![],
+    }
 }
 
 fn is_ok(pat: &syn::Pat) -> bool {
@@ -293,31 +313,24 @@ impl<'ast> Visit<'ast> for Walker {
     fn visit_expr_match(&mut self, m: &'ast syn::ExprMatch) {
         let try_line = m.expr.span().start().line;
         for arm in &m.arms {
-            if let Some(inner) = err_inner(&arm.pat) {
-                let caught = caught(Some(inner));
+            if let Some(ts) = err_pat(&arm.pat) {
+                let caught = caught(ts.elems.first());
                 let line = arm.pat.span().start().line;
                 let body = body_of(Some(Part::Expr(&arm.body)), &caught.0, line);
                 self.add("match", line, try_line, caught, body, false, false);
-            } else if let syn::Pat::TupleStruct(ts) = &arm.pat
-                && ts.path.segments.last().is_some_and(|s| s.ident == "Err")
-                && ts.elems.is_empty()
-            {
-                let line = arm.pat.span().start().line;
-                let body = body_of(Some(Part::Expr(&arm.body)), "", line);
-                self.add("match", line, try_line, caught(None), body, false, false);
             }
         }
         visit::visit_expr_match(self, m);
     }
 
     fn visit_expr_if(&mut self, i: &'ast syn::ExprIf) {
-        if let syn::Expr::Let(l) = &*i.cond
-            && let Some(inner) = err_inner(&l.pat)
-        {
-            let caught = caught(Some(inner));
-            let line = i.if_token.span.start().line;
-            let body = body_of(Some(Part::Block(&i.then_branch)), &caught.0, line);
-            self.add("if_let", line, l.expr.span().start().line, caught, body, false, false);
+        for l in lets(&i.cond) {
+            if let Some(inner) = err_inner(&l.pat) {
+                let caught = caught(Some(inner));
+                let line = i.if_token.span.start().line;
+                let body = body_of(Some(Part::Block(&i.then_branch)), &caught.0, line);
+                self.add("if_let", line, l.expr.span().start().line, caught, body, false, false);
+            }
         }
         visit::visit_expr_if(self, i);
     }
@@ -335,7 +348,7 @@ impl<'ast> Visit<'ast> for Walker {
                 let body = body_of(Some(Part::Expr(diverge)), "", line);
                 self.add("let_else", line, init.expr.span().start().line, caught(None), body, false, false);
             } else if matches!(pat, syn::Pat::Wild(_))
-                && matches!(&*init.expr, syn::Expr::Call(_) | syn::Expr::MethodCall(_) | syn::Expr::Await(_) | syn::Expr::Macro(_))
+                && matches!(&*init.expr, syn::Expr::Call(_) | syn::Expr::MethodCall(_) | syn::Expr::Await(_) | syn::Expr::Macro(_) | syn::Expr::If(_) | syn::Expr::Match(_))
             {
                 let body = body_of(None, "", line);
                 self.add("discard", line, init.expr.span().start().line, caught(None), body, true, false);
@@ -384,51 +397,5 @@ impl<'ast> Visit<'ast> for Walker {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn handlers(text: &str) -> Vec<Handler> {
-        let file = syn::parse_file(text).unwrap();
-        let found = read(&file);
-        super::super::forget_spans();
-        found
-    }
-
-    fn shapes(found: &[Handler]) -> Vec<&str> {
-        found.iter().map(|h| h.shape).collect()
-    }
-
-    #[test]
-    fn a_match_arm_on_err_is_a_handler_with_what_it_binds_reads_and_raises() {
-        let found = handlers("fn go() -> Result<(), E> {\n    match load() {\n        Ok(v) => use_it(v),\n        \
-                              Err(e) => { log(&e); return Err(Wrap(e)); }\n    }\n}\n");
-        assert_eq!(shapes(&found), ["match"]);
-        let h = &found[0];
-        assert_eq!((h.line, h.try_line, h.end_line, h.name.as_str(), h.bare), (4, 2, 4, "e", true));
-        assert_eq!((h.name_read, h.raises, h.reraises, h.passes, h.func.as_str()), (true, 1, false, false, "go"));
-        assert_eq!(h.calls, ["log", "Wrap"]);
-    }
-
-    #[test]
-    fn a_swallowed_error_passes_and_a_returned_one_is_the_same_error_going_on() {
-        let found = handlers("fn a() { match f() { Err(Kind::Gone) => {}, Err(e) => return Err(e), _ => () } }\n");
-        assert_eq!((found[0].types.clone(), found[0].bare, found[0].passes), (vec!["Kind::Gone".to_string()], false, true));
-        assert_eq!((found[1].reraises, found[1].raises), (true, 0));
-    }
-
-    #[test]
-    fn every_other_shape_is_a_row_and_test_code_says_so() {
-        let text = "impl Store { fn open(&self) -> Result<(), E> {\n    let Ok(f) = File::open(p) else { return Ok(()) };\n    \
-                    if let Err(e) = f.sync() { warn(e); }\n    let n = read(f)?;\n    let _ = flush();\n    \
-                    let v = n.parse::<u8>().unwrap_or_default();\n    let w = n.parse::<u8>().map_err(|e| Bad(e))?;\n    \
-                    let x = cfg().ok();\n    let r = std::panic::catch_unwind(|| run());\n    Ok(())\n} }\n\
-                    #[cfg(test)]\nmod tests { #[test] fn t() { go().unwrap(); go().expect(\"x\"); } }\n";
-        let found = handlers(text);
-        assert_eq!(shapes(&found), ["let_else", "if_let", "question", "discard", "fallback", "question", "map_err", "ok", "catch_unwind", "unwrap", "expect"]);
-        assert_eq!((found[0].cls.as_str(), found[0].func.as_str(), found[0].test), ("Store", "open", false));
-        assert_eq!((found[1].name.as_str(), found[1].name_read), ("e", true));
-        assert!(found[2].reraises && found[3].passes && found[7].passes);
-        assert_eq!(found[6].name, "e");
-        assert!(found[9].panics && found[9].test && found[10].test);
-    }
-}
+#[path = "handlers_tests.rs"]
+mod tests;
