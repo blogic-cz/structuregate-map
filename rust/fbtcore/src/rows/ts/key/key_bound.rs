@@ -22,7 +22,7 @@
 //! in the function whose `createComponent` (or factory call) drew the edge is that edge's binding, and an edge whose creator
 //! sets nothing leaves the input at its initializer - but only while every write of the input sits in some creator of that
 //! class, no `setInput` names it, and the creator creates that class once: a write anywhere else may be on this instance too.
-//! A write under a condition, in a loop or of a value that is no literal binds nothing either way.
+//! A write under a condition the creating call is not under, in a loop or of a value that is no literal binds nothing either way.
 //! An input with no initializer is `undefined` on an edge that binds nothing, which a condition reads as `false`. A child that
 //! writes the input only as `this.f = this.f && ..` keeps a falsy value falsy: such an edge binds only a falsy value.
 
@@ -196,6 +196,7 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
         let (Some(id), Some(to), Some(class)) = (cell(r, "id"), cell(r, "to"), cell(r, "to_class")) else { continue };
         let (Some(own), Some(gs)) = (inputs.get(&class), gates_of.get(&to)) else { continue };
         let (node, creator) = (cell(r, "node"), creator_of(r));
+        let under = cell(r, "call").and_then(|c| set.branch_of_call.get(&c).cloned());
         // member row -> this edge's value for it
         let mut with: IndexMap<String, Value> = IndexMap::default();
         for (alias, (member, init)) in own {
@@ -204,7 +205,7 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
                     Some(tree) => tree.clone(),
                     None => init.as_ref().map(|v| json!({"k": "Literal", "v": v})),
                 },
-                (None, Some(f)) => set.on_edge(member, alias, init.as_ref(), f, &creators[&class]).filter(|v| !set.narrowed.contains(member) || literal(v, false)),
+                (None, Some(f)) => set.on_edge(member, alias, init.as_ref(), f, under.as_deref(), &creators[&class]).filter(|v| !set.narrowed.contains(member) || literal(v, false)),
                 _ => None,
             };
             if let Some(v) = value {
@@ -259,7 +260,8 @@ const ANY_NAME: &str = "*";
 struct InstanceWrites {
     /// Input member id -> every write from outside its class: the function it sits in, and its value when that is a literal
     /// written unconditionally.
-    writes: IndexMap<String, Vec<(String, Option<Value>)>>,
+    /// written unconditionally but for the branch it sits under, and that branch.
+    writes: IndexMap<String, Vec<(String, Option<Value>, Option<String>)>>,
     /// Members their own class writes, which no binding defines.
     own: crate::rows::IndexSet<String>,
     /// Inputs their own class writes ONLY as `this.f = this.f && ..`: a falsy value handed in stays falsy, a truthy one is no
@@ -269,20 +271,24 @@ struct InstanceWrites {
     by_name: crate::rows::IndexSet<String>,
     /// Call id -> the function it sits in.
     fn_of_call: IndexMap<String, String>,
+    /// Call id -> the innermost branch it sits under.
+    branch_of_call: IndexMap<String, String>,
 }
 
 impl InstanceWrites {
     /// The value a code edge from the creating function `f` gives the input `member`, or nothing when it is not proved.
-    fn on_edge(&self, member: &str, alias: &str, init: Option<&Value>, f: &str, creators: &IndexMap<String, usize>) -> Option<Value> {
+    /// A WRITE UNDER THE BRANCH THE CREATING CALL SITS UNDER (`under`) is as unconditional as the edge itself: `if (byMail) { const m =
+    /// create(..); m.flag = false; }` (#147).
+    fn on_edge(&self, member: &str, alias: &str, init: Option<&Value>, f: &str, under: Option<&str>, creators: &IndexMap<String, usize>) -> Option<Value> {
         if creators.get(f) != Some(&1) || self.by_name.contains(alias) || self.by_name.contains(ANY_NAME) {
             return None;
         }
         let writes = self.writes.get(member).map(Vec::as_slice).unwrap_or_default();
-        let mut here = writes.iter().filter(|(w, _)| w == f);
+        let mut here = writes.iter().filter(|(w, _, _)| w == f);
         match (here.next(), here.next()) {
-            (Some((_, Some(v))), None) => Some(json!({"k": "Literal", "v": v})),
+            (Some((_, Some(v), b)), None) if b.as_deref() == under => Some(json!({"k": "Literal", "v": v})),
             (Some(_), _) => None,
-            (None, _) if writes.iter().all(|(w, _)| creators.contains_key(w)) => init.map(|v| json!({"k": "Literal", "v": v})),
+            (None, _) if writes.iter().all(|(w, _, _)| creators.contains_key(w)) => init.map(|v| json!({"k": "Literal", "v": v})),
             (None, _) => None,
         }
     }
@@ -302,15 +308,18 @@ fn instance_writes(store: &Store<'_>) -> InstanceWrites {
             }
             continue;
         }
-        let plain = cell(a, "operator").as_deref() == Some("=") && ["branch", "loop", "case", "choices"].iter().all(|k| a.get(*k).is_none_or(Value::is_null));
+        let plain = cell(a, "operator").as_deref() == Some("=") && ["loop", "case", "choices"].iter().all(|k| a.get(*k).is_none_or(Value::is_null));
         let value = a.get("value").filter(|v| plain && matches!(v, Value::Bool(_) | Value::Number(_) | Value::String(_))).cloned();
-        out.writes.entry(target).or_default().push((cell(a, "member").unwrap_or_default(), value));
+        out.writes.entry(target).or_default().push((cell(a, "member").unwrap_or_default(), value, cell(a, "branch")));
     }
     let own = std::mem::take(&mut out.own);
     out.narrowed.retain(|m| !own.contains(m));
     out.own = own;
     for c in store.table("calls").iter() {
         if let (Some(id), Some(f)) = (cell(c, "id"), cell(c, "member")) {
+            if let Some(b) = cell(c, "branch") {
+                out.branch_of_call.insert(id.clone(), b);
+            }
             out.fn_of_call.insert(id, f);
         }
         if cell(c, "method").as_deref() == Some("setInput") {
