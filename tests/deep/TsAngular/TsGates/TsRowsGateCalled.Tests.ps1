@@ -86,10 +86,11 @@ Test-Case 'tsrows keys: a key a private method translates is reached under the b
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db $script:CalledBranchQ
-    Assert-Line $r "demo.pipe.flat | name === 'flat'"
+    # EVERY CALL AFTER A GUARD THAT RETURNS sits in its `else`: `flat` is reached only when no earlier guard took the call (#129)
+    Assert-Line $r "demo.pipe.flat | name === 'home' && DemoEnv.isHomeStatic() ; name === "
     Assert-Line $r "demo.pipe.home | name === 'home' && DemoEnv.isHomeStatic()"
-    # one call of `lifeText` holds no branch of its own, so no branch holds on every way
-    Assert-Line $r 'demo.pipe.life | -'
+    # both calls of `lifeText` follow the `home` guard: its negation holds on every way, the `life` test only on one
+    Assert-Line $r "demo.pipe.life | name === 'home' && DemoEnv.isHomeStatic()"
     # `tipText` is also handed to `setTimeout`, a read that is no call: it runs where the map cannot see
     Assert-Line $r 'demo.pipe.tip | -'
 }

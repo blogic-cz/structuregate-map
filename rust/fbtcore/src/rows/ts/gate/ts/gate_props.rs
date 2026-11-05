@@ -178,10 +178,9 @@ impl<'a> Props<'a> {
         }
         // A TOP-LEVEL `then` a getter's return may sit under - see the getter arm below.
         let all_branches = store.table("branches");
-        let guards: IndexMap<String, &Row> = all_branches.iter()
-            .filter(|b| cell(b, "sense").as_deref() == Some("then") && cell(b, "parent").is_none())
-            .filter_map(|b| cell(b, "id").map(|id| (id, b)))
-            .collect();
+        // ...and the top-level `else` of one: `return false` after an `if` that always returns sits in it, as one written `else`.
+        let top = |sense: &str| -> IndexMap<String, &Row> { all_branches.iter().filter(|b| cell(b, "sense").as_deref() == Some(sense) && cell(b, "parent").is_none()).filter_map(|b| cell(b, "id").map(|id| (id, b))).collect() };
+        let (guards, elses) = (top("then"), top("else"));
         let written_by_template = template_written(store);
         let mut lifecycle: IndexMap<String, String> = IndexMap::default();
         for m in store.table("members").iter() {
@@ -222,10 +221,13 @@ impl<'a> Props<'a> {
                     }
                     // `if (C) { return E; } return false;` IS `C && E`, both ways: one return under one
                     // top-level `then`, and every other return the literal `false`.
+                    let fallback = |r: &Row| plain(r) || (cell(r, "case").is_none() && cell(r, "branch").is_some_and(|b| elses.contains_key(&b)));
                     let (falses, kept): (Vec<&&Row>, Vec<&&Row>) =
-                        rs.iter().partition(|r| plain(r) && cell(r, "source").as_deref() == Some("false"));
+                        rs.iter().partition(|r| fallback(r) && cell(r, "source").as_deref() == Some("false"));
                     let (Some(_), [r]) = (falses.first(), kept.as_slice()) else { continue };
                     let Some(b) = cell(r, "branch").and_then(|b| guards.get(&b)).filter(|_| cell(r, "case").is_none()) else { continue };
+                    // A `false` in an `else` is the fallback only of THIS guard: the `else` of another condition says something else.
+                    if !falses.iter().all(|f| cell(f, "branch").and_then(|x| elses.get(&x)).is_none_or(|e| cell(e, "condition_expr") == cell(b, "condition_expr"))) { continue; }
                     let cond = tree(cell(b, "condition_expr"), Some(id.clone()));
                     // A `const` LOCAL TESTED AS THE CONDITION is its initializer: the read is a truth position, and a
                     // const holds that value wherever it is read (#65: `const isA = isHome(...k); if (isA)`).

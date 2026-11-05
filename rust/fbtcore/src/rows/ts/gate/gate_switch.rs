@@ -14,11 +14,8 @@
 //! restriction" for content one variant alone renders, and a reader that
 //! widens on silence takes it as shown for every tier.
 //!
-//! `ngSwitchDefault` IS STILL INVISIBLE HERE, and cannot be fixed from this file: it takes
-//! no value, so it has no `expressions` row and therefore no `gates` row at all (its
-//! `bindings` rows, no gates). Its arm is the COMPLEMENT of its siblings — a `not_in` — and
-//! stating it needs the extractor to emit a gate for a valueless structural attribute
-//! first. Named so the remaining hole is a known one rather than a clean-looking count.
+//! `ngSwitchDefault` TAKES NO VALUE, so its gate has no expression (the extractor writes one for every valueless
+//! structural attribute). Its arm is the COMPLEMENT of its siblings - a `not_in` over every case of its switch.
 //!
 //! THE BLOCK FORM IS THE SAME COMPARISON (#40): `@switch (tier.TierID)` is a `block` gate named
 //! `SwitchBlock` (the dimension) and each `@case (TierIDs.Gamma)` a `block` gate named `SwitchBlockCase`
@@ -90,6 +87,11 @@ pub fn enclosing_dimension<'a>(
     parent: &IndexMap<String, Option<String>>,
     dims: &'a IndexMap<String, Dimension>,
 ) -> Option<&'a Dimension> {
+    enclosing_switch(node, parent, dims).and_then(|id| dims.get(&id))
+}
+
+/// The node of the nearest enclosing switch, by the same walk.
+fn enclosing_switch(node: &str, parent: &IndexMap<String, Option<String>>, dims: &IndexMap<String, Dimension>) -> Option<String> {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     seen.insert(node.to_string());
     let mut current = parent.get(node).cloned().flatten();
@@ -97,8 +99,8 @@ pub fn enclosing_dimension<'a>(
         if seen.contains(&id) {
             return None;
         }
-        if let Some(dim) = dims.get(&id) {
-            return Some(dim);
+        if dims.contains_key(&id) {
+            return Some(id);
         }
         seen.insert(id.clone());
         current = parent.get(&id).cloned().flatten();
@@ -190,16 +192,20 @@ pub fn switch_restrictions(
     let mut out: IndexMap<String, Vec<Value>> = IndexMap::default();
     let mut stats = SwitchStats { switches: dims.len(), ..Default::default() };
 
+    // switch node -> what each of its cases names, for the default arm.
+    let mut cases_of: IndexMap<String, Vec<Option<(String, String)>>> = IndexMap::default();
     for g in gates.iter().filter(|g| is_case(g)) {
         let Some(node) = id_of(g, "node") else {
             stats.unplaced += 1;
             continue;
         };
-        let Some(dim) = enclosing_dimension(&node, &parent, &dims) else {
+        let Some(at) = enclosing_switch(&node, &parent, &dims) else {
             stats.unplaced += 1;
             continue;
         };
+        let dim = &dims[&at];
         let con = ast_of(g).and_then(|ast| constant_of(ast, mem, idx));
+        cases_of.entry(at).or_default().push(con.clone());
         let Some(arm) = switch_arm(dim, con.as_ref()) else {
             stats.nameless += 1;
             continue;
@@ -214,7 +220,41 @@ pub fn switch_restrictions(
             out.insert(id, vec![arm]);
         }
     }
+    // `*ngSwitchDefault` RENDERS WHEN NO SIBLING CASE MATCHES: a `not_in` over every case of its switch - `unknown` when one of them names
+    // no member of the dimension's enum, since the complement of a value the map cannot name is no value it can.
+    for g in gates.iter().filter(|g| text(g, "name").as_deref() == Some("ngSwitchDefault")) {
+        let (Some(id), Some(node)) = (id_of(g, "id"), id_of(g, "node")) else { continue };
+        let Some(at) = enclosing_switch(&node, &parent, &dims) else {
+            stats.unplaced += 1;
+            continue;
+        };
+        let cases = cases_of.get(&at).map(Vec::as_slice).unwrap_or_default();
+        if let Some(arm) = default_arm(&dims[&at], cases) {
+            stats.gates += 1;
+            out.insert(id, vec![arm]);
+        }
+    }
     (out, stats)
+}
+
+/// THE DEFAULT ARM as a `gate_values` row: `not_in` the values its sibling cases name, all of the dimension's enum.
+pub fn default_arm(dim: &Dimension, cases: &[Option<(String, String)>]) -> Option<Value> {
+    let enum_id = dim.enum_id.clone().or_else(|| cases.iter().flatten().map(|(e, _)| e.clone()).next())?;
+    let mut values: Vec<String> = Vec::new();
+    for case in cases {
+        match case {
+            Some((found, value)) if *found == enum_id => {
+                if !values.contains(value) {
+                    values.push(value.clone());
+                }
+            }
+            _ => return Some(json!({"enum": enum_id, "dim": dim.dim, "row": dim.row, "op": "unknown"})),
+        }
+    }
+    if values.is_empty() {
+        return None;
+    }
+    Some(json!({"enum": enum_id, "dim": dim.dim, "row": dim.row, "op": "not_in", "values": values}))
 }
 
 #[cfg(test)]

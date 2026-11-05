@@ -389,19 +389,19 @@ pub fn gate_values_with(
     let stage = crate::trace::stage("gate_values: gates");
     let polarity = class_polarity(store);
     for g in store.table("gates").iter() {
-        let Some(e) = id_of(g, "expression").and_then(|x| expr_by_id.get(&x)) else { continue };
-        let Some(ast) = e.get("ast").filter(|a| !a.is_null()) else { continue };
-
-        // A CLASS GATE reads on the false side when its class hides, and is no condition when it only styles.
-        let (ast, negated) = match id_of(g, "id").and_then(|id| polarity.get(&id)) {
-            Some(Polarity::Hides) => (ast, true),
-            Some(Polarity::Styles) => continue,
-            Some(Polarity::Shown(c)) => (c, false),
-            None => (ast, false),
-        };
-
+        // A GATE WITH NO EXPRESSION (a valueless `*ngSwitchDefault`) states only what another source reads for it (`extra`).
+        let ast = id_of(g, "expression").and_then(|x| expr_by_id.get(&x)).and_then(|e| e.get("ast").filter(|a| !a.is_null()));
         let mut found = OrderedSet::new();
-        necessary_either(&props.expand(ast), negated, &mut leaf, &mut either, &mut found);
+        if let Some(ast) = ast {
+            // A CLASS GATE reads on the false side when its class hides, and is no condition when it only styles.
+            let (ast, negated) = match id_of(g, "id").and_then(|id| polarity.get(&id)) {
+                Some(Polarity::Hides) => (ast, true),
+                Some(Polarity::Styles) => continue,
+                Some(Polarity::Shown(c)) => (c, false),
+                None => (ast, false),
+            };
+            necessary_either(&props.expand(ast), negated, &mut leaf, &mut either, &mut found);
+        }
         if let Some(id) = id_of(g, "id")
             && let Some(more) = extra.get(&id)
         {
