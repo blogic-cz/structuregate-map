@@ -304,7 +304,9 @@ Test-Case 'tsrows: an input written on the instance a project factory returns re
 
 # A CHILD NARROWING ITS OWN INPUT (`this.showExtra = this.showExtra && await ..` in `ngOnInit`, #147) keeps a falsy value falsy: Beta leaves it
 # `undefined`, so its way is still no way. A truthy one is no longer known - Gamma's `true` meets the feature check - so its way stays, with no
-# condition, and `*ngIf="!showExtra"` is still reached from Gamma.
+# condition, and `*ngIf="!showExtra"` is still reached from Gamma. Delta creates it and writes `false` inside one `if`: a write under the
+# branch the creating call sits under is unconditional for that edge, so Delta's way is no way either. Epsilon's `false` sits under an
+# `if` its creating call is not under, so it binds nothing and Epsilon's way stays.
 Test-Case 'tsrows: an input its own component narrows with && stays false on the edge that leaves it unset' {
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/modal.component.ts' = "import { Component, Injectable, Input, OnInit } from '@angular/core';`n" +
@@ -322,15 +324,22 @@ Test-Case 'tsrows: an input its own component narrows with && stays false on the
             "  open() { const ref = this.at.createComponent(DemoModalComponent); ref.instance.title = 'demo.title'; }`n}`n" +
             "@Component({ selector: 'demo-gamma', standalone: true, template: '<button (click)=`"open()`">g</button>' })`n" +
             "export class GammaPanelComponent {`n  constructor(private at: ViewContainerRef) {}`n" +
-            "  open() { const ref = this.at.createComponent(DemoModalComponent); ref.instance.showExtra = true; }`n}`n"
+            "  open() { const ref = this.at.createComponent(DemoModalComponent); ref.instance.showExtra = true; }`n}`n" +
+            "@Component({ selector: 'demo-delta', standalone: true, template: '<button (click)=`"share(true)`">d</button>' })`n" +
+            "export class DeltaPanelComponent {`n  constructor(private at: ViewContainerRef) {}`n" +
+            "  async share(byMail: boolean) {`n    if (byMail) {`n      const ref = this.at.createComponent(DemoModalComponent);`n" +
+            "      ref.instance.title = 'demo.title';`n      ref.instance.showExtra = false;`n    }`n  }`n}`n" +
+            "@Component({ selector: 'demo-epsilon', standalone: true, template: '<button (click)=`"open(true)`">e</button>' })`n" +
+            "export class EpsilonPanelComponent {`n  constructor(private at: ViewContainerRef) {}`n" +
+            "  open(quiet: boolean) {`n    const ref = this.at.createComponent(DemoModalComponent);`n    if (quiet) {`n      ref.instance.showExtra = false;`n    }`n  }`n}`n"
         'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"extraOption":"x","noExtra":"n","always":"y","title":"t"}}'
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $n = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT key || ' paths ' || n_paths AS p FROM key_reach WHERE key LIKE 'demo.%'"
-    Assert-Line $n 'demo.always paths 3'
-    Assert-Line $n 'demo.extraOption paths 2'
-    Assert-Line $n 'demo.noExtra paths 3'
+    Assert-Line $n 'demo.always paths 5'
+    Assert-Line $n 'demo.extraOption paths 3'
+    Assert-Line $n 'demo.noExtra paths 5'
 }
 
 # A `gateInputs` PROPERTY HIDES NOTHING AT `false`. `[disabled]="isDisabled"` is a declared gate in A; the modal binds
