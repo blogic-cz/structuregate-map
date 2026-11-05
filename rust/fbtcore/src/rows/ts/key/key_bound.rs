@@ -23,6 +23,7 @@
 //! sets nothing leaves the input at its initializer - but only while every write of the input sits in some creator of that
 //! class, no `setInput` names it, and the creator creates that class once: a write anywhere else may be on this instance too.
 //! A write under a condition, in a loop or of a value that is no literal binds nothing either way.
+//! An input with no initializer is `undefined` on an edge that binds nothing, which a condition reads as `false`.
 
 use super::astreads::unwrap;
 use super::closure::RenderPath;
@@ -49,8 +50,32 @@ pub struct Bound {
     pub component_of_gate: IndexMap<String, String>,
 }
 
+/// Whether `ast` is a literal that JavaScript reads as `v` in a condition: `null` (which stands for `undefined` too), `0` and
+/// `""` read `false`, as `*ngIf` reads them.
 fn literal(ast: &Value, v: bool) -> bool {
-    ast.get("k").and_then(|k| k.as_str()) == Some("Literal") && ast.get("v") == Some(&Value::Bool(v))
+    if ast.get("k").and_then(|k| k.as_str()) != Some("Literal") {
+        return false;
+    }
+    let truthy = match ast.get("v") {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0 && !f.is_nan()),
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(Value::Null) => false,
+        _ => return false,
+    };
+    truthy == v
+}
+
+/// AN INPUT'S VALUE BEFORE ANYONE BINDS IT (#147): its literal initializer, or `undefined` - spelt `null`, which reads the
+/// same in a condition - when it has none (`@Input() showExtra: boolean;`), is `= null` or `= undefined`. A non-literal
+/// initializer is an object here (`TsDecls/TsExpr/TsValue.mjs::unresolved`) and states nothing.
+fn initial(m: &Row) -> Option<Value> {
+    match m.get("value") {
+        None | Some(Value::Null) => Some(Value::Null),
+        Some(v @ (Value::Bool(_) | Value::Number(_) | Value::String(_))) => Some(v.clone()),
+        Some(Value::Object(o)) if o.get("$literal").and_then(Value::as_str) == Some("undefined") => Some(Value::Null),
+        Some(_) => None,
+    }
 }
 
 /// THE FOLD IS ONLY AS LARGE AS THE SUBSTITUTION NEEDS: `true && x` is `x`, a `false` operand is `false`.
@@ -122,7 +147,7 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
             continue;
         }
         let Some(alias) = input_alias(m) else { continue };
-        let init = m.get("value").filter(|v| matches!(v, Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Null)).cloned();
+        let init = initial(m);
         inputs.entry(class).or_default().insert(alias, (id, init));
     }
     if inputs.is_empty() {
