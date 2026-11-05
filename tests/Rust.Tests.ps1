@@ -140,6 +140,27 @@ Test-Case 'rs map: a name a let, a parameter or a closure binds is a local, and 
     Assert-Equal (Get-RsImports $found.Map 'src/e.rs').Count 0 'a file''s own private n shadows a''s pub n'
 }
 
+Test-Case 'rs map: a name joins only into its own crate and the crates its Cargo.toml depends on' {
+    # Found on this repo's own tree: one name table drew `fbt -> fbtcore` though only fbtcore depends on fbt, and joined a
+    # `build.rs` to the `src/` of its own package, which it cannot name.
+    $tree = Use-Tree @{
+        'Cargo.toml'       = "[workspace]`nmembers = [`"alpha`", `"beta`", `"gamma`"]`n[workspace.dependencies]`nalpha = { path = `"alpha`" }`n"
+        'alpha/Cargo.toml' = "[package]`nname = `"alpha`"`nversion = `"0.1.0`"`n"
+        'alpha/src/lib.rs' = "pub fn go() { x(); }`n"
+        'beta/Cargo.toml'  = "[package]`nname = `"beta`"`nversion = `"0.1.0`"`n[dependencies]`nalpha = { path = `"../alpha`" }`n"
+        'beta/src/lib.rs'  = "use alpha::go;`npub fn x() { go(); }`n"
+        'beta/build.rs'    = "fn main() { x(); }`n"
+        'gamma/Cargo.toml' = "[package]`nname = `"gamma`"`nversion = `"0.1.0`"`n[dependencies]`nalpha = { workspace = true }`n"
+        'gamma/src/lib.rs' = "pub fn y() { go(); }`n"
+    }
+    $found = Get-RsMap --root $tree
+    Assert-Exit $found 0
+    Assert-Equal (Get-RsImports $found.Map 'alpha/src/lib.rs').Count 0 'alpha cannot name beta'
+    Assert-Equal ((Get-RsImports $found.Map 'beta/src/lib.rs') -join ',') 'alpha/src/lib.rs' 'beta depends on alpha'
+    Assert-Equal (Get-RsImports $found.Map 'beta/build.rs').Count 0 'build.rs cannot name its own src'
+    Assert-Equal ((Get-RsImports $found.Map 'gamma/src/lib.rs') -join ',') 'alpha/src/lib.rs' 'a workspace = true dependency'
+}
+
 Test-Case 'rs map: a rust item does not make a C# name ambiguous - the languages join apart' {
     # Found on this repo's own tree: `pub struct Check` in a rust file made the C# class `Check`
     # ambiguous, the edge was dropped, and Check.cs was reported as having no reader.

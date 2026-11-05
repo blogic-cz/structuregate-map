@@ -11,6 +11,7 @@
 //! is only knowable with the filesystem in view. The gate's count of a rust file is `count::`'s, which
 //! calls `lines::count` here.
 
+pub(crate) mod cargo;
 pub(crate) mod consts;
 pub(crate) mod fingerprint;
 pub(crate) mod handlers;

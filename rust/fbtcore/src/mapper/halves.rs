@@ -8,9 +8,11 @@ use super::protocol::{read, Collector};
 use crate::graph::{Computed, Place};
 use crate::hosts::plugins;
 use super::kept::Kept;
+use crate::rsmap::cargo;
 use crate::{gomap, mdmap, rsmap};
 use rayon::prelude::*;
 use serde_json::Value;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
 pub use super::script::{background, finish, script, Script};
@@ -31,6 +33,29 @@ pub fn mark(into: &mut Collector, prefix: &str, files: &[(String, String)], reas
 /// THE RUST HALF, in process: `syn` parses, and a `mod name;` is an exact edge.
 pub fn rust(into: &mut Collector, root: &str, prefix: &str, files: &[(String, String)], kept: &mut Option<Kept>) {
     in_process(into, root, prefix, files, kept, ("rust", "rust in-process (syn)", "rust".into()), rsmap::map_file);
+    rust_crates(into, root, prefix, files);
+}
+
+/// WHICH CRATE EACH RUST FILE IS IN and which it can name (`rsmap::cargo`), for the join (`graph/join.rs`). A folder is
+/// prefixed as the file rows are, the root's own as the prefix without its slash.
+fn rust_crates(into: &mut Collector, root: &str, prefix: &str, files: &[(String, String)]) {
+    let root = Path::new(root);
+    let at = |folder: &str| if folder.is_empty() { prefix.trim_end_matches('/').to_string() } else { format!("{prefix}{folder}") };
+    let mut packages = HashMap::new();
+    let mut reaches: HashMap<String, cargo::Reach> = HashMap::new();
+    for (rel, _) in files {
+        let Some(package) = cargo::package_of(root, rel, &mut packages) else { continue };
+        let unit = cargo::unit(rel, &package);
+        let build = unit != package;
+        let reach = reaches.entry(package.clone()).or_insert_with(|| cargo::reach(root, &package));
+        let mut can: BTreeSet<String> = if build { reach.build.iter().map(|x| at(x)).collect() } else { reach.normal.iter().map(|x| at(x)).collect() };
+        if !build {
+            can.insert(at(&package));
+        }
+        let row = into.row(&format!("{prefix}{rel}"), "rust");
+        row.unit = Some(if build { format!("{}#build", at(&package)) } else { at(&package) });
+        row.reach = Some(can);
+    }
 }
 
 /// THE GO HALF, in process by `gosyn` (`gomap/`). Its answer about a file also reads the `go.mod` that says where

@@ -48,3 +48,4 @@ callable's parameters, and C# `calls` bound to `System.Net.Http` (`cscalls.rs`, 
 callers are the rows); `http_links` is their match. The three tables are DROPped and CREATEd by every run that does not
 REPLAY them: the pass is keyed on what it reads (`rows/http/inputs.rs`: the build, every C# file's sha, and a token the TypeScript
 store moves only when a row of `TS_INPUTS` may have - a partial run compares what it removed with what it wrote).
+- A name joins only into the file's own crate and the in-tree crates its Cargo.toml depends on by `path` (directly or `workspace = true`; `rsmap/cargo.rs`); a `build.rs` is its own crate and sees only its `[build-dependencies]`; a file outside any package joins as before. `--map-if-stale` does not watch Cargo.toml.
