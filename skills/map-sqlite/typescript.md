@@ -107,7 +107,7 @@ Beside the shared tables it adds the FRAMEWORK tables:
   `for..of`/`for..in`, else the condition; `''` for `for (;;)`), `expr` (joins `expressions.id`, role `loop`), `incrementor_source`, `line`/`col`/`end_line`,
   `member`/`class`, and `branch`/`case`/`choices` as a `calls` row has them. A row INSIDE a loop's body (`calls`, `assignments`, `locals`, `returns`,
   `raises`, `handlers`, a nested `loops`) carries `loop` (joins `loops.id`, the innermost); a callback in the body is its own member and has none.
-  `branches` holds only if-arms and `try`: a statement in a loop is not conditional. A bare expression statement that is no call or write
+  `branches` holds only if-arms and `try`: a statement in a loop is not conditional; what follows an `if` whose arm always leaves (`return`, `throw`, `break`, `continue`) sits in an `else` row of it. A `gates` row of a valueless structural attribute (`*ngSwitchDefault`) has no `expression`. A bare expression statement that is no call or write
   (`this.a.b;`) is an `expressions` row, role `statement`; `x++`/`--x` is an `assignments` row, `operator` `++`/`--`, `value` NULL.
 * **A `value` cell is the EVALUATED expression** (`returns`, `assignments`, `locals`, `members`, `consts`, `raises`, and
   each of `calls.args`): a literal is its value (`'x'`, `1`, `true`), an expression the map cannot evaluate is

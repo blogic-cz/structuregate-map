@@ -476,7 +476,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
    * a consumer reading the chain would invert half of it. `else if` needs no special case - the inner `if`'s
    * row parents to the outer `if`'s ELSE row, so walking `parent` up yields "B and not A" by construction.
    */
-  function collectIf(node, ownerId, classId, walk) {
+  function collectIf(node, ownerId, classId, walk, rest = null) {
     const condition = evalCell(node.expression);
     const source = node.expression.getText();
     // THE CONDITION'S TREE, always. `condition` is the evaluator's answer, which drops the tree of a bare
@@ -499,6 +499,43 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
     };
     branch('then', node.thenStatement);
     if (node.elseStatement) branch('else', node.elseStatement);
+    else if (rest) {
+      // WHAT FOLLOWS AN `if` WHOSE ARM ALWAYS LEAVES is its `else`: `if (C) { return a; } return b;` runs `b` only when C is false,
+      // exactly as `if (C) { return a; } else { return b; }` does - and written so, it had no branch at all. Its rows are an `else`
+      // row of the same condition spanning the rest of the block, so every reader of `sense` reads it unchanged.
+      const id = store.add('branches', 'br', {
+        member: ownerId, class: classId, parent, sense: 'else',
+        condition, condition_expr: tree, condition_source: source,
+        ...locationOf(rest[0]), end_line: locationOf(rest[rest.length - 1]).end_line,
+      });
+      currentBranch = id;
+      try {
+        walkStatements(rest, ownerId, classId, walk);
+      } finally {
+        currentBranch = parent;
+      }
+    }
+  }
+
+  /** Whether a statement always leaves its block: a `return`, a `throw`, a `break`, a `continue`, or a block or an `if`/`else` all of whose
+   *  ways end in one. */
+  function leaves(st) {
+    if (ts.isReturnStatement(st) || ts.isThrowStatement(st) || ts.isBreakStatement(st) || ts.isContinueStatement(st)) return true;
+    if (ts.isBlock(st)) return st.statements.length > 0 && leaves(st.statements[st.statements.length - 1]);
+    if (ts.isIfStatement(st)) return !!st.elseStatement && leaves(st.thenStatement) && leaves(st.elseStatement);
+    return false;
+  }
+
+  /** A block's statements in order; an `if` with no `else` whose arm always leaves takes the statements after it as its `else`. */
+  function walkStatements(statements, ownerId, classId, walk) {
+    for (let i = 0; i < statements.length; i++) {
+      const st = statements[i];
+      if (ts.isIfStatement(st) && !st.elseStatement && i + 1 < statements.length && leaves(st.thenStatement)) {
+        collectIf(st, ownerId, classId, walk, statements.slice(i + 1));
+        return;
+      }
+      walk(st);
+    }
   }
 
   /** The body of an arrow that has no block: the expression IS what the arrow returns. */
@@ -546,6 +583,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       }
       if (ts.isSwitchStatement(node)) { collectSwitch(node, ownerId, classId, walk); return; }
       if (ts.isIfStatement(node)) { collectIf(node, ownerId, classId, walk); return; }
+      if (ts.isBlock(node)) { walkStatements(node.statements, ownerId, classId, walk); return; }
       if (loopKind(ts, node) !== null) { collectLoop(node, ownerId, classId, walk); return; }
       if (ts.isExpressionStatement(node)) { collectStatement(node, walk); return; }
       if (ts.isTryStatement(node)) collectTry(node, ownerId, classId);

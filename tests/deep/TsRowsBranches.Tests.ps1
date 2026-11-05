@@ -125,9 +125,8 @@ Test-Case 'tsrows: a key chosen by a ternary or returned by a getter carries its
     Assert-Line $r 'days.mon | field_binding | day in ["Mon"]'
     Assert-Line $r 'days.other | field_binding | day not_in ["Mon"]'
     Assert-Line $r 'days.sun | field_binding | day in ["Sun"]'
-    # The early return does not make the fallback conditional on anything the map reads: it gets no value.
-    $plain = Invoke-TsRowsQ $made.Db "SELECT key || ' | ' || $(Get-NodeRootListSql 'key_reach__always_values' 'key_reach.rowid') AS reach FROM key_reach WHERE key = 'days.plain'"
-    Assert-Line $plain 'days.plain | []'
+    # WHAT FOLLOWS AN EARLY RETURN is that `if`'s else: `days.plain` is returned only when the day is not Sun.
+    Assert-Line $r 'days.plain | field_binding | day not_in ["Sun"]'
 }
 
 # A KEY HANDED TO A TRANSLATION CALL runs only when the call does: a getter returning `instant('k')` inside an
@@ -162,7 +161,41 @@ Test-Case 'tsrows: a key passed to a translation call carries the branch the cal
     # ts_call, which any other component's field_binding for the same key then replaced); the branches are the same.
     Assert-Line $r 'labels.duo | field_binding | plan in ["Duo"]'
     Assert-Line $r 'labels.team | field_binding | plan in ["Team"]'
-    Assert-Line $r 'labels.rest | field_binding | plan not_in ["Team"]'
+    # ...and after the early `return` of Duo the rest runs only when the plan is not Duo either.
+    Assert-Line $r 'labels.rest | field_binding | plan in ["Crew","Solo"]'
+}
+
+# A STRUCTURAL ATTRIBUTE WITH NO VALUE IS A GATE: `*ngSwitchDefault` renders when no sibling case matches - `not_in` every case, here
+# folded to the members left - and
+# `*demoShow`, whose directive creates the view only on a condition of its own, is a gate on every way through it.
+Test-Case 'tsrows: a valueless switch default is not_in its cases, and a valueless structural directive gates' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/plans.component.html' = "<ng-container [ngSwitch]=`"plan`"><i *ngSwitchCase=`"Plan.Duo`">{{ 'sw.duo' | money }}</i>" +
+            "<i *ngSwitchCase=`"Plan.Team`">{{ 'sw.team' | money }}</i><b *ngSwitchDefault>{{ 'sw.other' | money }}</b></ng-container>" +
+            "<span *demoShow>{{ 'sw.shown' | money }}</span><p>{{ 'sw.always' | money }}</p>`n"
+        'apps/shop/src/plans.component.ts' = "import { Component, Directive, Injectable, OnInit, TemplateRef, ViewContainerRef } from '@angular/core';`n" +
+            "import { NgSwitch, NgSwitchCase, NgSwitchDefault } from '@angular/common';`n" +
+            "export enum Plan { Solo = 1, Duo = 2, Team = 3, Crew = 4 }`n" +
+            "@Injectable({ providedIn: 'root' })`nexport class Env {`n  isAlpha(): boolean {`n    return true;`n  }`n}`n" +
+            "@Directive({ selector: '[demoShow]', standalone: true })`n" +
+            "export class DemoShowDirective implements OnInit {`n  constructor(private t: TemplateRef<any>, private v: ViewContainerRef, private env: Env) {}`n" +
+            "  ngOnInit() {`n    if (this.env.isAlpha()) {`n      this.v.createEmbeddedView(this.t);`n    } else {`n      this.v.clear();`n    }`n  }`n}`n" +
+            "@Component({ selector: 'app-plans', templateUrl: './plans.component.html', standalone: true, imports: [NgSwitch, NgSwitchCase, NgSwitchDefault, DemoShowDirective] })`n" +
+            "export class PlansComponent {`n  plan: Plan = Plan.Solo;`n  Plan = Plan;`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},"sw":{"duo":"a","team":"b","other":"c","shown":"d","always":"e"}}'
+        'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["money"],"gateInputs":["ngSwitch"]}'
+    }
+    $made = New-TsRowsDb $tree
+    $r = Invoke-TsRowsQ $made.Db ("SELECT key || ' | ' || " +
+        "$(Get-TsItemFieldSql 'key_reach__always_values' 'key_reach.rowid' 0 'dimension') || ' ' || $(Get-TsItemFieldSql 'key_reach__always_values' 'key_reach.rowid' 0 'op') || ' ' || " +
+        "$(Get-NodeItemListSql 'key_reach__always_values' 'key_reach.rowid' 0 'values') || ' | gates ' || " +
+        "(SELECT count(*) FROM key_reach__always_gates jn WHERE jn.owner = '#' || key_reach.rowid AND jn.parent = 0) AS reach FROM key_reach WHERE key LIKE 'sw.%'")
+    Assert-Line $r 'sw.duo | plan in ["Duo"]'
+    Assert-Line $r 'sw.other | plan in ["Crew","Solo"]'
+    $g = Invoke-TsRowsQ $made.Db ("SELECT key || ' | gates ' || (SELECT count(*) FROM key_reach__always_gates jn WHERE jn.owner = '#' || key_reach.rowid " +
+        "AND jn.parent = 0) AS reach FROM key_reach WHERE key IN ('sw.shown', 'sw.always')")
+    Assert-Line $g 'sw.shown | gates 1'
+    Assert-Line $g 'sw.always | gates 0'
 }
 
 # A BARE BOOLEAN PROPERTY IS READ AS WHAT IT IS ASSIGNED. Written once, it proves its expression when true and

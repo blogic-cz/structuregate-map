@@ -136,7 +136,7 @@ export function makeEmitters({ store, normalizeExpr, carriers, gateInputs, class
    * into `type`, so the binding's name is `is-active`. Class and style bindings were therefore never
    * recorded as gates at all - hundreds of rows the map silently lacked.
    */
-  function emitBound(attr, kind, nodeId, tplId, comp, carrier, shift, structural = false) {
+  function emitBound(attr, kind, nodeId, tplId, comp, carrier, shift, structural = false, alone = false) {
     // An input carries `value`, an output carries `handler` - take whichever this binding actually has.
     const expression = attr.value ?? attr.handler;
     const norm = expression ? normalizeExpr(expression) : null;
@@ -146,6 +146,16 @@ export function makeEmitters({ store, normalizeExpr, carriers, gateInputs, class
       template: tplId, node: nodeId, component: comp.id, kind,
       name: attr.name, binding_type: attr.type ?? null, source, ...span,
     });
+    // A STRUCTURAL ATTRIBUTE WITH NO VALUE IS STILL A GATE: `*ngSwitchDefault` renders only when no sibling case matches, `*demoShow` only
+    // when its directive creates the view. With no expression it had no gate row, and everything under it read as unconditional. Its
+    // row has no `expression`; what it restricts is read from the switch around it or from the directive (`gate_switch.rs`). ONLY WHEN IT
+    // IS THE ELEMENT'S ONE TEMPLATE ATTRIBUTE: `*ngFor="let x of xs"` leaves a valueless `ngFor` beside the `ngForOf` that is its gate.
+    if (!norm && kind === 'template_attr' && alone) {
+      store.add('gates', 'g', {
+        template: tplId, node: nodeId, component: comp.id, expression: null, kind, gate_kind: 'structural', name: attr.name,
+        source: null, reads: [], identifiers: [], calls: [], strings: [], ...span,
+      });
+    }
     if (!norm) return { source, exprId: null, keys: [], bindingId };
     // `[hidden]="c"` HIDES its element and subtree while `c` holds: a gate on `!c`, never on `c` (a `gateInputs`
     // entry read it so, and the key under it was restricted to the side `c` EXCLUDES).

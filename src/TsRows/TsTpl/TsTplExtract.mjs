@@ -382,7 +382,7 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
       emitBound(o, 'output', nodeId, tplId, comp, false, shift);
     }
     if (isTpl) {
-      for (const a of node.templateAttrs) emitBound(a, 'template_attr', nodeId, tplId, comp, false, shift);
+      for (const a of node.templateAttrs) emitBound(a, 'template_attr', nodeId, tplId, comp, false, shift, false, node.templateAttrs.length === 1);
       // `*ngIf="c; else ref"` RENDERS `ref` UNDER `!(c)`: a gate of its own on this node, in no node's chain (`TsGateChain.mjs`) -
       // `key_outlets.rs` puts it on the way through the `else` in place of the `ngIf` gate, as `@else` reads its negation.
       const bound = [...node.templateAttrs, ...(node.inputs ?? [])];
