@@ -23,7 +23,8 @@
 //! sets nothing leaves the input at its initializer - but only while every write of the input sits in some creator of that
 //! class, no `setInput` names it, and the creator creates that class once: a write anywhere else may be on this instance too.
 //! A write under a condition, in a loop or of a value that is no literal binds nothing either way.
-//! An input with no initializer is `undefined` on an edge that binds nothing, which a condition reads as `false`.
+//! An input with no initializer is `undefined` on an edge that binds nothing, which a condition reads as `false`. A child that
+//! writes the input only as `this.f = this.f && ..` keeps a falsy value falsy: such an edge binds only a falsy value.
 
 use super::astreads::unwrap;
 use super::closure::RenderPath;
@@ -203,7 +204,7 @@ pub fn bound_conds(store: &Store<'_>) -> Bound {
                     Some(tree) => tree.clone(),
                     None => init.as_ref().map(|v| json!({"k": "Literal", "v": v})),
                 },
-                (None, Some(f)) => set.on_edge(member, alias, init.as_ref(), f, &creators[&class]),
+                (None, Some(f)) => set.on_edge(member, alias, init.as_ref(), f, &creators[&class]).filter(|v| !set.narrowed.contains(member) || literal(v, false)),
                 _ => None,
             };
             if let Some(v) = value {
@@ -261,6 +262,9 @@ struct InstanceWrites {
     writes: IndexMap<String, Vec<(String, Option<Value>)>>,
     /// Members their own class writes, which no binding defines.
     own: crate::rows::IndexSet<String>,
+    /// Inputs their own class writes ONLY as `this.f = this.f && ..`: a falsy value handed in stays falsy, a truthy one is no
+    /// longer known.
+    narrowed: crate::rows::IndexSet<String>,
     /// Input names some `setInput` call passes.
     by_name: crate::rows::IndexSet<String>,
     /// Call id -> the function it sits in.
@@ -291,13 +295,20 @@ fn instance_writes(store: &Store<'_>) -> InstanceWrites {
     for a in store.table("assignments").iter() {
         let Some(target) = cell(a, "target_id") else { continue };
         if cell(a, "class").is_some() && cell(a, "class") == class_of.get(&target).cloned() {
-            out.own.insert(target);
+            if narrows(a) {
+                out.narrowed.insert(target);
+            } else {
+                out.own.insert(target);
+            }
             continue;
         }
         let plain = cell(a, "operator").as_deref() == Some("=") && ["branch", "loop", "case", "choices"].iter().all(|k| a.get(*k).is_none_or(Value::is_null));
         let value = a.get("value").filter(|v| plain && matches!(v, Value::Bool(_) | Value::Number(_) | Value::String(_))).cloned();
         out.writes.entry(target).or_default().push((cell(a, "member").unwrap_or_default(), value));
     }
+    let own = std::mem::take(&mut out.own);
+    out.narrowed.retain(|m| !own.contains(m));
+    out.own = own;
     for c in store.table("calls").iter() {
         if let (Some(id), Some(f)) = (cell(c, "id"), cell(c, "member")) {
             out.fn_of_call.insert(id, f);
@@ -309,6 +320,17 @@ fn instance_writes(store: &Store<'_>) -> InstanceWrites {
         }
     }
     out
+}
+
+/// `this.f = this.f && ..` - the component's own write that can only keep a falsy `f` falsy (`await this.features.isOn(..)` on the right).
+fn narrows(a: &Row) -> bool {
+    let Some(target) = cell(a, "target") else { return false };
+    let Some(value) = a.get("value") else { return false };
+    let first = value.get("$operands").and_then(Value::as_array).and_then(|o| o.first());
+    cell(a, "operator").as_deref() == Some("=")
+        && value.get("$logic").and_then(Value::as_str) == Some("&&")
+        && first.and_then(|f| f.get("$kind")).and_then(Value::as_str) == Some("PropertyAccessExpression")
+        && first.and_then(|f| f.get("$expr")).and_then(Value::as_str) == Some(format!("this.{target}").as_str())
 }
 
 /// The links a way through `path` holds for `gates`, or nothing when one of its edges is no way.

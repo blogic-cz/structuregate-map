@@ -302,6 +302,37 @@ Test-Case 'tsrows: an input written on the instance a project factory returns re
     Assert-Line $n 'demo.extraOption paths 1'
 }
 
+# A CHILD NARROWING ITS OWN INPUT (`this.showExtra = this.showExtra && await ..` in `ngOnInit`, #147) keeps a falsy value falsy: Beta leaves it
+# `undefined`, so its way is still no way. A truthy one is no longer known - Gamma's `true` meets the feature check - so its way stays, with no
+# condition, and `*ngIf="!showExtra"` is still reached from Gamma.
+Test-Case 'tsrows: an input its own component narrows with && stays false on the edge that leaves it unset' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/modal.component.ts' = "import { Component, Injectable, Input, OnInit } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`nexport class FeatureService { async isEnabled(code: string): Promise<boolean> { return !!code; } }`n" +
+            "@Component({ selector: 'demo-modal', standalone: true, template: '<div *ngIf=`"showExtra`"><span>{{ \'demo.extraOption\' | money }}</span></div><i *ngIf=`"!showExtra`">{{ \'demo.noExtra\' | money }}</i><p>{{ \'demo.always\' | money }}</p>' })`n" +
+            "export class DemoModalComponent implements OnInit {`n  @Input() showExtra: boolean;`n  @Input() title = '';`n  constructor(private features: FeatureService) {}`n" +
+            "  async ngOnInit() {`n    this.showExtra = this.showExtra && (await this.features.isEnabled('Extra'));`n  }`n}`n"
+        'apps/shop/src/panels.component.ts' = "import { Component, ViewContainerRef } from '@angular/core';`n" +
+            "import { DemoModalComponent } from './modal.component';`n" +
+            "@Component({ selector: 'demo-alpha', standalone: true, template: '<button (click)=`"open()`">a</button>' })`n" +
+            "export class AlphaPanelComponent {`n  x = false;`n  constructor(private at: ViewContainerRef) {}`n" +
+            "  open() { const ref = this.at.createComponent(DemoModalComponent); ref.instance.showExtra = !this.x; }`n}`n" +
+            "@Component({ selector: 'demo-beta', standalone: true, template: '<button (click)=`"open()`">b</button>' })`n" +
+            "export class BetaPanelComponent {`n  constructor(private at: ViewContainerRef) {}`n" +
+            "  open() { const ref = this.at.createComponent(DemoModalComponent); ref.instance.title = 'demo.title'; }`n}`n" +
+            "@Component({ selector: 'demo-gamma', standalone: true, template: '<button (click)=`"open()`">g</button>' })`n" +
+            "export class GammaPanelComponent {`n  constructor(private at: ViewContainerRef) {}`n" +
+            "  open() { const ref = this.at.createComponent(DemoModalComponent); ref.instance.showExtra = true; }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"extraOption":"x","noExtra":"n","always":"y","title":"t"}}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $n = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT key || ' paths ' || n_paths AS p FROM key_reach WHERE key LIKE 'demo.%'"
+    Assert-Line $n 'demo.always paths 3'
+    Assert-Line $n 'demo.extraOption paths 2'
+    Assert-Line $n 'demo.noExtra paths 3'
+}
+
 # A `gateInputs` PROPERTY HIDES NOTHING AT `false`. `[disabled]="isDisabled"` is a declared gate in A; the modal binds
 # `[isDisabled]="false"`, which folded to the literal `false` and dropped the modal's way as if `*ngIf="false"` stood
 # there. `demo.shown` is the control: B's `*ngIf="isShown"` bound to `false` by the modal still IS no way.
