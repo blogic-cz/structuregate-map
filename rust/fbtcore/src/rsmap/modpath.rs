@@ -92,6 +92,7 @@ mod tests {
             name: name.to_string(),
             path_attr: path_attr.map(str::to_string),
             inline: inline.iter().map(|s| s.to_string()).collect(),
+            test: false,
         }
     }
 

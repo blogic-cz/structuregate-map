@@ -50,8 +50,9 @@ pub struct Handler {
     pub test: bool,
 }
 
-pub fn read(file: &syn::File) -> Vec<Handler> {
-    let mut walker = Walker { out: Vec::new(), func: Vec::new(), cls: Vec::new(), tests: 0 };
+/// `test`: the whole file is test code (declared under `#[cfg(test)]` elsewhere, or a `tests/` crate).
+pub fn read(file: &syn::File, test: bool) -> Vec<Handler> {
+    let mut walker = Walker { out: Vec::new(), func: Vec::new(), cls: Vec::new(), tests: usize::from(test) };
     walker.visit_file(file);
     walker.out
 }
@@ -318,9 +319,13 @@ impl<'ast> Visit<'ast> for Walker {
     }
 
     fn visit_impl_item_fn(&mut self, f: &'ast syn::ImplItemFn) {
+        // A `#[test]` or `#[cfg(test)]` method counts as test code exactly as a free fn does.
+        let test = usize::from(is_test(&f.attrs));
+        self.tests += test;
         self.func.push(f.sig.ident.to_string());
         visit::visit_impl_item_fn(self, f);
         self.func.pop();
+        self.tests -= test;
     }
 
     fn visit_expr_match(&mut self, m: &'ast syn::ExprMatch) {

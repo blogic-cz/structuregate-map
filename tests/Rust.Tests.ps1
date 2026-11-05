@@ -263,3 +263,23 @@ Test-Case 'rs rows: a handler inside a macro''s arguments is a row, and a body t
     $rust = "SELECT 'v=' || group_concat(r, ' ') FROM (SELECT h.line || ':' || h.shape AS r FROM handlers h JOIN files f ON f.id = h.file WHERE f.lang = 'rust' ORDER BY h.line, h.shape)"
     Assert-Equal (Get-RsDeep $db $rust) '2:fallback 2:question 4:unwrap' 'line:shape'
 }
+
+Test-Case 'rs rows: a file a #[cfg(test)] mod declares, and a tests/ crate, are test code - and the flag follows the declaration' {
+    $nl = [string][char]10
+    $tree = Use-Tree @{
+        'src/lib.rs'       = "mod a;" + $nl + "#[cfg(test)]" + $nl + "#[path = `"lib_tests.rs`"]" + $nl + "mod tests;" + $nl
+        'src/lib_tests.rs' = "const LIMIT: u8 = 3;" + $nl + "fn helper() -> u8 { `"1`".parse().unwrap() }" + $nl
+        'src/a.rs'         = "pub fn a() -> u8 { `"2`".parse().unwrap() }" + $nl + "pub struct S;" + $nl + "impl S {" + $nl +
+                             "    #[cfg(test)]" + $nl + "    fn t() { y().unwrap(); }" + $nl + "}" + $nl + "pub const KEEP: u8 = 1;" + $nl
+        'tests/it.rs'      = "fn t() { x().unwrap(); }" + $nl
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .rs --map-sqlite $db) 0
+    $h = "SELECT 'v=' || group_concat(r, ' ') FROM (SELECT f.path || ':' || h.line || ':' || h.test AS r FROM handlers h JOIN files f ON f.id = h.file WHERE f.lang = 'rust' ORDER BY f.path, h.line)"
+    Assert-Equal (Get-RsDeep $db $h) 'src/a.rs:1:0 src/a.rs:5:1 src/lib_tests.rs:2:1 tests/it.rs:1:1' 'path:line:test'
+    Assert-Equal (Get-RsDeep $db "SELECT 'v=' || count(*) FROM consts WHERE name = 'LIMIT'") '0' 'a test file declares no constant'
+    [System.IO.File]::WriteAllText((Join-Path $tree 'src/lib.rs'), "mod a;" + $nl + "#[path = `"lib_tests.rs`"]" + $nl + "mod tests;" + $nl)
+    Assert-Exit (Invoke-Gate --root $tree --ext .rs --map-sqlite $db) 0
+    Assert-Equal (Get-RsDeep $db "SELECT 'v=' || h.test FROM handlers h JOIN files f ON f.id = h.file WHERE f.path = 'src/lib_tests.rs'") '0' 'the flag follows the declaration, the child unchanged'
+    Assert-Equal (Get-RsDeep $db "SELECT 'v=' || count(*) FROM consts WHERE name = 'LIMIT'") '1' 'and its constant is back'
+}

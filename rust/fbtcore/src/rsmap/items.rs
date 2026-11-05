@@ -28,6 +28,8 @@ pub struct ModRef {
     pub path_attr: Option<String>,
     /// The inline `mod a { ... }` blocks around it, outermost first - each is a directory.
     pub inline: Vec<String>,
+    /// Declared under `#[cfg(test)]` - on itself or an enclosing inline module.
+    pub test: bool,
 }
 
 pub struct Body {
@@ -106,6 +108,7 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
                     name: m.ident.to_string(),
                     path_attr: path_attr(&m.attrs),
                     inline: self.inline.clone(),
+                    test: self.tests > 0 || is_cfg_test(&m.attrs),
                 });
             }
             return;
