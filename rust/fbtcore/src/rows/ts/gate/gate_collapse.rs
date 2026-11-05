@@ -39,6 +39,10 @@ pub fn collapse(items: &[Value], idx: &EnumIndex) -> Vec<Value> {
 
     for r in items {
         let Some(object) = r.as_object() else { continue };
+        // AN UNSET TEST (#131) restricts nothing on its own: only `either` reads it.
+        if object.get("op").and_then(Value::as_str) == Some("unset") {
+            continue;
+        }
         let en = object.get("enum").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let dim = object.get("dim").and_then(|v| v.as_str()).unwrap_or("").to_string();
         let key = format!("{en}#{dim}");
@@ -132,6 +136,26 @@ pub fn collapse(items: &[Value], idx: &EnumIndex) -> Vec<Value> {
     out
 }
 
+/// The unset row of a read: its enum when the read is typed by one, else only its text - the other side of an OR names the enum.
+pub fn unset_of(n: &Value, mem: &super::gate_values::MemberEnums) -> Option<Value> {
+    super::gate_values::dimension_of(n, mem).map(|(en, dim, row)| unset(Some(en), dim, row)).or_else(|| super::gate_values::untyped_dimension(n).map(|dim| unset(None, dim, None)))
+}
+
+/// The internal row of a test that a dimension holds NO member (#131): never published, read only by `either`.
+pub fn unset(en: Option<String>, dim: String, row: Option<String>) -> Value {
+    json!({"enum": en, "dim": dim, "row": row, "op": "unset"})
+}
+
+/// Whether every member of the enum folded to a truthy value: then a falsy `x` is no member.
+pub fn no_falsy(idx: &EnumIndex, en: &str) -> bool {
+    idx.values.get(en).is_some_and(|members| !members.is_empty() && members.values().all(|v| match v {
+        Value::String(s) => !s.is_empty(),
+        Value::Number(n) => n.as_f64().is_some_and(|f| f != 0.0),
+        Value::Bool(b) => *b,
+        _ => false,
+    }))
+}
+
 /// A DISJUNCTION, as what BOTH of its sides prove.
 ///
 /// `a || b` permits whatever either side permits, so a dimension is restricted only when BOTH sides
@@ -143,11 +167,22 @@ pub fn collapse(items: &[Value], idx: &EnumIndex) -> Vec<Value> {
 /// A SET dimension (`gate_predicates`) unions its `in`s - "some of A is present, or some of B" is "some
 /// of A or B" - and anything else on one is `unknown`: "none of A, or none of B" is no single set.
 pub fn either(left: &[Value], right: &[Value], idx: &EnumIndex) -> Vec<Value> {
-    let right = collapse(right, idx);
     let key = |v: &Value| (v["enum"].clone(), v["dim"].clone());
     let op = |v: &Value| v["op"].as_str().unwrap_or("unknown").to_string();
-    let mut out = Vec::new();
-    for a in collapse(left, idx) {
+    // A SIDE TESTING THE DIMENSION UNSET (#131) adds no member to it: the union is what the other side permits.
+    let unset = |side: &[Value]| -> Vec<(Value, Value)> { side.iter().filter(|v| v["op"] == "unset").map(key).collect() };
+    let (unset_left, unset_right) = (unset(left), unset(right));
+    // THE UNSET TEST MATCHES ITS DIMENSION'S TEXT; its enum, when the read had none, is the other side's - and it names no member only
+    // when no member of that enum is falsy.
+    let tests = |v: &Value, unsets: &[(Value, Value)]| unsets.iter().any(|(e, d)| *d == v["dim"] && (e.is_null() || *e == v["enum"]))
+        && v["enum"].as_str().is_some_and(|e| no_falsy(idx, e));
+    let left = collapse(left, idx);
+    let right = collapse(right, idx);
+    let mut out: Vec<Value> = Vec::new();
+    for (mine, theirs, other) in [(&left, &unset_right, &right), (&right, &unset_left, &left)] {
+        out.extend(mine.iter().filter(|v| tests(v, theirs) && !other.iter().any(|o| key(o) == key(v))).cloned());
+    }
+    for a in left {
         let Some(b) = right.iter().find(|b| key(b) == key(&a)) else { continue };
         let Some(info) = a["enum"].as_str().and_then(|e| idx.by_id.get(e)) else { continue };
         let set = a["set"] == Value::Bool(true) || b["set"] == Value::Bool(true);

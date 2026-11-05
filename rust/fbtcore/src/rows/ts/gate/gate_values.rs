@@ -22,6 +22,7 @@
 //! two domains and report members the compared enum does not have.
 
 use super::astreads::is_read;
+use super::gate_collapse::unset_of;
 use super::featurewalk::{necessary_either, OrderedSet};
 use super::gate_predicates::{predicate_restriction, predicates};
 use super::store::{Row, Store};
@@ -264,6 +265,11 @@ pub fn restriction_of(
     idx: &EnumIndex,
 ) -> Option<Value> {
     let object = node.as_object()?;
+    // `!x` ON AN ENUM WITH NO FALSY MEMBER is a test that `x` is UNSET (#131): it names no member, so on its own it restricts
+    // nothing - but an OR with a side restricting `x` permits that side's members (`!x || x === K` is `in [K]`, `gate_collapse::either`).
+    if negated && is_read(node) {
+        return unset_of(node, mem);
+    }
     if object.get("k").and_then(|k| k.as_str()) != Some("Binary") {
         return None;
     }
@@ -280,7 +286,8 @@ pub fn restriction_of(
     // `unknown` the moment `x` resolved to its enum-typed member.
     let nullish = |s: &Value| s.get("k").and_then(Value::as_str) == Some("Literal") && s.get("v").is_none_or(Value::is_null);
     if !relational && sides.iter().any(|s| nullish(s)) {
-        return None;
+        // ...and `x === null` is the same unset test (#131), `x !== null` restricting nothing.
+        return sides.iter().filter(|s| !nullish(s)).find_map(|s| unset_of(s, mem)).filter(|_| EQ.contains(&op) != negated);
     }
     let con = sides.iter().find_map(|s| constant_of(s, mem, idx));
     let typed_dim = sides.iter().find_map(|s| dimension_of(s, mem));
@@ -385,12 +392,15 @@ pub fn gate_values_with(
         }
     }
 
+    // A VALUELESS STRUCTURAL DIRECTIVE renders under its own class's condition (#130, `gate_render_cond`).
+    let rendered = super::gate_render_cond::render_conds(store, &idx);
     let mut out = GateValues::default();
     let stage = crate::trace::stage("gate_values: gates");
     let polarity = class_polarity(store);
     for g in store.table("gates").iter() {
         // A GATE WITH NO EXPRESSION (a valueless `*ngSwitchDefault`) states only what another source reads for it (`extra`).
-        let ast = id_of(g, "expression").and_then(|x| expr_by_id.get(&x)).and_then(|e| e.get("ast").filter(|a| !a.is_null()));
+        let ast = id_of(g, "expression").and_then(|x| expr_by_id.get(&x)).and_then(|e| e.get("ast").filter(|a| !a.is_null()))
+            .or_else(|| id_of(g, "id").and_then(|id| rendered.get(&id)));
         let mut found = OrderedSet::new();
         if let Some(ast) = ast {
             // A CLASS GATE reads on the false side when its class hides, and is no condition when it only styles.
@@ -500,10 +510,11 @@ mod tests {
 
     #[test]
     fn a_comparison_with_null_or_undefined_restricts_nothing() {
-        // A typed dimension against `null`: no member is null, so the test says nothing of which member it holds.
+        // A typed dimension against `null`: no member is null, so the test says nothing of which member it holds - at most the
+        // internal `unset` row (#131), which `collapse` drops and only an OR reads.
+        let nothing = |r: Option<Value>| r.is_none_or(|r| r["op"] == "unset");
         for op in ["===", "!==", "==", "!="] {
-            assert!(restriction_of(&binary(op, discriminator(), json!({"k": "Literal", "v": null})), false, &mem_of(), &idx_of(FIVE)).is_none());
-            assert!(restriction_of(&binary(op, json!({"k": "Literal"}), discriminator()), false, &mem_of(), &idx_of(FIVE)).is_none());
+            assert!(nothing(restriction_of(&binary(op, discriminator(), json!({"k": "Literal", "v": null})), false, &mem_of(), &idx_of(FIVE))) && nothing(restriction_of(&binary(op, json!({"k": "Literal"}), discriminator()), false, &mem_of(), &idx_of(FIVE))));
         }
     }
 
