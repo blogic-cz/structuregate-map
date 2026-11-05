@@ -268,6 +268,40 @@ Test-Case 'tsrows: an input set on the instance of a component created in code r
     Assert-NoLine $b 'demo.always branch'
 }
 
+# THE SAME THROUGH A PROJECT FACTORY THAT RETURNS THE INSTANCE (#147): `ViewFactory.create` wraps `createComponent` and
+# returns `ref.instance`, so each panel writes the input on a local. The input has no initializer, so Beta, writing only
+# another input, leaves it `undefined` and Gamma writes `false`: both ways are no way. Alpha's non-literal write keeps its way.
+Test-Case 'tsrows: an input written on the instance a project factory returns restricts that way, and one with no initializer is undefined' {
+    $tree = New-TsRowsWorkspace @{
+        'apps/shop/src/modal.component.ts' = "import { Component, Input } from '@angular/core';`n" +
+            "@Component({ selector: 'demo-modal', standalone: true, template: '<label *ngIf=`"showExtra`">{{ \'demo.extraOption\' | money }}</label><p>{{ \'demo.always\' | money }}</p>' })`n" +
+            "export class DemoModalComponent { @Input() showExtra: boolean; @Input() other: boolean; }`n"
+        'apps/shop/src/view.factory.ts' = "import { ComponentFactoryResolver, EmbeddedViewRef, Injectable, Type, ViewContainerRef } from '@angular/core';`n" +
+            "@Injectable({ providedIn: 'root' })`nexport class ViewFactory {`n  constructor(private resolver: ComponentFactoryResolver) {}`n" +
+            "  create<T>(component: Type<T>, container: ViewContainerRef, toBody = false): T {`n" +
+            "    const ref = container.createComponent(this.resolver.resolveComponentFactory(component));`n" +
+            "    if (toBody) { document.body.appendChild((ref.hostView as EmbeddedViewRef<T>).rootNodes[0]); }`n" +
+            "    return ref.instance;`n  }`n}`n"
+        'apps/shop/src/panels.component.ts' = "import { Component, ViewContainerRef } from '@angular/core';`n" +
+            "import { DemoModalComponent } from './modal.component';`nimport { ViewFactory } from './view.factory';`n" +
+            "@Component({ selector: 'demo-alpha', standalone: true, template: '<button (click)=`"open()`">a</button>' })`n" +
+            "export class AlphaPanelComponent {`n  isA = false; isB = false;`n  constructor(private factory: ViewFactory, private vcr: ViewContainerRef) {}`n" +
+            "  open() { const modal = this.factory.create(DemoModalComponent, this.vcr, true); modal.showExtra = !(this.isA || this.isB); }`n}`n" +
+            "@Component({ selector: 'demo-beta', standalone: true, template: '<button (click)=`"open()`">b</button>' })`n" +
+            "export class BetaPanelComponent {`n  constructor(private factory: ViewFactory, private vcr: ViewContainerRef) {}`n" +
+            "  open() { const modal = this.factory.create(DemoModalComponent, this.vcr, true); modal.other = true; }`n}`n" +
+            "@Component({ selector: 'demo-gamma', standalone: true, template: '<button (click)=`"open()`">g</button>' })`n" +
+            "export class GammaPanelComponent {`n  constructor(private factory: ViewFactory, private vcr: ViewContainerRef) {}`n" +
+            "  open() { const modal = this.factory.create(DemoModalComponent, this.vcr, true); modal.showExtra = false; }`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"extraOption":"x","always":"y"}}'
+    }
+    $made = New-TsRowsDb $tree
+    Assert-Exit $made.Result 0
+    $n = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT key || ' paths ' || n_paths AS p FROM key_reach WHERE key LIKE 'demo.%'"
+    Assert-Line $n 'demo.always paths 3'
+    Assert-Line $n 'demo.extraOption paths 1'
+}
+
 # A `gateInputs` PROPERTY HIDES NOTHING AT `false`. `[disabled]="isDisabled"` is a declared gate in A; the modal binds
 # `[isDisabled]="false"`, which folded to the literal `false` and dropped the modal's way as if `*ngIf="false"` stood
 # there. `demo.shown` is the control: B's `*ngIf="isShown"` bound to `false` by the modal still IS no way.
