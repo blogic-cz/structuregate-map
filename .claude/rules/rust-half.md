@@ -33,7 +33,7 @@ THE DEEP MAP'S RUST ROWS (`--map-sqlite`) are `files`, `consts` and `handlers`, 
 A constant is a module-level, inline-`mod`, `impl` or `trait` `const`/`static`; one in a function body or a
 `#[cfg(test)]` module is not. A handler is every way an error is dealt with - each `?`, `Err` arm, `if let Err`,
 `let Ok(..) else`, `unwrap`/`expect`, fallback, `.ok()`, `map_err`, `let _ =` and `catch_unwind` - named by `shape`,
-with `test` set inside a `#[cfg(test)]` module or `#[test]` fn. No type checker: an Option's `.unwrap()` is a row too. `string_literals` and
+inside a macro's arguments too, when they parse as expressions, with `test` set inside a `#[cfg(test)]` module or `#[test]` fn. No type checker: an Option's `.unwrap()` is a row too. `string_literals` and
 `number_literals` (`rsmap/literals.rs`) carry the `use`/`callee`/`target` every half shares for `--magic`; syn keeps
 no parent, so a parent hands its child the use, and a macro's body is parsed as expressions where it can be. **Bump `ROWS_VERSION` in `rust.rs` with every change to what it writes**, or
 an unchanged file keeps the old rows.

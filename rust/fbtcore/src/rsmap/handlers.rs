@@ -20,6 +20,8 @@
 //! WHICH TYPE a method is called on is not known here - there is no type checker in this process - so an
 //! `.unwrap()` on an Option is a row too. `test` marks what sits in a `#[cfg(test)]` module or a `#[test]`
 //! function, where unwrapping is the idiom: a query about production code says `test = 0`.
+//!
+//! A HANDLER INSIDE A MACRO'S ARGUMENTS is a row when the body parses as expressions (`format!`, `println!`).
 
 use super::consts::{compact, path_text, Names};
 use syn::spanned::Spanned;
@@ -282,6 +284,17 @@ impl Walker {
 }
 
 impl<'ast> Visit<'ast> for Walker {
+    /// A MACRO'S ARGUMENTS ARE TOKENS to syn: `format!("{}", x?)` held a `?` no row saw. A body that parses as
+    /// comma-separated expressions - `format!`, `println!`, `write!`, `assert!`, `vec![a, b]` - is walked as
+    /// them, as `literals.rs` reads it; one that does not (`json!`, `matches!`, `vec![x; n]`) stays unread.
+    fn visit_macro(&mut self, m: &'ast syn::Macro) {
+        if let Ok(args) = m.parse_body_with(syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated) {
+            for arg in &args {
+                walk(self, arg);
+            }
+        }
+    }
+
     fn visit_item_mod(&mut self, m: &'ast syn::ItemMod) {
         let test = usize::from(is_test(&m.attrs));
         self.tests += test;
@@ -399,3 +412,9 @@ impl<'ast> Visit<'ast> for Walker {
 #[cfg(test)]
 #[path = "handlers_tests.rs"]
 mod tests;
+
+/// The parsed arguments are owned by `visit_macro`, so they cannot live for the tree's `'ast`; one impl exists
+/// per lifetime, and this picks a local one.
+fn walk<'a>(w: &mut Walker, e: &'a syn::Expr) {
+    <Walker as Visit<'a>>::visit_expr(w, e)
+}

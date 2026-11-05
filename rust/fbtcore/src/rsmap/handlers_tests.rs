@@ -52,3 +52,9 @@ fn a_let_chain_an_nested_ok_err_arm_and_a_discarded_if_are_rows() {
     let found = handlers(text);
     assert_eq!(shapes(&found), ["if_let", "match", "discard"]);
 }
+
+#[test]
+fn a_handler_inside_a_macro_argument_is_a_row() {
+    let found = handlers("fn f() { let s = format!(\"{}\", x?); assert!(y.ok().is_some()); }\n");
+    assert_eq!(shapes(&found), ["question", "ok"]);
+}
