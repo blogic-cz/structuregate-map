@@ -8,8 +8,9 @@
 //! - `binding` - the `bindings` row of the template expression that places the key (NULL for text content), `input` its name;
 //! - `literal` - the `template_literals` row that built the key on that way: a `tpl:` link of the way, or - for a field or a
 //!   method the template reads, whose ways drop those links - a literal `key_builds` has for the key inside that member's lines or those of
-//!   any member or function it calls, transitively, and of every method assigning a field it reads (#135: a getter returning a service
-//!   call; an `*ngFor` collection is the member it reads; `this.rows = IDS.map(id => ..)` in a method);
+//!   any member or function it calls, transitively, of every method assigning or pushing onto a field it reads, and of the parent fields
+//!   an `@Input` it reads is bound to (#135: a getter returning a service call; an `*ngFor` collection is the member it reads;
+//!   `this.rows = IDS.map(id => ..)` in a method; `[model]="kinds"` on the child's element);
 //!   NULL when the key is written whole or the map cannot tell;
 //! - `typed` - 1 when every hole of that literal is typed (an enum, a union of literals: `key_builds`), so it builds the key exactly; 0 when
 //!   a hole is untyped, or the literal's prefix spells the key but its types say it cannot build it (#132) - an expansion; NULL without a literal.
@@ -65,15 +66,16 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
             callees.entry(from).or_default().insert(to);
         }
     }
-    // ...AND OF EVERY METHOD THAT ASSIGNS THE FIELD the site reads: `this.rows = IDS.map(id => ({ name: t(`demo.item_${id}`) }))` in a
-    // method - the field's own initializer is often only `[]`. (A `push` onto it needs nothing here: its value is on the route already.)
-    let writers = writers(store);
+    // ...AND OF EVERY METHOD THAT ASSIGNS OR PUSHES ONTO THE FIELD the site reads: `this.rows = IDS.map(id => ({ name: t(`demo.item_${id}`) }))`
+    // in a method - the field's own initializer is often only `[]` - or `this.rows.push({ label: this.labelOf(code) })`; and, for an
+    // `@Input`, of the fields its parents bind it to (`[model]="kinds"`), and so on up.
+    let feeders = feeders(store);
     let reached = |start: &str| -> Vec<&(String, i64, i64)> {
         let mut seen: IndexSet<String> = IndexSet::from_iter([start.to_string()]);
-        seen.extend(writers.get(start).into_iter().flatten().cloned());
         let mut i = 0;
         while let Some(m) = seen.get_index(i).cloned() {
             i += 1;
+            seen.extend(feeders.get(&m).into_iter().flatten().cloned());
             seen.extend(callees.get(&m).into_iter().flatten().cloned());
         }
         seen.iter().filter_map(|m| spans.get(m)).collect()
@@ -137,13 +139,65 @@ pub fn rows(store: &Store<'_>, routes: &IndexMap<String, Route>, builds: &[Row])
     out
 }
 
-/// field member id -> the members that assign it (`assignments.target_id`).
-fn writers(store: &Store<'_>) -> HashMap<String, IndexSet<String>> {
+/// field member id -> the members and functions that fill it: those assigning it (`assignments.target_id`), those pushing onto it
+/// (`key_pushes`), and - for an `@Input` - the members every element rendering its class reads in the binding of that input.
+fn feeders(store: &Store<'_>) -> HashMap<String, IndexSet<String>> {
     let mut out: HashMap<String, IndexSet<String>> = HashMap::new();
     for a in store.table("assignments").iter() {
         if let (Some(field), Some(writer)) = (id_of(a, "target_id"), id_of(a, "member")) {
             out.entry(field).or_default().insert(writer);
         }
     }
+    let (calls, members, functions) = (store.table("calls"), store.table("members"), store.table("functions"));
+    let field_id: HashMap<(String, String), String> = members.iter().filter_map(|m| Some(((text(m, "class")?, text(m, "name")?), id_of(m, "id")?))).collect();
+    for ((class, field), pushed) in super::key_pushes::pushes(&calls, &members, &functions).field {
+        let Some(id) = field_id.get(&(class, field)) else { continue };
+        out.entry(id.clone()).or_default().extend(pushed.iter().filter_map(|c| id_of(c, "member")));
+    }
+    // (class, input name) -> the members its parents' bindings of that input read.
+    let mut rendered: HashMap<String, Vec<String>> = HashMap::new();
+    for r in store.table("renders").iter() {
+        if let (Some(node), Some(class)) = (id_of(r, "node"), id_of(r, "to_class")) {
+            rendered.entry(node).or_default().push(class);
+        }
+    }
+    let mut bound: HashMap<(String, String), IndexSet<String>> = HashMap::new();
+    for e in store.table("expressions").iter() {
+        if text(e, "kind").as_deref() != Some("input") {
+            continue;
+        }
+        let (Some(node), Some(name)) = (id_of(e, "node"), text(e, "name")) else { continue };
+        let Some(classes) = rendered.get(&node) else { continue };
+        let mut read = IndexSet::default();
+        if let Some(ast) = e.get("ast") {
+            own_reads(ast, &mut read);
+        }
+        for class in classes {
+            bound.entry((class.clone(), name.clone())).or_default().extend(read.iter().cloned());
+        }
+    }
+    for m in members.iter() {
+        let (Some(id), Some(class), Some(alias)) = (id_of(m, "id"), text(m, "class"), super::gate_input_flags::input_alias(m)) else { continue };
+        if let Some(read) = bound.get(&(class, alias)) {
+            out.entry(id).or_default().extend(read.iter().cloned());
+        }
+    }
     out
+}
+
+/// The members a template expression reads off its own component (`kinds`, `this.kinds`): every `Read` on the implicit receiver.
+fn own_reads(ast: &Value, out: &mut IndexSet<String>) {
+    match ast {
+        Value::Object(o) => {
+            let implicit = o.get("receiver").and_then(|r| r.get("k")).and_then(Value::as_str) == Some("Implicit");
+            if implicit && o.get("k").and_then(Value::as_str) == Some("Read") {
+                if let Some(row) = o.get("target").and_then(|t| t.get("row")).and_then(Value::as_str) {
+                    out.insert(row.to_string());
+                }
+            }
+            o.values().for_each(|v| own_reads(v, out));
+        }
+        Value::Array(a) => a.iter().for_each(|v| own_reads(v, out)),
+        _ => {}
+    }
 }
