@@ -12,10 +12,12 @@
 //! calls `lines::count` here.
 
 pub(crate) mod consts;
+pub(crate) mod fingerprint;
 pub(crate) mod handlers;
 pub(crate) mod items;
 pub(crate) mod lines;
 pub(crate) mod literals;
+pub(crate) mod locals;
 pub(crate) mod modpath;
 pub(crate) mod testmods;
 

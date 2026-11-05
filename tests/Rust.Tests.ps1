@@ -122,6 +122,24 @@ Test-Case 'rs map: a method call that spells a free function''s name is not an e
     Assert-Equal (Get-RsImports $found.Map 'src/reader.rs').Count 0 'reader imports nothing'
 }
 
+Test-Case 'rs map: a name a let, a parameter or a closure binds is a local, and a #[cfg(test)] item is not declared' {
+    # `|n| n + 1` reads the closure's own `n`; joining it to the file that declares `pub fn n` was half of all edges.
+    $tree = Use-Tree @{
+        'src/lib.rs' = "mod a;`nmod b;`nmod c;`nmod d;`nmod e;`n"
+        'src/a.rs'   = "pub fn n() {}`npub fn name() {}`n#[cfg(test)]`npub fn fixture() {}`n"
+        'src/b.rs'   = "pub fn f(v: &[u8]) -> usize { v.iter().map(|n| n + 1).count() }`npub fn g(name: &str) -> usize { let k = name.len(); println!(`"{}`", name); k }`n"
+        'src/c.rs'   = "pub fn h() -> usize { let m = 1; n(); m }`n"
+        'src/d.rs'   = "pub fn k() { let fixture = 1; let _ = fixture; fixture(); }`n"
+        'src/e.rs'   = "fn n() {}`npub fn q() { n(); }`n"
+    }
+    $found = Get-RsMap --root $tree
+    Assert-Exit $found 0
+    Assert-Equal (Get-RsImports $found.Map 'src/b.rs').Count 0 'b names only its own locals'
+    Assert-Equal ((Get-RsImports $found.Map 'src/c.rs') -join ',') 'src/a.rs' 'c calls the item n'
+    Assert-Equal (Get-RsImports $found.Map 'src/d.rs').Count 0 'a #[cfg(test)] item is no target'
+    Assert-Equal (Get-RsImports $found.Map 'src/e.rs').Count 0 'a file''s own private n shadows a''s pub n'
+}
+
 Test-Case 'rs map: a rust item does not make a C# name ambiguous - the languages join apart' {
     # Found on this repo's own tree: `pub struct Check` in a rust file made the C# class `Check`
     # ambiguous, the edge was dropped, and Check.cs was reported as having no reader.

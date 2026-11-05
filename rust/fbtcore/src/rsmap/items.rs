@@ -9,11 +9,21 @@
 //! A `#[cfg(test)]` MODULE DECLARES NOTHING. Its items are never named from outside it; its uses are
 //! kept, because a test reaching into another file is still a reader of that file.
 //!
+//! A `#[cfg(test)]` ITEM DECLARES NOTHING EITHER, for the same reason.
+//!
+//! A NAME A PATTERN BINDS IS A LOCAL (`locals.rs`): a `let`, a parameter, a closure input, a `match` arm or a `for`
+//! binds `n`, and a bare path `n` that reads it is no use of another file's `pub fn n`. Without that, a local `name`
+//! joined its file to whichever file declared a `pub fn name`.
+//!
+//! A NAME THE FILE DEFINES ITSELF IS ITS OWN, private or test-only: rustc resolves it to that item, so a call of a
+//! private `fn walk` never joins to another file's `pub fn walk`.
+//!
 //! MEMBER NAMES ARE NOT USES, as in the C# half: `thing.walk()` names a method of whatever `thing` is,
 //! and drawing an edge to a file that declares a free `fn walk` would be the grep this map replaces.
 
 use super::lines::LineStarts;
-use proc_macro2::{Delimiter, TokenStream, TokenTree};
+use super::locals;
+use proc_macro2::{TokenStream, TokenTree};
 use quote::ToTokens;
 use std::collections::BTreeSet;
 use syn::visit::{self, Visit};
@@ -50,9 +60,10 @@ pub struct Items {
 }
 
 pub fn read(file: &syn::File, starts: &LineStarts<'_>) -> Items {
-    let mut walker = Walker { items: Items::default(), starts, inline: vec![], tests: 0, fns: 0 };
+    let mut walker = Walker { items: Items::default(), starts, inline: vec![], tests: 0, fns: 0, locals: vec![], own: BTreeSet::new() };
     walker.items.summary = summary(&file.attrs);
     walker.visit_file(file);
+    walker.items.uses.retain(|u| !walker.own.contains(u));
     walker.items
 }
 
@@ -64,11 +75,22 @@ struct Walker<'s, 't> {
     tests: usize,
     /// How many function bodies enclose it - an item inside a body is local to that body.
     fns: usize,
+    /// The names bound by the patterns around the walk, innermost last; empty at module level.
+    locals: Vec<BTreeSet<String>>,
+    /// Every name the file itself defines at module level, private or test-only.
+    own: BTreeSet<String>,
 }
 
 impl Walker<'_, '_> {
-    fn declare(&mut self, ident: &syn::Ident, vis: &syn::Visibility) {
-        if self.tests == 0 && self.fns == 0 && !matches!(vis, syn::Visibility::Inherited) {
+    fn declare(&mut self, ident: &syn::Ident, vis: &syn::Visibility, attrs: &[syn::Attribute]) {
+        if self.fns == 0 {
+            self.own.insert(ident.to_string());
+        }
+        if self.tests == 0
+            && self.fns == 0
+            && !matches!(vis, syn::Visibility::Inherited)
+            && !is_cfg_test(attrs)
+        {
             self.items.declares.insert(ident.to_string());
         }
     }
@@ -86,17 +108,40 @@ impl Walker<'_, '_> {
         }
         let span = block.brace_token.span.join();
         self.items.bodies.push(Body {
-            digest: fingerprint(block.to_token_stream()),
+            digest: super::fingerprint::fingerprint(block.to_token_stream()),
             line: span.start().line,
             name,
             size: self.starts.chars_between(span.start(), span.end()),
         });
     }
 
-    fn in_fn(&mut self, walk: impl FnOnce(&mut Self)) {
+    fn in_fn(&mut self, inputs: Vec<&syn::Pat>, walk: impl FnOnce(&mut Self)) {
         self.fns += 1;
+        // AN ITEM INSIDE A BODY CANNOT SEE THE OUTER LOCALS.
+        let outer = std::mem::take(&mut self.locals);
+        self.locals.push(BTreeSet::new());
+        for pat in inputs {
+            self.bind(pat);
+        }
         walk(self);
+        self.locals = outer;
         self.fns -= 1;
+    }
+
+    fn bound(&self, name: &str) -> bool {
+        self.locals.iter().any(|s| s.contains(name))
+    }
+
+    fn bind(&mut self, pat: &syn::Pat) {
+        if let Some(scope) = self.locals.last_mut() {
+            scope.extend(locals::bindings(pat));
+        }
+    }
+
+    fn scoped(&mut self, walk: impl FnOnce(&mut Self)) {
+        self.locals.push(BTreeSet::new());
+        walk(self);
+        self.locals.pop();
     }
 }
 
@@ -122,70 +167,149 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
     }
 
     fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
-        self.declare(&f.sig.ident, &f.vis);
+        self.declare(&f.sig.ident, &f.vis, &f.attrs);
         if f.sig.ident == "main" && self.fns == 0 && self.inline.is_empty() {
             self.items.has_main = true;
         }
         self.body(&f.block, f.sig.ident.to_string());
-        self.in_fn(|w| visit::visit_item_fn(w, f));
+        self.in_fn(typed(&f.sig), |w| visit::visit_item_fn(w, f));
     }
 
     fn visit_impl_item_fn(&mut self, f: &'ast syn::ImplItemFn) {
         self.body(&f.block, f.sig.ident.to_string());
-        self.in_fn(|w| visit::visit_impl_item_fn(w, f));
+        self.in_fn(typed(&f.sig), |w| visit::visit_impl_item_fn(w, f));
     }
 
     fn visit_trait_item_fn(&mut self, f: &'ast syn::TraitItemFn) {
         if let Some(block) = &f.default {
             self.body(block, f.sig.ident.to_string());
         }
-        self.in_fn(|w| visit::visit_trait_item_fn(w, f));
+        self.in_fn(typed(&f.sig), |w| visit::visit_trait_item_fn(w, f));
     }
 
     fn visit_item_struct(&mut self, i: &'ast syn::ItemStruct) {
-        self.declare(&i.ident, &i.vis);
+        self.declare(&i.ident, &i.vis, &i.attrs);
         visit::visit_item_struct(self, i);
     }
 
     fn visit_item_enum(&mut self, i: &'ast syn::ItemEnum) {
-        self.declare(&i.ident, &i.vis);
+        self.declare(&i.ident, &i.vis, &i.attrs);
         visit::visit_item_enum(self, i);
     }
 
     fn visit_item_union(&mut self, i: &'ast syn::ItemUnion) {
-        self.declare(&i.ident, &i.vis);
+        self.declare(&i.ident, &i.vis, &i.attrs);
         visit::visit_item_union(self, i);
     }
 
     fn visit_item_trait(&mut self, i: &'ast syn::ItemTrait) {
-        self.declare(&i.ident, &i.vis);
+        self.declare(&i.ident, &i.vis, &i.attrs);
         visit::visit_item_trait(self, i);
     }
 
     fn visit_item_type(&mut self, i: &'ast syn::ItemType) {
-        self.declare(&i.ident, &i.vis);
+        self.declare(&i.ident, &i.vis, &i.attrs);
         visit::visit_item_type(self, i);
     }
 
     fn visit_item_const(&mut self, i: &'ast syn::ItemConst) {
-        self.declare(&i.ident, &i.vis);
+        self.declare(&i.ident, &i.vis, &i.attrs);
         visit::visit_item_const(self, i);
     }
 
     fn visit_item_static(&mut self, i: &'ast syn::ItemStatic) {
-        self.declare(&i.ident, &i.vis);
+        self.declare(&i.ident, &i.vis, &i.attrs);
         visit::visit_item_static(self, i);
     }
 
     fn visit_item_macro(&mut self, i: &'ast syn::ItemMacro) {
         if let Some(ident) = &i.ident
             && i.mac.path.is_ident("macro_rules")
+            && self.fns == 0
+        {
+            self.own.insert(ident.to_string());
+        }
+        if let Some(ident) = &i.ident
+            && i.mac.path.is_ident("macro_rules")
             && self.tests == 0
             && self.fns == 0
+            && !is_cfg_test(&i.attrs)
         {
             self.items.declares.insert(ident.to_string());
         }
         visit::visit_item_macro(self, i);
+    }
+
+    fn visit_block(&mut self, b: &'ast syn::Block) {
+        self.scoped(|w| visit::visit_block(w, b));
+    }
+
+    /// THE INITIALIZER IS READ BEFORE THE NAME IS BOUND: `let n = n + 1;` reads the outer `n`.
+    fn visit_local(&mut self, l: &'ast syn::Local) {
+        if let Some(init) = &l.init {
+            self.visit_expr(&init.expr);
+            if let Some((_, diverge)) = &init.diverge {
+                self.visit_expr(diverge);
+            }
+        }
+        self.visit_pat(&l.pat);
+        self.bind(&l.pat);
+    }
+
+    fn visit_expr_closure(&mut self, c: &'ast syn::ExprClosure) {
+        self.scoped(|w| {
+            for pat in &c.inputs {
+                w.bind(pat);
+            }
+            visit::visit_expr_closure(w, c);
+        });
+    }
+
+    fn visit_arm(&mut self, a: &'ast syn::Arm) {
+        self.scoped(|w| {
+            w.bind(&a.pat);
+            visit::visit_arm(w, a);
+        });
+    }
+
+    fn visit_expr_for_loop(&mut self, f: &'ast syn::ExprForLoop) {
+        self.visit_expr(&f.expr);
+        self.scoped(|w| {
+            w.visit_pat(&f.pat);
+            w.bind(&f.pat);
+            w.visit_block(&f.body);
+        });
+    }
+
+    fn visit_expr_if(&mut self, i: &'ast syn::ExprIf) {
+        self.scoped(|w| {
+            w.visit_expr(&i.cond);
+            w.visit_block(&i.then_branch);
+        });
+        if let Some((_, other)) = &i.else_branch {
+            self.visit_expr(other);
+        }
+    }
+
+    fn visit_expr_while(&mut self, x: &'ast syn::ExprWhile) {
+        self.scoped(|w| visit::visit_expr_while(w, x));
+    }
+
+    fn visit_expr_let(&mut self, l: &'ast syn::ExprLet) {
+        self.visit_expr(&l.expr);
+        self.visit_pat(&l.pat);
+        self.bind(&l.pat);
+    }
+
+    /// A BARE PATH THAT READS A LOCAL IS NO USE of an item of that name.
+    fn visit_expr_path(&mut self, p: &'ast syn::ExprPath) {
+        if p.qself.is_none()
+            && p.path.segments.len() == 1
+            && self.bound(&p.path.segments[0].ident.to_string())
+        {
+            return;
+        }
+        visit::visit_expr_path(self, p);
     }
 
     fn visit_path(&mut self, p: &'ast syn::Path) {
@@ -199,7 +323,12 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
     /// identifiers are read off the tokens. Anything after a `.` is a member, and is left out as a
     /// member is everywhere else.
     fn visit_macro(&mut self, m: &'ast syn::Macro) {
-        macro_idents(m.tokens.clone(), &mut |ident| self.use_name(ident));
+        let mut idents = vec![];
+        macro_idents(m.tokens.clone(), &mut |ident| idents.push(ident.clone()));
+        idents.retain(|i| !self.bound(i.to_string().trim_start_matches("r#")));
+        for ident in &idents {
+            self.use_name(ident);
+        }
         visit::visit_macro(self, m);
     }
 
@@ -214,6 +343,16 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
     }
 }
 
+fn typed(sig: &syn::Signature) -> Vec<&syn::Pat> {
+    sig.inputs
+        .iter()
+        .filter_map(|a| match a {
+            syn::FnArg::Typed(t) => Some(&*t.pat),
+            syn::FnArg::Receiver(_) => None,
+        })
+        .collect()
+}
+
 fn macro_idents(stream: TokenStream, found: &mut impl FnMut(&syn::Ident)) {
     let mut after_dot = false;
     for token in stream {
@@ -223,47 +362,6 @@ fn macro_idents(stream: TokenStream, found: &mut impl FnMut(&syn::Ident)) {
             _ => {}
         }
         after_dot = matches!(&token, TokenTree::Punct(p) if p.as_char() == '.');
-    }
-}
-
-/// THE SHAPE OF A BODY, with LOCAL NAMES BLANKED so one idiom pasted under two sets of variable
-/// names still fingerprints alike. A name after `.` or `::` is a member or a path step and is KEPT:
-/// `fs::read_to_string` is what makes that call that call. Comments never enter - they are not
-/// tokens - so two bodies match when they DO the same thing however they are described.
-fn fingerprint(stream: TokenStream) -> String {
-    let mut hasher = blake3::Hasher::new();
-    shape(stream, &mut hasher, &mut false);
-    hasher.finalize().to_hex()[..16].to_string()
-}
-
-fn shape(stream: TokenStream, hasher: &mut blake3::Hasher, keep_next: &mut bool) {
-    for token in stream {
-        let keep = *keep_next;
-        *keep_next = false;
-        match token {
-            TokenTree::Ident(ident) => {
-                let text = ident.to_string();
-                hasher.update(if keep { text.as_bytes() } else { b"_" });
-            }
-            TokenTree::Punct(p) => {
-                hasher.update(p.as_char().to_string().as_bytes());
-                *keep_next = matches!(p.as_char(), '.' | ':');
-            }
-            TokenTree::Literal(lit) => {
-                hasher.update(lit.to_string().as_bytes());
-            }
-            TokenTree::Group(group) => {
-                let (open, close) = match group.delimiter() {
-                    Delimiter::Parenthesis => ("(", ")"),
-                    Delimiter::Brace => ("{", "}"),
-                    Delimiter::Bracket => ("[", "]"),
-                    Delimiter::None => ("", ""),
-                };
-                hasher.update(open.as_bytes());
-                shape(group.stream(), hasher, &mut false);
-                hasher.update(close.as_bytes());
-            }
-        }
     }
 }
 
@@ -317,66 +415,5 @@ fn names_test(token: &TokenTree) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn items(text: &str) -> Items {
-        let file = syn::parse_file(text).expect("parses");
-        read(&file, &LineStarts::new(text))
-    }
-
-    #[test]
-    fn only_what_another_file_can_name_is_declared() {
-        let found = items("pub struct A;\nstruct Hidden;\npub(crate) fn b() {}\nmacro_rules! m { () => {} }\n");
-        assert_eq!(found.declares.into_iter().collect::<Vec<_>>(), ["A", "b", "m"]);
-    }
-
-    #[test]
-    fn a_test_module_and_an_item_inside_a_body_declare_nothing() {
-        let found = items("#[cfg(test)]\nmod tests { pub struct T; }\npub fn f() { pub struct Local; }\n");
-        assert_eq!(found.declares.into_iter().collect::<Vec<_>>(), ["f"]);
-    }
-
-    #[test]
-    fn a_path_a_macro_argument_and_a_use_are_uses_and_a_member_is_not() {
-        let found = items("use crate::store::Store;\nfn f() { let x = vec![Rows::new()]; x.walk(); }\n");
-        for name in ["store", "Store", "Rows", "new", "vec"] {
-            assert!(found.uses.contains(name), "{name} is a use");
-        }
-        assert!(!found.uses.contains("walk"), "a method after a dot is a member");
-        assert!(!found.uses.contains("crate"), "a path keyword is not a name");
-    }
-
-    #[test]
-    fn a_mod_declaration_is_recorded_with_its_path_attribute_and_its_inline_parents() {
-        let found = items("mod a;\n#[path = \"x/y.rs\"]\nmod b;\nmod outer { mod c; }\n");
-        let shape: Vec<_> = found.mods.iter().map(|m| (m.name.as_str(), m.path_attr.clone(), m.inline.clone())).collect();
-        assert_eq!(shape[0], ("a", None, vec![]));
-        assert_eq!(shape[1], ("b", Some("x/y.rs".to_string()), vec![]));
-        assert_eq!(shape[2], ("c", None, vec!["outer".to_string()]));
-    }
-
-    #[test]
-    fn two_bodies_that_differ_only_in_local_names_and_comments_fingerprint_alike() {
-        let one = items("fn a(p: &str) { let x = p.len(); let y = x + 1; println!(\"{}\", y); }\n");
-        let two = items("fn b(q: &str) {\n // why\n let m = q.len(); let n = m + 1; println!(\"{}\", n); }\n");
-        assert_eq!(one.bodies[0].digest, two.bodies[0].digest);
-        assert_eq!(one.bodies[0].name, "a");
-    }
-
-    #[test]
-    fn a_body_under_the_statement_threshold_is_not_recorded() {
-        assert!(items("fn a() { let x = 1; x; }\n").bodies.is_empty());
-    }
-
-    #[test]
-    fn the_summary_is_the_first_line_of_the_crate_doc() {
-        assert_eq!(items("//! First line.\n//! Second.\nfn a() {}\n").summary, "First line.");
-    }
-
-    #[test]
-    fn main_at_the_top_is_an_entry_and_main_inside_a_module_is_not() {
-        assert!(items("fn main() {}\n").has_main);
-        assert!(!items("mod m { fn main() {} }\n").has_main);
-    }
-}
+#[path = "items_tests.rs"]
+mod tests;
