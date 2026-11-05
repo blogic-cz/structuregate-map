@@ -65,6 +65,10 @@ class Statements:
             # The NAMES it takes decide between several files spelling the module (`Tree.unique`), as they do for `bind`.
             taken = tuple(a.name for a in node.names if a.name != "*")
             source = tree.relative(rel, node.level, module) if node.level else tree.module(rel, module, taken)
+            if not source and alias.name != "*":
+                # A FOLDER WITH NO `__init__.py` IS A NAMESPACE PACKAGE: `from pkg.sub import mod` takes the file `pkg/sub/mod.py`.
+                nested = (module + "." if module else "") + alias.name
+                source = tree.relative(rel, node.level, nested) if node.level else tree.module(rel, nested)
             self.rows.add("imports", "i", dict(self.where(), line=node.lineno, module=module,
                                                name=alias.name, alias=alias.asname or "", bind=bind,
                                                level=node.level or 0, from_path=source,
@@ -81,12 +85,44 @@ class Statements:
                 or not isinstance(value.args[0].value, str):
             return
         local, module = node.targets[0].id, value.args[0].value
+        self.string_imports.add(id(value))
         if dotted(value.func) == "__import__":
             module = module.split(".")[0]
         self.rows.add("imports", "i", dict(self.where(), line=node.lineno, module=module, name="", alias=local, level=0,
                                            bind="", used=1 if local in self.used else 0,
                                            from_path=self.binder.tree.module(self.binder.rel, module),
                                            guarded=1 if id(node) in self.guarded else 0))
+
+    def loose_import(self, node) -> None:
+        """`return importlib.import_module("mod")`, `pytest.importorskip("mod").tool` - an import a string names that no
+        name keeps: a row with no alias, used where it stands. One a name keeps is `string_import`'s."""
+        if id(node) in self.string_imports or dotted(node.func) not in IMPORTERS or not node.args \
+                or not isinstance(node.args[0], ast.Constant) or not isinstance(node.args[0].value, str):
+            return
+        module = node.args[0].value
+        if dotted(node.func) == "__import__":
+            module = module.split(".")[0]
+        self.rows.add("imports", "i", dict(self.where(), line=node.lineno, module=module, name="", alias="", level=0, bind="",
+                                           used=1, from_path=self.binder.tree.module(self.binder.rel, module),
+                                           guarded=1 if id(node) in self.guarded else 0))
+
+    def own_scope(self, node, names: set) -> None:
+        """A COMPREHENSION OR A LAMBDA BINDS ITS OWN NAMES: every row inside it - a nested expression, an argument -
+        reads them as locals, never as the module's variable of the same name."""
+        self.binder.scopes.append(("func", "", {name: None for name in names}))
+        try:
+            self.generic_visit(node)
+        finally:
+            self.binder.leave()
+
+    def visit_ListComp(self, node) -> None:
+        self.own_scope(node, {n.id for g in node.generators for n in ast.walk(g.target) if isinstance(n, ast.Name)})
+
+    visit_SetComp = visit_DictComp = visit_GeneratorExp = visit_ListComp
+
+    def visit_Lambda(self, node) -> None:
+        spec = node.args
+        self.own_scope(node, {a.arg for a in spec.posonlyargs + spec.args + spec.kwonlyargs + [spec.vararg, spec.kwarg] if a})
 
     def caught(self, handler) -> list:
         """What one handler catches, one entry per type - `""` for a bare `except:`."""

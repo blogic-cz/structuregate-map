@@ -53,7 +53,7 @@ module-level instance (`STORE.get()` is `Store.get`). EMPTY when the tree cannot
 parameter, an inherited method. **Every `reads` has a `binds` beside it**, position for position: the
 `file::qualname` each read names, or "" - so config.py's `ROOT` is told from every other `ROOT` by
 a join of `<table>__binds` to `<table>__reads` on `owner` and `ord`, never by the name. `imports.bind` and `classes.bases_bind` are the same for an imported
-name and a base class (`imports.bind` from its own statement, even where a def of that name follows in another branch); a name only a comprehension or a lambda binds reads as "", and one a function declares `global` binds the module's; `--dead` walks the latter to keep an override, a method of a class whose base is
+name and a base class (`imports.bind` from its own statement, even where a def of that name follows in another branch); a name only a comprehension or a lambda binds reads as "" (in every row inside it), a module variable aliasing a def (`ALIAS = util.helper`) binds the variable, and one a function declares `global` binds the module's; `--dead` walks the latter to keep an override, a method of a class whose base is
 outside the map, and a method of a mixin such a class inherits (`class Walker(Mixin, ast.NodeVisitor)`), off its list. `getattr(mod, name)` gives `target_name = '*'` - any def in that file.
 `functions.launched = 1` is a def a launcher calls - an entry point, or what pytest calls in `test_*.py`,
 `*_test.py` and `conftest.py`: a `test*` def, a `test*` method of a `Test*` class, a fixture - and a module-level `pytest_*` hook in any file.
