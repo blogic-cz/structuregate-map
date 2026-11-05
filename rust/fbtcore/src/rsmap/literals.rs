@@ -43,8 +43,8 @@ impl Use {
     }
 }
 
-pub fn read(file: &syn::File, starts: &LineStarts<'_>) -> Vec<Literal> {
-    let mut walker = Walker { starts, next: Use::of("other"), negative: false, scrutinee: String::new(), out: Vec::new(), func: Vec::new(), cls: Vec::new(), tests: 0 };
+pub fn read(file: &syn::File, starts: &LineStarts<'_>, test: bool) -> Vec<Literal> {
+    let mut walker = Walker { starts, next: Use::of("other"), negative: false, scrutinee: String::new(), out: Vec::new(), func: Vec::new(), cls: Vec::new(), tests: usize::from(test) };
     walker.visit_file(file);
     walker.out
 }
@@ -141,9 +141,13 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
     }
 
     fn visit_impl_item_fn(&mut self, f: &'ast syn::ImplItemFn) {
+        // A `#[test]` or `#[cfg(test)]` method counts as test code exactly as a free fn does.
+        let test = usize::from(test_attr(&f.attrs));
+        self.tests += test;
         self.func.push(f.sig.ident.to_string());
         visit::visit_impl_item_fn(self, f);
         self.func.pop();
+        self.tests -= test;
     }
 
     fn visit_item_const(&mut self, c: &'ast syn::ItemConst) {
@@ -272,7 +276,7 @@ mod tests {
 
     fn literals(text: &str) -> Vec<Literal> {
         let file = syn::parse_file(text).unwrap();
-        let found = read(&file, &LineStarts::new(text));
+        let found = read(&file, &LineStarts::new(text), false);
         super::super::forget_spans();
         found
     }

@@ -17,6 +17,7 @@ pub(crate) mod items;
 pub(crate) mod lines;
 pub(crate) mod literals;
 pub(crate) mod modpath;
+pub(crate) mod testmods;
 
 use serde_json::{json, Value};
 use std::path::Path;
@@ -78,12 +79,14 @@ pub(crate) struct Rows {
 
 /// The deep map's rows of one file - its constants, its error handling and its literals - or `Err` with the
 /// line and the reason when it does not parse. The spans are forgotten before this returns.
-pub(crate) fn rows_of(text: &str) -> Result<Rows, (usize, String)> {
+/// `test`: the file is test code as a whole (`testmods`) - its handlers and literals are test rows and it declares no constant.
+pub(crate) fn rows_of(text: &str, test: bool) -> Result<Rows, (usize, String)> {
     let source = lines::without_shebang(text.trim_start_matches('\u{feff}'));
     let found = match syn::parse_file(&source) {
         Ok(file) => {
             let starts = lines::LineStarts::new(&source);
-            Ok(Rows { consts: consts::read(&file, &starts), handlers: handlers::read(&file), literals: literals::read(&file, &starts) })
+            let consts = if test { Vec::new() } else { consts::read(&file, &starts) };
+            Ok(Rows { consts, handlers: handlers::read(&file, test), literals: literals::read(&file, &starts, test) })
         }
         Err(e) => Err((e.span().start().line.max(1), format!("does not parse as rust: {e}"))),
     };

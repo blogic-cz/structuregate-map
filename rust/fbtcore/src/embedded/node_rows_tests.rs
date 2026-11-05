@@ -82,7 +82,7 @@ fn items(krate: &mut Crate, queue: &mut Vec<(ModPath, String)>, src: &Path, rel:
                         items(krate, queue, src, rel, &child, &nested, inner);
                     }
                     None => {
-                        let target = modpath::resolve(src, rel, &ModRef { name, path_attr: path_attr(&m.attrs), inline: inline.to_vec() });
+                        let target = modpath::resolve(src, rel, &ModRef { name, path_attr: path_attr(&m.attrs), inline: inline.to_vec(), test: false });
                         queue.push((child, target));
                     }
                 }

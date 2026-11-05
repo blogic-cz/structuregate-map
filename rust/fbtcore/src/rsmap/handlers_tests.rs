@@ -2,7 +2,7 @@ use super::*;
 
 fn handlers(text: &str) -> Vec<Handler> {
     let file = syn::parse_file(text).unwrap();
-    let found = read(&file);
+    let found = read(&file, false);
     super::super::forget_spans();
     found
 }

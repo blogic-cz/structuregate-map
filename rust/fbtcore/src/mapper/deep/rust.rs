@@ -3,6 +3,9 @@
 //! process (`rsmap::consts`) and stored through the same door the payload halves use (`rows::apply`), so
 //! what is recorded, what has gone and what disagrees are all scoped by `lang = 'rust'` exactly as theirs.
 //!
+//! A FILE'S SHA CARRIES WHETHER IT IS TEST CODE AS A WHOLE (`rsmap::testmods`): that is decided by the file that
+//! DECLARES it, so the child's rows flip when only the parent changed.
+//!
 //! INCREMENTAL LIKE THE OTHERS: a file whose sha the database already records is not parsed again, and its
 //! rows stay. A disagreement after the write means the record is lying, so every rust file is read once
 //! more - the database is never replaced, because the other halves' rows are in it.
@@ -16,7 +19,7 @@ use std::path::Path;
 
 const LANG: &str = "rust";
 /// Part of every file's sha: changing what a file's rows hold changes this, and every file is read again.
-const ROWS_VERSION: &str = "rust-rows 6";
+const ROWS_VERSION: &str = "rust-rows 7";
 
 pub fn run(into: &mut Collector, db: &str, root: &str, files: &[(String, String)]) {
     let state = rows::state(Path::new(db), LANG, false);
@@ -25,12 +28,17 @@ pub fn run(into: &mut Collector, db: &str, root: &str, files: &[(String, String)
         return;
     }
     let mut texts: Vec<(&str, &str, String)> = Vec::new();
-    let mut shas = Map::new();
     for (rel, abs) in files {
         // An unreadable file is named by the file-level pass over the same tree; here it has no rows.
         let Ok(text) = std::fs::read_to_string(abs) else { continue };
-        shas.insert(rel.clone(), Value::String(super::driven::folded(&format!("{ROWS_VERSION}\n{text}"))));
         texts.push((rel, abs, text));
+    }
+    let pairs: Vec<(&str, &str)> = texts.iter().map(|(rel, _, text)| (*rel, text.as_str())).collect();
+    let tests = rsmap::testmods::test_files(Path::new(root), &pairs);
+    let mut shas = Map::new();
+    for (rel, _, text) in &texts {
+        let flag = if tests.contains(*rel) { "test\n" } else { "" };
+        shas.insert(rel.to_string(), Value::String(super::driven::folded(&format!("{ROWS_VERSION}\n{flag}{text}"))));
     }
     for reset in [false, true] {
         let held = if state.rebuild || reset { BTreeMap::new() } else { state.shas.clone() };
@@ -39,7 +47,7 @@ pub fn run(into: &mut Collector, db: &str, root: &str, files: &[(String, String)
         let mut counters: BTreeMap<String, i64> = if state.rebuild { BTreeMap::new() } else { state.counters.clone() };
         let mut tables: BTreeMap<&str, Vec<Value>> = BTreeMap::new();
         for (rel, _, text) in &stale {
-            write_file(into, &mut tables, &mut counters, rel, text, shas[*rel].as_str().unwrap_or(""));
+            write_file(into, &mut tables, &mut counters, rel, text, shas[*rel].as_str().unwrap_or(""), tests.contains(*rel));
         }
         let batch = rows::Batch {
             all: true,
@@ -81,8 +89,8 @@ fn next(counters: &mut BTreeMap<String, i64>, prefix: &str) -> String {
     format!("{prefix}:{n}")
 }
 
-fn write_file(into: &mut Collector, tables: &mut BTreeMap<&str, Vec<Value>>, counters: &mut BTreeMap<String, i64>, rel: &str, text: &str, sha: &str) {
-    let found = rsmap::rows_of(text);
+fn write_file(into: &mut Collector, tables: &mut BTreeMap<&str, Vec<Value>>, counters: &mut BTreeMap<String, i64>, rel: &str, text: &str, sha: &str, test: bool) {
+    let found = rsmap::rows_of(text, test);
     let file = next(counters, "f");
     let stem = Path::new(rel).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     // `mod.rs` is the module its folder names, as python's `__init__.py` is.
