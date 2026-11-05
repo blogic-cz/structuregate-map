@@ -69,7 +69,7 @@ LANG = "python"
 # has to re-read THESE files: a new salt makes every recorded python sha disagree, and each file is read
 # again on the next run. Without it `calls.target_path` existed only for files edited since the upgrade,
 # and a query naming it failed with `no such column` on every tree that had a database already.
-ROWS_VERSION = "19"
+ROWS_VERSION = "20"
 
 
 def emit(*fields: object) -> None:
@@ -146,6 +146,8 @@ class Walker(Statements, ast.NodeVisitor):
         self.value_of = None
         # {id(child): parent}, for what a literal is DOING - see PyLiterals.
         self.parents: dict = {}
+        # The importer calls a name keeps (`string_import`); every other one is `loose_import`'s.
+        self.string_imports: set = set()
         # The settings section each name holds, for a lookup key's dotted path - see PyKeys.
         self.sections = None
 
@@ -380,6 +382,7 @@ class Walker(Statements, ast.NodeVisitor):
                 target_path = self.binder.module_of(dotted(node.args[0]))
                 target_name = "*" if target_path else ""
         callee = dotted(node.func) or self.src(node.func)
+        self.loose_import(node)
         call = self.rows.add("calls", "call", dict(self.where(), line=node.lineno, callee=callee,
                                                    target_path=target_path, target_name=target_name,
                                                    args=len(node.args), kwargs=len(node.keywords),

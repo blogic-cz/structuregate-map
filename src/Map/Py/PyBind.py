@@ -97,12 +97,23 @@ class Tree:
         then every other root. `names` are what the import takes from it, for `unique`."""
         parts = dotted.split(".")
         owner = self.root_of(rel)
+        home = os.path.dirname(self.abs_of(rel))
+        if parts == ["conftest"] and owner is not None:
+            # `from conftest import helper` IN A TEST is the NEAREST conftest above it that defines `helper`: pytest puts
+            # each test's folder chain on `sys.path`, and the root's conftest defining none of it would raise.
+            folder = home
+            while folder == owner[1] or folder.startswith(owner[1] + os.sep):
+                hit = self.found(os.path.join(folder, "conftest"))
+                if hit and all(declares(self, hit, name) for name in names):
+                    return hit
+                folder = os.path.dirname(folder)
         if owner is not None:
             hit = self.found(os.path.join(owner[1], *parts))
             if hit:
                 return hit
-        home = os.path.dirname(self.abs_of(rel))
-        if home:
+        # THE IMPORTER'S FOLDER IS ON `sys.path` ONLY FOR A SCRIPT: a file inside a package (`__init__.py` beside it) never
+        # imports a sibling flat - `import state` in `pkg/__init__.py` is the `state` on the path, not `pkg/state.py`.
+        if home and not exists_exact(os.path.join(home, "__init__.py")):
             hit = self.found(os.path.join(home, *parts))
             if hit:
                 return hit
@@ -446,6 +457,11 @@ class Binder:
         two or more files define - `ROOT`, `write`, `load`, `register` - and matched by name, a read of
         config.py's `ROOT` was a read of every `ROOT`.
         """
+        # A MODULE-LEVEL VARIABLE IS READ AS ITSELF, even when it aliases a def (`ALIAS = util.helper`): following it to the
+        # def left the variable never read, and `--dead` listed it. A call through it still reaches the def (`resolve`).
+        binding = self.lookup(name)
+        if binding is not None and binding[0] == "var" and binding[1]:
+            return binding[1], binding[2]
         path, qual = self.resolve(name)
         if path:
             return path, qual

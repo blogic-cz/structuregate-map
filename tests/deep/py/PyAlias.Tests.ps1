@@ -131,6 +131,57 @@ Test-Case 'pyalias: a module two folders spell is the one that binds the name ta
 }
 
 
+Test-Case 'pyalias: a test''s conftest import, a namespace folder''s submodule and a package''s flat import find the file python does' {
+    # `from conftest import _bundle` is the nearest conftest above the test that defines it, not the root's. `from pkg.sub
+    # import mod` with no `pkg/sub/__init__.py` is the file `pkg/sub/mod.py`. `import state` inside a package is not the
+    # sibling `pkg/state.py` - a package's folder is on no `sys.path` - while a script's folder still is (`run.py`'s helper).
+    $db = New-PyAliasDb @{
+        'conftest.py'           = "def other():$nl    return 0$nl"
+        't/conftest.py'         = "def _bundle():$nl    return 1$nl"
+        't/sub/conftest.py'     = "def _bundle():$nl    return 2$nl"
+        't/sub/deep/test_c.py'  = "from conftest import _bundle$nl" + "def test_c():$nl    assert _bundle()$nl"
+        'pkg/__init__.py'       = ""
+        'pkg/sub/mod.py'        = "def f():$nl    return 1$nl"
+        'user.py'               = "from pkg.sub import mod$nl" + "def run():$nl    return mod.f()$nl"
+        'svc/state.py'          = "def lock():$nl    return 1$nl"
+        'svc/inner/__init__.py' = "import state$nl" + "def go():$nl    return state.lock()$nl"
+        'svc/inner/state.py'    = "def other():$nl    return 2$nl"
+        'tools/run.py'          = "import helper$nl" + "helper.f()$nl"
+        'tools/helper.py'       = "def f():$nl    return 1$nl"
+        'more/helper.py'        = "def f():$nl    return 2$nl"
+    }
+    $i = Invoke-PyAliasQ $db --sql "SELECT 'from=' || module || '|' || name || '|' || from_path AS x FROM imports"
+    Assert-Line $i 'from=conftest|_bundle|t/sub/conftest.py'
+    Assert-Line $i 'from=pkg.sub|mod|pkg/sub/mod.py'
+    Assert-NoLine $i 'from=state||svc/inner/state.py'
+    Assert-Line $i 'from=helper||tools/helper.py'
+}
+
+Test-Case 'pyalias: a constant aliasing a def is read, a comprehension name inside a nested row is its own, a loose string import is a row' {
+    # `ALIAS = util.helper` read in a test is a read of ALIAS (it read as dead), its call still reaches the def. `k * 2` in
+    # `[k * 2 for k in xs]` is its own row and reads the comprehension's `k`, not the module loop's. `return
+    # importlib.import_module("util")` imports util though no name keeps it.
+    $db = New-PyAliasDb @{
+        'util.py'   = "def helper(x):$nl    return x$nl" + "class Box:$nl    pass$nl"
+        'test_a.py' = "import util$nl" + "ALIAS = util.helper$nl" + "BOX = util.Box$nl" +
+            "def test_a():$nl    assert ALIAS(1) == 1$nl    assert BOX.__name__$nl"
+        'm.py'      = "PAIRS = {'a': 1}$nl" + "for k, v in PAIRS.items():$nl    print(k, v)$nl" +
+            "def g(xs):$nl    return [k * 2 + len(xs) for k in xs]$nl"
+        'dyn.py'    = "import importlib$nl" + "def get():$nl    return importlib.import_module('util')$nl"
+    }
+    $d = Invoke-PyAliasQ $db --dead
+    Assert-NoLine $d 'ALIAS'
+    Assert-NoLine $d 'BOX'
+    $c = Invoke-PyAliasQ $db --sql "SELECT 'call=' || callee || '|' || target_path || '|' || target_name AS x FROM calls WHERE callee = 'ALIAS'"
+    Assert-Line $c 'call=ALIAS|util.py|helper'
+    $x = Invoke-PyAliasQ $db --sql ("SELECT 'x=' || x.source || '|' || b.value AS x FROM expressions x JOIN expressions__binds b ON b.owner = x.id " +
+        "WHERE b.node = 'string' AND x.func = 'g'")
+    Assert-Line $x 'x=k * 2 + len(xs)|'
+    Assert-NoLine $x 'm.py::k'
+    $i = Invoke-PyAliasQ $db --sql "SELECT 'dyn=' || module || '|' || from_path || '|' || used AS x FROM imports WHERE file = (SELECT id FROM files WHERE path = 'dyn.py')"
+    Assert-Line $i 'dyn=util|util.py|1'
+}
+
 Test-Case 'pyalias: an argument of a dataclass or a NamedTuple fills the field it lands on' {
     # Neither writes an `__init__`; the one python gives it is the fields in order, a ClassVar and a field(init=False) not among them.
     $db = New-PyAliasDb @{
