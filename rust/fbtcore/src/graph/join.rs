@@ -87,6 +87,27 @@ impl Tables<'_> {
                     }
                     continue;
                 };
+                // A RUST NAME RESOLVES ONLY INTO A CRATE ITS FILE CAN NAME - its own and its Cargo dependencies; one table
+                // across the tree drew `alpha -> beta` where only beta depends on alpha, and joined `build.rs` to the
+                // `src/` it cannot see.
+                let narrowed: Vec<String>;
+                let targets = match &file.reach {
+                    Some(reach) => {
+                        narrowed = targets
+                            .iter()
+                            .filter(|t| match self.files.get(*t).and_then(|f| f.unit.as_ref()) {
+                                Some(unit) => reach.contains(unit),
+                                None => true,
+                            })
+                            .cloned()
+                            .collect();
+                        if narrowed.is_empty() {
+                            continue;
+                        }
+                        &narrowed
+                    }
+                    None => targets,
+                };
                 // A NAME SEVERAL FILES DECLARE, BOUND BY THE COMPILER: the owners its symbols are declared in - every
                 // file of a partial type - and no guess. `Result` declared three times had no edge at all, though
                 // Roslyn had bound every use to one of them.

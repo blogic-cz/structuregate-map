@@ -43,6 +43,10 @@ pub struct File {
     /// What an import can take FROM this file.
     pub binds: BTreeSet<String>,
     pub reports_external: bool,
+    /// RUST: the crate this file is compiled in - its package's folder, `<folder>#build` for a `build.rs` - and the crates it
+    /// can name (`rsmap::cargo`). None outside a cargo package: such a file joins as before.
+    pub unit: Option<String>,
+    pub reach: Option<BTreeSet<String>>,
     pub entry: bool,
     pub unmapped: String,
     pub generated: bool,
