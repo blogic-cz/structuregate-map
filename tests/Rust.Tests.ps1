@@ -234,3 +234,18 @@ Test-Case 'rs rows: every way rust deals with an error is a handlers row, beside
     $sharp = "SELECT 'v=' || count(*) FROM handlers h JOIN files f ON f.id = h.file WHERE f.lang = 'csharp'"
     Assert-Equal (Get-RsDeep $db $sharp) '1' 'the C# catch is in the same table'
 }
+
+Test-Case 'rs rows: an if-let Err in a let-chain, an Ok(Err(e)) arm and a discarded if are handlers rows' {
+    $nl = [string][char]10
+    $tree = Use-Tree @{
+        'src/lib.rs' = "pub fn h(y: Option<u8>, z: Result<Result<u8, String>, String>, empty: bool) -> Result<(), String> {" + $nl +
+                       "    if let Some(v) = y && let Err(e) = check(v) {" + $nl + "        drop(e);" + $nl + "    }" + $nl +
+                       "    match z {" + $nl + "        Ok(Err(e)) => return Err(e)," + $nl + "        _ => {}" + $nl + "    }" + $nl +
+                       "    let _ = if empty { remove_a() } else { remove_b() };" + $nl + "    Ok(())" + $nl + "}" + $nl
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .rs --map-sqlite $db) 0
+    $rust = "SELECT 'v=' || group_concat(r, ' ') FROM (SELECT h.line || ':' || h.shape AS r FROM handlers h JOIN files f ON f.id = h.file WHERE f.lang = 'rust' ORDER BY h.line, h.shape)"
+    Assert-Equal (Get-RsDeep $db $rust) '2:if_let 6:match 9:discard' 'line:shape'
+    Assert-Equal (Get-RsDeep $db "SELECT 'v=' || name || '|' || reraises FROM handlers WHERE shape = 'match'") 'e|1' 'the nested arm binds e and hands it on'
+}
