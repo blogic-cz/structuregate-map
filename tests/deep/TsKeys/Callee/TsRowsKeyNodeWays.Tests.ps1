@@ -140,7 +140,8 @@ Test-Case 'tsrows keys: a hole a template call fills with a literal argument mak
 }
 
 # (#135, re-check) A FIELD HANDED TO A CHILD'S INPUT, AND A HELPER'S RETURN PUSHED ONTO A FIELD, name their literal too. The child reads
-# `item.Label` off its `@Input() model`, which the parent binds `[model]="kinds"` - the literal is in the method assigning `kinds`. `rows`
+# `item.Label` off its `@Input() model` (or off the getter of an input setter of that name, which keeps the value the setter is
+# handed), which the parent binds `[model]="kinds"` - the literal is in the method assigning `kinds`. `rows`
 # gets `{ label: this.labelOf(code) }` pushed in `ngOnInit`, and `labelOf` returns the literal, read through the translate pipe.
 Test-Case 'tsrows keys: a key reaching a node through a child input or a pushed helper return names its literal (#135)' {
     $made = New-TsRowsDb (New-TsRowsWorkspace @{
@@ -151,11 +152,17 @@ Test-Case 'tsrows keys: a key reaching a node through a child input or a pushed 
             "@Component({ selector: 'app-form', standalone: true, imports: [ChoiceComponent], template: '<app-choice [model]=`"kinds`"></app-choice>' })`n" +
             "export class FormComponent implements OnInit {`n  kinds: { ItemID: number; Label: string }[] = [];`n  constructor(private i18n: I18nService) {}`n" +
             "  ngOnInit() {`n    this.kinds = [Kind.A, Kind.B].map((e) => ({ ItemID: e, Label: this.i18n.getTranslation('demo.kind.' + e) }));`n  }`n}`n" +
+            "export interface ChoiceItem { ItemID: number; Label: string }`n" +
+            "@Component({ selector: 'app-radio', standalone: true, imports: [NgFor], template: '<div *ngFor=`"let item of model`"><span [innerHTML]=`"item.Label | money`"></span></div>' })`n" +
+            "export class RadioComponent {`n  private _model: ChoiceItem[] = [];`n  @Input() set model(items: ChoiceItem[]) { this._model = items; }`n  get model() { return this._model; }`n}`n" +
+            "@Component({ selector: 'app-form2', standalone: true, imports: [RadioComponent], template: '<app-radio [model]=`"steps`"></app-radio>' })`n" +
+            "export class Form2Component implements OnInit {`n  steps: ChoiceItem[] = [];`n  constructor(private i18n: I18nService) {}`n" +
+            "  ngOnInit() {`n    this.steps = [Kind.A, Kind.B].map((e) => {`n      return {`n        ItemID: e,`n        Label: this.i18n.getTranslation('demo.step.' + e),`n      } as ChoiceItem;`n    });`n  }`n}`n" +
             "@Component({ selector: 'app-ids', standalone: true, imports: [NgFor], template: '<div *ngFor=`"let row of rows`">{{ row.label | money }}</div>' })`n" +
             "export class IdsComponent implements OnInit {`n  rows: { key: string; label: string }[] = [];`n" +
             "  ngOnInit() {`n    ['Alpha', 'Beta'].forEach((code) => this.rows.push({ key: code, label: this.labelOf(code) }));`n  }`n" +
             "  labelOf(code: string): string {`n    return ``demo.ids.`${code}``;`n  }`n}`n"
-        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"kind":{"1":"A","2":"B"},"ids":{"Alpha":"a","Beta":"b","Gamma":"g"}}}'
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"kind":{"1":"A","2":"B"},"step":{"1":"A","2":"B"},"ids":{"Alpha":"a","Beta":"b","Gamma":"g"}}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
     }) -Shared
     Assert-Exit $made.Result 0
@@ -163,7 +170,8 @@ Test-Case 'tsrows keys: a key reaching a node through a child input or a pushed 
         "FROM key_node_ways w LEFT JOIN template_literals t ON t.id = w.literal WHERE w.key LIKE 'demo.%'")
     Assert-Line $r 'w=demo.kind.1|field_binding|13|1'
     Assert-Line $r 'w=demo.kind.2|field_binding|13|1'
-    Assert-Line $r 'w=demo.ids.Alpha|field_binding|23|0'
+    Assert-Line $r 'w=demo.ids.Alpha|field_binding|43|0'
+    Assert-Line $r 'w=demo.step.1|field_binding|31|1'
     $whole = @($r.Lines | Where-Object { $_.Trim().StartsWith('w=') -and $_.Trim().EndsWith('|-|-') })
     if ($whole.Count) { throw "ways with no literal:`n$($whole -join "`n")" }
 }
