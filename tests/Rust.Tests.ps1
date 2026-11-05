@@ -249,3 +249,17 @@ Test-Case 'rs rows: an if-let Err in a let-chain, an Ok(Err(e)) arm and a discar
     Assert-Equal (Get-RsDeep $db $rust) '2:if_let 6:match 9:discard' 'line:shape'
     Assert-Equal (Get-RsDeep $db "SELECT 'v=' || name || '|' || reraises FROM handlers WHERE shape = 'match'") 'e|1' 'the nested arm binds e and hands it on'
 }
+
+Test-Case 'rs rows: a handler inside a macro''s arguments is a row, and a body that is not expressions is skipped' {
+    $nl = [string][char]10
+    $tree = Use-Tree @{
+        'src/lib.rs' = "pub fn h(x: Result<u8, String>, y: Option<&str>) -> Result<String, String> {" + $nl +
+                       "    let s = format!(`"{} {}`", x.clone()?, y.unwrap_or(`"`"));" + $nl +
+                       "    let v = vec![0u8; 3];" + $nl +
+                       "    println!(`"{}`", s.parse::<u8>().unwrap());" + $nl + "    Ok(s)" + $nl + "}" + $nl
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .rs --map-sqlite $db) 0
+    $rust = "SELECT 'v=' || group_concat(r, ' ') FROM (SELECT h.line || ':' || h.shape AS r FROM handlers h JOIN files f ON f.id = h.file WHERE f.lang = 'rust' ORDER BY h.line, h.shape)"
+    Assert-Equal (Get-RsDeep $db $rust) '2:fallback 2:question 4:unwrap' 'line:shape'
+}
