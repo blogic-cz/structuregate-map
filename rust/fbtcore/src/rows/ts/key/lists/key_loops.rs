@@ -203,8 +203,6 @@ impl Loops {
                 out.declared.insert(id, names);
             }
         }
-        let expressions = store.table("expressions");
-        let expr_by_id: HashMap<String, &Row> = expressions.iter().filter_map(|e| id_of(e, "id").map(|i| (i, e))).collect();
         let rows = super::gate_tsrows::TsRows::of(store);
         let returns = store.table("returns");
         let by_member = returns_by_member(&returns);
@@ -301,31 +299,11 @@ impl Loops {
         lists.extend(handed);
         // WHAT A FORM CONTROL IS OFFERED: the lists bound beside its value binding (`key_options`).
         out.options = super::key_options::offered(store, &controls, &lists, &src, &branches);
-        // THE LOOP AND ITS COLLECTION, two ways: an `ngForOf` gate on the `*ngFor` wrapper, its expression the collection;
-        // an `@for` block, which is no gate - its collection is the `block_ForLoopBlock` expression on its own node.
-        // Either node declares the item as its `$implicit` variable.
-        let blocks: HashSet<String> = nodes.iter().filter(|n| block(n)).filter_map(|n| id_of(n, "id")).collect();
-        let iterated = gates
-            .iter()
-            .filter(|g| text(g, "name").as_deref() == Some("ngForOf"))
-            .filter_map(|g| Some((id_of(g, "node")?, id_of(g, "expression")?)))
-            .chain(expressions.iter().filter(|e| text(e, "kind").as_deref() == Some("block_ForLoopBlock")).filter_map(|e| {
-                let node = id_of(e, "node").filter(|n| blocks.contains(n))?;
-                Some((node, id_of(e, "id")?))
-            }));
-        for (top, expr) in iterated {
-            let Some(ast) = expr_by_id.get(&expr).and_then(|e| e.get("ast")).filter(|a| !a.is_null()) else { continue };
-            let Some((list, items)) = read_rows(unwrap(ast)).into_iter().find_map(|r| Some((lists.get(&r)?, r)).map(|(i, r)| (r, i))) else { continue };
-            let variable = match nodes.iter().find(|n| id_of(n, "id").as_deref() == Some(top.as_str())).and_then(|n| n.get("variables")) {
-                Some(Value::Array(vs)) => vs
-                    .iter()
-                    .find(|v| v.get("value").and_then(|x| x.as_str()) == Some("$implicit"))
-                    .and_then(|v| v.get("name").and_then(|n| n.as_str())),
-                _ => None,
-            };
-            let Some(variable) = variable else { continue };
+        // THE LOOP AND ITS COLLECTION (`key_shown::loop_heads`): an `*ngFor`'s `ngForOf` gate or an `@for` block.
+        for super::key_shown::Head { node: top, variable, ast } in super::key_shown::loop_heads(store) {
+            let Some((list, items)) = read_rows(unwrap(&ast)).into_iter().find_map(|r| Some((lists.get(&r)?, r)).map(|(i, r)| (r, i))) else { continue };
             out.by_node.entry(top.clone()).or_insert(out.list.len());
-            out.list.push(Loop { node: top, variable: variable.to_string(), items: items.clone(), list: Some(list) });
+            out.list.push(Loop { node: top, variable, items: items.clone(), list: Some(list) });
         }
         out
     }
@@ -415,7 +393,7 @@ fn reads_variable(ast: Option<&&Value>, variable: &str) -> bool {
 ///
 /// A CALL HANDING THE VARIABLE ITSELF TO A METHOD (`tipOf(b, row)`) reads what the method reads off that parameter
 /// (`key_handed`); `handed` is empty where only a direct read counts (a gate's condition).
-fn property_reads(ast: &Value, variable: &str, handed: &super::key_handed::Handed, out: &mut Vec<String>) {
+pub(super) fn property_reads(ast: &Value, variable: &str, handed: &super::key_handed::Handed, out: &mut Vec<String>) {
     match ast {
         Value::Array(items) => items.iter().for_each(|i| property_reads(i, variable, handed, out)),
         Value::Object(object) => {
@@ -471,7 +449,7 @@ fn nested_path(ast: &Value, variable: &str) -> Option<String> {
     }
 }
 
-fn declares(node: &Row, variable: &str) -> bool {
+pub(super) fn declares(node: &Row, variable: &str) -> bool {
     matches!(node.get("variables"), Some(Value::Array(vs))
         if vs.iter().any(|v| v.get("name").and_then(|n| n.as_str()) == Some(variable)))
 }

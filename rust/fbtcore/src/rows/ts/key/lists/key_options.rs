@@ -14,6 +14,9 @@
 //! list is read from, `callee` the member or function whose return built its elements when every one came from the same.
 //! A child component's own `*ngFor` over the list, if the tree has one, is still where `key_reach` places the key; this
 //! table says what the control is OFFERED, whether its template is in the tree or a library's.
+//!
+//! HOW THE CONTROL SHOWS A PROPERTY (#156) is read from its own template (`key_shown`): `shown_as` is `option` or `hint`
+//! (NULL when the template is not in the tree or never shows the property), `shown_node` the node it was read at.
 
 use super::key_branches::{Branches, KeySet};
 use super::key_fields::{id_of, text};
@@ -150,12 +153,18 @@ pub fn rows(store: &Store<'_>) -> Vec<Row> {
     let i18n = store.option_list("i18n_calls");
     let keys: KeySet = store.table("translations").iter().filter_map(|t| text(t, "key")).collect();
     let per_list = with_reader(store, |reader| loops.options.iter().map(|o| element_keys(&o.items, &keys, &i18n, reader)).collect::<Vec<_>>());
+    let shown = super::key_shown::shown(store, &loops.options);
     let mut out = Vec::new();
     for (o, elements) in loops.options.iter().zip(per_list) {
+        let how = shown.get(&(o.node.clone(), o.input.clone()));
         // ONE CALLEE when every element came out of the same return; elements written in place, or from two, name none.
         let owners: Vec<Option<&str>> = o.items.iter().map(Element::owner).collect();
         let callee = owners.first().copied().flatten().filter(|first| owners.iter().all(|w| *w == Some(*first)));
         for (property, found) in &elements {
+            let (shown_as, shown_node) = match how.and_then(|h| h.get(property)) {
+                Some((as_, node)) => (Value::String(as_.to_string()), Value::String(node.clone())),
+                None => (Value::Null, Value::Null),
+            };
             for key in found.keys() {
                 let mut row = Row::new();
                 let mut put = |k: &str, v: Value| row.insert(k.to_string(), v);
@@ -169,6 +178,8 @@ pub fn rows(store: &Store<'_>) -> Vec<Row> {
                 put("callee", callee.map(|c| Value::String(c.to_string())).unwrap_or(Value::Null));
                 put("property", Value::String(property.clone()));
                 put("key", Value::String(key.clone()));
+                put("shown_as", shown_as.clone());
+                put("shown_node", shown_node.clone());
                 out.push(row);
             }
         }
