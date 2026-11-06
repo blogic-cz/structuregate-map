@@ -12,6 +12,7 @@
 use super::store::{Row, Store};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+pub(crate) use crate::rows::ts::rowread::text;
 
 /// The inputs of Angular's own `NgTemplateOutlet` and `NgIf` that RENDER a template handed to them.
 pub(crate) const OUTLET_INPUTS: [&str; 2] = ["ngTemplateOutlet", "ngIfThen"];
@@ -23,9 +24,6 @@ const HANDOVER: [&str; 5] = ["ngTemplateOutlet", "ngTemplateOutletContext", "ngT
 /// The decorators that hand a template to the class - by its ref name, or by type (then every template of it, unless the type is a component).
 const QUERIES: [&str; 4] = ["ViewChild", "ViewChildren", "ContentChild", "ContentChildren"];
 
-pub(crate) fn text(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) { Some(Value::String(s)) if !s.is_empty() => Some(s.clone()), _ => None }
-}
 fn strings(row: &Row, field: &str) -> Vec<String> {
     match row.get(field) {
         Some(Value::Array(items)) => items.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),

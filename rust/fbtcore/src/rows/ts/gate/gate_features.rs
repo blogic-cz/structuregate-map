@@ -23,6 +23,7 @@ use super::store::{Row, Store};
 use crate::rows::IndexMap;
 use serde_json::Value;
 use std::collections::HashSet;
+use crate::rows::ts::rowread::{text, id_of};
 
 /// A write that names a PROPERTY. `local` and `local-indexed` write a VARIABLE, and
 /// `indexed`'s target is a whole receiver PATH, never a bare property name. All three were
@@ -34,21 +35,6 @@ const PROPERTY_WRITES: &[&str] = &["this", "property", "this-indexed"];
 /// The gates that render ONCE PER ITEM, where an empty collection renders nothing and `[]`
 /// is not truth: `*ngFor`'s `ngForOf` and the `@for` block's collection (#43).
 const ITERATION_GATES: &[&str] = &["ngForOf", "ForLoopBlock"];
-
-fn text(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    }
-}
-
-fn id_of(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(other) => Some(other.to_string()),
-    }
-}
 
 /// THE OWNER OF A WRITE IS THE CLASS THAT DECLARES THE PROPERTY, never the class the
 /// statement sits in.

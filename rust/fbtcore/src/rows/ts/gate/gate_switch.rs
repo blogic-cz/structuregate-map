@@ -28,13 +28,7 @@ use super::gate_values::{constant_of, dimension_of, untyped_dimension, EnumIndex
 use super::store::{Row, Store};
 use crate::rows::IndexMap;
 use serde_json::{json, Value};
-
-fn text(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    }
-}
+use crate::rows::ts::rowread::{text, id_of};
 
 /// The gates that name a switch's DIMENSION: `[ngSwitch]` and the `@switch` block.
 fn is_switch(g: &Row) -> bool {
@@ -51,14 +45,6 @@ fn is_case(g: &Row) -> bool {
         Some("ngSwitchCase") => true,
         Some("SwitchBlockCase") => text(g, "gate_kind").as_deref() == Some("block"),
         _ => false,
-    }
-}
-
-fn id_of(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(other) => Some(other.to_string()),
     }
 }
 

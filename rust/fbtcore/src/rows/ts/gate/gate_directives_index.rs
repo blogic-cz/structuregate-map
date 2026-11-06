@@ -2,6 +2,7 @@
 //! A child of `gate_directives` by `#[path]`: its items are `pub(super)` for that file alone.
 
 use super::*;
+pub(super) use crate::rows::ts::rowread::id_of;
 
 pub(super) const EQ: &[&str] = &["===", "=="];
 pub(super) const NE: &[&str] = &["!==", "!="];
@@ -17,14 +18,6 @@ pub(super) fn slash(v: Option<&Value>) -> String {
 /// The same normalisation for a path already out of its row.
 pub(super) fn slash_str(path: Option<&str>) -> String {
     path.unwrap_or("").replace('\\', "/")
-}
-
-pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(other) => Some(other.to_string()),
-    }
 }
 
 pub(super) fn str_of(v: Option<&Value>) -> Option<String> {

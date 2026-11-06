@@ -28,6 +28,7 @@ use super::gate_predicates::{predicate_restriction, predicates};
 use super::store::{Row, Store};
 use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
+pub(super) use crate::rows::ts::rowread::{text, id_of};
 
 const EQ: &[&str] = &["===", "=="];
 const NE: &[&str] = &["!==", "!="];
@@ -43,22 +44,7 @@ fn slash(v: Option<&Value>) -> String {
     }
 }
 
-pub(super) fn text(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    }
-}
-
 pub use super::gate_polarity::{class_polarity, Polarity};
-
-pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(other) => Some(other.to_string()),
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct EnumInfo {

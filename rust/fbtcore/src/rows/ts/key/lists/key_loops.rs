@@ -179,13 +179,12 @@ pub struct Loops {
     /// The lists form controls are handed beside their value binding (`key_options`), found over the same lists.
     pub options: Vec<super::key_options::Offered>,
     by_node: HashMap<String, usize>,
-    parent: HashMap<String, String>,
-    declared: HashMap<String, Vec<String>>,
+    tree: std::rc::Rc<crate::rows::ts::rowread::TemplateTree>,
 }
 
 impl Loops {
     pub fn new(store: &Store<'_>) -> Loops {
-        let mut out = Loops { list: Vec::new(), options: Vec::new(), by_node: HashMap::new(), parent: HashMap::new(), declared: HashMap::new() };
+        let mut out = Loops { list: Vec::new(), options: Vec::new(), by_node: HashMap::new(), tree: Default::default() };
         let gates = store.table("gates");
         let nodes = store.table("template_nodes");
         let block = |n: &Row| text(n, "kind").as_deref() == Some("ForLoopBlock");
@@ -193,16 +192,7 @@ impl Loops {
         if !gates.iter().any(|g| text(g, "name").as_deref() == Some("ngForOf")) && !nodes.iter().any(block) && controls.is_empty() {
             return out;
         }
-        for n in nodes.iter() {
-            let Some(id) = id_of(n, "id") else { continue };
-            if let Some(parent) = id_of(n, "parent") {
-                out.parent.insert(id.clone(), parent);
-            }
-            if let Some(Value::Array(vs)) = n.get("variables") {
-                let names = vs.iter().filter_map(|v| v.get("name").and_then(|x| x.as_str()).map(str::to_string)).collect();
-                out.declared.insert(id, names);
-            }
-        }
+        out.tree = crate::rows::ts::rowread::TemplateTree::of(store);
         let rows = super::gate_tsrows::TsRows::of(store);
         let returns = store.table("returns");
         let by_member = returns_by_member(&returns);
@@ -316,19 +306,19 @@ impl Loops {
     /// element without the property, a value that is not an enum member, or an enum NAME that
     /// is zero or several declarations (a shared name is never merged) is no expansion.
     pub fn expand(&self, node: &str, ast: &Value, idx: &EnumIndex) -> Option<Vec<Value>> {
-        let mut at = self.parent.get(node)?;
+        let mut at = self.tree.parent.get(node)?;
         let lp = loop {
             if let Some(i) = self.by_node.get(at) {
                 break &self.list[*i];
             }
-            at = self.parent.get(at)?;
+            at = self.tree.parent.get(at)?;
         };
-        let mut between = self.parent.get(node)?;
+        let mut between = self.tree.parent.get(node)?;
         while between != &lp.node {
-            if self.declared.get(between).is_some_and(|d| d.contains(&lp.variable)) {
+            if self.tree.declares(between, &lp.variable) {
                 return None;
             }
-            between = self.parent.get(between)?;
+            between = self.tree.parent.get(between)?;
         }
         let mut hits = 0;
         let mut copies = Vec::new();
@@ -449,7 +439,7 @@ fn nested_path(ast: &Value, variable: &str) -> Option<String> {
     }
 }
 
-pub(super) fn declares(node: &Row, variable: &str) -> bool {
+fn declares(node: &Row, variable: &str) -> bool {
     matches!(node.get("variables"), Some(Value::Array(vs))
         if vs.iter().any(|v| v.get("name").and_then(|n| n.as_str()) == Some(variable)))
 }
@@ -471,12 +461,8 @@ pub fn loop_sites(store: &Store<'_>) -> (Vec<FieldSite>, usize) {
     let keyset: KeySet = store.table("translations").iter().filter_map(|t| text(t, "key")).collect();
     let nodes = store.table("template_nodes");
     let node_by_id: HashMap<String, &Row> = nodes.iter().filter_map(|n| id_of(n, "id").map(|i| (i, n))).collect();
-    let mut children: HashMap<String, Vec<String>> = HashMap::new();
-    for n in nodes.iter() {
-        if let (Some(id), Some(parent)) = (id_of(n, "id"), id_of(n, "parent")) {
-            children.entry(parent).or_default().push(id);
-        }
-    }
+    let tree = crate::rows::ts::rowread::TemplateTree::of(store);
+    let children = &tree.children;
     let expressions = store.table("expressions");
     let mut exprs_on: HashMap<String, Vec<&Row>> = HashMap::new();
     let mut expr_by_id: HashMap<String, &Row> = HashMap::new();

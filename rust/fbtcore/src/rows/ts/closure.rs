@@ -29,21 +29,7 @@ use super::key_branches::Branches;
 use super::store::{Row, Store};
 use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
-
-fn text(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    }
-}
-
-fn id_of(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(other) => Some(other.to_string()),
-    }
-}
+use crate::rows::ts::rowread::{text, id_of};
 
 fn string_list(row: &Row, field: &str) -> Vec<String> {
     match row.get(field) {

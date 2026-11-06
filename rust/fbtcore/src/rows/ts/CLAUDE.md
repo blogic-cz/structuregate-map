@@ -9,6 +9,10 @@ derived tables mean and which restrictions a gate is read for. Black-box cases:
 
 ## The closure (`closure.rs`, `key/keyreach.rs`, `value_folds.rs`)
 
+A row's cell is read through `read/rowread.rs` (`text`: a non-empty string, `id_of`: any scalar, `scalar`: any scalar but `""`), never a
+local copy; a template's shape (parent, children, component, tag, declared names) is `rowread::TemplateTree::of(store)`, built once
+per derivation, and a map more than one pass builds goes behind `Store::shared` the same way (`key_options::value_bindings`).
+
 `render_path`, `key_reach`, `gate_values` and `gate_features` are derived from EVERY other table, so they run
 LAST, over `Store` read back from SQLite. They answer what no single row can: every way in to a component from
 a routed root, where a translation key can be travelled to, what gates every way, which capability a gate

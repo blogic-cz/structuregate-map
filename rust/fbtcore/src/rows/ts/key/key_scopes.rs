@@ -16,17 +16,10 @@
 //! does not hold.
 
 use super::closure::RenderPath;
-use super::store::{Row, Store};
+use super::store::Store;
 use crate::rows::{IndexMap, IndexSet};
-use serde_json::Value;
 use std::sync::Arc;
-
-fn cell(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    }
-}
+use crate::rows::ts::rowread::text as cell;
 
 /// One step of a rename: the child's input member -> the parent's read chain on that edge. SHARED: a way holds the
 /// steps of every gate on it, and a deep copy per gate per way was most of the time `keyreach::ways_of` took.

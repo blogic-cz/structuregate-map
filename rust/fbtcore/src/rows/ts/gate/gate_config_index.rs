@@ -2,6 +2,7 @@
 //! A child of `gate_config` by `#[path]`: its items are `pub(super)` for that file alone.
 
 use super::*;
+pub(super) use crate::rows::ts::rowread::{text, id_of};
 
 pub(super) const EQ: &[&str] = &["===", "=="];
 
@@ -14,21 +15,6 @@ pub(super) const HAS: &[&str] = &["has", "includes"];
 
 pub(super) fn slash(s: &str) -> String {
     s.replace('\\', "/")
-}
-
-pub(super) fn text(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    }
-}
-
-pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(other) => Some(other.to_string()),
-    }
 }
 
 pub(super) fn number(row: &Row, field: &str) -> Option<i64> {

@@ -5,7 +5,10 @@
 //! row for row, and it was met before the earlier ends were deleted.
 //!
 
+#[path = "read/astreads.rs"]
 pub mod astreads;
+#[path = "read/rowread.rs"]
+pub mod rowread;
 pub mod closure;
 pub mod feature_writes;
 pub mod featurewalk;

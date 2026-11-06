@@ -18,15 +18,7 @@ use super::astreads::unwrap;
 use super::store::{Row, Store};
 use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
-
-fn cell(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) if s.is_empty() => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(other) => Some(other.to_string()),
-    }
-}
+use crate::rows::ts::rowread::scalar as cell;
 
 /// The `@Input` alias of a member, or nothing when it is no input.
 pub fn input_alias(m: &Row) -> Option<String> {

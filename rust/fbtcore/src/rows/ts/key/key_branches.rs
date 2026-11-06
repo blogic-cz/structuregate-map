@@ -38,15 +38,7 @@ use super::gate_values::EnumIndex;
 use super::store::{Row, Store};
 use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
-
-fn cell(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) if s.is_empty() => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(other) => Some(other.to_string()),
-    }
-}
+use crate::rows::ts::rowread::scalar as cell;
 
 fn number(row: &Row, field: &str) -> Option<i64> {
     match row.get(field) {

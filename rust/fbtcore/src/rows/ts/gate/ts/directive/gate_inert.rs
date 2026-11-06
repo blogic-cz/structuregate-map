@@ -17,15 +17,7 @@
 use super::store::{Row, Store};
 use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
-
-fn cell(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) if s.is_empty() => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(other) => Some(other.to_string()),
-    }
-}
+use crate::rows::ts::rowread::scalar as cell;
 
 /// Where a row starts: line, then column - a `clear(); createEmbeddedView(..)` is often one line.
 fn at(row: &Row) -> (i64, i64) {
@@ -212,9 +204,8 @@ pub fn unaliased(store: &Store<'_>, node: Option<&str>, tree: &Value) -> Value {
     if held.is_empty() {
         return tree.clone();
     }
-    let parents = store.shared("template parents", |s: &Store<'_>| -> IndexMap<String, String> {
-        s.table("template_nodes").iter().filter_map(|n| Some((cell(n, "id")?, cell(n, "parent")?))).collect()
-    });
+    let shape = crate::rows::ts::rowread::TemplateTree::of(store);
+    let parents = &shape.parent;
     let mut scope: IndexMap<String, Value> = IndexMap::default();
     let mut at = node.map(str::to_string);
     let mut seen: IndexSet<String> = IndexSet::default();
