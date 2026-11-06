@@ -21,7 +21,8 @@
 //! `.unwrap()` on an Option is a row too. `test` marks what sits in a `#[cfg(test)]` module or a `#[test]`
 //! function, where unwrapping is the idiom: a query about production code says `test = 0`.
 //!
-//! A HANDLER INSIDE A MACRO'S ARGUMENTS is a row when the body parses as expressions (`format!`, `println!`).
+//! A HANDLER INSIDE A MACRO'S ARGUMENTS is a row when the body parses as expressions (`format!`, `println!`) or
+//! is one `body_pieces` reads (`json!` values, `vec![x; n]`, `matches!`).
 
 use super::consts::{compact, path_text, Names};
 use syn::spanned::Spanned;
@@ -287,11 +288,11 @@ impl Walker {
 impl<'ast> Visit<'ast> for Walker {
     /// A MACRO'S ARGUMENTS ARE TOKENS to syn: `format!("{}", x?)` held a `?` no row saw. A body that parses as
     /// comma-separated expressions - `format!`, `println!`, `write!`, `assert!`, `vec![a, b]` - is walked as
-    /// them, as `literals.rs` reads it; one that does not (`json!`, `matches!`, `vec![x; n]`) stays unread.
+    /// them, as are the values of `json!`, `vec![x; n]` and `matches!` (`literals::body_pieces`).
     fn visit_macro(&mut self, m: &'ast syn::Macro) {
-        if let Ok(args) = m.parse_body_with(syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated) {
-            for arg in &args {
-                walk(self, arg);
+        for piece in super::literals::body_pieces(m) {
+            if let super::literals::Piece::Expr(e) = &piece {
+                walk(self, e);
             }
         }
     }
@@ -415,7 +416,7 @@ impl<'ast> Visit<'ast> for Walker {
 }
 
 #[cfg(test)]
-#[path = "handlers_tests.rs"]
+#[path = "tests/handlers_tests.rs"]
 mod tests;
 
 /// The parsed arguments are owned by `visit_macro`, so they cannot live for the tree's `'ast`; one impl exists

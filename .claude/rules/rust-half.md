@@ -30,12 +30,12 @@ Roslyn. It is called in process: its line counter by `count/` (the gate) and `ma
 THE DEEP MAP'S RUST ROWS (`--map-sqlite`) are `files`, `consts` and `handlers`, from `rsmap/consts.rs` and
 `rsmap/handlers.rs` (one parse, `rows_of`) stored by
 `mapper/deep/rust.rs` through `rows::apply` with `lang = 'rust'` - incremental by sha like the python half.
-A constant is a module-level, inline-`mod`, `impl` or `trait` `const`/`static`; one in a function body or a
-`#[cfg(test)]` module is not, nor is one in a file that is test code as a whole (below). A handler is every way an error is dealt with - each `?`, `Err` arm, `if let Err`,
+A constant is a module-level, inline-`mod`, `impl` or `trait` `const`/`static`, and a `thread_local!` static; one in a function body, a
+`#[cfg(test)]` module, a `#[cfg(test)]` item or `impl`, and `const _` are not, nor is one in a file that is test code as a whole (below). A handler is every way an error is dealt with - each `?`, `Err` arm, `if let Err`,
 `let Ok(..) else`, `unwrap`/`expect`, fallback, `.ok()`, `map_err`, `let _ =` and `catch_unwind` - named by `shape`,
-inside a macro's arguments too, when they parse as expressions, with `test` set inside a `#[cfg(test)]` module or `#[test]` fn (a method too), and in every file a `#[cfg(test)] mod x;` declares (and the files it declares) or a `tests/` integration crate holds - decided by the declaration, so its sha carries the flag (`rsmap/testmods.rs`). No type checker: an Option's `.unwrap()` is a row too. `string_literals` and
+inside a macro's arguments too, when they parse as expressions (or are the values of `json!`, `vec![x; n]` or `matches!`), with `test` set inside a `#[cfg(test)]` module or `#[test]` fn (a method too), and in every file a `#[cfg(test)] mod x;` declares (and the files it declares) or a `tests/` integration crate holds - decided by the declaration, so its sha carries the flag (`rsmap/testmods.rs`). No type checker: an Option's `.unwrap()` is a row too. `string_literals` and
 `number_literals` (`rsmap/literals.rs`) carry the `use`/`callee`/`target` every half shares for `--magic`; syn keeps
-no parent, so a parent hands its child the use, and a macro's body is parsed as expressions where it can be. **Bump `ROWS_VERSION` in `rust.rs` with every change to what it writes**, or
+no parent, so a parent hands its child the use, and a macro's body is parsed as expressions where it can be; `json!`, `vec![x; n]` and `matches!` bodies are read by their grammar (`literals::body_pieces`), any other unparsed body for its literal tokens; the format string of `write!`/`writeln!`/`assert!*` is at its std position (1, or 2 for `assert_eq!`); a constant's type is walked, so an array length is a number. **Bump `ROWS_VERSION` in `rust.rs` with every change to what it writes**, or
 an unchanged file keeps the old rows.
 
 THE REGEX BAN searches rust RECURSIVELY (`findstr /S` over each crate's `src`), unlike every other glob

@@ -341,3 +341,23 @@ Test-Case 'rs rows: a file a #[cfg(test)] mod declares, and a tests/ crate, are 
     Assert-Equal (Get-RsDeep $db "SELECT 'v=' || h.test FROM handlers h JOIN files f ON f.id = h.file WHERE f.path = 'src/lib_tests.rs'") '0' 'the flag follows the declaration, the child unchanged'
     Assert-Equal (Get-RsDeep $db "SELECT 'v=' || count(*) FROM consts WHERE name = 'LIMIT'") '1' 'and its constant is back'
 }
+
+Test-Case 'rs rows: json! and thread_local! bodies, a writeln! format, an array length, and no test or _ constant' {
+    $nl = [string][char]10
+    $tree = Use-Tree @{
+        'src/lib.rs' = "use std::cell::Cell;" + $nl + "use std::fmt::Write;" + $nl +
+                       "thread_local! { static DEPTH: Cell<u8> = Cell::new(7); }" + $nl +
+                       "#[cfg(test)]" + $nl + "const FIXTURE: u8 = 9;" + $nl + "const _: () = ();" + $nl +
+                       "pub const SIZES: [u8; 4] = [1, 2, 3, 4];" + $nl +
+                       "pub fn f(out: &mut String, y: Option<u8>) -> serde_json::Value {" + $nl +
+                       "    writeln!(out, `"line {}`", 5).unwrap();" + $nl +
+                       "    serde_json::json!({`"key`": y.unwrap_or_default(), `"list`": [11, `"twelve`"]})" + $nl + "}" + $nl
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .rs --map-sqlite $db) 0
+    Assert-Equal (Get-RsDeep $db "SELECT 'v=' || group_concat(name, ',') FROM (SELECT name FROM consts ORDER BY line)") 'DEPTH,SIZES' 'a thread_local! static is a constant; a test const and const _ are not'
+    Assert-Equal (Get-RsDeep $db "SELECT 'v=' || use FROM string_literals WHERE value = 'line {}'") 'format' 'writeln! takes its format at position 1'
+    Assert-Equal (Get-RsDeep $db "SELECT 'v=' || count(*) FROM number_literals WHERE line = 7") '5' 'the array length and four elements'
+    Assert-Equal (Get-RsDeep $db "SELECT 'v=' || group_concat(value, ',') FROM (SELECT value FROM string_literals WHERE callee = 'json!' ORDER BY value)") 'key,list,twelve' 'json! keys and strings'
+    Assert-Equal (Get-RsDeep $db "SELECT 'v=' || group_concat(line || ':' || shape, ' ') FROM (SELECT line, shape FROM handlers ORDER BY line, shape)") '9:unwrap 10:fallback' 'the handler inside json!'
+}

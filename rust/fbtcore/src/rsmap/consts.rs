@@ -3,8 +3,9 @@
 //!
 //! A CONSTANT IS A `const` OR A `static` ITEM another item can name: at module level, in an inline `mod`, or
 //! associated with an `impl` or a `trait` (the C# half's `const` field). One inside a function body is a
-//! local, as a python constant inside a `def` is, and one in a `#[cfg(test)]` module is a fixture; neither is
-//! a fact about the codebase somebody looks for by name.
+//! local, as a python constant inside a `def` is, and one in a `#[cfg(test)]` module is a fixture, as is a
+//! `#[cfg(test)]` item or `impl` of its own; `const _` names nothing. None is a fact about the codebase
+//! somebody looks for by name. A `thread_local!` static is a `static` - `thread_locals` reads its body.
 //!
 //! `value` IS WHAT A LITERAL HOLDS, as the C# half folds `Prefix + "/root"` into the string it is: the text
 //! of `"x"` is a quoted token, its value is `x`. Anything that is not a literal keeps `source` and no value -
@@ -93,14 +94,23 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
     fn visit_trait_item_fn(&mut self, _: &'ast syn::TraitItemFn) {}
 
     fn visit_item_const(&mut self, c: &'ast syn::ItemConst) {
+        if super::items::is_cfg_test(&c.attrs) || c.ident == "_" {
+            return;
+        }
         self.add("const", &c.ident, public(&c.vis), &c.ty, Some(&c.expr));
     }
 
     fn visit_item_static(&mut self, s: &'ast syn::ItemStatic) {
+        if super::items::is_cfg_test(&s.attrs) {
+            return;
+        }
         self.add("static", &s.ident, public(&s.vis), &s.ty, Some(&s.expr));
     }
 
     fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
+        if super::items::is_cfg_test(&i.attrs) {
+            return;
+        }
         let ty = compact(&i.self_ty.to_token_stream().to_string());
         let owner = match &i.trait_ {
             Some((_, path, _)) => format!("{} for {ty}", compact(&path.to_token_stream().to_string())),
@@ -117,6 +127,14 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
         self.owner.pop();
     }
 
+    fn visit_item_macro(&mut self, i: &'ast syn::ItemMacro) {
+        if i.mac.path.is_ident("thread_local") {
+            for t in thread_locals(&i.mac).iter().filter(|t| !super::items::is_cfg_test(&t.attrs)) {
+                self.add("static", &t.ident, public(&t.vis), &t.ty, Some(&t.expr));
+            }
+        }
+    }
+
     fn visit_item_trait(&mut self, t: &'ast syn::ItemTrait) {
         self.owner.push(t.ident.to_string());
         for item in &t.items {
@@ -127,6 +145,37 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
         }
         self.owner.pop();
     }
+}
+
+/// One `static` of a `thread_local!` body.
+pub(super) struct ThreadLocal {
+    pub(super) attrs: Vec<syn::Attribute>,
+    pub(super) vis: syn::Visibility,
+    pub(super) ident: syn::Ident,
+    pub(super) ty: syn::Type,
+    pub(super) expr: syn::Expr,
+}
+
+/// A `thread_local!` body is `#[attrs]* vis static NAME: Type = init;` repeated - tokens to syn, so it is
+/// parsed here (`const { .. }` is an expression). A body that does not parse holds none.
+pub(super) fn thread_locals(mac: &syn::Macro) -> Vec<ThreadLocal> {
+    let all = |input: syn::parse::ParseStream| -> syn::Result<Vec<ThreadLocal>> {
+        let mut out = Vec::new();
+        while !input.is_empty() {
+            let attrs = input.call(syn::Attribute::parse_outer)?;
+            let vis = input.parse()?;
+            input.parse::<syn::Token![static]>()?;
+            let ident = input.parse()?;
+            input.parse::<syn::Token![:]>()?;
+            let ty = input.parse()?;
+            input.parse::<syn::Token![=]>()?;
+            let expr = input.parse()?;
+            input.parse::<Option<syn::Token![;]>>()?;
+            out.push(ThreadLocal { attrs, vis, ident, ty, expr });
+        }
+        Ok(out)
+    };
+    mac.parse_body_with(all).unwrap_or_default()
 }
 
 /// The names an initializer reads and the things it calls.
@@ -257,5 +306,17 @@ mod tests {
         assert_eq!(names, ["SIZE", "SIDES"]);
         assert_eq!((found[0].owner.as_str(), found[0].value.as_str()), ("Cfg", "-3"));
         assert_eq!((found[1].owner.as_str(), found[1].source.as_str()), ("Shape", ""));
+    }
+
+    #[test]
+    fn a_thread_local_static_is_a_constant_and_a_cfg_test_item_or_underscore_is_not() {
+        let text = "thread_local! { pub static A: Cell<u8> = Cell::new(1); #[cfg(test)] static B: u8 = 2; static C: u8 = const { 3 } }\n\
+                    #[cfg(test)]\nconst D: u8 = 4;\nconst _: () = ();\n#[cfg(test)]\nimpl X { const E: u8 = 5; }\n";
+        let found = consts(text);
+        let names: Vec<(&str, &str, bool)> = found.iter().map(|c| (c.name.as_str(), c.kind, c.exported)).collect();
+        assert_eq!(names, [("A", "static", true), ("C", "static", false)]);
+        assert_eq!(found[0].ty, "Cell<u8>");
+        let mac: syn::Macro = syn::parse_str("thread_local! { static A: u8 = 1; static B: u8 = 2 }").unwrap();
+        assert_eq!(thread_locals(&mac).len(), 2);
     }
 }

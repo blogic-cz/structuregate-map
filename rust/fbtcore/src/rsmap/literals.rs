@@ -7,11 +7,15 @@
 //!
 //! A MACRO'S ARGUMENTS ARE TOKENS to `syn`, and most of a rust file's strings are in one - `format!`,
 //! `println!`, `panic!`, `vec![..]`. A macro whose body parses as comma-separated expressions is read as such:
-//! a leading string is its `format`, the rest are its arguments (`callee` = `format!`). One that does not parse
-//! (`vec![0; n]`, `matches!`) is skipped rather than guessed at. An ATTRIBUTE is never read: a doc comment and
-//! `#[path = "x.rs"]` are not literals the code uses.
+//! a string at the macro's std FORMAT POSITION is its `format` (`write!` 1, `assert_eq!` 2, the others 0), the rest
+//! are its arguments (`callee` = `format!`). One that does not parse that way is read by `body_pieces`: `json!`,
+//! `vec![x; n]` and `matches!` by their grammar, any other by its literal tokens. An item-level macro
+//! (`include!`) is read as one, and a `thread_local!` static as a constant. A constant's TYPE is walked too: an
+//! array length is a number. An ATTRIBUTE is never read: a doc comment and `#[path = "x.rs"]` are not literals
+//! the code uses.
 
 use super::lines::LineStarts;
+use proc_macro2::{Spacing, TokenStream, TokenTree};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -99,16 +103,172 @@ impl Walker<'_, '_> {
         });
     }
 
-    /// A macro whose body is comma-separated expressions: a leading string is its format, the rest arguments.
+    /// A macro whose body is comma-separated expressions: the string at its format position is the format, the
+    /// rest arguments. Any other body is read by `body_pieces`.
     fn mac(&mut self, mac: &syn::Macro) {
         let name = mac.path.segments.last().map(|s| format!("{}!", s.ident)).unwrap_or_default();
-        let Ok(args) = mac.parse_body_with(Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated) else { return };
-        for (i, arg) in args.iter().enumerate() {
-            let format = i == 0 && matches!(arg, syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(_), .. })) && name != "vec!";
-            let uses = if format { Use::of("format") } else { Use { uses: "argument", callee: name.clone(), target: String::new() } };
-            self.with(uses, arg);
+        let argument = Use { uses: "argument", callee: name.clone(), target: String::new() };
+        if let Ok(args) = mac.parse_body_with(Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated) {
+            let at = format_position(&name);
+            for (i, arg) in args.iter().enumerate() {
+                let format = Some(i) == at && matches!(arg, syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(_), .. }));
+                self.with(if format { Use::of("format") } else { argument.clone() }, arg);
+            }
+            return;
+        }
+        for piece in body_pieces(mac) {
+            match piece {
+                Piece::Expr(e) => self.with(argument.clone(), &e),
+                Piece::Lit(l) => self.lit(&l, argument.clone()),
+                Piece::Pat(p) => self.visit_pat(&p),
+            }
         }
     }
+}
+
+/// WHERE std's macros put the format string: `write!(out, "..")` after the writer, `assert_eq!(a, b, "..")` after
+/// both operands. `vec!` has none - its first string is an element.
+fn format_position(name: &str) -> Option<usize> {
+    match name {
+        "write!" | "writeln!" | "assert!" | "debug_assert!" => Some(1),
+        "assert_eq!" | "assert_ne!" | "debug_assert_eq!" | "debug_assert_ne!" => Some(2),
+        "vec!" => None,
+        _ => Some(0),
+    }
+}
+
+/// WHAT A MACRO BODY HOLDS when it is not a plain comma list - owned, as syn parses it out of the tokens.
+pub(super) enum Piece {
+    Expr(syn::Expr),
+    Lit(syn::Lit),
+    Pat(syn::Pat),
+}
+
+/// A macro body as the pieces a reader walks: a comma list of expressions; `json!` by its object and array
+/// grammar (a key is a literal, a value a nested object, array or expression); `vec![x; n]`; `matches!(e, pat if
+/// guard)`; any other body by EVERY LITERAL TOKEN in it, at any depth. A body that parses no way is never lost
+/// whole: its literals are still the file's.
+pub(super) fn body_pieces(mac: &syn::Macro) -> Vec<Piece> {
+    if let Ok(args) = mac.parse_body_with(Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated) {
+        return args.into_iter().map(Piece::Expr).collect();
+    }
+    let last = mac.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
+    let mut out = Vec::new();
+    match last.as_str() {
+        "json" => {
+            json_value(mac.tokens.clone(), &mut out);
+            return out;
+        }
+        "vec" => {
+            let both = |input: syn::parse::ParseStream| -> syn::Result<(syn::Expr, syn::Expr)> {
+                let value: syn::Expr = input.parse()?;
+                input.parse::<syn::Token![;]>()?;
+                Ok((value, input.parse()?))
+            };
+            if let Ok((value, count)) = mac.parse_body_with(both) {
+                return vec![Piece::Expr(value), Piece::Expr(count)];
+            }
+        }
+        "matches" => {
+            let all = |input: syn::parse::ParseStream| -> syn::Result<Vec<Piece>> {
+                let subject: syn::Expr = input.parse()?;
+                input.parse::<syn::Token![,]>()?;
+                let pat = syn::Pat::parse_multi_with_leading_vert(input)?;
+                let mut pieces = vec![Piece::Expr(subject), Piece::Pat(pat)];
+                if input.parse::<Option<syn::Token![if]>>()?.is_some() {
+                    pieces.push(Piece::Expr(input.parse()?));
+                }
+                input.parse::<Option<syn::Token![,]>>()?;
+                Ok(pieces)
+            };
+            if let Ok(pieces) = mac.parse_body_with(all) {
+                return pieces;
+            }
+        }
+        _ => {}
+    }
+    token_literals(mac.tokens.clone(), &mut out);
+    out
+}
+
+fn token_literals(tokens: TokenStream, out: &mut Vec<Piece>) {
+    for tree in tokens {
+        match tree {
+            TokenTree::Literal(l) => out.push(Piece::Lit(syn::Lit::new(l))),
+            TokenTree::Group(g) => token_literals(g.stream(), out),
+            _ => {}
+        }
+    }
+}
+
+/// A json value: a lone `{..}` is an object, a lone `[..]` an array, anything else an expression - or, when it
+/// is not one (`$x`, `(key)`), its literal tokens.
+fn json_value(tokens: TokenStream, out: &mut Vec<Piece>) {
+    let trees: Vec<TokenTree> = tokens.clone().into_iter().collect();
+    if let [TokenTree::Group(g)] = trees.as_slice() {
+        match g.delimiter() {
+            proc_macro2::Delimiter::Brace => {
+                for entry in split_top(g.stream(), &is_comma) {
+                    let mut at = None;
+                    let items: Vec<TokenTree> = entry.clone().into_iter().collect();
+                    for (i, t) in items.iter().enumerate() {
+                        if is_single_colon(&items, i, t) {
+                            at = Some(i);
+                            break;
+                        }
+                    }
+                    let Some(at) = at else {
+                        token_literals(entry, out);
+                        continue;
+                    };
+                    let key: TokenStream = items[..at].iter().cloned().collect();
+                    match &items[..at] {
+                        [TokenTree::Literal(l)] => out.push(Piece::Lit(syn::Lit::new(l.clone()))),
+                        _ => token_literals(key, out),
+                    }
+                    json_value(items[at + 1..].iter().cloned().collect(), out);
+                }
+                return;
+            }
+            proc_macro2::Delimiter::Bracket => {
+                for element in split_top(g.stream(), &is_comma) {
+                    json_value(element, out);
+                }
+                return;
+            }
+            _ => {}
+        }
+    }
+    match syn::parse2::<syn::Expr>(tokens.clone()) {
+        Ok(e) => out.push(Piece::Expr(e)),
+        Err(_) => token_literals(tokens, out),
+    }
+}
+
+fn is_comma(t: &TokenTree) -> bool {
+    matches!(t, TokenTree::Punct(p) if p.as_char() == ',')
+}
+
+/// A `:` that is not half of `::` - the first of the pair is `Joint`, the second follows a `Joint` `:`.
+fn is_single_colon(items: &[TokenTree], i: usize, t: &TokenTree) -> bool {
+    let TokenTree::Punct(p) = t else { return false };
+    if p.as_char() != ':' || p.spacing() == Spacing::Joint {
+        return false;
+    }
+    !matches!(i.checked_sub(1).and_then(|j| items.get(j)), Some(TokenTree::Punct(q)) if q.as_char() == ':' && q.spacing() == Spacing::Joint)
+}
+
+/// The stream cut at every top-level token `cut` accepts (a group is one token); an empty tail is dropped.
+fn split_top(tokens: TokenStream, cut: &dyn Fn(&TokenTree) -> bool) -> Vec<TokenStream> {
+    let mut parts = vec![Vec::new()];
+    for tree in tokens {
+        if cut(&tree) {
+            parts.push(Vec::new());
+        } else {
+            parts.last_mut().map(|p| p.push(tree));
+        }
+    }
+    parts.into_iter().filter(|p| !p.is_empty()).map(|p| p.into_iter().collect()).collect()
 }
 
 fn test_attr(attrs: &[syn::Attribute]) -> bool {
@@ -151,14 +311,17 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
     }
 
     fn visit_item_const(&mut self, c: &'ast syn::ItemConst) {
+        self.visit_type(&c.ty);
         self.with(Use::of("declared"), &c.expr);
     }
 
     fn visit_item_static(&mut self, s: &'ast syn::ItemStatic) {
+        self.visit_type(&s.ty);
         self.with(Use::of("declared"), &s.expr);
     }
 
     fn visit_impl_item_const(&mut self, c: &'ast syn::ImplItemConst) {
+        self.visit_type(&c.ty);
         self.with(Use::of("declared"), &c.expr);
     }
 
@@ -265,62 +428,22 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
         }
     }
 
+    fn visit_item_macro(&mut self, i: &'ast syn::ItemMacro) {
+        if i.mac.path.is_ident("thread_local") {
+            for t in super::consts::thread_locals(&i.mac) {
+                self.visit_type(&t.ty);
+                self.with(Use::of("declared"), &t.expr);
+            }
+        } else if !i.mac.path.is_ident("macro_rules") {
+            self.mac(&i.mac);
+        }
+    }
+
     fn visit_stmt_macro(&mut self, m: &'ast syn::StmtMacro) {
         self.mac(&m.mac);
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn literals(text: &str) -> Vec<Literal> {
-        let file = syn::parse_file(text).unwrap();
-        let found = read(&file, &LineStarts::new(text), false);
-        super::super::forget_spans();
-        found
-    }
-
-    fn row(l: &Literal) -> String {
-        format!("{}:{}:{}:{}:{}", l.line, l.value, l.uses, l.callee, l.target)
-    }
-
-    #[test]
-    fn every_literal_says_what_it_is_doing() {
-        let text = "/// doc text\nconst LIMIT: usize = 450;\nfn go(line: &str, n: i32) -> i32 {\n    \
-                    if n > 3 { return line.split(':').nth(2).map_or(-1, |s| s.len() as i32 * 60); }\n    \
-                    let parts: Vec<&str> = line.split(\",\").collect();\n    let x = parts[1];\n    \
-                    match n { 404 => 0, _ => n }\n}\n";
-        let rows: Vec<String> = literals(text).iter().map(row).collect();
-        assert_eq!(rows, [
-            "2:450:declared::",
-            "4:3:compare::n",
-            "4:::argument:split:line",
-            "4:2:argument:nth:line.split(':')",
-            "4:-1:argument:map_or:line.split(':').nth(2)",
-            "4:60:arith::",
-            "5:,:argument:split:line",
-            "6:1:index::parts",
-            "7:404:compare::n",
-            "7:0:other::",
-        ]);
-    }
-
-    #[test]
-    fn a_compare_literal_names_the_other_operand_or_the_scrutinee() {
-        let text = "fn f(depth: u32, k: &str) {\n    if depth > 60 {}\n    if \"a\" == k.trim() {}\n    \
-                    match depth { 1..=9 => {}, 404 => {}, _ => {} }\n    if let 7 = depth {}\n}\n";
-        let rows: Vec<String> = literals(text).iter().map(row).collect();
-        assert_eq!(rows, ["2:60:compare::depth", "3:a:compare::k.trim()", "4:1:compare::depth", "4:9:compare::depth",
-                          "4:404:compare::depth", "5:7:compare::depth"]);
-    }
-
-    #[test]
-    fn a_macro_s_format_string_and_arguments_are_read_and_test_code_is_marked() {
-        let found = literals("fn a() { println!(\"{} of {}\", 5, \"x\"); }\n#[test]\nfn t() { assert_eq!(f(), 7); }\n");
-        let rows: Vec<String> = found.iter().map(row).collect();
-        assert_eq!(rows, ["1:{} of {}:format::", "1:5:argument:println!:", "1:x:argument:println!:", "3:7:argument:assert_eq!:"]);
-        assert_eq!((found[0].func.as_str(), found[0].test, found[3].test), ("a", false, true));
-        assert_eq!(found[1].number, Some(5.0));
-    }
-}
+#[path = "tests/literals_tests.rs"]
+mod tests;
