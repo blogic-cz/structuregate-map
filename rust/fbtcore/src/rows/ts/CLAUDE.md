@@ -47,6 +47,9 @@ requires and which enum members it still permits.
   once (a visited set). The keys are the `key_node_ways` rows of the label binding, derived just before (emitted before `release`); a label that is a bare read of
   its component's `@Input` takes each host's binding of it, up while a host relays its own input (`key_binding`, `key_host`). An `[x]` beside an `(xChange)` of any
   handler is a control here too; `value_bindings` keeps every output of a name, so a two-way pair with its own handler stays a pair (`control_options` too).
+- **`control_options.shown_as` IS HOW THE CONTROL SHOWS A PROPERTY** (#156, `key/lists/key_shown.rs`): the control's rendered component, the `@Input` its input binds
+  (`io`), every loop over that member (`key_shown::loop_heads`, shared with `key_loops`) and the `<item>.<property>` reads its subtree shows - `hint` under a `hint_tags`
+  element or through a `hint_inputs` input, else `option`; a gate's expression shows nothing.
 - **THE CLOSURE TABLES DECLARE UNIQUE KEYS**, so a pass that files a row twice fails the insert instead of
   publishing a plausible duplicate.
 - **NO REGEX: the dead-key trace is character walks** (`sourcescan.rs`, `sourcetrace.rs`). It decides whether

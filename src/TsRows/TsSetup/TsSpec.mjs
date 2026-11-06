@@ -72,6 +72,9 @@ export function provenanceOf({ setup, fe, tsVersion, ngVersion, found, warning, 
       i18n_dictionary_calls: names(config, 'i18nDictionaryCalls'),
       // THE INPUTS A FORM CONTROL'S LABEL IS BOUND UNDER (#155, `control_labels`): `labelInputs`, else `label` and `title`.
       label_inputs: Array.isArray(config.data?.labelInputs) ? names(config, 'labelInputs') : ['label', 'title'],
+      // WHAT SHOWS AN OPTION'S PROPERTY AS HELP, not as the option (#156, `control_options.shown_as`): an element `hintTags` names, an input `hintInputs` does.
+      hint_tags: Array.isArray(config.data?.hintTags) ? names(config, 'hintTags') : ['mat-hint'],
+      hint_inputs: Array.isArray(config.data?.hintInputs) ? names(config, 'hintInputs') : ['title', 'matTooltip'],
       locales: names(config, 'locales'),
       feature_checks: names(config, 'featureChecks'),
       feature_enum: config.data?.featureEnum ?? '',
