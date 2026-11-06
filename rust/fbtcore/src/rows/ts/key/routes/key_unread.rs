@@ -22,13 +22,7 @@
 use super::store::{Row, Store};
 use serde_json::Value;
 use crate::rows::{FastMap as HashMap, FastSet as HashSet};
-
-pub(crate) fn text(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    }
-}
+pub(crate) use crate::rows::ts::rowread::text;
 
 /// Every identifier a text spells, of ANY length - `sourcescan::words` keeps three characters or more, and a field
 /// named `id` read in a template would then read as unread.

@@ -79,7 +79,12 @@ fn stored_place(tree: &Value) -> Option<Value> {
 }
 
 /// Node id -> its value binding (binding id, its source): the input of a two-way pair, or a binding `VALUE_NAMES` names.
-pub(super) fn value_bindings(store: &Store<'_>) -> HashMap<String, (String, String)> {
+/// Built once per derivation: `control_options` and `control_labels` both ask.
+pub(super) fn value_bindings(store: &Store<'_>) -> std::rc::Rc<HashMap<String, (String, String)>> {
+    store.shared("value bindings", find_value_bindings)
+}
+
+fn find_value_bindings(store: &Store<'_>) -> HashMap<String, (String, String)> {
     let bindings = store.table("bindings");
     let expressions = store.table("expressions");
     let trees = binding_trees(&expressions);

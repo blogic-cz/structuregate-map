@@ -48,8 +48,8 @@ struct Found<'a> {
 /// The template facts the climb reads: each node's parent and component, the label bindings on each node, and the host
 /// elements each component is rendered at.
 struct Tree {
-    parent: HashMap<String, Option<String>>,
-    component: HashMap<String, String>,
+    /// The template's shape (`rowread::TemplateTree`), shared with the other passes.
+    nodes: std::rc::Rc<crate::rows::ts::rowread::TemplateTree>,
     labels: HashMap<String, Vec<Label>>,
     hosts: HashMap<String, Vec<String>>,
     /// Node -> its input and attribute bindings (binding id, name, text, attribute?).
@@ -60,15 +60,7 @@ struct Tree {
 
 impl Tree {
     fn new(store: &Store<'_>, names: &[String]) -> Tree {
-        let mut parent = HashMap::new();
-        let mut component = HashMap::new();
-        for n in store.table("template_nodes").iter() {
-            let Some(id) = id_of(n, "id") else { continue };
-            if let Some(c) = text(n, "component") {
-                component.insert(id.clone(), c);
-            }
-            parent.insert(id, id_of(n, "parent"));
-        }
+        let nodes = crate::rows::ts::rowread::TemplateTree::of(store);
         let mut labels: HashMap<String, Vec<Label>> = HashMap::new();
         let mut bound: HashMap<String, Vec<(String, String, String, bool)>> = HashMap::new();
         for b in store.table("bindings").iter() {
@@ -103,7 +95,7 @@ impl Tree {
                 }
             }
         }
-        Tree { parent, component, labels, hosts, bound, inputs }
+        Tree { nodes, labels, hosts, bound, inputs }
     }
 
     /// The keys a label binding shows, with the binding that placed each: its own, else - when it is a bare read of its
@@ -126,7 +118,7 @@ impl Tree {
             if attribute || text.is_empty() || !text.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
                 continue;
             }
-            let Some(component) = self.component.get(&at) else { continue };
+            let Some(component) = self.nodes.component.get(&at) else { continue };
             let Some(name) = self.inputs.get(&(component.clone(), text.clone())) else { continue };
             for h in self.hosts.get(component).into_iter().flatten() {
                 for (hb, hname, htext, hattr) in self.bound.get(h).into_iter().flatten() {
@@ -154,11 +146,11 @@ impl Tree {
                     out.push(Found { node: at, via: how, host, up });
                     break;
                 }
-                match self.parent.get(at).and_then(|p| p.as_deref()) {
+                match self.nodes.parent.get(at).map(String::as_str) {
                     Some(p) => at = p,
                     // THE ROOT, WITH NO LABEL: up one render edge, from every host element of the component.
                     None => {
-                        let Some(component) = self.component.get(at) else { break };
+                        let Some(component) = self.nodes.component.get(at) else { break };
                         for h in self.hosts.get(component).into_iter().flatten() {
                             if queued.insert(h.as_str()) {
                                 queue.push_back((h.as_str(), "host", Some(h.as_str()), up + 1));
@@ -237,12 +229,12 @@ pub fn rows(store: &Store<'_>, ways: &[Row]) -> Vec<Row> {
                     let mut row = Row::new();
                     let mut put = |k: &str, v: Value| row.insert(k.to_string(), v);
                     let opt = |s: Option<String>| s.map(Value::String).unwrap_or(Value::Null);
-                    put("component", opt(tree.component.get(node).cloned()));
+                    put("component", opt(tree.nodes.component.get(node).cloned()));
                     put("node", Value::String(node.clone()));
                     put("value_binding", Value::String(value_binding.clone()));
                     put("via", Value::String(found.via.to_string()));
                     put("label_node", Value::String(found.node.to_string()));
-                    put("label_component", opt(tree.component.get(found.node).cloned()));
+                    put("label_component", opt(tree.nodes.component.get(found.node).cloned()));
                     put("label_binding", Value::String(label.binding.clone()));
                     put("input", Value::String(label.input.clone()));
                     put("source", Value::String(label.source.clone()));
@@ -262,7 +254,7 @@ pub fn rows(store: &Store<'_>, ways: &[Row]) -> Vec<Row> {
 /// Node id -> its value binding: what `key_options::value_bindings` calls a control, and an input `x` beside an output
 /// `xChange` of any handler - one-way, yet a control that shows a value and reports its change.
 fn controls(store: &Store<'_>) -> HashMap<String, String> {
-    let mut out: HashMap<String, String> = super::key_options::value_bindings(store).into_iter().map(|(n, (b, _))| (n, b)).collect();
+    let mut out: HashMap<String, String> = super::key_options::value_bindings(store).iter().map(|(n, (b, _))| (n.clone(), b.clone())).collect();
     let bindings = store.table("bindings");
     let outputs: HashSet<(String, String)> = bindings.iter().filter(|b| text(b, "kind").as_deref() == Some("output"))
         .filter_map(|b| Some((text(b, "node")?, text(b, "name")?))).collect();

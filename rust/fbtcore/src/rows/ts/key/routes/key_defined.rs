@@ -19,13 +19,7 @@ use super::store::{Row, Store};
 use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
 use std::sync::Arc;
-
-fn cell(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    }
-}
+use crate::rows::ts::rowread::text as cell;
 
 /// `this.a.b` -> `a.b`, only when every link is a plain name.
 fn this_chain(text: &str) -> Option<String> {

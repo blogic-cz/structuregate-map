@@ -29,27 +29,13 @@ use super::key_routes::FieldSite;
 use super::store::{Row, Store};
 use crate::rows::IndexMap;
 use serde_json::Value;
+pub(super) use crate::rows::ts::rowread::{text, id_of};
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Stats {
     pub fields: usize,
     pub nodes: usize,
     pub sites: usize,
-}
-
-pub(super) fn text(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    }
-}
-
-pub(super) fn id_of(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(other) => Some(other.to_string()),
-    }
 }
 
 /// A FIELD HOLDING WHAT A CALLED METHOD RETURNS holds the keys of that method's ONE plain return

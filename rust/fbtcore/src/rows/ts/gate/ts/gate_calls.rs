@@ -26,15 +26,7 @@ use super::store::{Row, Store};
 use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
 use std::rc::Rc;
-
-fn cell(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) if s.is_empty() => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(other) => Some(other.to_string()),
-    }
-}
+use crate::rows::ts::rowread::scalar as cell;
 
 /// A declared return type whose value is truthy whatever it holds.
 fn deferred(declared: Option<String>) -> bool {

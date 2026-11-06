@@ -24,24 +24,10 @@
 use super::store::{Row, Store};
 use crate::rows::IndexMap;
 use serde_json::Value;
+use crate::rows::ts::rowread::{text, id_of};
 
 /// One assignment row the feature pass proved to be a guarded ternary write.
 pub type TernaryWrites = IndexMap<String, Row>;
-
-fn text(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    }
-}
-
-fn id_of(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(other) => Some(other.to_string()),
-    }
-}
 
 fn number(row: &Row, field: &str) -> Option<i64> {
     match row.get(field) {

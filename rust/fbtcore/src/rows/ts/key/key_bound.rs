@@ -32,13 +32,7 @@ use super::gate_input_flags::{bound_inputs, input_alias, written_members};
 use super::store::{Row, Store};
 use crate::rows::IndexMap;
 use serde_json::{json, Value};
-
-fn cell(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    }
-}
+use crate::rows::ts::rowread::text as cell;
 
 /// What the ways read: the per-edge conditions, the edges that are no way, and where each gate sits.
 #[derive(Default)]

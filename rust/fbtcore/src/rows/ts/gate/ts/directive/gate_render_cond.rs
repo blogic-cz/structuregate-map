@@ -16,13 +16,7 @@ use super::gate_values::EnumIndex;
 use super::store::{Row, Store};
 use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
-
-fn cell(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    }
-}
+use crate::rows::ts::rowread::text as cell;
 
 /// Gate id -> the condition its directive creates the view under, resolved, for every valueless gate that has one.
 pub fn render_conds(store: &Store<'_>, idx: &EnumIndex) -> IndexMap<String, Value> {

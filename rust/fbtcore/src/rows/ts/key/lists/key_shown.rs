@@ -79,20 +79,7 @@ pub(super) fn shown(store: &Store<'_>, options: &[Offered]) -> Shown {
         return out;
     }
     let (tags, inputs) = (store.option_list("hint_tags"), store.option_list("hint_inputs"));
-    let nodes = store.table("template_nodes");
-    let mut parent: HashMap<String, String> = HashMap::new();
-    let mut tag: HashMap<String, String> = HashMap::new();
-    let mut children: HashMap<String, Vec<&Row>> = HashMap::new();
-    for n in nodes.iter() {
-        let Some(id) = id_of(n, "id") else { continue };
-        if let Some(t) = text(n, "tag") {
-            tag.insert(id.clone(), t);
-        }
-        if let Some(p) = id_of(n, "parent") {
-            children.entry(p.clone()).or_default().push(n);
-            parent.insert(id, p);
-        }
-    }
+    let tree = crate::rows::ts::rowread::TemplateTree::of(store);
     // WHAT A NODE SHOWS: its interpolations and its input bindings, never a gate's condition - nor the binding of a gate that reads
     // its condition from a row of its own (`[hidden]`'s negation), matched by its node and name.
     let gates = store.table("gates");
@@ -119,10 +106,10 @@ pub(super) fn shown(store: &Store<'_>, options: &[Offered]) -> Shown {
             if !seen.insert(id.clone()) {
                 return false;
             }
-            if tag.get(&id).is_some_and(|t| tags.contains(t)) {
+            if tree.tag.get(&id).is_some_and(|t| tags.contains(t)) {
                 return true;
             }
-            at = parent.get(&id).cloned();
+            at = tree.parent.get(&id).cloned();
         }
         false
     };
@@ -151,11 +138,9 @@ pub(super) fn shown(store: &Store<'_>, options: &[Offered]) -> Shown {
                 }
             }
             // A CHILD DECLARING THE SAME NAME shadows the item below it.
-            for child in children.get(&id).into_iter().flatten().rev() {
-                if !super::key_loops::declares(child, &head.variable)
-                    && let Some(c) = id_of(child, "id")
-                {
-                    stack.push(c);
+            for child in tree.children.get(&id).into_iter().flatten().rev() {
+                if !tree.declares(child, &head.variable) {
+                    stack.push(child.clone());
                 }
             }
         }

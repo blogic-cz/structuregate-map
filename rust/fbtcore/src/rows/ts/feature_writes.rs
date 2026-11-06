@@ -13,6 +13,7 @@ use super::featurewalk::{
 use super::store::{Row, Store};
 use crate::rows::IndexMap;
 use serde_json::Value;
+use crate::rows::ts::rowread::{text, id_of};
 
 pub type Codes = IndexMap<String, bool>;
 /// `(class, property)` -> the codes that property necessarily requires.
@@ -27,21 +28,6 @@ pub fn slash(p: Option<&Value>) -> String {
         Some(Value::String(s)) => s.replace('\\', "/"),
         Some(Value::Null) | None => String::new(),
         Some(other) => other.to_string().replace('\\', "/"),
-    }
-}
-
-fn text(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
-    }
-}
-
-fn id_of(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(other) => Some(other.to_string()),
     }
 }
 

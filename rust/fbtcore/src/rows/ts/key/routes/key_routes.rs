@@ -20,6 +20,7 @@ use super::sourcescan::braced_names;
 use super::store::{Row, Store};
 use crate::rows::{IndexMap, IndexSet};
 use serde_json::Value;
+use crate::rows::ts::rowread::text;
 
 /// THE FIRST THREE TIE. Ranking `template_string` BELOW a carrier lost render sites
 /// rather than weak evidence: a key written as a carrier in one component and as a bound
@@ -225,15 +226,6 @@ impl Routes {
         held.refs = 0;
         held.rank = incoming;
         hit.sites.shift_remove(&comp);
-    }
-}
-
-/// A cell that is a non-empty string, or nothing. Python's `if comp else None` treats an
-/// empty string as absent, and so does this.
-fn text(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
-        _ => None,
     }
 }
 

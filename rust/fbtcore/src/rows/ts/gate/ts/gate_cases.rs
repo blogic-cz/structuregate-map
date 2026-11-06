@@ -22,15 +22,7 @@ use super::gate_values::{constant_of, dimension_of, untyped_dimension, EnumIndex
 use super::store::{Row, Store};
 use crate::rows::{IndexMap, IndexSet};
 use serde_json::{json, Value};
-
-fn cell(row: &Row, field: &str) -> Option<String> {
-    match row.get(field) {
-        None | Some(Value::Null) => None,
-        Some(Value::String(s)) if s.is_empty() => None,
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(other) => Some(other.to_string()),
-    }
-}
+use crate::rows::ts::rowread::scalar as cell;
 
 /// One case group: its id, its labels read as constants (None where one cannot be), and
 /// whether it is the `default`.
