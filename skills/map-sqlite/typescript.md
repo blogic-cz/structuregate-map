@@ -41,7 +41,7 @@ Beside the shared tables it adds the FRAMEWORK tables:
 | templates | `templates` `template_nodes` `bindings` `renders` `renders_out_of_scope` `render_graph` `component_reach` `selector_index` |
 | routing and gates | `routes` `route_keys` `gates` `gate_values` `gate_index` |
 | NgRx | `state_actions` `state_handlers` `state_selectors` `state_effects` |
-| the closure, derived LAST from every other table | `render_path` `key_reach` (+ `key_reach_ways`, `key_reach_chains`) `gate_features` (+ `gate_values`): where a translation key can be travelled to from a routed root, each way it goes, what gates every way in, which capability each gate requires; `control_options`: which option keys each form control is offered; `key_builds`/`key_node_ways`: which literal builds a key and which way it reached each node ([typescript-refs.md](typescript-refs.md)) |
+| the closure, derived LAST from every other table | `render_path` `key_reach` (+ `key_reach_ways`, `key_reach_chains`) `gate_features` (+ `gate_values`): where a translation key can be travelled to from a routed root, each way it goes, what gates every way in, which capability each gate requires; `control_options`: which option keys each form control is offered; `control_labels`: which label each form control is shown under (#155); `key_builds`/`key_node_ways`: which literal builds a key and which way it reached each node ([typescript-refs.md](typescript-refs.md)) |
 
 * **`components.class`** is the class row (`c:...`) that `routes.component_id`, `render_graph.from_class`
   and `renders` point at. `renders` holds the edges Angular instantiates, each with its `scope` (`declared`,
@@ -164,7 +164,7 @@ Beside the shared tables it adds the FRAMEWORK tables:
   converter). A dictionary call whose first argument is a string makes each locale key under `<prefix>.` reachable from
   the component the call sits in (route `ts_call`), and from every template reading the field or getter that holds the
   result (`field_binding`); a prefix built at run time is not read. `i18n_refs` carries it as a row with `prefix`
-  and `kind = 'dictionary_call'`, and no `key`. A dictionary call handed on to another function is not followed. `i18nCarriers` (template pipes/elements carrying a key) and the
+  and `kind = 'dictionary_call'`, and no `key`. A dictionary call handed on to another function is not followed. `labelInputs` the inputs a form control's label is bound under (`control_labels`, default `label` and `title`). `i18nCarriers` (template pipes/elements carrying a key) and the
   other cell contracts: [typescript-refs.md](typescript-refs.md). `propertyPaths` (rows 98) names the members whose strings are
   property PATHS and where each path starts: `[{"member": "ValidationRuleSet.PropertyName", "root": "this"}, {"member": "HueRule.Path",
   "root": {"argument": 0}}]` - `this` the class the string is written in, `{argument: n}` the n-th argument of the call its object is handed

@@ -323,7 +323,12 @@ pub fn build_closure(
     let builds = super::key_builds::rows(store);
     let build_rows = builds.len();
     // WHICH WAY EACH NODE WAS REACHED (#126): route, binding and the literal that built the key there.
-    for row in super::key_node_ways::rows(store, &routes, &builds) {
+    let ways = super::key_node_ways::rows(store, &routes, &builds);
+    // WHICH LABEL EACH FORM CONTROL IS SHOWN UNDER (#155): its keys are the ways just derived through the label's binding.
+    for row in super::key_labels::rows(store, &ways) {
+        store.emit("control_labels", row);
+    }
+    for row in ways {
         store.emit("key_node_ways", row);
     }
     for row in builds {
