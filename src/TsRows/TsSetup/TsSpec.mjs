@@ -70,6 +70,8 @@ export function provenanceOf({ setup, fe, tsVersion, ngVersion, found, warning, 
       ...templatePass.options,
       i18n_calls: names(config, 'i18nCalls'),
       i18n_dictionary_calls: names(config, 'i18nDictionaryCalls'),
+      // THE INPUTS A FORM CONTROL'S LABEL IS BOUND UNDER (#155, `control_labels`): `labelInputs`, else `label` and `title`.
+      label_inputs: Array.isArray(config.data?.labelInputs) ? names(config, 'labelInputs') : ['label', 'title'],
       locales: names(config, 'locales'),
       feature_checks: names(config, 'featureChecks'),
       feature_enum: config.data?.featureEnum ?? '',

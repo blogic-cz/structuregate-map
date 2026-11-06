@@ -89,6 +89,8 @@ pub mod key_lists;
 pub mod key_loops;
 #[path = "key/lists/key_options.rs"]
 pub mod key_options;
+#[path = "key/lists/key_labels.rs"]
+pub mod key_labels;
 #[path = "key/lists/key_this.rs"]
 pub mod key_this;
 #[path = "key/lists/key_pipes.rs"]

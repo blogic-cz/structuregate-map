@@ -41,6 +41,10 @@ requires and which enum members it still permits.
   property is written with, found up the nested shapes to the `returns`/`assignments`/`locals`/`consts`/`members` row holding the root (`key/fields/shape_values.rs`).
   A `.filter`/`.slice`/`.concat`/`.map(cb)` on a list is read through (`ListSource::chained`, `cb`'s parameter reads per element), a `this.labels.x`
   read or template literal of `this.` fields no one assigns is folded (`key_this.rs`), and a PIPE is its `transform`'s returns (`key_pipes.rs`).
+- **`control_labels` IS WHICH LABEL A FORM CONTROL IS SHOWN UNDER** (#155, `key/lists/key_labels.rs`): for each node `key_options::value_bindings` calls a control, a
+  binding named in the `label_inputs` option (node resolves `labelInputs`, default `label`/`title`) on the control itself (`own`), else on its nearest ancestor (`wrap`),
+  else on each host element of its component (`renders.node`) and up from there (`host`), a render edge at a time while nothing is found, each host element climbed from
+  once (a visited set). The keys are the `key_node_ways` rows of the label binding, derived just before (emitted before `release`).
 - **THE CLOSURE TABLES DECLARE UNIQUE KEYS**, so a pass that files a row twice fails the insert instead of
   publishing a plausible duplicate.
 - **NO REGEX: the dead-key trace is character walks** (`sourcescan.rs`, `sourcetrace.rs`). It decides whether
