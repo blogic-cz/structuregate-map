@@ -59,7 +59,7 @@ pub fn built_values(
         let Some(list) = e.get("id").and_then(|x| x.as_str()).and_then(|x| wanted.get(x)) else { continue };
         let Some(ast) = e.get("ast") else { continue };
         let tree = rows.resolve(super::astreads::unwrap(ast), &none, idx);
-        let parts = tree.get("expressions").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+        let parts: &[Value] = tree.get("expressions").and_then(|x| x.as_array()).map(Vec::as_slice).unwrap_or(&[]);
         for (link, texts) in list {
             let mut restrictions = Vec::new();
             for (hole, text) in parts.iter().zip(texts) {

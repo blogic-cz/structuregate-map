@@ -43,6 +43,13 @@ pub(super) fn input_lists(store: &Store<'_>, lists: &HashMap<String, Vec<Element
     }
     // class -> (input alias -> the member ids the bound list lands in), for the inputs nothing initialises or writes
     let mut inputs: HashMap<String, HashMap<String, Vec<String>>> = HashMap::new();
+    // (class, name) -> the first getter of that name, looked up per setter (a scan of every member per setter was quadratic).
+    let mut getters: HashMap<(String, String), &Row> = HashMap::new();
+    for g in members.iter().filter(|g| text(g, "kind").as_deref() == Some("getter")) {
+        if let (Some(class), Some(name)) = (text(g, "class"), text(g, "name")) {
+            getters.entry((class, name)).or_insert(g);
+        }
+    }
     for m in members.iter() {
         let (Some(id), Some(class)) = (id_of(m, "id"), text(m, "class")) else { continue };
         let Some(alias) = input_alias(m) else { continue };
@@ -51,8 +58,7 @@ pub(super) fn input_lists(store: &Store<'_>, lists: &HashMap<String, Vec<Element
             if lists.contains_key(field) || writes.get(field) != Some(&1) {
                 continue;
             }
-            let name = text(m, "name");
-            let getter = members.iter().find(|g| text(g, "kind").as_deref() == Some("getter") && text(g, "class").as_ref() == Some(&class) && text(g, "name") == name);
+            let getter = text(m, "name").and_then(|name| getters.get(&(class.clone(), name)).copied());
             let lands = std::iter::once(field.clone()).chain(getter.and_then(|g| id_of(g, "id"))).collect();
             inputs.entry(class).or_default().insert(alias, lands);
             continue;

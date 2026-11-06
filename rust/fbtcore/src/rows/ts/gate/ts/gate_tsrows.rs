@@ -206,9 +206,14 @@ impl TsRows {
         }
         places.sort();
         places.iter().find_map(|(abs, line)| {
-            let (id, _) = self.by_tail.get(&tail(abs))?.iter().find(|(_, p)| abs.ends_with(p.as_str()))?;
+            let id = self.file_row(abs)?;
             self.decl_at.get(&format!("{id} {line}")).cloned().flatten()
         })
+    }
+
+    /// The `files` row of an absolute path a target names: the rows sharing its last two segments, the one it ends with.
+    fn file_row(&self, abs: &str) -> Option<&String> {
+        self.by_tail.get(&tail(abs))?.iter().find(|(_, p)| abs.ends_with(p.as_str())).map(|(id, _)| id)
     }
 
     /// The one declaration at (`file` row id, `line`): the anchor a stored tree carries.
@@ -220,7 +225,7 @@ impl TsRows {
     /// evaluated `$target` carries, which has no line. Two of that name in the file are nothing.
     pub fn member_named(&self, target: &Value) -> Option<String> {
         let (name, abs) = (target.get("name")?.as_str()?, crate::rows::ts::feature_writes::ref_file(target.get("file")?.as_str()?));
-        let (id, _) = self.by_tail.get(&tail(&abs))?.iter().find(|(_, p)| abs.ends_with(p.as_str()))?;
+        let id = self.file_row(&abs)?;
         match self.members_named.get(&format!("{id} {name}"))?.as_slice() {
             [one] => Some(one.clone()),
             _ => None,
@@ -235,7 +240,7 @@ impl TsRows {
     /// The ONE function a `{name, file}` target names (a call's evaluated `$target`, which has no line).
     pub fn function_named(&self, target: &Value) -> Option<String> {
         let (name, abs) = (target.get("name")?.as_str()?, crate::rows::ts::feature_writes::ref_file(target.get("file")?.as_str()?));
-        let (id, _) = self.by_tail.get(&tail(&abs))?.iter().find(|(_, p)| abs.ends_with(p.as_str()))?;
+        let id = self.file_row(&abs)?;
         match self.functions_named.get(&format!("{id} {name}"))?.as_slice() {
             [one] => Some(one.clone()),
             _ => None,

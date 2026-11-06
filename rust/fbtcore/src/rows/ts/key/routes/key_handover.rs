@@ -111,10 +111,14 @@ pub fn find(store: &Store<'_>, refs: &HashMap<(String, String), String>, class_o
     }
     let at = Child { renders: &renders, class_of_component: &class_of_component, template_of: &template_of, class_of, file_of_class: &file_of_class,
         members: &members, written: &|id: &str| writes.contains_key(id), indexed: &indexed, read_in: &read_in, reads: &reads, gate_at: &gate_at };
+    // EACH CLASS'S MEMBERS, in table order: a ref looks only at its own class's (a scan of every member per ref was quadratic).
+    let mut of_class: HashMap<&str, Vec<&(String, String, String, Option<String>)>> = HashMap::new();
+    for m in &members { of_class.entry(m.1.as_str()).or_default().push(m); }
     for ((tpl, name), node) in refs {
         let Some(class) = class_of.get(tpl) else { continue };
+        let own = of_class.get(class.as_str()).map(Vec::as_slice).unwrap_or(&[]);
         let Some([field]) = queried.get(&(class.clone(), name.clone())).map(Vec::as_slice) else { continue };
-        let field_id = members.iter().find(|(_, c, n, _)| c == class && n == field).map(|(id, ..)| id.clone());
+        let field_id = own.iter().find(|(_, _, n, _)| n == field).map(|(id, ..)| id.clone());
         // THE QUERIED FIELD IS READ ONLY BY THE ASSIGNMENTS HANDING IT ON: any other read (`createEmbeddedView(this.special)`, another
         // file, `this` handed away) renders the template where the map cannot follow.
         let Some(file) = file_of_class.get(class) else { continue };
@@ -124,8 +128,8 @@ pub fn find(store: &Store<'_>, refs: &HashMap<(String, String), String>, class_o
         let mut holders: Vec<(String, Vec<Vec<String>>)> = Vec::new();
         if field_id.as_ref().is_some_and(|id| !writes.contains_key(id)) { holders.push((field.clone(), vec![Vec::new()])); }
         let read = format!("this.{field}");
-        for (id, c, n, value) in &members {
-            if c != class || n == field { continue; }
+        for (id, _, n, value) in own.iter().copied() {
+            if n == field { continue; }
             let Some(all) = writes.get(id) else { continue };
             let unset = value.as_deref().is_none_or(|v| v == "null" || v == "undefined");
             if !unset || !all.iter().all(|(wc, access, _)| wc.as_ref() == Some(class) && access.as_deref() == Some(read.as_str())) { continue; }
