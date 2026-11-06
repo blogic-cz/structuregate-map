@@ -20,9 +20,10 @@ fn a_test_module_and_an_item_inside_a_body_declare_nothing() {
 #[test]
 fn a_path_a_macro_argument_and_a_use_are_uses_and_a_member_is_not() {
     let found = items("use crate::store::Store;\nfn f() { let x = vec![Rows::new()]; x.walk(); }\n");
-    for name in ["store", "Store", "Rows", "new", "vec"] {
+    for name in ["store", "Store", "Rows", "vec"] {
         assert!(found.uses.contains(name), "{name} is a use");
     }
+    assert!(!found.uses.contains("new"), "a later segment of an unimported type's path is its member");
     assert!(!found.uses.contains("walk"), "a method after a dot is a member");
     assert!(!found.uses.contains("crate"), "a path keyword is not a name");
 }
@@ -82,5 +83,12 @@ fn a_name_a_pattern_binds_is_no_use_and_a_call_is() {
 #[test]
 fn a_name_the_file_defines_itself_is_no_use_of_another_files_item() {
     let found = items("fn walk() {}\npub fn go() { walk(); }\n");
+    assert!(!found.uses.contains("new"), "a later segment of an unimported type's path is its member");
     assert!(!found.uses.contains("walk"));
+}
+
+#[test]
+fn a_fns_local_item_is_its_own_and_draws_no_use() {
+    let uses = items("pub fn k() -> u8 { fn helper() -> u8 { 1 } helper() }\n").uses;
+    assert!(!uses.contains("helper"), "{uses:?}");
 }

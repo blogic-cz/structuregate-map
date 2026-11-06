@@ -107,6 +107,14 @@ fn manifest(root: &Path, dir: &str) -> Option<toml::Table> {
     std::fs::read_to_string(root.join(dir).join("Cargo.toml")).ok()?.parse::<toml::Table>().ok()
 }
 
+/// The name other crates write for `package`: its `[lib].name`, else its `[package].name`, `-` as `_`.
+pub(crate) fn crate_name(root: &Path, package: &str) -> Option<String> {
+    let doc = manifest(root, package)?;
+    let name = doc.get("lib").and_then(|l| l.get("name")).and_then(|n| n.as_str())
+        .or_else(|| doc.get("package")?.get("name")?.as_str())?;
+    Some(name.replace('-', "_"))
+}
+
 /// `base/rel` with `.` and `..` resolved, as a root-relative folder.
 fn join(base: &str, rel: &str) -> String {
     let mut parts: Vec<&str> = base.split('/').filter(|s| !s.is_empty()).collect();
@@ -161,6 +169,18 @@ mod tests {
         let mut cache = HashMap::new();
         assert_eq!(package_of(&root, "a/src/lib.rs", &mut cache).as_deref(), Some("a"));
         assert_eq!(package_of(&root, "tools/x.rs", &mut cache), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_crate_is_named_by_its_lib_or_its_package_with_underscores() {
+        let root = tree("name", &[
+            ("a/Cargo.toml", "[package]\nname = \"my-pkg\"\n"),
+            ("b/Cargo.toml", "[package]\nname = \"b-pkg\"\n[lib]\nname = \"other\"\n"),
+        ]);
+        assert_eq!(crate_name(&root, "a").as_deref(), Some("my_pkg"));
+        assert_eq!(crate_name(&root, "b").as_deref(), Some("other"));
+        assert_eq!(crate_name(&root, "c"), None);
         let _ = std::fs::remove_dir_all(&root);
     }
 

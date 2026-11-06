@@ -20,6 +20,7 @@ pub(crate) mod lines;
 pub(crate) mod literals;
 pub(crate) mod locals;
 pub(crate) mod modpath;
+pub(crate) mod paths;
 pub(crate) mod testmods;
 
 use serde_json::{json, Value};
@@ -67,6 +68,7 @@ fn read(root: &Path, rel: &str, text: &str) -> Value {
         "summary": found.summary,
         "declares": found.declares,
         "uses": found.uses,
+        "rooted": found.rooted,
         "uses_path": uses_path,
         "entry": found.has_main || modpath::is_crate_root(rel),
         "bodies": bodies,

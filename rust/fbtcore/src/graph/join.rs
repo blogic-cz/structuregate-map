@@ -133,6 +133,32 @@ impl Tables<'_> {
                     Some(_) => {}
                 }
             }
+            // A NAME REACHED THROUGH ANOTHER CRATE binds only into that crate, and only when it is an in-tree package the
+            // file can reach; a path into an external crate names nothing here.
+            if !optional {
+                for (krate, names) in &file.rooted {
+                    let Some(unit) = file.crates.get(krate) else { continue };
+                    for name in names {
+                        let Some(owned_by) = self.owners.get(&owned(file, name)) else { continue };
+                        let targets: Vec<String> = owned_by
+                            .iter()
+                            .filter(|t| self.files.get(*t).and_then(|f| f.unit.as_ref()) == Some(unit))
+                            .cloned()
+                            .collect();
+                        match targets.len() {
+                            0 => {}
+                            1 => {
+                                if targets[0] != file.rel {
+                                    edges.insert(targets[0].clone());
+                                }
+                            }
+                            _ => {
+                                joined.ambiguous.insert(name.clone(), sorted(targets.into_iter()));
+                            }
+                        }
+                    }
+                }
+            }
             // A PATH IMPORT IS EXACT - the half already resolved it against the filesystem - so a path that
             // names nothing mapped is not an external package, it is a BROKEN import.
             for target in if optional { &file.soft_uses_path } else { &file.uses_path } {

@@ -17,7 +17,7 @@ Roslyn. It is called in process: its line counter by `count/` (the gate) and `ma
 - A source line is a line a TOKEN sits on. `proc-macro2` returns `///` and `//!` as `#[doc]` tokens;
   they are told apart from a typed attribute by the SOURCE under the `#` (a comment starts with `/`).
 - `mod name;` is an exact edge, resolved like rustc (`modpath.rs`: crate roots and `mod.rs` own their
-  folder, `#[path]` is relative to the declaring file). Every other path segment is a NAME.
+  folder, `#[path]` is relative to the declaring file). A path's ROOT decides what its later segments name (`rsmap/paths.rs`): `crate::`/`super::` and an in-tree `use` name them, `std::`, `Self::`, an own item and `TokenTree::Group` after an extern import name nothing, and a name through another crate joins only into that crate.
 - Only items another file can name are declared (`pub`, `pub(crate)`, … and every `macro_rules!`). A
   `#[cfg(test)]` item or module declares nothing, and a bare name a `let`, parameter or pattern binds is a local, never a use. A method after `.` is a member, never a use.
 - `proc_macro2::extra::invalidate_current_thread_spans()` runs after every file. Outside a proc macro the

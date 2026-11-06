@@ -32,7 +32,7 @@ pub fn mark(into: &mut Collector, prefix: &str, files: &[(String, String)], reas
 
 /// THE RUST HALF, in process: `syn` parses, and a `mod name;` is an exact edge.
 pub fn rust(into: &mut Collector, root: &str, prefix: &str, files: &[(String, String)], kept: &mut Option<Kept>) {
-    in_process(into, root, prefix, files, kept, ("rust", "rust in-process (syn)", "rust".into()), rsmap::map_file);
+    in_process(into, root, prefix, files, kept, ("rust", "rust in-process (syn)", "rust|rooted".into()), rsmap::map_file);
     rust_crates(into, root, prefix, files);
 }
 
@@ -43,16 +43,25 @@ fn rust_crates(into: &mut Collector, root: &str, prefix: &str, files: &[(String,
     let at = |folder: &str| if folder.is_empty() { prefix.trim_end_matches('/').to_string() } else { format!("{prefix}{folder}") };
     let mut packages = HashMap::new();
     let mut reaches: HashMap<String, cargo::Reach> = HashMap::new();
+    let mut names: HashMap<String, Option<String>> = HashMap::new();
     for (rel, _) in files {
         let Some(package) = cargo::package_of(root, rel, &mut packages) else { continue };
         let unit = cargo::unit(rel, &package);
         let build = unit != package;
         let reach = reaches.entry(package.clone()).or_insert_with(|| cargo::reach(root, &package));
-        let mut can: BTreeSet<String> = if build { reach.build.iter().map(|x| at(x)).collect() } else { reach.normal.iter().map(|x| at(x)).collect() };
+        let mut folders: Vec<&str> = if build { reach.build.iter().map(String::as_str).collect() } else { reach.normal.iter().map(String::as_str).collect() };
         if !build {
-            can.insert(at(&package));
+            folders.push(&package);
         }
         let row = into.row(&format!("{prefix}{rel}"), "rust");
+        // THE CRATES BY THE NAME A PATH WRITES THEM: every package in reach, the file's own included for a normal unit.
+        for folder in &folders {
+            let name = names.entry(folder.to_string()).or_insert_with(|| cargo::crate_name(root, folder));
+            if let Some(name) = name {
+                row.crates.insert(name.clone(), at(folder));
+            }
+        }
+        let can: BTreeSet<String> = folders.iter().map(|f| at(f)).collect();
         row.unit = Some(if build { format!("{}#build", at(&package)) } else { at(&package) });
         row.reach = Some(can);
     }
@@ -128,6 +137,9 @@ fn in_process(into: &mut Collector, root: &str, prefix: &str, files: &[(String, 
             None => format!("{prefix}{u}"),
         };
         file.uses.extend(strings(&row["uses"]).into_iter().map(|u| if u.contains("::") && language == "go" { qualify(u) } else { u }));
+        for (krate, names) in row["rooted"].as_object().into_iter().flatten() {
+            file.rooted.entry(krate.clone()).or_default().extend(strings(names));
+        }
         file.uses_path.extend(strings(&row["uses_path"]).into_iter().map(|p| format!("{prefix}{p}")));
         for folder in strings(&row["uses_dirs"]) {
             file.uses_path.extend(by_folder.get(&folder).into_iter().flatten().filter(|p| **p != rel).cloned());
