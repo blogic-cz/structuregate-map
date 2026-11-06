@@ -180,6 +180,26 @@ Test-Case 'rs map: a later path segment names into the tree only through crate, 
     Assert-Equal (Get-RsImports $found.Map 'src/n.rs').Count 0 'a fn''s local helper is its own'
 }
 
+Test-Case 'rs map: macro arguments are code, a macro_rules template names nothing, and cfg(not(test)) is production' {
+    $tree = Use-Tree @{
+        'src/lib.rs'  = "mod a;`nmod m1;`nmod m2;`nmod m3;`nmod m4;`nmod db2;`nmod u2;`n"
+        'src/a.rs'    = "pub fn closureparam() {}`npub fn label() {}`npub fn tmpl() {}`npub fn n() {}`n"
+        'src/m1.rs'   = "pub fn f(v: &[i32]) -> usize { format!(`"{}`", v.iter().map(|closureparam| closureparam + 1).count()).len() }`n"
+        'src/m2.rs'   = "struct S { label: i32 }`npub fn f() { assert_eq!(S { label: 1 }.label, 1); }`n"
+        'src/m3.rs'   = "macro_rules! m { (`$tmpl:expr) => { `$tmpl }; }`n"
+        'src/m4.rs'   = "pub fn f(x: Option<u8>) -> bool { matches!(x, Some(n) if n > 1) }`n"
+        'src/db2.rs'  = "#[cfg(not(test))]`npub fn prod() {}`n"
+        'src/u2.rs'   = "use crate::db2::prod;`npub fn g() { prod(); }`n"
+    }
+    $found = Get-RsMap --root $tree
+    Assert-Exit $found 0
+    Assert-Equal (Get-RsImports $found.Map 'src/m1.rs').Count 0 'a closure parameter inside format! arguments is a local'
+    Assert-Equal (Get-RsImports $found.Map 'src/m2.rs').Count 0 'a struct-literal label inside assert_eq! is a field'
+    Assert-Equal (Get-RsImports $found.Map 'src/m3.rs').Count 0 'a macro_rules metavariable names nothing'
+    Assert-Equal (Get-RsImports $found.Map 'src/m4.rs').Count 0 'a matches! binding is a local'
+    Assert-Equal ((Get-RsImports $found.Map 'src/u2.rs') -join ',') 'src/db2.rs' 'a cfg(not(test)) item is declared'
+}
+
 Test-Case 'rs map: a rust item does not make a C# name ambiguous - the languages join apart' {
     # Found on this repo's own tree: `pub struct Check` in a rust file made the C# class `Check`
     # ambiguous, the edge was dropped, and Check.cs was reported as having no reader.

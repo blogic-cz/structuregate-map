@@ -92,3 +92,32 @@ fn a_fns_local_item_is_its_own_and_draws_no_use() {
     let uses = items("pub fn k() -> u8 { fn helper() -> u8 { 1 } helper() }\n").uses;
     assert!(!uses.contains("helper"), "{uses:?}");
 }
+
+fn cfg_test(attr: &str) -> bool {
+    let f: syn::ItemFn = syn::parse_str(&format!("{attr}\nfn f() {{}}\n")).unwrap();
+    super::is_cfg_test(&f.attrs)
+}
+
+#[test]
+fn a_cfg_requires_test_by_its_predicate() {
+    assert!(cfg_test("#[cfg(test)]"));
+    assert!(cfg_test("#[cfg(all(test, windows))]"));
+    assert!(!cfg_test("#[cfg(any(test, feature = \"x\"))]"));
+    assert!(cfg_test("#[cfg(any(test, all(test, unix)))]"));
+    assert!(!cfg_test("#[cfg(not(test))]"));
+    assert!(!cfg_test("#[cfg(windows)]"));
+}
+
+#[test]
+fn macro_arguments_are_code_and_a_macro_rules_template_names_nothing() {
+    let found = items("fn f(v: &[u8]) { println!(\"{}\", v.iter().map(|alpha| alpha + 1).count()); assert_eq!(S { beta: 1 }.beta, 1); let _ = matches!(v.len(), Some(gamma) if gamma > 1); let _ = vec![delta(); 2]; }\n");
+    for name in ["alpha", "beta", "gamma"] {
+        assert!(!found.uses.contains(name), "{name}: {:?}", found.uses);
+    }
+    assert!(found.uses.contains("delta"), "a call inside an argument is a use");
+    let found = items("macro_rules! m { ($tmpl:expr) => { $tmpl + kept() }; }\n");
+    for name in ["tmpl", "expr"] {
+        assert!(!found.uses.contains(name), "{name}: {:?}", found.uses);
+    }
+    assert!(found.uses.contains("kept"));
+}
