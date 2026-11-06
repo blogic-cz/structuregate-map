@@ -57,6 +57,12 @@ fn read(root: &Path, rel: &str, text: &str) -> Value {
     };
     let found = items::read(&file, &lines::LineStarts::new(&source));
     let uses_path: Vec<String> = found.mods.iter().map(|m| modpath::resolve(root, rel, m)).collect();
+    // THE MODULE TREE the join walks (`graph/rspaths.rs`): every `mod x;` with its file, every inline `mod x { }` without.
+    let mut mods: Vec<Value> = found.mods.iter().zip(&uses_path).map(|(m, t)| json!({ "inline": m.inline, "name": m.name, "target": t })).collect();
+    mods.extend(found.inline_mods.iter().map(|(inline, name)| json!({ "inline": inline, "name": name, "target": null })));
+    let qualified: Vec<Value> = found.qualified.iter().map(qualified_row).collect();
+    let imports: Vec<Value> = found.imports.iter().map(|n| named_row(Some(&n.name), &n.q)).collect();
+    let globs: Vec<Value> = found.globs.iter().map(qualified_row).collect();
     let bodies: Vec<Value> = found
         .bodies
         .iter()
@@ -70,9 +76,27 @@ fn read(root: &Path, rel: &str, text: &str) -> Value {
         "uses": found.uses,
         "rooted": found.rooted,
         "uses_path": uses_path,
+        "mods": mods,
+        "own": found.own,
+        "qualified": qualified,
+        "imports": imports,
+        "globs": globs,
         "entry": found.has_main || modpath::is_crate_root(rel),
         "bodies": bodies,
     })
+}
+
+fn qualified_row(q: &paths::Qualified) -> Value {
+    named_row(None, q)
+}
+
+fn named_row(name: Option<&str>, q: &paths::Qualified) -> Value {
+    let (anchor, supers) = match q.anchor {
+        paths::Anchor::Crate => ("crate", 0),
+        paths::Anchor::SelfMod => ("self", 0),
+        paths::Anchor::Super(n) => ("super", n),
+    };
+    json!({ "module": q.module, "anchor": anchor, "supers": supers, "segs": q.segs, "glob": q.glob, "name": name })
 }
 
 /// The deep map's rows of one file, off ONE parse.

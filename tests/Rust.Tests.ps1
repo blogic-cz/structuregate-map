@@ -200,6 +200,46 @@ Test-Case 'rs map: macro arguments are code, a macro_rules template names nothin
     Assert-Equal ((Get-RsImports $found.Map 'src/u2.rs') -join ',') 'src/db2.rs' 'a cfg(not(test)) item is declared'
 }
 
+Test-Case 'rs map: an in-tree path is walked through the module tree - a module, a type''s member, a parent''s private item' {
+    # Found on this repo's own tree: every segment of an in-tree path was a bare NAME joined to whichever file declared it.
+    $tree = Use-Tree @{
+        'src/lib.rs'       = "mod seeds;`nmod schema;`nmod a;`nmod a2;`nmod db;`nmod sess;`nmod y;`nmod q;`nmod qq;`nmod p;`nmod other;`nmod pf;`nmod t;`nmod rows;`nmod r1;`nmod g;`n"
+        'src/seeds.rs'     = "pub fn schema() {}`n"
+        'src/schema.rs'    = "pub fn existing() {}`n"
+        'src/a.rs'         = "use crate::schema;`npub fn f() { schema::existing(); }`n"
+        'src/a2.rs'        = "pub fn f() { crate::schema::existing(); }`n"
+        'src/db.rs'        = "pub(crate) fn open() {}`n"
+        'src/sess.rs'      = "pub struct Session;`nimpl Session { pub fn open() {} }`n"
+        'src/y.rs'         = "use crate::sess::Session;`npub fn g() { Session::open(); }`n"
+        'src/q.rs'         = "mod child;`nfn query() {}`n"
+        'src/q/child.rs'   = "use super::query;`npub fn h() { query(); }`n"
+        'src/qq.rs'        = "pub fn query() {}`n"
+        'src/p.rs'         = "fn helper() {}`n#[cfg(test)]`nmod p_tests;`n"
+        'src/p/p_tests.rs' = "use super::*;`nfn t() { helper(); }`n"
+        'src/other.rs'     = "pub fn helper() {}`n"
+        'src/pf.rs'        = "fn schema() {}`npub fn f() { crate::seeds::schema(); }`n"
+        'src/t.rs'         = "#[cfg(test)]`nmod tests {`n    use super::*;`n    fn t() { rusqlite::Connection::open(`"x`"); }`n}`n"
+        'src/rows/mod.rs'      = "mod cells;`npub use cells::meta;`n"
+        'src/rows/cells/mod.rs'  = "pub mod meta;`n"
+        'src/rows/cells/meta.rs' = "pub fn get() {}`n"
+        'src/r1.rs'        = "pub fn f() { crate::rows::meta::get(); }`n"
+        'src/g.rs'         = "use crate::sess::Session;`n#[cfg(test)]`nmod g_tests;`n"
+        'src/g/g_tests.rs' = "use super::*;`nfn t() { Session::open(); }`n"
+    }
+    $found = Get-RsMap --root $tree
+    Assert-Exit $found 0
+    Assert-Equal ((Get-RsImports $found.Map 'src/a.rs') -join ',') 'src/schema.rs' 'use crate::schema is a MODULE: it joins schema.rs, not the file that declares a fn schema'
+    Assert-Equal ((Get-RsImports $found.Map 'src/a2.rs') -join ',') 'src/schema.rs' 'crate::schema::existing walks the module, not the name schema'
+    Assert-Equal ((Get-RsImports $found.Map 'src/y.rs') -join ',') 'src/sess.rs' 'Session::open after use crate::sess::Session is a member of Session, not a pub fn open elsewhere'
+    Assert-Equal ((Get-RsImports $found.Map 'src/q/child.rs') -join ',') 'src/q.rs' 'use super::query is the parent''s private item, not another file''s pub fn query'
+    Assert-Equal ((Get-RsImports $found.Map 'src/p/p_tests.rs') -join ',') 'src/p.rs' 'helper() under use super::* is the parent''s private item, not another file''s pub fn helper'
+    Assert-Equal ((Get-RsImports $found.Map 'src/pf.rs') -join ',') 'src/seeds.rs' 'a qualified crate::seeds::schema() is not hidden by the file''s own private fn schema'
+    Assert-Equal (Get-RsImports $found.Map 'src/t.rs').Count 0 'rusqlite::Connection::open under use super::* is a member of an extern type'
+    Assert-Equal ((Get-RsImports $found.Map 'src/r1.rs') -join ',') 'src/rows/cells/meta.rs' 'a re-export is followed: use cells::meta in rows/mod.rs makes crate::rows::meta the file cells/meta.rs'
+    Assert-Equal ((Get-RsImports $found.Map 'src/g/g_tests.rs') -join ',') 'src/g.rs,src/sess.rs' 'use super::* reaches the parent (the glob) and the type the parent imports (the followed import)'
+    Assert-Equal (Get-RsImports $found.Map 'src/db.rs').Count 0 'pub(crate) is visibility, not a path to the crate root'
+}
+
 Test-Case 'rs map: a rust item does not make a C# name ambiguous - the languages join apart' {
     # Found on this repo's own tree: `pub struct Check` in a rust file made the C# class `Check`
     # ambiguous, the edge was dropped, and Check.cs was reported as having no reader.

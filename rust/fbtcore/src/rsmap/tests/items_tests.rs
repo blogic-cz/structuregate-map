@@ -20,9 +20,13 @@ fn a_test_module_and_an_item_inside_a_body_declare_nothing() {
 #[test]
 fn a_path_a_macro_argument_and_a_use_are_uses_and_a_member_is_not() {
     let found = items("use crate::store::Store;\nfn f() { let x = vec![Rows::new()]; x.walk(); }\n");
-    for name in ["store", "Store", "Rows", "vec"] {
+    for name in ["Rows", "vec"] {
         assert!(found.uses.contains(name), "{name} is a use");
     }
+    // AN IN-TREE `use` IS A QUALIFIED PATH, walked through the module tree, never the names `store` and `Store`.
+    assert!(!found.uses.contains("store") && !found.uses.contains("Store"), "{:?}", found.uses);
+    assert_eq!(found.qualified.len(), 1);
+    assert_eq!(found.qualified[0].segs, ["store", "Store"]);
     assert!(!found.uses.contains("new"), "a later segment of an unimported type's path is its member");
     assert!(!found.uses.contains("walk"), "a method after a dot is a member");
     assert!(!found.uses.contains("crate"), "a path keyword is not a name");
@@ -35,6 +39,19 @@ fn a_mod_declaration_is_recorded_with_its_path_attribute_and_its_inline_parents(
     assert_eq!(shape[0], ("a", None, vec![]));
     assert_eq!(shape[1], ("b", Some("x/y.rs".to_string()), vec![]));
     assert_eq!(shape[2], ("c", None, vec!["outer".to_string()]));
+}
+
+#[test]
+fn a_visibility_restriction_is_no_path() {
+    let found = items("pub(crate) fn a() {}\npub(super) struct B;\npub(in crate::m) fn c() {}\n");
+    assert!(found.qualified.is_empty(), "{:?}", found.qualified);
+}
+
+#[test]
+fn an_inline_module_is_recorded_with_the_chain_around_it_and_every_own_name_is_kept() {
+    let found = items("mod outer { mod inner { fn deep() {} } }\nfn top() {}\n");
+    assert_eq!(found.inline_mods, [(vec![], "outer".to_string()), (vec!["outer".to_string()], "inner".to_string())]);
+    assert!(found.own.contains("top") && found.own.contains("deep") && found.own.contains("inner"));
 }
 
 #[test]

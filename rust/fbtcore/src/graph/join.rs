@@ -50,7 +50,8 @@ pub fn resolve(files: &BTreeMap<String, File>) -> Joined {
         ambiguous: Rows::new(),
         broken: Vec::new(),
     };
-    let tables = Tables { files, owners: &owners, by_name: &by_name };
+    let tree = super::rspaths::Tree::new(files);
+    let tables = Tables { files, owners: &owners, by_name: &by_name, tree: &tree };
     joined.imports = tables.join(false, &mut joined);
     let mut soft = tables.join(true, &mut joined);
     // A MODULE IMPORTED BOTH WAYS IS HARD: one unguarded site is enough to need it, and listing it as
@@ -69,6 +70,7 @@ struct Tables<'a> {
     files: &'a BTreeMap<String, File>,
     owners: &'a HashMap<String, Vec<String>>,
     by_name: &'a HashMap<&'a str, Vec<&'a str>>,
+    tree: &'a super::rspaths::Tree<'a>,
 }
 
 impl Tables<'_> {
@@ -158,6 +160,10 @@ impl Tables<'_> {
                         }
                     }
                 }
+            }
+            // A RUST PATH INTO THE TREE IS WALKED through the module tree (`rspaths.rs`), never joined by name.
+            if !optional {
+                edges.extend(file.qualified.iter().filter_map(|q| self.tree.target(file, q)));
             }
             // A PATH IMPORT IS EXACT - the half already resolved it against the filesystem - so a path that
             // names nothing mapped is not an external package, it is a BROKEN import.
