@@ -15,6 +15,14 @@
 //! visited set; a component rendered inside itself ends there). The KEY is what `key_node_ways` places through the
 //! label binding (a literal, a field a key lands in, a pipe), or a plain attribute's text when a locale defines it; a label
 //! the closure places no key through is still a row, `key` NULL, its `source` the binding's text.
+//!
+//! A CONTROL is also an input `x` beside an output `xChange` of ANY handler (`[value]="x" (valueChange)="onX($event)"`): it
+//! shows a value and reports its change, so it is labelled like a two-way one, though `control_options` does not count it.
+//!
+//! A LABEL BOUND TO THE COMPONENT'S OWN `@Input` (`[title]="rowTitle"`) that places no key is read at every HOST: the binding
+//! of that input on each element the component is rendered at, and up again while that is a bare read of the host's own
+//! input (a visited set over bindings). Each key a host writes is a row; `key_binding` is the binding that placed it and
+//! `key_host` its element (the label binding itself and NULL when the label places the key).
 
 use super::key_fields::{id_of, text};
 use super::store::{Row, Store};
@@ -44,6 +52,10 @@ struct Tree {
     component: HashMap<String, String>,
     labels: HashMap<String, Vec<Label>>,
     hosts: HashMap<String, Vec<String>>,
+    /// Node -> its input and attribute bindings (binding id, name, text, attribute?).
+    bound: HashMap<String, Vec<(String, String, String, bool)>>,
+    /// (component, member) -> the name an `@Input` member is bound under.
+    inputs: HashMap<(String, String), String>,
 }
 
 impl Tree {
@@ -58,15 +70,29 @@ impl Tree {
             parent.insert(id, id_of(n, "parent"));
         }
         let mut labels: HashMap<String, Vec<Label>> = HashMap::new();
+        let mut bound: HashMap<String, Vec<(String, String, String, bool)>> = HashMap::new();
         for b in store.table("bindings").iter() {
             let (Some(id), Some(node), Some(name)) = (id_of(b, "id"), text(b, "node"), text(b, "name")) else { continue };
             let kind = text(b, "kind").unwrap_or_default();
-            if !(kind == "input" || kind == "attribute") || !names.contains(&name) {
+            if !(kind == "input" || kind == "attribute") {
                 continue;
             }
             let attribute = kind == "attribute";
             let source = if attribute { text(b, "value") } else { text(b, "source") }.unwrap_or_default();
-            labels.entry(node).or_default().push(Label { binding: id, input: name, source, attribute });
+            bound.entry(node.clone()).or_default().push((id.clone(), name.clone(), source.clone(), attribute));
+            if names.contains(&name) {
+                labels.entry(node).or_default().push(Label { binding: id, input: name, source, attribute });
+            }
+        }
+        // A COMPONENT'S `@Input`s, by the component id a template node names (`components.class` joins `io.class`).
+        let class_of: HashMap<String, String> = store.table("components").iter()
+            .filter_map(|c| Some((id_of(c, "class")?, id_of(c, "id")?))).collect();
+        let mut inputs = HashMap::new();
+        for io in store.table("io").iter().filter(|r| text(r, "kind").as_deref() == Some("input")) {
+            let (Some(class), Some(member)) = (id_of(io, "class"), text(io, "member")) else { continue };
+            let Some(component) = class_of.get(&class) else { continue };
+            let name = text(io, "binding_name").unwrap_or_else(|| member.clone());
+            inputs.insert((component.clone(), member), name);
         }
         let mut hosts: HashMap<String, Vec<String>> = HashMap::new();
         for r in store.table("renders").iter() {
@@ -77,9 +103,41 @@ impl Tree {
                 }
             }
         }
-        Tree { parent, component, labels, hosts }
+        Tree { parent, component, labels, hosts, bound, inputs }
     }
 
+    /// The keys a label binding shows, with the binding that placed each: its own, else - when it is a bare read of its
+    /// component's `@Input` - what each host binds that input to, up while a host's binding is one again.
+    fn keys_of(&self, binding: &str, source: &str, attribute: bool, node: &str, k: &Keys<'_>) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut queue: VecDeque<(String, String, bool, String)> =
+            VecDeque::from([(binding.to_string(), source.to_string(), attribute, node.to_string())]);
+        while let Some((b, text, attribute, at)) = queue.pop_front() {
+            if !seen.insert(b.clone()) {
+                continue;
+            }
+            let placed = k.placed(&b, &text, attribute);
+            if !placed.is_empty() {
+                out.extend(placed.into_iter().map(|key| (key, b.clone())));
+                continue;
+            }
+            // A BARE NAME of an `@Input` of the component this node is in: every host's binding of that input.
+            if attribute || text.is_empty() || !text.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
+                continue;
+            }
+            let Some(component) = self.component.get(&at) else { continue };
+            let Some(name) = self.inputs.get(&(component.clone(), text.clone())) else { continue };
+            for h in self.hosts.get(component).into_iter().flatten() {
+                for (hb, hname, htext, hattr) in self.bound.get(h).into_iter().flatten() {
+                    if hname == name {
+                        queue.push_back((hb.clone(), htext.clone(), *hattr, h.clone()));
+                    }
+                }
+            }
+        }
+        out
+    }
     /// Every label the control `node` is shown under: its own, else the nearest ancestor's, else each host's.
     fn climb<'a>(&'a self, node: &'a str) -> Vec<Found<'a>> {
         let mut out = Vec::new();
@@ -115,9 +173,26 @@ impl Tree {
     }
 }
 
+/// What the closure placed through each binding (`key_node_ways`), and the keys a locale defines.
+struct Keys<'a> {
+    by_binding: HashMap<String, Vec<String>>,
+    defined: &'a HashSet<String>,
+}
+
+impl Keys<'_> {
+    /// The keys one binding places: its `key_node_ways` rows, or a plain attribute's text a locale defines.
+    fn placed(&self, binding: &str, text: &str, attribute: bool) -> Vec<String> {
+        match self.by_binding.get(binding) {
+            Some(keys) => keys.clone(),
+            None if attribute && self.defined.contains(text) => vec![text.to_string()],
+            None => Vec::new(),
+        }
+    }
+}
+
 /// THE ROWS, over the `key_node_ways` rows the closure just derived.
 pub fn rows(store: &Store<'_>, ways: &[Row]) -> Vec<Row> {
-    let controls = super::key_options::value_bindings(store);
+    let controls = controls(store);
     if controls.is_empty() {
         return Vec::new();
     }
@@ -127,35 +202,38 @@ pub fn rows(store: &Store<'_>, ways: &[Row]) -> Vec<Row> {
         return Vec::new();
     }
     let tree = Tree::new(store, &names);
-    let mut keys_of: HashMap<String, Vec<String>> = HashMap::new();
+    let mut by_binding: HashMap<String, Vec<String>> = HashMap::new();
     for w in ways {
         if let (Some(b), Some(k)) = (text(w, "binding"), text(w, "key")) {
-            let list = keys_of.entry(b).or_default();
+            let list = by_binding.entry(b).or_default();
             if !list.contains(&k) {
                 list.push(k);
             }
         }
     }
     let defined: HashSet<String> = store.table("translations").iter().filter_map(|t| text(t, "key")).collect();
-    let mut sorted: Vec<(&String, &(String, String))> = controls.iter().collect();
+    let keys = Keys { by_binding, defined: &defined };
+    let node_of: HashMap<&str, &str> = tree.bound.iter().flat_map(|(n, bs)| bs.iter().map(move |b| (b.0.as_str(), n.as_str()))).collect();
+    let mut sorted: Vec<(&String, &String)> = controls.iter().collect();
     sorted.sort_by(|a, b| node_order(a.0).cmp(&node_order(b.0)).then(a.0.cmp(b.0)));
     let mut out = Vec::new();
-    let mut written: HashSet<(String, String, Option<String>, String)> = HashSet::new();
-    for (node, (value_binding, _)) in sorted {
+    let mut written: HashSet<(String, String, Option<String>, String, String)> = HashSet::new();
+    for (node, value_binding) in sorted {
         for found in tree.climb(node) {
             for label in tree.labels.get(found.node).into_iter().flatten() {
-                let mut keys: Vec<Option<String>> = keys_of.get(&label.binding).into_iter().flatten().cloned().map(Some).collect();
-                if keys.is_empty() && label.attribute && defined.contains(&label.source) {
-                    keys.push(Some(label.source.clone()));
+                let mut placed: Vec<(Option<String>, Option<String>)> = tree.keys_of(&label.binding, &label.source, label.attribute, found.node, &keys)
+                    .into_iter().map(|(k, b)| (Some(k), Some(b))).collect();
+                if placed.is_empty() {
+                    placed.push((None, None));
                 }
-                if keys.is_empty() {
-                    keys.push(None);
-                }
-                for key in keys {
+                for (key, key_binding) in placed {
                     let host = found.host.map(str::to_string);
-                    if !written.insert((node.clone(), label.binding.clone(), host.clone(), key.clone().unwrap_or_default())) {
+                    let unique = (node.clone(), label.binding.clone(), host.clone(), key.clone().unwrap_or_default(), key_binding.clone().unwrap_or_default());
+                    if !written.insert(unique) {
                         continue;
                     }
+                    // THE HOST WHOSE BINDING PLACED THE KEY, when it is not the label's own.
+                    let key_host = key_binding.as_deref().filter(|b| *b != label.binding).and_then(|b| node_of.get(b)).map(|n| n.to_string());
                     let mut row = Row::new();
                     let mut put = |k: &str, v: Value| row.insert(k.to_string(), v);
                     let opt = |s: Option<String>| s.map(Value::String).unwrap_or(Value::Null);
@@ -169,11 +247,29 @@ pub fn rows(store: &Store<'_>, ways: &[Row]) -> Vec<Row> {
                     put("input", Value::String(label.input.clone()));
                     put("source", Value::String(label.source.clone()));
                     put("key", opt(key));
+                    put("key_binding", opt(key_binding));
+                    put("key_host", opt(key_host));
                     put("host_node", opt(host));
                     put("up", Value::from(found.up as i64));
                     out.push(row);
                 }
             }
+        }
+    }
+    out
+}
+
+/// Node id -> its value binding: what `key_options::value_bindings` calls a control, and an input `x` beside an output
+/// `xChange` of any handler - one-way, yet a control that shows a value and reports its change.
+fn controls(store: &Store<'_>) -> HashMap<String, String> {
+    let mut out: HashMap<String, String> = super::key_options::value_bindings(store).into_iter().map(|(n, (b, _))| (n, b)).collect();
+    let bindings = store.table("bindings");
+    let outputs: HashSet<(String, String)> = bindings.iter().filter(|b| text(b, "kind").as_deref() == Some("output"))
+        .filter_map(|b| Some((text(b, "node")?, text(b, "name")?))).collect();
+    for b in bindings.iter().filter(|b| text(b, "kind").as_deref() == Some("input")) {
+        let (Some(id), Some(node), Some(name)) = (id_of(b, "id"), text(b, "node"), text(b, "name")) else { continue };
+        if outputs.contains(&(node.clone(), format!("{name}Change"))) {
+            out.entry(node).or_insert(id);
         }
     }
     out
