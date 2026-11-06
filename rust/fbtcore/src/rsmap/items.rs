@@ -240,6 +240,12 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
         {
             self.items.declares.insert(ident.to_string());
         }
+        // A `thread_local!` static is declared like any `static`: own here, and named from outside only if visible.
+        if i.mac.path.is_ident("thread_local") {
+            for t in super::consts::thread_locals(&i.mac) {
+                self.declare(&t.ident, &t.vis, &t.attrs);
+            }
+        }
         visit::visit_item_macro(self, i);
     }
 
@@ -425,5 +431,5 @@ fn names_test(token: &TokenTree) -> bool {
 }
 
 #[cfg(test)]
-#[path = "items_tests.rs"]
+#[path = "tests/items_tests.rs"]
 mod tests;
