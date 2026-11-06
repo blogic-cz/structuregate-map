@@ -26,6 +26,7 @@
 
 use super::lines::LineStarts;
 use super::locals;
+use super::literals::Piece;
 use super::paths;
 use proc_macro2::{TokenStream, TokenTree};
 use quote::ToTokens;
@@ -66,7 +67,7 @@ pub struct Items {
 }
 
 pub fn read(file: &syn::File, starts: &LineStarts<'_>) -> Items {
-    let mut walker = Walker { items: Items::default(), starts, inline: vec![], tests: 0, fns: 0, locals: vec![], own: BTreeSet::new(), paths: vec![], use_items: vec![] };
+    let mut walker = Walker { items: Items::default(), starts, inline: vec![], tests: 0, fns: 0, locals: vec![], own: BTreeSet::new(), paths: vec![], use_items: vec![], template: false };
     walker.items.summary = summary(&file.attrs);
     walker.visit_file(file);
     let (mut uses, rooted) = paths::resolve(&walker.paths, &walker.use_items, &walker.own);
@@ -91,6 +92,8 @@ struct Walker<'s, 't> {
     /// Every path's segments, and every `use` leaf - read by `paths::resolve` once the whole file is seen.
     paths: Vec<(Vec<String>, Vec<String>)>,
     use_items: Vec<paths::UseItem>,
+    /// Inside a `macro_rules!` body: `$name` and `$name:frag` are the macro's own, not names.
+    template: bool,
 }
 
 impl Walker<'_, '_> {
@@ -246,7 +249,10 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
                 self.declare(&t.ident, &t.vis, &t.attrs);
             }
         }
+        let template = i.mac.path.is_ident("macro_rules");
+        self.template = template;
         visit::visit_item_macro(self, i);
+        self.template = false;
     }
 
     fn visit_block(&mut self, b: &'ast syn::Block) {
@@ -330,11 +336,30 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
     /// A MACRO'S ARGUMENTS ARE NOT PARSED by syn - `vec![Store::new()]` is tokens to it - so their
     /// identifiers are read off the tokens. Anything after a `.` is a member, and is left out as a
     /// member is everywhere else.
+    ///
+    /// ARGUMENTS THAT PARSE ARE CODE, walked as code: a closure parameter, a struct-literal label and a `matches!`
+    /// binding are patterns and fields there, not uses. The token scrape is only for a body that does not parse.
     fn visit_macro(&mut self, m: &'ast syn::Macro) {
-        let mut found = vec![];
-        macro_paths(m.tokens.clone(), &mut |path| found.push(path));
-        found.retain(|p| !self.bound(&p[0]));
-        self.paths.extend(found.into_iter().map(|p| (self.inline.clone(), p)));
+        let pieces = if self.template { None } else { super::literals::parsed_pieces(m) };
+        if let Some(pieces) = pieces {
+            self.scoped(|w| {
+                for piece in &pieces {
+                    match piece {
+                        Piece::Expr(e) => w.visit_expr(e),
+                        Piece::Pat(p) => {
+                            w.visit_pat(p);
+                            w.bind(p);
+                        }
+                        Piece::Lit(_) => {}
+                    }
+                }
+            });
+        } else {
+            let mut found = vec![];
+            macro_paths(m.tokens.clone(), self.template, &mut |path| found.push(path));
+            found.retain(|p| !self.bound(&p[0]));
+            self.paths.extend(found.into_iter().map(|p| (self.inline.clone(), p)));
+        }
         visit::visit_macro(self, m);
     }
 
@@ -357,13 +382,18 @@ fn typed(sig: &syn::Signature) -> Vec<&syn::Pat> {
 
 /// Each path the tokens spell, as its segments: `TokenTree::Group` is one path of two, not two bare names, for the root
 /// rule (`paths.rs`) reads the first segment. A path after a `.` is a member and is left out.
-fn macro_paths(stream: TokenStream, found: &mut impl FnMut(Vec<String>)) {
+/// In a `macro_rules!` TEMPLATE the ident after a `$` is a metavariable (`$crate` too) and the one after `$name :`
+/// its fragment specifier - neither is a name of this tree.
+fn macro_paths(stream: TokenStream, template: bool, found: &mut impl FnMut(Vec<String>)) {
     let tokens: Vec<TokenTree> = stream.into_iter().collect();
     let colon = |t: Option<&TokenTree>| matches!(t, Some(TokenTree::Punct(p)) if p.as_char() == ':');
     let mut i = 0;
     let mut after_dot = false;
+    let dollar = |j: Option<usize>| matches!(j.and_then(|j| tokens.get(j)), Some(TokenTree::Punct(p)) if p.as_char() == '$');
     while i < tokens.len() {
+        let meta = template && (dollar(i.checked_sub(1)) || (colon(i.checked_sub(1).and_then(|j| tokens.get(j))) && dollar(i.checked_sub(3))));
         match &tokens[i] {
+            TokenTree::Ident(_) if meta => {}
             TokenTree::Ident(ident) if !after_dot => {
                 let mut path = vec![ident.to_string().trim_start_matches("r#").to_string()];
                 while colon(tokens.get(i + 1)) && colon(tokens.get(i + 2)) {
@@ -373,7 +403,7 @@ fn macro_paths(stream: TokenStream, found: &mut impl FnMut(Vec<String>)) {
                 }
                 found(path);
             }
-            TokenTree::Group(group) => macro_paths(group.stream(), found),
+            TokenTree::Group(group) => macro_paths(group.stream(), template, found),
             _ => {}
         }
         after_dot = matches!(&tokens[i], TokenTree::Punct(p) if p.as_char() == '.');
@@ -412,21 +442,31 @@ fn path_attr(attrs: &[syn::Attribute]) -> Option<String> {
     attrs.iter().filter(|a| a.path().is_ident("path")).find_map(doc_text)
 }
 
-/// `#[cfg(test)]` exactly. A `cfg(all(test, windows))` is still a test module, so any `cfg` whose
-/// tokens mention `test` counts - a false yes costs a declaration nobody could name anyway.
+/// A `cfg` THAT REQUIRES `test`, by evaluating its predicate: `test`, `all(..)` with a child that requires it,
+/// `any(..)` whose every child does. `not(test)` is PRODUCTION code - read as test it declared nothing, and every
+/// caller of the item lost its edge.
 pub(super) fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|a| {
         a.path().is_ident("cfg")
-            && matches!(&a.meta, syn::Meta::List(list)
-                if list.tokens.clone().into_iter().any(|t| names_test(&t)))
+            && a.parse_args::<syn::Meta>().is_ok_and(|m| requires_test(&m))
     })
 }
 
-fn names_test(token: &TokenTree) -> bool {
-    match token {
-        TokenTree::Ident(ident) => ident == "test",
-        TokenTree::Group(group) => group.stream().into_iter().any(|t| names_test(&t)),
-        _ => false,
+fn requires_test(meta: &syn::Meta) -> bool {
+    match meta {
+        syn::Meta::Path(p) => p.is_ident("test"),
+        syn::Meta::List(list) => {
+            let children = list.parse_args_with(syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated);
+            let Ok(children) = children else { return false };
+            if list.path.is_ident("all") {
+                children.iter().any(requires_test)
+            } else if list.path.is_ident("any") {
+                !children.is_empty() && children.iter().all(requires_test)
+            } else {
+                false
+            }
+        }
+        syn::Meta::NameValue(_) => false,
     }
 }
 

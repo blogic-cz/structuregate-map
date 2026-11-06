@@ -149,15 +149,24 @@ pub(super) enum Piece {
 /// guard)`; any other body by EVERY LITERAL TOKEN in it, at any depth. A body that parses no way is never lost
 /// whole: its literals are still the file's.
 pub(super) fn body_pieces(mac: &syn::Macro) -> Vec<Piece> {
+    parsed_pieces(mac).unwrap_or_else(|| {
+        let mut out = Vec::new();
+        token_literals(mac.tokens.clone(), &mut out);
+        out
+    })
+}
+
+/// THE PIECES A BODY'S GRAMMAR GIVES (cases above, all but the literal-token fallback); None when none applies.
+pub(super) fn parsed_pieces(mac: &syn::Macro) -> Option<Vec<Piece>> {
     if let Ok(args) = mac.parse_body_with(Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated) {
-        return args.into_iter().map(Piece::Expr).collect();
+        return Some(args.into_iter().map(Piece::Expr).collect());
     }
     let last = mac.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
-    let mut out = Vec::new();
     match last.as_str() {
         "json" => {
+            let mut out = Vec::new();
             json_value(mac.tokens.clone(), &mut out);
-            return out;
+            return Some(out);
         }
         "vec" => {
             let both = |input: syn::parse::ParseStream| -> syn::Result<(syn::Expr, syn::Expr)> {
@@ -166,7 +175,7 @@ pub(super) fn body_pieces(mac: &syn::Macro) -> Vec<Piece> {
                 Ok((value, input.parse()?))
             };
             if let Ok((value, count)) = mac.parse_body_with(both) {
-                return vec![Piece::Expr(value), Piece::Expr(count)];
+                return Some(vec![Piece::Expr(value), Piece::Expr(count)]);
             }
         }
         "matches" => {
@@ -182,13 +191,12 @@ pub(super) fn body_pieces(mac: &syn::Macro) -> Vec<Piece> {
                 Ok(pieces)
             };
             if let Ok(pieces) = mac.parse_body_with(all) {
-                return pieces;
+                return Some(pieces);
             }
         }
         _ => {}
     }
-    token_literals(mac.tokens.clone(), &mut out);
-    out
+    None
 }
 
 fn token_literals(tokens: TokenStream, out: &mut Vec<Piece>) {

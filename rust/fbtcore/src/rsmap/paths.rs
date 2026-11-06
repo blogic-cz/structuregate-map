@@ -115,8 +115,8 @@ pub(crate) fn resolve(paths: &[(Vec<String>, Vec<String>)], uses: &[UseItem], ow
     let mut rooted = Rooted::new();
     let mut all_imports: BTreeMap<&Vec<String>, BTreeMap<String, Root>> = BTreeMap::new();
     let mut globs: BTreeSet<&Vec<String>> = BTreeSet::new();
-    // AN ALIAS IS NOT A NAME of any file; the leaf it renames is already recorded by the `use`.
-    let mut aliased: BTreeSet<&str> = BTreeSet::new();
+    // AN ALIAS IS NOT A NAME of any file, and is visible only in the module that writes it (like an import); the leaf it renames is already recorded by the `use`.
+    let mut aliased: BTreeSet<(&Vec<String>, &str)> = BTreeSet::new();
     let add = |names: &mut BTreeSet<String>, s: &str| {
         if !keyword(s) {
             names.insert(s.to_string());
@@ -125,7 +125,7 @@ pub(crate) fn resolve(paths: &[(Vec<String>, Vec<String>)], uses: &[UseItem], ow
     for u in uses {
         let root = root_of_use(u, own);
         if let Some(a) = &u.alias {
-            aliased.insert(a);
+            aliased.insert((&u.module, a));
         }
         if u.glob {
             if matches!(root, Root::InTree | Root::Own) {
@@ -158,8 +158,9 @@ pub(crate) fn resolve(paths: &[(Vec<String>, Vec<String>)], uses: &[UseItem], ow
         let own_imports = all_imports.get(module).unwrap_or(&no_imports);
         let parent_imports = parent.and_then(|m| all_imports.get(&m.to_vec())).unwrap_or(&no_imports);
         let Some((head, rest)) = path.split_first() else { continue };
+        let is_alias = aliased.contains(&(module, head.as_str()));
         let all = |names: &mut BTreeSet<String>| {
-            for s in path.iter().filter(|s| !(*s == head && aliased.contains(head.as_str()))) {
+            for s in path.iter().filter(|s| !(*s == head && is_alias)) {
                 add(names, s);
             }
         };
@@ -177,7 +178,7 @@ pub(crate) fn resolve(paths: &[(Vec<String>, Vec<String>)], uses: &[UseItem], ow
                 Some(Root::Std | Root::Own) => {}
                 Some(Root::Extern(x)) => {
                     let set = rooted.entry(x.clone()).or_default();
-                    set.extend(path.iter().filter(|s| !keyword(s) && !(*s == head && aliased.contains(head.as_str()))).cloned());
+                    set.extend(path.iter().filter(|s| !keyword(s) && !(*s == head && is_alias)).cloned());
                 }
                 None => {
                     add(&mut names, h);
@@ -311,6 +312,14 @@ mod tests {
         let (names, rooted) = run("", &["Vec::new", "alpha::go"], &[]);
         assert_eq!(names, set(&["Vec", "alpha"]));
         assert_eq!(rooted["alpha"], set(&["go"]));
+    }
+
+    #[test]
+    fn an_alias_hides_its_head_only_in_the_module_that_writes_it() {
+        let (names, _) = run_in("use crate::a::b as c;", &["tests"], &["c"], &[]);
+        assert!(names.contains("c"), "{names:?}");
+        let (names, _) = run("use crate::a::b as c;", &["c"], &[]);
+        assert!(!names.contains("c"), "{names:?}");
     }
 
     #[test]
