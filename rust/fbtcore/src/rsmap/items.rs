@@ -19,7 +19,8 @@
 //! private `fn walk` never joins to another file's `pub fn walk`.
 //!
 //! A PATH'S ROOT DECIDES WHAT ITS LATER SEGMENTS NAME (`paths.rs`): `TokenTree::Group` or `std::env::temp_dir` name
-//! nothing in this tree, `crate::a::B` names `a` and `B`, and a name reached through another crate is `rooted` under it.
+//! nothing in this tree, `crate::a::B` is a QUALIFIED path the join walks through the module tree (`graph/rspaths.rs`;
+//! the inline modules are recorded here for it), and a name reached through another crate is `rooted` under it.
 //!
 //! MEMBER NAMES ARE NOT USES, as in the C# half: `thing.walk()` names a method of whatever `thing` is,
 //! and drawing an edge to a file that declares a free `fn walk` would be the grep this map replaces.
@@ -62,6 +63,15 @@ pub struct Items {
     /// What the file names through ANOTHER crate, by that crate's name.
     pub rooted: BTreeMap<String, BTreeSet<String>>,
     pub mods: Vec<ModRef>,
+    /// The inline `mod x { }` blocks - (the inline chain around it, its name) - and the paths that lead into the tree
+    /// (`paths::Qualified`), for the module-tree walk of the join (`graph/rspaths.rs`).
+    pub inline_mods: Vec<(Vec<String>, String)>,
+    pub qualified: Vec<paths::Qualified>,
+    /// The in-tree imports and globs of each module, for the walk to follow (`paths::imports`).
+    pub imports: Vec<paths::Named>,
+    pub globs: Vec<paths::Qualified>,
+    /// Every name the file defines, private included: what a glob of this file brings.
+    pub own: BTreeSet<String>,
     pub has_main: bool,
     pub bodies: Vec<Body>,
 }
@@ -70,10 +80,13 @@ pub fn read(file: &syn::File, starts: &LineStarts<'_>) -> Items {
     let mut walker = Walker { items: Items::default(), starts, inline: vec![], tests: 0, fns: 0, locals: vec![], own: BTreeSet::new(), paths: vec![], use_items: vec![], template: false };
     walker.items.summary = summary(&file.attrs);
     walker.visit_file(file);
-    let (mut uses, rooted) = paths::resolve(&walker.paths, &walker.use_items, &walker.own);
+    let (mut uses, rooted, qualified) = paths::resolve(&walker.paths, &walker.use_items, &walker.own);
     uses.retain(|u| !walker.own.contains(u));
     walker.items.uses = uses;
     walker.items.rooted = rooted;
+    walker.items.qualified = qualified;
+    (walker.items.imports, walker.items.globs) = paths::imports(&walker.use_items, &walker.own);
+    walker.items.own = walker.own.clone();
     walker.items
 }
 
@@ -164,6 +177,9 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
                 });
             }
             return;
+        }
+        if self.fns == 0 {
+            self.items.inline_mods.push((self.inline.clone(), m.ident.to_string()));
         }
         let test = is_cfg_test(&m.attrs);
         self.inline.push(path_attr(&m.attrs).unwrap_or_else(|| m.ident.to_string()));
@@ -326,6 +342,9 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
         }
         visit::visit_expr_path(self, p);
     }
+
+    /// `pub(crate)`, `pub(super)` AND `pub(in a::b)` ARE VISIBILITY, never a use: read as the path `crate` they drew an edge to the crate root.
+    fn visit_visibility(&mut self, _: &'ast syn::Visibility) {}
 
     fn visit_path(&mut self, p: &'ast syn::Path) {
         let segs = p.segments.iter().map(|s| s.ident.to_string().trim_start_matches("r#").to_string()).collect();

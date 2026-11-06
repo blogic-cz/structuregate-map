@@ -5,7 +5,7 @@
 //! map of a tree with no python in it.
 
 use super::protocol::{read, Collector};
-use crate::graph::{Computed, Place};
+use crate::graph::{Computed, ModEntry, Place, Qualified};
 use crate::hosts::plugins;
 use super::kept::Kept;
 use crate::rsmap::cargo;
@@ -32,7 +32,7 @@ pub fn mark(into: &mut Collector, prefix: &str, files: &[(String, String)], reas
 
 /// THE RUST HALF, in process: `syn` parses, and a `mod name;` is an exact edge.
 pub fn rust(into: &mut Collector, root: &str, prefix: &str, files: &[(String, String)], kept: &mut Option<Kept>) {
-    in_process(into, root, prefix, files, kept, ("rust", "rust in-process (syn)", "rust|rooted".into()), rsmap::map_file);
+    in_process(into, root, prefix, files, kept, ("rust", "rust in-process (syn)", "rust|paths".into()), rsmap::map_file);
     rust_crates(into, root, prefix, files);
 }
 
@@ -141,6 +141,26 @@ fn in_process(into: &mut Collector, root: &str, prefix: &str, files: &[(String, 
             file.rooted.entry(krate.clone()).or_default().extend(strings(names));
         }
         file.uses_path.extend(strings(&row["uses_path"]).into_iter().map(|p| format!("{prefix}{p}")));
+        // RUST'S MODULE TREE and the paths into it, for the join's walk (`graph/rspaths.rs`); a target is prefixed like `uses_path`.
+        for m in row["mods"].as_array().into_iter().flatten() {
+            file.mods.push(ModEntry {
+                inline: strings(&m["inline"]),
+                name: m["name"].as_str().unwrap_or("").into(),
+                target: m["target"].as_str().map(|t| format!("{prefix}{t}")),
+            });
+        }
+        let read_q = |q: &Value| Qualified {
+            module: strings(&q["module"]),
+            anchor: q["anchor"].as_str().unwrap_or("").into(),
+            supers: q["supers"].as_u64().unwrap_or(0) as usize,
+            segs: strings(&q["segs"]),
+            glob: q["glob"].as_bool().unwrap_or(false),
+            name: q["name"].as_str().map(String::from),
+        };
+        file.qualified.extend(row["qualified"].as_array().into_iter().flatten().map(read_q));
+        file.imports.extend(row["imports"].as_array().into_iter().flatten().map(read_q));
+        file.globs.extend(row["globs"].as_array().into_iter().flatten().map(read_q));
+        file.own.extend(strings(&row["own"]));
         for folder in strings(&row["uses_dirs"]) {
             file.uses_path.extend(by_folder.get(&folder).into_iter().flatten().filter(|p| **p != rel).cloned());
         }

@@ -14,9 +14,11 @@ mod findings;
 pub(crate) use findings::is_error;
 mod join;
 mod reach;
+mod rspaths;
 mod shape;
 mod write;
 
+pub use rspaths::{ModEntry, Qualified};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -51,6 +53,15 @@ pub struct File {
     pub rooted: BTreeMap<String, BTreeSet<String>>,
     /// RUST: crate name -> the unit it is, for every package in this file's reach (`rsmap::cargo::crate_name`).
     pub crates: BTreeMap<String, String>,
+    /// RUST: the module declarations the join walks - `mod x;` with its file, an inline `mod x { }` without - and the
+    /// paths that lead into the tree, walked through them (`rspaths.rs`). `own`: every name the file defines, private
+    /// included, which a glob of it brings.
+    pub mods: Vec<ModEntry>,
+    pub qualified: Vec<Qualified>,
+    /// The in-tree imports (`name` set) and globs of each module the walk follows.
+    pub imports: Vec<Qualified>,
+    pub globs: Vec<Qualified>,
+    pub own: BTreeSet<String>,
     pub entry: bool,
     pub unmapped: String,
     pub generated: bool,
