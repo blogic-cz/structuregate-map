@@ -44,7 +44,9 @@ requires and which enum members it still permits.
 - **`control_labels` IS WHICH LABEL A FORM CONTROL IS SHOWN UNDER** (#155, `key/lists/key_labels.rs`): for each node `key_options::value_bindings` calls a control, a
   binding named in the `label_inputs` option (node resolves `labelInputs`, default `label`/`title`) on the control itself (`own`), else on its nearest ancestor (`wrap`),
   else on each host element of its component (`renders.node`) and up from there (`host`), a render edge at a time while nothing is found, each host element climbed from
-  once (a visited set). The keys are the `key_node_ways` rows of the label binding, derived just before (emitted before `release`).
+  once (a visited set). The keys are the `key_node_ways` rows of the label binding, derived just before (emitted before `release`); a label that is a bare read of
+  its component's `@Input` takes each host's binding of it, up while a host relays its own input (`key_binding`, `key_host`). An `[x]` beside an `(xChange)` of any
+  handler is a control here too; `value_bindings` keeps every output of a name, so a two-way pair with its own handler stays a pair (`control_options` too).
 - **THE CLOSURE TABLES DECLARE UNIQUE KEYS**, so a pass that files a row twice fails the insert instead of
   publishing a plausible duplicate.
 - **NO REGEX: the dead-key trace is character walks** (`sourcescan.rs`, `sourcetrace.rs`). It decides whether

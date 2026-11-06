@@ -81,10 +81,12 @@ pub(super) fn value_bindings(store: &Store<'_>) -> HashMap<String, (String, Stri
     let expressions = store.table("expressions");
     let trees = binding_trees(&expressions);
     let tree = |id: &str| trees.get(id).map(|t| super::astreads::unwrap(t));
-    let mut outputs: HashMap<(String, String), (String, Option<Value>)> = HashMap::new();
+    // EVERY OUTPUT OF A NAME, not the last (#155): `[(value)]="x" (valueChange)="onX($event)"` is two `valueChange` outputs on one
+    // node, and keeping one let the handler's stand in for the pair's.
+    let mut outputs: HashMap<(String, String), Vec<(String, Option<Value>)>> = HashMap::new();
     for b in bindings.iter().filter(|b| text(b, "kind").as_deref() == Some("output")) {
         if let (Some(id), Some(node), Some(name)) = (id_of(b, "id"), text(b, "node"), text(b, "name")) {
-            outputs.insert((node, name), (text(b, "source").unwrap_or_default(), tree(&id).and_then(stored_place)));
+            outputs.entry((node, name)).or_default().push((text(b, "source").unwrap_or_default(), tree(&id).and_then(stored_place)));
         }
     }
     let mut out: HashMap<String, (String, String)> = HashMap::new();
@@ -92,7 +94,7 @@ pub(super) fn value_bindings(store: &Store<'_>) -> HashMap<String, (String, Stri
         let (Some(id), Some(node), Some(name)) = (id_of(b, "id"), text(b, "node"), text(b, "name")) else { continue };
         // A PLAIN ATTRIBUTE (`formControlName="tier"`) has no expression: its text is its `value`.
         let source = text(b, "source").filter(|t| !t.is_empty()).or_else(|| text(b, "value")).unwrap_or_default();
-        let paired = outputs.get(&(node.clone(), format!("{name}Change"))).is_some_and(|(text, place)| {
+        let paired = outputs.get(&(node.clone(), format!("{name}Change"))).into_iter().flatten().any(|(text, place)| {
             *text == source || place.as_ref().is_some_and(|p| tree(&id) == Some(p))
         });
         let two_way = text(b, "kind").as_deref() == Some("input") && paired;
