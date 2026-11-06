@@ -161,6 +161,25 @@ Test-Case 'rs map: a name joins only into its own crate and the crates its Cargo
     Assert-Equal ((Get-RsImports $found.Map 'gamma/src/lib.rs') -join ',') 'alpha/src/lib.rs' 'a workspace = true dependency'
 }
 
+Test-Case 'rs map: a later path segment names into the tree only through crate, super or an in-tree import' {
+    $tree = Use-Tree @{
+        'src/lib.rs'    = "mod shapes;`nmod walk;`nmod util;`nmod c;`nmod m;`nmod n;`n"
+        'src/shapes.rs' = "pub struct Group;`npub fn temp_dir() {}`npub fn reach() {}`npub fn helper() {}`n"
+        'src/walk.rs'   = "use proc_macro2::TokenTree;`npub fn f(t: TokenTree) -> bool { matches!(t, TokenTree::Group(_)) || std::env::temp_dir().exists() }`n"
+        'src/util.rs'   = "mod reach { pub fn orphans() {} }`npub fn g() { self::reach::orphans(); }`n"
+        'src/c.rs'      = "use crate::shapes::Group;`npub fn h() -> Group { Group }`n"
+        'src/m.rs'      = "pub fn top() -> u8 { 1 }`npub fn other(t: proc_macro2::TokenTree) -> bool { matches!(t, TokenTree::Group(_)) }`n#[cfg(test)]`nmod tests {`n    use super::*;`n    fn t() { let _ = top(); }`n}`n"
+        'src/n.rs'      = "pub fn k() -> u8 { fn helper() -> u8 { 1 } helper() }`n"
+    }
+    $found = Get-RsMap --root $tree
+    Assert-Exit $found 0
+    Assert-Equal (Get-RsImports $found.Map 'src/walk.rs').Count 0 'TokenTree::Group and std::env::temp_dir name nothing in the tree'
+    Assert-Equal (Get-RsImports $found.Map 'src/util.rs').Count 0 'self::reach is util''s own module'
+    Assert-Equal ((Get-RsImports $found.Map 'src/c.rs') -join ',') 'src/shapes.rs' 'a crate:: import still joins'
+    Assert-Equal (Get-RsImports $found.Map 'src/m.rs').Count 0 'a glob in the tests module does not reach the rest of the file'
+    Assert-Equal (Get-RsImports $found.Map 'src/n.rs').Count 0 'a fn''s local helper is its own'
+}
+
 Test-Case 'rs map: a rust item does not make a C# name ambiguous - the languages join apart' {
     # Found on this repo's own tree: `pub struct Check` in a rust file made the C# class `Check`
     # ambiguous, the edge was dropped, and Check.cs was reported as having no reader.

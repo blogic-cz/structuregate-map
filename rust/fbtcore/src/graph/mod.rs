@@ -47,6 +47,10 @@ pub struct File {
     /// can name (`rsmap::cargo`). None outside a cargo package: such a file joins as before.
     pub unit: Option<String>,
     pub reach: Option<BTreeSet<String>>,
+    /// RUST: the names a path of this file reaches through ANOTHER crate, by that crate's name (`alpha::go`).
+    pub rooted: BTreeMap<String, BTreeSet<String>>,
+    /// RUST: crate name -> the unit it is, for every package in this file's reach (`rsmap::cargo::crate_name`).
+    pub crates: BTreeMap<String, String>,
     pub entry: bool,
     pub unmapped: String,
     pub generated: bool,

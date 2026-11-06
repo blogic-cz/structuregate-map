@@ -18,14 +18,18 @@
 //! A NAME THE FILE DEFINES ITSELF IS ITS OWN, private or test-only: rustc resolves it to that item, so a call of a
 //! private `fn walk` never joins to another file's `pub fn walk`.
 //!
+//! A PATH'S ROOT DECIDES WHAT ITS LATER SEGMENTS NAME (`paths.rs`): `TokenTree::Group` or `std::env::temp_dir` name
+//! nothing in this tree, `crate::a::B` names `a` and `B`, and a name reached through another crate is `rooted` under it.
+//!
 //! MEMBER NAMES ARE NOT USES, as in the C# half: `thing.walk()` names a method of whatever `thing` is,
 //! and drawing an edge to a file that declares a free `fn walk` would be the grep this map replaces.
 
 use super::lines::LineStarts;
 use super::locals;
+use super::paths;
 use proc_macro2::{TokenStream, TokenTree};
 use quote::ToTokens;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use syn::visit::{self, Visit};
 
 /// Fewer statements than this is an idiom, not a copied body - the C# half's threshold.
@@ -54,16 +58,21 @@ pub struct Items {
     pub summary: String,
     pub declares: BTreeSet<String>,
     pub uses: BTreeSet<String>,
+    /// What the file names through ANOTHER crate, by that crate's name.
+    pub rooted: BTreeMap<String, BTreeSet<String>>,
     pub mods: Vec<ModRef>,
     pub has_main: bool,
     pub bodies: Vec<Body>,
 }
 
 pub fn read(file: &syn::File, starts: &LineStarts<'_>) -> Items {
-    let mut walker = Walker { items: Items::default(), starts, inline: vec![], tests: 0, fns: 0, locals: vec![], own: BTreeSet::new() };
+    let mut walker = Walker { items: Items::default(), starts, inline: vec![], tests: 0, fns: 0, locals: vec![], own: BTreeSet::new(), paths: vec![], use_items: vec![] };
     walker.items.summary = summary(&file.attrs);
     walker.visit_file(file);
-    walker.items.uses.retain(|u| !walker.own.contains(u));
+    let (mut uses, rooted) = paths::resolve(&walker.paths, &walker.use_items, &walker.own);
+    uses.retain(|u| !walker.own.contains(u));
+    walker.items.uses = uses;
+    walker.items.rooted = rooted;
     walker.items
 }
 
@@ -77,28 +86,22 @@ struct Walker<'s, 't> {
     fns: usize,
     /// The names bound by the patterns around the walk, innermost last; empty at module level.
     locals: Vec<BTreeSet<String>>,
-    /// Every name the file itself defines at module level, private or test-only.
+    /// Every name the file itself defines, at any depth - a fn's local `fn helper` is its own too.
     own: BTreeSet<String>,
+    /// Every path's segments, and every `use` leaf - read by `paths::resolve` once the whole file is seen.
+    paths: Vec<(Vec<String>, Vec<String>)>,
+    use_items: Vec<paths::UseItem>,
 }
 
 impl Walker<'_, '_> {
     fn declare(&mut self, ident: &syn::Ident, vis: &syn::Visibility, attrs: &[syn::Attribute]) {
-        if self.fns == 0 {
-            self.own.insert(ident.to_string());
-        }
+        self.own.insert(ident.to_string());
         if self.tests == 0
             && self.fns == 0
             && !matches!(vis, syn::Visibility::Inherited)
             && !is_cfg_test(attrs)
         {
             self.items.declares.insert(ident.to_string());
-        }
-    }
-
-    fn use_name(&mut self, ident: &syn::Ident) {
-        let name = ident.to_string();
-        if !matches!(name.as_str(), "self" | "Self" | "super" | "crate") {
-            self.items.uses.insert(name.trim_start_matches("r#").to_string());
         }
     }
 
@@ -147,6 +150,7 @@ impl Walker<'_, '_> {
 
 impl<'ast> Visit<'ast> for Walker<'_, '_> {
     fn visit_item_mod(&mut self, m: &'ast syn::ItemMod) {
+        self.own.insert(m.ident.to_string());
         if m.content.is_none() {
             if self.fns == 0 {
                 self.items.mods.push(ModRef {
@@ -225,7 +229,6 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
     fn visit_item_macro(&mut self, i: &'ast syn::ItemMacro) {
         if let Some(ident) = &i.ident
             && i.mac.path.is_ident("macro_rules")
-            && self.fns == 0
         {
             self.own.insert(ident.to_string());
         }
@@ -313,9 +316,8 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
     }
 
     fn visit_path(&mut self, p: &'ast syn::Path) {
-        for segment in &p.segments {
-            self.use_name(&segment.ident);
-        }
+        let segs = p.segments.iter().map(|s| s.ident.to_string().trim_start_matches("r#").to_string()).collect();
+        self.paths.push((self.inline.clone(), segs));
         visit::visit_path(self, p);
     }
 
@@ -323,23 +325,17 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
     /// identifiers are read off the tokens. Anything after a `.` is a member, and is left out as a
     /// member is everywhere else.
     fn visit_macro(&mut self, m: &'ast syn::Macro) {
-        let mut idents = vec![];
-        macro_idents(m.tokens.clone(), &mut |ident| idents.push(ident.clone()));
-        idents.retain(|i| !self.bound(i.to_string().trim_start_matches("r#")));
-        for ident in &idents {
-            self.use_name(ident);
-        }
+        let mut found = vec![];
+        macro_paths(m.tokens.clone(), &mut |path| found.push(path));
+        found.retain(|p| !self.bound(&p[0]));
+        self.paths.extend(found.into_iter().map(|p| (self.inline.clone(), p)));
         visit::visit_macro(self, m);
     }
 
-    fn visit_use_tree(&mut self, tree: &'ast syn::UseTree) {
-        match tree {
-            syn::UseTree::Path(p) => self.use_name(&p.ident),
-            syn::UseTree::Name(n) => self.use_name(&n.ident),
-            syn::UseTree::Rename(r) => self.use_name(&r.ident),
-            _ => {}
-        }
-        visit::visit_use_tree(self, tree);
+    /// A `use` is read whole (`paths::flatten`): its root says what every segment of it names.
+    fn visit_item_use(&mut self, i: &'ast syn::ItemUse) {
+        let module = self.inline.clone();
+        self.use_items.extend(paths::flatten(&i.tree).into_iter().map(|u| paths::UseItem { module: module.clone(), ..u }));
     }
 }
 
@@ -353,15 +349,29 @@ fn typed(sig: &syn::Signature) -> Vec<&syn::Pat> {
         .collect()
 }
 
-fn macro_idents(stream: TokenStream, found: &mut impl FnMut(&syn::Ident)) {
+/// Each path the tokens spell, as its segments: `TokenTree::Group` is one path of two, not two bare names, for the root
+/// rule (`paths.rs`) reads the first segment. A path after a `.` is a member and is left out.
+fn macro_paths(stream: TokenStream, found: &mut impl FnMut(Vec<String>)) {
+    let tokens: Vec<TokenTree> = stream.into_iter().collect();
+    let colon = |t: Option<&TokenTree>| matches!(t, Some(TokenTree::Punct(p)) if p.as_char() == ':');
+    let mut i = 0;
     let mut after_dot = false;
-    for token in stream {
-        match &token {
-            TokenTree::Ident(ident) if !after_dot => found(ident),
-            TokenTree::Group(group) => macro_idents(group.stream(), found),
+    while i < tokens.len() {
+        match &tokens[i] {
+            TokenTree::Ident(ident) if !after_dot => {
+                let mut path = vec![ident.to_string().trim_start_matches("r#").to_string()];
+                while colon(tokens.get(i + 1)) && colon(tokens.get(i + 2)) {
+                    let Some(TokenTree::Ident(next)) = tokens.get(i + 3) else { break };
+                    path.push(next.to_string().trim_start_matches("r#").to_string());
+                    i += 3;
+                }
+                found(path);
+            }
+            TokenTree::Group(group) => macro_paths(group.stream(), found),
             _ => {}
         }
-        after_dot = matches!(&token, TokenTree::Punct(p) if p.as_char() == '.');
+        after_dot = matches!(&tokens[i], TokenTree::Punct(p) if p.as_char() == '.');
+        i += 1;
     }
 }
 
