@@ -158,7 +158,7 @@ pub fn read(output: &str, into: &mut Collector, language: &str, prefix: &str) ->
             "MAP-UNMAPPED" if n > 2 => into.row(&rel, language).unmapped = fields[2].into(),
             // MAP-BODY|rel|line|name|digest|size[|shingles] and MAP-EXPR|rel|line|digest|size - fingerprints.
             // The seventh field is OPTIONAL: one 8-hex digest per statement, space-joined, from the python
-            // half alone today; the other halves send six fields and are the duplicates' only. THE SPLIT
+            // half (rust sends its own in process, `halves.rs`); the other halves send six fields and are the duplicates' only. THE SPLIT
             // ABOVE STOPS AT SIX, so the sixth slot is `size` or `size|shingles` and is split once more here -
             // read as `number(fields[5])` it was None, and every python body silently left the map.
             "MAP-BODY" if n > 5 => {

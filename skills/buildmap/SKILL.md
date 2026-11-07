@@ -64,7 +64,7 @@ buildtools\structuregate.exe --root . <the tree's flags> --map --map-check --map
 | `cycles` | import cycles, as the loop |
 | `computed_imports` | every place a target is built at RUN TIME — `importlib.import_module(name)`, `import(expr)`, `. $lib`, `Type.GetType(name)` |
 | `duplicate_bodies` / `duplicate_expressions` | identical function bodies, and repeated expressions across files, with local names blanked. Size is in source CHARACTERS |
-| `similar_bodies` | the NEAR copies the digest cannot see: pairs of bodies (python only today) sharing most of their statement shapes - names AND literals blanked, one shape per statement - but not all. `score` is shared/total in percent (one literal changed is 100, one line added to four is 80), `shared`/`total` the counts, `at` the two places. Below 75, or fewer than 3 shared, is not a pair; an identical pair is in `duplicate_bodies` instead |
+| `similar_bodies` | the NEAR copies the digest cannot see: pairs of bodies (python and rust) sharing most of their statement shapes - names AND literals blanked, one shape per statement - but not all. `score` is shared/total in percent (one literal changed is 100, one line added to four is 80), `shared`/`total` the counts, `at` the two places. Below 75, or fewer than 3 shared, is not a pair; an identical pair is in `duplicate_bodies` instead |
 | `halves` | which language halves and plugins ran — a half missing here mapped nothing, so its files' edges are absent, not empty |
 | `findings` | everything the run concluded, each line carrying its own severity |
 | `artifacts` / `steps` / `produced_by` / `read_by` | EMPTY unless a `--map-plugin` fills them — see the top of this skill |
@@ -84,7 +84,9 @@ name is joined to the file the compiler bound it to, so a C# `ambiguous` entry m
 
 **`duplicate_expressions` BLANKS LOCAL NAMES, and without that it finds nothing worth finding.** So a group
 is one SHAPE — read the sites before folding them — and a deliberate boilerplate (a bootstrap pasted into
-every script) is reported like any other repeat, because it genuinely is one.
+every script) is reported like any other repeat, because it genuinely is one. In rust an expression is a call, a method call, a
+binary operation, a struct or array literal, a closure or a macro of at least 12 tokens (the TypeScript half's floor);
+a block, an `if` or a `match` is a body's business.
 
 **A `NO READER` FINDING IS NOT PROOF NOTHING READS IT.** Two readers are invisible: something outside the
 mapped roots (uvicorn starting `app.py`, a shell script, a CI step) and something naming its target at run

@@ -53,6 +53,15 @@ pub struct Body {
     pub line: usize,
     pub name: String,
     pub size: usize,
+    /// One digest per statement, names and literals blanked (`fingerprint::shingles`).
+    pub shingles: Vec<String>,
+}
+
+/// An expression long enough to be a copy (`fingerprint::copied_unit`): its digest, its line and its size in characters.
+pub struct Expression {
+    pub digest: String,
+    pub line: usize,
+    pub size: usize,
 }
 
 #[derive(Default)]
@@ -74,6 +83,7 @@ pub struct Items {
     pub own: BTreeSet<String>,
     pub has_main: bool,
     pub bodies: Vec<Body>,
+    pub expressions: Vec<Expression>,
 }
 
 pub fn read(file: &syn::File, starts: &LineStarts<'_>) -> Items {
@@ -131,6 +141,7 @@ impl Walker<'_, '_> {
             line: span.start().line,
             name,
             size: self.starts.chars_between(span.start(), span.end()),
+            shingles: super::fingerprint::shingles(block),
         });
     }
 
@@ -269,6 +280,22 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
         self.template = template;
         visit::visit_item_macro(self, i);
         self.template = false;
+    }
+
+    /// A SECOND UNIT BESIDE THE BODIES: an idiom pasted INSIDE larger functions is invisible to a body digest.
+    fn visit_expr(&mut self, e: &'ast syn::Expr) {
+        if super::fingerprint::copied_unit(e) {
+            let tokens = e.to_token_stream();
+            if super::fingerprint::leaves(tokens.clone()) >= super::fingerprint::MIN_EXPRESSION_LEAVES {
+                let span = syn::spanned::Spanned::span(e);
+                self.items.expressions.push(Expression {
+                    digest: super::fingerprint::fingerprint(tokens),
+                    line: span.start().line,
+                    size: self.starts.chars_between(span.start(), span.end()),
+                });
+            }
+        }
+        visit::visit_expr(self, e);
     }
 
     fn visit_block(&mut self, b: &'ast syn::Block) {

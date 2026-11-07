@@ -82,7 +82,7 @@ pub struct Place(pub String, pub usize);
 
 /// One function body as the SET of its statement shapes (names and literals blanked, one digest per
 /// top-level statement, unique and sorted) beside its whole-body digest and its size. What
-/// `shape::similar` compares; only a half that sends shingles fills it - python today.
+/// `shape::similar` compares; only a half that sends shingles fills it - python and rust.
 #[derive(Deserialize, Default)]
 #[serde(default)]
 pub struct Shingled {
