@@ -5,6 +5,7 @@
  * Ported from the original Angular extractor. Every API is recognised by its RESOLVED
  * declaration inside the state library, never by its name. Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
+import { joinKey } from './TsNodes.mjs';
 
 const str = (v) => (typeof v === 'string' ? v : null);
 const arr = (v) => (Array.isArray(v) ? v : []);
@@ -29,7 +30,7 @@ export function rollupStateGraph(store) {
   // null. The hole names a const in the same file whose value the map already holds, so the fold is a JOIN.
   const stringConstByFileName = new Map();
   for (const c of consts) {
-    if (typeof c.value === 'string') stringConstByFileName.set(`${String(c.file)}#${String(c.name)}`, c.value);
+    if (typeof c.value === 'string') stringConstByFileName.set(joinKey(c.file, c.name), c.value);
   }
   const foldString = (v, file) => {
     if (typeof v === 'string') return v;
@@ -40,7 +41,7 @@ export function rollupStateGraph(store) {
     for (const [i, part] of parts.entries()) {
       out += String(part ?? '');
       if (i < holes.length) {
-        const filled = stringConstByFileName.get(`${String(file)}#${String(holes[i])}`);
+        const filled = stringConstByFileName.get(joinKey(file, holes[i]));
         if (filled === undefined) return null;
         out += filled;
       }
@@ -122,10 +123,10 @@ export function rollupStateGraph(store) {
   // same file or an import resolved to one (`declared_id`, set before this pass); its value, when it is a list,
   // supplies the entries. A name that resolves to anything else stays what it was.
   const constById = new Map(consts.map((k) => [k.id, k]));
-  const constByFileName = new Map(consts.map((k) => [`${String(k.file)}#${String(k.name)}`, k]));
+  const constByFileName = new Map(consts.map((k) => [joinKey(k.file, k.name), k]));
   const importedConst = new Map();
   for (const ib of store.table('import_names')) {
-    if (ib.declared_id != null) importedConst.set(`${String(ib.file)}#${String(ib.local)}`, ib.declared_id);
+    if (ib.declared_id != null) importedConst.set(joinKey(ib.file, ib.local), ib.declared_id);
   }
   const expandEntries = (entries, file, seen) => {
     const out = [];
@@ -135,7 +136,7 @@ export function rollupStateGraph(store) {
         out.push(entry);
         continue;
       }
-      const key = `${String(file)}#${String(names[0])}`;
+      const key = joinKey(file, names[0]);
       const named = constByFileName.get(key) ?? constById.get(importedConst.get(key));
       if (named === undefined || !Array.isArray(named.value) || seen.has(named.id)) {
         out.push(entry);
@@ -247,7 +248,7 @@ export function rollupStateGraph(store) {
     const held = heldBy.get(f.id);
     if (str(f.name) === null && held === undefined) continue;
     emitSelector(call, {
-      const: held?.const ?? constByFileName.get(`${String(f.file)}#${String(f.name)}`)?.id ?? null,
+      const: held?.const ?? constByFileName.get(joinKey(f.file, f.name))?.id ?? null,
       file: f.file, name: held?.name ?? f.name, line: f.line, factory: f.id,
     });
   }

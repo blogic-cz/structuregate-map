@@ -12,6 +12,7 @@
  *
  * Imports are flat: see `TsTypeRef.mjs`.
  */
+import { isPlainString } from './TsNodes.mjs';
 
 export function makeTsExprNormalizer(ts, resolveRead, resolveName = null, resolveLocal = null, resolveParam = null) {
   /**
@@ -44,7 +45,7 @@ export function makeTsExprNormalizer(ts, resolveRead, resolveName = null, resolv
     if (ts.isExpressionWithTypeArguments(node)) return norm(node.expression);
     if (ts.isIdentifier(node)) return bareRead(node);
     if (node.kind === ts.SyntaxKind.ThisKeyword) return { k: 'This' };
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    if (isPlainString(ts, node)) {
       return { k: 'Literal', v: node.text };
     }
     if (ts.isNumericLiteral(node)) return { k: 'Literal', v: Number(node.text) };

@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs';
 
 import { relativeTo } from './TsPaths.mjs';
-import { makeExprNormalizer } from './TsTplExpr.mjs';
+import { isTmplNode, makeExprNormalizer } from './TsTplExpr.mjs';
 import { makeEmitters, probeBindingTypes } from './TsTplEmit.mjs';
 import { isCustomElement, spanOf } from './TsTplKeys.mjs';
 import { childOwnedBindings, matchNode } from './TsTplMatch.mjs';
@@ -26,10 +26,6 @@ import { ELSE_GATE } from './TsGateChain.mjs';
  *  of the notes. */
 const isBuiltinTag = (ng, tag) => ng.isNgContainer(tag) || ng.isNgTemplate(tag) || ng.isNgContent(tag);
 
-/** A template AST node, by the interface every `TmplAst*` class implements - so a child-bearing field is
- *  found STRUCTURALLY instead of by name, and a node type this compiler version added is walked without
- *  being listed. */
-const isTmplNode = (v) => !!v && typeof v === 'object' && typeof v.visit === 'function';
 
 export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carriers, gateInputs }) {
   const { normalizeExpr } = makeExprNormalizer(ng);

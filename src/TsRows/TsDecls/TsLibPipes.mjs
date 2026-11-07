@@ -16,7 +16,7 @@
  * Imports are flat: see `TsTypeRef.mjs`.
  */
 import { canonicalPath, relativeTo, slash } from './TsPaths.mjs';
-import { locationOf, unwrapOuter } from './TsNodes.mjs';
+import { initializedVar, locationOf, unwrapOuter } from './TsNodes.mjs';
 
 export function makeLibPipes({ ts, checker, symbolAt, feRoot, propName }) {
   const inLibrary = (decl) => decl.getSourceFile().isDeclarationFile
@@ -88,7 +88,7 @@ export function makeLibPipes({ ts, checker, symbolAt, feRoot, propName }) {
       const cls = classOf(sym);
       if (cls) out.push(cls);
       else {
-        const held = (sym?.declarations ?? []).find((d) => ts.isVariableDeclaration(d) && d.initializer);
+        const held = initializedVar(ts, sym);
         if (held) classesIn(held.initializer, seen, out);
       }
     }

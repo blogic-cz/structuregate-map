@@ -7,6 +7,7 @@
  * components. Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
 import { slash } from './TsPaths.mjs';
+import { joinKey } from './TsNodes.mjs';
 
 const asRef = (v) => (v != null && typeof v === 'object' ? v : null);
 const str = (v) => (typeof v === 'string' ? v : null);
@@ -19,7 +20,7 @@ export function rollupComponentReach(store, { wholeApp }) {
     fileIdBy.set(f.path, f.id);
     fileIdBy.set(f.abs, f.id);
   }
-  const classByFileName = new Map(classes.map((c) => [`${String(c.file)}#${String(c.name)}`, c.id]));
+  const classByFileName = new Map(classes.map((c) => [joinKey(c.file, c.name), c.id]));
   // A CLASS IS RESOLVED BY FILE + NAME, never by name alone: a monorepo can have two `AppComponent`s, two
   // `SharedModule`s and duplicate `TooltipComponent`s answering to one name.
   // THE ROW ID A ROLLUP ALREADY RESOLVED comes first: a class exported under another name
@@ -30,7 +31,7 @@ export function rollupComponentReach(store, { wholeApp }) {
     const file = str(ref?.file);
     if (name === null || file === null) return null;
     const fid = fileIdBy.get(slash(file));
-    return fid === undefined ? null : classByFileName.get(`${String(fid)}#${name}`) ?? null;
+    return fid === undefined ? null : classByFileName.get(joinKey(fid, name)) ?? null;
   };
 
   const areaOfClass = new Map();

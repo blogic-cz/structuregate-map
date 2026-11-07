@@ -8,9 +8,9 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
-import { canonicalPath, relativeTo, slash } from './TsPaths.mjs';
+import { asObject } from './TsNodes.mjs';
+import { asArray, canonicalPath, relativeTo, slash } from './TsPaths.mjs';
 
-const asArray = (v) => (Array.isArray(v) ? v : v === undefined ? [] : [v]);
 const asString = (v) => (typeof v === 'string' ? v : null);
 
 /**
@@ -63,8 +63,7 @@ function refName(v) {
 /** The decorator's first argument as an object literal, or `{}` when it has none. */
 function metaOf(d) {
   const first = d.args[0];
-  return first !== undefined && first !== null && typeof first === 'object' && !Array.isArray(first)
-    ? first : {};
+  return asObject(first) ?? {};
 }
 
 export function makeAngularRows({ store, feRoot, diag }) {
@@ -173,7 +172,7 @@ export function makeAngularRows({ store, feRoot, diag }) {
       for (const d of m.decorators) {
         if (d.name !== 'Input' && d.name !== 'Output') continue;
         const first = d.args[0];
-        const opts = first !== null && typeof first === 'object' && !Array.isArray(first) ? first : null;
+        const opts = asObject(first);
         const alias = typeof first === 'string' ? first : asString(opts?.alias);
         const bindingName = alias ?? m.name;
         store.add('io', 'io', {

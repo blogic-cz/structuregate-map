@@ -15,7 +15,7 @@
  */
 import { makeValueRefs, undefinedLiteral } from './TsValueRefs.mjs';
 import { draftWrites } from './TsExprDescribe.mjs';
-import { isOuterWrapper, unwrapOuter } from './TsNodes.mjs';
+import { aliased, asObject, isOuterWrapper, isPlainString, unwrapOuter } from './TsNodes.mjs';
 
 /**
  * `describe` is the expressions writer, and it is OPTIONAL: given one, an unevaluable value also carries
@@ -110,7 +110,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
       else if (ts.isShorthandPropertyAssignment(p)) out[p.name.text] = refs.evalShorthand(p);
       else if (ts.isSpreadAssignment(p)) {
         const spread = evalNode(p.expression);
-        if (spread && typeof spread === 'object' && !Array.isArray(spread) && !('$expr' in spread)) {
+        if (asObject(spread) !== null && !('$expr' in spread)) {
           Object.assign(out, spread);
         } else out.$spread = spread;
       } else if (ts.isMethodDeclaration(p) || ts.isGetAccessor(p) || ts.isSetAccessor(p)) {
@@ -145,10 +145,10 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
         && (checker.getTypeAtLocation(node.expression.expression).flags & ts.TypeFlags.StringLike) !== 0) {
         receiverValue = evaluated;
       }
-      const isChainLink = !!evaluated && typeof evaluated === 'object' && !Array.isArray(evaluated)
+      const isChainLink = asObject(evaluated) !== null
         && evaluated.$receiver !== undefined;
       if (Array.isArray(evaluated) || isChainLink || objectTable(node.expression.expression) || treeList(node.expression) || mapLookup(node.expression, evaluated)) receiver = evaluated;
-      else if (!!evaluated && typeof evaluated === 'object' && !Array.isArray(evaluated)) {
+      else if (asObject(evaluated) !== null) {
         const id = evaluated.$expr_id ?? evaluated.$cond_expr;
         if (typeof id === 'string') receiverExpr = id;
       }
@@ -213,7 +213,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
     }
     if (!ts.isIdentifier(e)) return null;
     let symbol = checker.getSymbolAtLocation(e);
-    if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+    symbol = aliased(ts, checker, symbol);
     const decl = symbol?.valueDeclaration;
     if (decl === undefined || !ts.isVariableDeclaration(decl) || (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0) return null;
     const init = unwrapOuter(ts, decl.initializer);
@@ -243,7 +243,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
   function lookupKeys(node) {
     if (!describe || node.arguments.length !== 1) return {};
     let symbol = checker.getSymbolAtLocation(ts.isPropertyAccessExpression(node.expression.expression) ? node.expression.expression.name : node.expression.expression);
-    if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+    symbol = aliased(ts, checker, symbol);
     const decl = symbol?.valueDeclaration;
     const fixed = decl !== undefined && ((ts.isVariableDeclaration(decl) && (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0)
       || (ts.isPropertyDeclaration(decl) && (ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Readonly) !== 0));
@@ -275,7 +275,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
     try {
       const at = ts.isPropertyAccessExpression(callee) ? callee.name : callee;
       let symbol = checker.getSymbolAtLocation(at);
-      if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+      symbol = aliased(ts, checker, symbol);
       const d = symbol?.valueDeclaration;
       if (d === undefined) return null;
       if ((ts.isFunctionDeclaration(d) || ts.isMethodDeclaration(d)) && d.body !== undefined) return d;
@@ -285,7 +285,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
 
   function evalNode(node) {
     if (!node) return unresolved(node);
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+    if (isPlainString(ts, node)) return node.text;
     if (ts.isNumericLiteral(node)) return Number(node.text);
     if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
     if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
@@ -385,7 +385,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
   /** A resolved value as a KEY: a string or a number, or the `value` a resolved access carries. */
   function computedKey(v) {
     if (typeof v === 'string' || typeof v === 'number') return String(v);
-    if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+    if (asObject(v) !== null) {
       const inner = v.value;
       if (typeof inner === 'string' || typeof inner === 'number') return String(inner);
     }

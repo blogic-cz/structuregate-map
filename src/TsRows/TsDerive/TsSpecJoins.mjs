@@ -64,8 +64,11 @@ export function deriveJoins(store, idScheme, tables) {
       out[`${table}.${field}`] = targets.join(' | ');
     }
   }
-  return Object.fromEntries(Object.entries(out).sort(([a], [b]) => a.localeCompare(b)));
+  return sortedKeys(out);
 }
+
+/** An object with its keys in order, as every derived spec map is written. */
+export const sortedKeys = (o) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
 
 /** Which columns of each table held a STRUCTURE and which a BOOLEAN - what SQLite cannot record. */
 export function columnKinds(store, tableNames) {

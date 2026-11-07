@@ -18,7 +18,7 @@
  *
  * NO REGEX - the build refuses one over this folder.
  */
-import { EXPRESSION_KINDS, MIN_BODY_STATEMENTS, MIN_EXPRESSION_LEAVES, alias, candidatesOf, fingerprint,
+import { EXPRESSION_KINDS, MIN_EXPRESSION_LEAVES, alias, candidatesOf, countedBody, fingerprint,
     isModuleSyntax, resolve, specifierOf, summary } from './TsGate.Map.mjs';
 import { bindCall, bindingNames, dotted, facts, isFunctionLike, nameText } from './TsPlainFacts.mjs';
 import { catchFacts } from './TsCatch.mjs';
@@ -263,7 +263,8 @@ export function readFile(ts, rows, file) {
     const functionRow = (node, name, anonymous) => {
         const holder = node.parent && node.parent.initializer === node ? node.parent : node;
         const body = node.body && node.body.statements ? node.body : null;
-        const shape = body && body.statements.length >= MIN_BODY_STATEMENTS ? fingerprint(ts, body, sf) : null;
+        const counted = countedBody(node);
+        const shape = counted ? fingerprint(ts, counted, sf) : null;
         rows.add('functions', 'fn', {
             ...where(), line: line(node), end_line: endLine(node), name, qualname: qual(name),
             kind: kindOf.fn.get(node.kind) ?? 'function',
@@ -458,10 +459,8 @@ export function readFile(ts, rows, file) {
             if (handler) rows.add('handlers', 'h', { ...where(), ...handler });
         }
 
-        // THE FILE MAP'S RULE, EXACTLY: a node with a body of its own is a BODY, never an expression row -
-        // see TsGate.Map.mjs `runMap`. Diverging here would make this table's groups disagree with its.
-        const hasBody = node.body && node.body.statements && node.body.statements.length >= MIN_BODY_STATEMENTS;
-        if (!hasBody && expressionKinds.has(kind)) {
+        // THE FILE MAP'S RULE, its own function (`countedBody`): a node with a body of its own is a BODY, never an expression row.
+        if (!countedBody(node) && expressionKinds.has(kind)) {
             const shape = fingerprint(ts, node, sf);
             if (shape.leaves >= MIN_EXPRESSION_LEAVES) {
                 rows.add('expressions', 'x', { ...where(), line: line(node), role: expressionKinds.get(kind),

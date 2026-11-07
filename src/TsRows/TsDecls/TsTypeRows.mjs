@@ -10,7 +10,7 @@
  * the resolution was right and the last hop still had to be made by hand. Hence one row per member, at its
  * OWN line, with `path` carrying the dotted route and `parent` linking it to the member that contains it.
  */
-import { locationOf } from './TsNodes.mjs';
+import { locationOf, typeParamsOf } from './TsNodes.mjs';
 
 export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalNode, propName, fileId }) {
   function enumRow(statement, fid) {
@@ -45,7 +45,7 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
       // WHERE EACH BASE IS (rows 72), as a member's `type_ref` is, arguments included: a template read of a member the base declares
       // (`SavedDoc extends Doc`, then `doc.Code`) walks them; `extends` stays the text.
       ...(statement.heritageClauses?.length ? { extends_refs: statement.heritageClauses.flatMap((h) => h.types.map((t) => typeRefAt(t).type_ref ?? null)) } : {}),
-      ...(statement.typeParameters?.length ? { type_params: statement.typeParameters.map((p) => p.name.text) } : {}),
+      ...typeParamsOf(statement),
       members: statement.members.map((m) => ({
         name: m.name ? propName(m.name) : (ts.SyntaxKind[m.kind] ?? 'unknown'),
         type: m.type ? m.type.getText() : null,
@@ -66,7 +66,7 @@ export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalN
       ...(inModule ? { in_module: inModule } : {}),
       type: statement.type.getText(),
       // A GENERIC ALIAS'S PARAMETERS, as an interface's are (rows 72): `Tip<{ .. }>` binds `data: TData` through them.
-      ...(statement.typeParameters?.length ? { type_params: statement.typeParameters.map((p) => p.name.text) } : {}),
+      ...typeParamsOf(statement),
       // AN ALIAS OF AN INTERSECTION LISTS ITS PARTS (rows 74), as a member's `type_ref`/`type_refs` does: where it is a part of another intersection (`A & Vm`) a
       // template read walks them in its place, since a written intersection names the alias and no longer the parts the checker flattened it to.
       ...(typeRefAt.partsOf?.(statement.type) ?? {}),

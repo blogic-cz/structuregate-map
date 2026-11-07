@@ -5,6 +5,7 @@
  * `TsDecls/TsTypeRef.mjs`.
  */
 import { slash } from './TsPaths.mjs';
+import { joinKey } from './TsNodes.mjs';
 
 const str = (v) => (typeof v === 'string' ? v : null);
 
@@ -18,7 +19,7 @@ export function rollupInputUsage(store) {
     if (row.kind !== 'input' && row.kind !== 'output') continue;
     (row.kind === 'input' ? declaredInputs : declaredOutputs).push(row);
     const bindingName = str(row.binding_name) ?? str(row.alias) ?? str(row.member);
-    if (bindingName !== null) (row.kind === 'input' ? byClassAndName : byClassAndOutput).set(`${String(row.class)}#${bindingName}`, row);
+    if (bindingName !== null) (row.kind === 'input' ? byClassAndName : byClassAndOutput).set(joinKey(row.class, bindingName), row);
   }
 
   /**
@@ -41,14 +42,14 @@ export function rollupInputUsage(store) {
   for (const r of store.table('renders')) {
     if (r.node == null || r.to_class == null) continue;
     const inScope = r.scope === 'declared' || r.scope === 'imported';
-    if (inScope) { inScopeNodes.add(String(r.node)); inScopePairs.add(`${String(r.node)}#${String(r.to_class)}`); }
+    if (inScope) { inScopeNodes.add(String(r.node)); inScopePairs.add(joinKey(r.node, r.to_class)); }
     // A COMPONENT'S OWN SELECTOR IN ITS TEMPLATE IS IN ITS SCOPE: Angular lets a component recurse with no import, though its scope row
     // says `out_of_scope` for a standalone one - so its inputs stay attributed (`from_class` is the component, `to_class` itself).
-    else if (r.scope === 'out_of_scope' && r.from_class !== r.to_class) cannotSee.add(`${String(r.node)}#${String(r.to_class)}`);
+    else if (r.scope === 'out_of_scope' && r.from_class !== r.to_class) cannotSee.add(joinKey(r.node, r.to_class));
     const hit = targetsOfNode.get(r.node);
     if (hit) hit.add(r.to_class);
     else targetsOfNode.set(r.node, new Set([r.to_class]));
-    if (!inScope) outOfScope.add(`${String(r.node)}#${String(r.to_class)}`);
+    if (!inScope) outOfScope.add(joinKey(r.node, r.to_class));
   }
 
   // A (node, class) pair some row reaches IN scope is not one the scope cannot see.
@@ -68,14 +69,14 @@ export function rollupInputUsage(store) {
     idByPath.set(String(f.path), f.id);
     idByPath.set(String(f.abs), f.id);
   }
-  const classByFileName = new Map(classRows.map((c) => [`${String(c.file)}#${String(c.name)}`, c.id]));
+  const classByFileName = new Map(classRows.map((c) => [joinKey(c.file, c.name), c.id]));
   const baseOf = new Map();
   for (const c of classRows) {
     const name = str(c.extends?.name);
     const file = str(c.extends?.file);
     if (name === null || file === null) continue;
     const fid = idByPath.get(slash(file));
-    const base = fid === undefined ? undefined : classByFileName.get(`${String(fid)}#${name}`);
+    const base = fid === undefined ? undefined : classByFileName.get(joinKey(fid, name));
     if (base !== undefined) baseOf.set(c.id, base);
   }
 
@@ -118,10 +119,10 @@ export function rollupInputUsage(store) {
     // `nodeHasInScope` alone attributed a mask directive's inputs on a text box, where every candidate is out of scope,
     // to the one class the module does not import. `unknown` and `direct_reference` still wait for an in-scope rival.
     for (const targetClass of candidates) {
-      const pair = `${String(b.node)}#${String(targetClass)}`;
+      const pair = joinKey(b.node, targetClass);
       if (cannotSee.has(pair) || (nodeHasInScope && outOfScope.has(pair))) continue;
       const io = chainOf(targetClass)
-        .map((cls) => (isOutput ? byClassAndOutput : byClassAndName).get(`${String(cls)}#${name}`))
+        .map((cls) => (isOutput ? byClassAndOutput : byClassAndName).get(joinKey(cls, name)))
         .find((row) => row !== undefined);
       if (io === undefined) continue;
       if (isOutput) {

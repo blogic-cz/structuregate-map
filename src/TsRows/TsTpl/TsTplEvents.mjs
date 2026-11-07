@@ -6,6 +6,7 @@
  *
  * Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
+import { joinKey } from './TsNodes.mjs';
 
 /** THE TYPE ARGUMENT an emitter was declared with: the first of its `args`, else its `element` - the one argument of a single-argument generic, kept when the argument is a type parameter
  *  or an unnamed intersection (`EventEmitter<T & { cell: Cell }>`), which `args` leave out. */
@@ -17,7 +18,7 @@ export function makeEvents({ store, propByOwner, directivesAt, declaredBy, conte
   for (const io of store.table('io')) {
     // `io.member` is the member's NAME: its row is the class's property of that name.
     if (io.kind !== 'output' || typeof io.binding_name !== 'string' || io.member == null) continue;
-    outputsOf.set(`${String(io.class)}#${io.binding_name}`, propByOwner.get(`class:${String(io.class)}#${String(io.member)}`) ?? null);
+    outputsOf.set(joinKey(io.class, io.binding_name), propByOwner.get(`class:${String(io.class)}#${String(io.member)}`) ?? null);
   }
 
   /** AN OUTPUT A DIRECTIVE INHERITS IS STILL ITS OUTPUT (rows 85): `{ member, owner }` - the output of that name the class declares, else its nearest base's, `owner` the class it was found
@@ -26,7 +27,7 @@ export function makeEvents({ store, propByOwner, directivesAt, declaredBy, conte
     const seen = new Set();
     for (let owner = { kind: 'class', id: classId, env }; owner !== null && owner.kind === 'class' && !seen.has(owner.id); owner = baseTypedOf(owner)) {
       seen.add(owner.id);
-      const member = outputsOf.get(`${String(owner.id)}#${String(name)}`);
+      const member = outputsOf.get(joinKey(owner.id, name));
       if (argumentOf(member) !== null) return { member, owner };
     }
     return null;
