@@ -28,6 +28,8 @@
                               parse: the rest are answered from the caller's cache, and still resolve a dot-source
       out  the MAP-* protocol on stdout (see rust/fbtcore/src/mapper/protocol.rs), MAP-DONE last
       exit 0 even when findings exist - the caller owns the verdict.
+
+    The fingerprints, the record buffer and the constants are `PsShape.ps1`'s, shared with the deep half.
 #>
 using namespace System.Management.Automation.Language
 
@@ -39,147 +41,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-# EVERY NODE, ASKED IN .NET: a delegate bound to `[Ast].IsInstanceOfType` is true for each node and runs no script.
-# `FindAll({ $true })` invoked a scriptblock per node - 77 000 of them, 650 ms of this repo's cold map.
-# NO CMDLET ON THE WAY IN: the first `New-Object` or `Test-Path` autoloads its module, ~70 ms of a one-file run each,
-# so this script builds its .NET objects with `::new()` and asks the file system directly.
-$script:EveryNode = [Delegate]::CreateDelegate([Func[Ast, bool]], [Ast], [Type].GetMethod('IsInstanceOfType', [Type[]]@([object])))
-# THE RECORDS OF ONE FILE, written out once it is read. A PowerShell function call costs ~60 us - more than the record
-# it writes - so the hot records are appended in the walk itself, and every record goes through this one buffer to
-# keep their order.
-$script:Out = [System.Text.StringBuilder]::new()
-# The caller reads this stream as UTF-8. Without this line a summary quoted out of a file with a non-ASCII
-# identifier arrives mangled, because powershell.exe writes in the console's OEM code page.
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-
-# A body this short is not a duplication worth reporting - see the same constant in the other three halves.
-$script:MinBodyStatements = 3
-
-# An expression smaller than this is shared vocabulary, not a copy. Counted in TOKENS, with a cheap
-# CHARACTER pre-filter in front of it: PowerShell nests expressions deeply, so taking a token slice for
-# every one of them is what this walk actually spends its time on, and nothing under 120 characters is a
-# copy anyone has to keep in step.
-$script:MinExpressionTokens = 20
-$script:MinExpressionChars = 120
-
-$script:MaxSummary = 160
+# NO CMDLET ON THE WAY IN: the first `New-Object`, `Test-Path` or `Join-Path` autoloads its module, ~70 ms of a
+# one-file run each, so this script builds its .NET objects with `::new()` and asks the file system directly.
+. ([System.IO.Path]::Combine($PSScriptRoot, 'PsShape.ps1'))
 
 # The variables a dot-sourced path is written with, and what they mean for the file being read. Anything
 # else in a path expression is computed, and a computed path is NOT guessed at - a wrong edge is worse than
 # a missing one, because the reader cannot tell it from a proven one.
 $script:PathVariables = @('PSScriptRoot', 'PSCommandPath')
-
-function Write-Record {
-    # One protocol record. A field carrying `|` or a newline would split into the wrong slot on the other
-    # side, so both are folded here rather than parsed around there.
-    #
-    # A PLAIN FUNCTION OVER `$args`: thousands of records a run, and an advanced one - a `[Parameter]` binding
-    # its arguments, an array grown by `+=` - was a third of the half's time.
-    $parts = foreach ($field in $args) { ([string]$field).Replace('|', '/').Replace("`r", ' ').Replace("`n", ' ') }
-    [void]$script:Out.AppendLine(@($parts) -join '|')
-}
-
-function Write-Records {
-    [Console]::Out.Write($script:Out.ToString())
-    [void]$script:Out.Clear()
-}
-
-function Get-Summary([Token[]]$Tokens) {
-    # The file's headline: the first line with words in it inside the FIRST comment. Read off the token
-    # stream rather than the raw text, so a `#` inside a string is never mistaken for one.
-    foreach ($token in $Tokens) {
-        if ($token.Kind -ne [TokenKind]::Comment) { continue }
-        foreach ($raw in $token.Text.Split("`n")) {
-            $line = $raw.Trim()
-            foreach ($lead in @('<#', '#>', '#')) {
-                if ($line.StartsWith($lead)) { $line = $line.Substring($lead.Length).Trim(); break }
-            }
-            if ($line.Length -eq 0) { continue }
-            if ($line.Length -gt $script:MaxSummary) { return $line.Substring(0, $script:MaxSummary) + ' ...' }
-            return $line
-        }
-        return ''
-    }
-    return ''
-}
-
-function Get-TokenIndex([int[]]$Starts, [int]$Offset) {
-    # The first token at or after an offset, by binary search. A linear scan per expression is O(tokens x
-    # expressions), which on a 500-line file is over a million PowerShell loop iterations - slow enough that
-    # the map would not be worth running.
-    $found = [Array]::BinarySearch($Starts, $Offset)
-    if ($found -ge 0) { return $found }
-    return -$found - 1
-}
-
-function Get-TokenKeys([Token[]]$Tokens) {
-    # EVERY TOKEN'S PART OF A FINGERPRINT, ONCE PER FILE: its kind and text (a variable blanked to `_`), or ''
-    # for a token no fingerprint reads, with where each token starts and ends and how many counted tokens come
-    # before it. A fingerprint is then a slice of these, joined in .NET - the per-token PowerShell loop it was,
-    # repeated for every nested function and expression, was 68 ms a file.
-    #
-    # AND THE FILE'S SOURCE LINES, in the same pass: BY TOKEN, exactly as the gate counts C# by Roslyn - a source line
-    # is a line a token sits on, so a comment and a blank line produce none and a measured-reason header costs nothing.
-    $n = $Tokens.Count
-    $lines = [System.Collections.Generic.HashSet[int]]::new()
-    $prepared = @{
-        Parts = [string[]]::new($n)
-        Starts = [int[]]::new($n)
-        Ends = [int[]]::new($n)
-        Counted = [int[]]::new($n + 1)
-    }
-    for ($i = 0; $i -lt $n; $i++) {
-        $token = $Tokens[$i]
-        $prepared.Starts[$i] = $token.Extent.StartOffset
-        $prepared.Ends[$i] = $token.Extent.EndOffset
-        $skipped = $token.Kind -eq [TokenKind]::Comment -or $token.Kind -eq [TokenKind]::NewLine -or $token.Kind -eq [TokenKind]::EndOfInput
-        if ($skipped) {
-            $prepared.Parts[$i] = ''
-            $prepared.Counted[$i + 1] = $prepared.Counted[$i]
-            continue
-        }
-        for ($line = $token.Extent.StartLineNumber; $line -le $token.Extent.EndLineNumber; $line++) { [void]$lines.Add($line) }
-        $text = if ($token -is [VariableToken]) { '_' } else { $token.Text }
-        # [char]31 and not a `u escape: that syntax is PowerShell 6+, and this half is parsed and RUN by
-        # the 5.1 that launches these apps.
-        $prepared.Parts[$i] = [string][int]$token.Kind + ':' + $text + [char]31
-        $prepared.Counted[$i + 1] = $prepared.Counted[$i] + 1
-    }
-    $prepared.Lines = $lines.Count
-    return $prepared
-}
-
-function Get-Fingerprint($Prepared, $Extent) {
-    # The shape of a piece of code, with VARIABLE NAMES BLANKED so two spellings of one idiom fingerprint
-    # alike, and command and member names KEPT because those are what make it that code. Comments never
-    # enter: they are their own token kind and are skipped, so two functions match when they DO the same
-    # thing however differently they are described.
-    #
-    # THE TOKENS FROM THE FIRST AT THE EXTENT'S START UP TO THE FIRST THAT ENDS PAST IT: token ends only grow,
-    # so both are binary searches.
-    $first = Get-TokenIndex $Prepared.Starts $Extent.StartOffset
-    $ends = $Prepared.Ends
-    $last = [Array]::BinarySearch($ends, $Extent.EndOffset)
-    if ($last -lt 0) { $last = -$last - 1 } else { while ($last -lt $ends.Count -and $ends[$last] -le $Extent.EndOffset) { $last++ } }
-    if ($last -lt $first) { $last = $first }
-    $joined = [string]::Join('', $Prepared.Parts, $first, $last - $first)
-    $count = $Prepared.Counted[$last] - $Prepared.Counted[$first]
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
-    } finally {
-        $sha.Dispose()
-    }
-    $hex = [System.BitConverter]::ToString($bytes).Replace('-', '').ToLowerInvariant()
-    # TOKENS DECIDE WHETHER TO REPORT IT, CHARACTERS SAY HOW BIG IT IS. A token count is the right filter -
-    # a long variable name cannot inflate it - but it is not comparable with what the other three halves
-    # count, and the groups are ranked against them in ONE list. A source span is the same unit everywhere.
-    return [pscustomobject]@{
-        Digest = $hex.Substring(0, 16)
-        Tokens = $count
-        Span   = $Extent.EndOffset - $Extent.StartOffset
-    }
-}
 
 function Get-LiteralPath($Expression, [string]$FileDirectory, [string]$FilePath) {
     # A dot-sourced path, as the text it will be. Two shapes resolve: a bare or quoted constant, and an
@@ -259,16 +128,6 @@ function Resolve-Import([string]$Rel, $Expression, [string]$Root, [hashtable]$Kn
     }
 }
 
-# THE SCRIPTBLOCK LITERAL A NODE SITS IN, or $null. A `{ ... }` assigned and run elsewhere (a runspace,
-# `Start-Job`, `Invoke-Command`) is its own scope: a function declared in it is that block's, and a runspace
-# body MUST redeclare its helpers because it cannot see the caller's.
-function Get-LiteralScope([Ast]$Node) {
-    for ($at = $Node.Parent; $at; $at = $at.Parent) {
-        if ($at -is [ScriptBlockExpressionAst]) { return $at }
-    }
-    return $null
-}
-
 function Read-File([string]$Rel, [string]$AbsolutePath, [string]$Root, [hashtable]$Known) {
     $tokens = $null
     $errors = $null
@@ -321,7 +180,7 @@ function Read-File([string]$Rel, [string]$AbsolutePath, [string]$Root, [hashtabl
             $body = $node.Body
             if ($body -and $body.EndBlock -and $body.EndBlock.Statements.Count -ge $script:MinBodyStatements) {
                 $shape = Get-Fingerprint $prepared $body.Extent
-                Write-Record 'MAP-BODY' $Rel $node.Extent.StartLineNumber $node.Name $shape.Digest $shape.Span
+                Write-Record 'MAP-BODY' $Rel $node.Extent.StartLineNumber $node.Name $shape.Digest $shape.Span (Get-Shingles $prepared $body.EndBlock.Statements)
             }
             continue
         }

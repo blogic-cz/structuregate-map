@@ -31,6 +31,9 @@ use std::ffi::{c_char, CStr, CString};
 use std::path::{Path, PathBuf, MAIN_SEPARATOR};
 use std::time::SystemTime;
 
+/// How every PowerShell half is launched: the host's flags before the script - the file map's and the deep map's.
+pub(crate) const POWERSHELL_BEFORE: [&str; 5] = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"];
+
 pub type CsMap = extern "C" fn(abs: *const c_char, rel: *const c_char) -> *mut c_char;
 pub type Deep = extern "C" fn(input: *const c_char) -> *mut c_char;
 pub type Free = extern "C" fn(text: *mut c_char);
@@ -227,6 +230,7 @@ fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
         sql: sql.clone(),
         rust: lists(&buckets, |b| &b.rust),
         go: lists(&buckets, |b| &b.go),
+        powershell: lists(&buckets, |b| &b.shell),
     };
     let deep_options = || deep::Deep {
         db: input.map_sqlite.clone().unwrap_or_default(),
@@ -234,6 +238,7 @@ fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
         roots: input.roots.iter().map(|r| (prefix(input, r), r.clone())).collect(),
         ts_host: input.ts_host.clone(),
         py_host: input.py_host.clone(),
+        ps_host: input.ps_host.clone(),
         skip: input.skip.clone(),
         ts_node_modules: input.ts_node_modules.clone(),
         ts_config: input.ts_config.clone(),
@@ -336,7 +341,7 @@ fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
             None => Err(stage_errors.get(language).map_or("not staged", String::as_str)),
         }
     };
-    let powershell_before: Vec<String> = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"].map(String::from).to_vec();
+    let powershell_before: Vec<String> = POWERSHELL_BEFORE.map(String::from).to_vec();
     let powershell = || halves::Script { language: "powershell", host: &input.ps_host, script: staged("powershell"), flag: "--ps-host",
         before: powershell_before.clone(), after: Vec::new(), list_flag: "-ListFile", root_flag: "-Root", per_file: true, known_flag: "-KnownFile", whole: None, dependents: None, early: None };
     let mut pending = Vec::new();

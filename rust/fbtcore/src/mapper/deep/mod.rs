@@ -20,7 +20,8 @@ mod payload;
 pub use payload::stored_nothing;
 mod reasons;
 mod refresh;
-mod rust;
+mod own;
+use own::{ps, rust};
 pub(crate) mod sqlconfig;
 mod ts;
 
@@ -41,6 +42,7 @@ pub struct Deep {
     pub roots: Vec<(String, String)>,
     pub ts_host: String,
     pub py_host: String,
+    pub ps_host: String,
     pub skip: Vec<String>,
     pub ts_node_modules: Vec<String>,
     pub ts_config: Option<String>,
@@ -78,6 +80,8 @@ pub struct Files {
     pub sql: Vec<(String, String)>,
     pub rust: Vec<(String, String)>,
     pub go: Vec<(String, String)>,
+    /// `.ps1`, `.psm1` and `.psd1`.
+    pub powershell: Vec<(String, String)>,
 }
 
 impl Deep {
@@ -151,6 +155,7 @@ fn plain_half<'a>(deep: &'a Deep, hashes: &hashes::Hashes, script: &[(String, St
         script: deep.staged("plain-ts rows"),
         host: &deep.ts_host,
         flag: "--ts-host",
+        before: Vec::new(),
         extra: plain_modules(deep).into_iter().flat_map(|m| ["--node-modules".to_string(), m]).chain(["--hashes".into(), "hashes.json".into()]).collect(),
         beside: vec![("hashes.json", handed(hashes, script))],
         named: "the plain typescript half",
@@ -162,7 +167,7 @@ fn plain_half<'a>(deep: &'a Deep, hashes: &hashes::Hashes, script: &[(String, St
 fn tree_hashes(deep: &Deep, files: &Files) -> hashes::Hashes {
     let db = deep.db.as_str();
     let any = !files.sharp.is_empty() || !files.sql.is_empty() || !files.script.is_empty() || !files.python.is_empty()
-        || !files.rust.is_empty() || !files.go.is_empty() || Path::new(db).is_file();
+        || !files.rust.is_empty() || !files.go.is_empty() || !files.powershell.is_empty() || Path::new(db).is_file();
     let roots: Vec<String> = deep.roots.iter().map(|(_, root)| root.clone()).collect();
     let mut avoid = vec![db];
     avoid.extend(deep.map_out.as_deref());
@@ -182,6 +187,7 @@ fn python_half<'a>(deep: &'a Deep, hashes: &hashes::Hashes, files: &Files) -> pa
         script: deep.staged("python rows"),
         host: &deep.py_host,
         flag: "--py-host",
+        before: Vec::new(),
         extra: vec!["--roots-file".into(), "roots.json".into(), "--hashes".into(), "hashes.json".into()],
         beside: vec![("roots.json", roots), ("hashes.json", handed(hashes, &files.python))],
         named: "the python half",
@@ -256,6 +262,15 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
             beside_ms.insert("python", since(timed));
         }
 
+        // A PAYLOAD HALF under the `--ps-host`; a tree whose last PowerShell file has gone launches nothing (`ps.rs`).
+        {
+            let timed = Instant::now();
+            let stage = crate::trace::stage("deep: powershell");
+            stage.set("structuregate.files", files.powershell.len() as i64);
+            ps::run(into, deep, &hashes, files);
+            beside_ms.insert("powershell", since(timed));
+        }
+
         // IN PROCESS, by `syn`: no host to start, and an unchanged file is not parsed again. A tree whose last
         // `.rs` has gone still runs it, so the rows it recorded go too.
         {
@@ -324,7 +339,7 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
         payload::run(into, &payload::Half { key, ..plain }, &plain_list, db, root, started);
         ms.insert("plain typescript", since(timed));
     } else if Path::new(db).is_file() {
-        payload::forget(into, "plain-ts rows", "ts", db, root);
+        payload::forget(into, "plain-ts rows", "ts", db, root, "the plain typescript rows were dropped: no tree here is mapped by that half now");
     }
     if !flown {
         beside(into);
@@ -332,7 +347,7 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
     drop(beside);
     ms.extend(beside_ms);
     // IN THE ORDER THE HALVES WERE ONCE RUN, whichever ran beside which.
-    for half in ["typescript", "plain typescript", "python", "rust", "go", "csharp"] {
+    for half in ["typescript", "plain typescript", "python", "powershell", "rust", "go", "csharp"] {
         if let Some(&took) = ms.get(half) {
             clock.add(half, took);
         }
@@ -467,7 +482,14 @@ fn key(hashes: &hashes::Hashes, set: &crate::embedded::Set, host: &str, argument
 ");
     }
     let tree = format!("{tree}|{}", &list.finalize().to_hex()[..16]);
-    let version = crate::hosts::process(host, &["--version".to_string()], ".", &[]).ok()
+    // WINDOWS POWERSHELL HAS NO `--version`: it is asked for `$PSVersionTable` instead.
+    let windows_powershell = Path::new(host).file_stem().is_some_and(|stem| stem.eq_ignore_ascii_case("powershell"));
+    let asked: Vec<String> = if windows_powershell {
+        ["-NoProfile", "-NonInteractive", "-Command", "$PSVersionTable.PSVersion.ToString()"].map(String::from).to_vec()
+    } else {
+        vec!["--version".to_string()]
+    };
+    let version = crate::hosts::process(host, &asked, ".", &[]).ok()
         .filter(|ran| ran.exit == 0)
         .map(|ran| format!("{}{}", ran.stdout.trim(), ran.stderr.trim()))?;
     let text = format!("{tree}|{}|{host}|{version}|{}|{outside}", crate::embedded::digest(set), arguments.join(" "));

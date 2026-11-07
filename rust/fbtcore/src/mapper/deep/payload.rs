@@ -20,6 +20,8 @@ pub struct Half<'a> {
     pub script: Result<&'a str, &'a str>,
     pub host: &'a str,
     pub flag: &'a str,
+    /// The host's own flags before the script - `-NoProfile ... -File` for a PowerShell host.
+    pub before: Vec<String>,
     /// The arguments after the state, rows and reset flags - node modules, the roots file.
     pub extra: Vec<String>,
     /// Written beside the state before the launch: `(file name, body)`.
@@ -121,7 +123,7 @@ pub fn early(half: &Half, files: &[(String, String)], db: &str, root: &str, key:
     let work = work_dir(half);
     let launch = hosts::Launch {
         host: half.host.into(),
-        before: Vec::new(),
+        before: half.before.clone(),
         script: script.into(),
         after: arguments(half, &work, false),
         list_flag: "--list-file".into(),
@@ -238,7 +240,7 @@ fn extract(into: &mut Collector, half: &Half, files: &[(String, String)], root: 
         host: half.host,
         script: half.script,
         flag: half.flag,
-        before: Vec::new(),
+        before: half.before.clone(),
         after,
         list_flag: "--list-file",
         root_flag: "--root",
@@ -304,7 +306,7 @@ pub fn store(into: &mut Collector, db: &str, root: &str, rows: &Path, language: 
 
 /// THIS HALF'S ROWS, GONE, when it no longer answers for the tree - the last script file left, or an Angular
 /// workspace appeared. Nothing is launched: the store is handed an empty tree for the half.
-pub fn forget(into: &mut Collector, language: &str, lang: &str, db: &str, root: &str) {
+pub fn forget(into: &mut Collector, language: &str, lang: &str, db: &str, root: &str, said: &str) {
     let Ok(state) = calls::state(Path::new(db), lang, false) else { return };
     let held = serde_json::from_str::<Value>(&state).ok().and_then(|s| s["shas"].as_object().map(|o| !o.is_empty()));
     if held != Some(true) {
@@ -316,5 +318,5 @@ pub fn forget(into: &mut Collector, language: &str, lang: &str, db: &str, root: 
         into.errors.push(format!("HALF      {language}: its rows could not be dropped — {failed}"));
         return;
     }
-    into.notes.push("the plain typescript rows were dropped: no tree here is mapped by that half now".into());
+    into.notes.push(said.into());
 }

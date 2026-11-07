@@ -10,7 +10,7 @@
 //! rows stay. A disagreement after the write means the record is lying, so every rust file is read once
 //! more - the database is never replaced, because the other halves' rows are in it.
 
-use super::super::protocol::Collector;
+use crate::mapper::protocol::Collector;
 use crate::rows;
 use crate::rsmap;
 use serde_json::{json, Map, Value};
@@ -38,7 +38,7 @@ pub fn run(into: &mut Collector, db: &str, root: &str, files: &[(String, String)
     let mut shas = Map::new();
     for (rel, _, text) in &texts {
         let flag = if tests.contains(*rel) { "test\n" } else { "" };
-        shas.insert(rel.to_string(), Value::String(super::driven::folded(&format!("{ROWS_VERSION}\n{flag}{text}"))));
+        shas.insert(rel.to_string(), Value::String(super::super::driven::folded(&format!("{ROWS_VERSION}\n{flag}{text}"))));
     }
     for reset in [false, true] {
         let held = if state.rebuild || reset { BTreeMap::new() } else { state.shas.clone() };
