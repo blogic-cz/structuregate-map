@@ -176,19 +176,7 @@ export class InjectComponent {
 function Get-TsTypesDb { return Get-TsRowsDbOf $script:TsTypesFiles -Shared }
 
 # Every Read of the expressions whose source is `$Source`: `read=<source>|<name>=<row prefix>@<file>:<line>` of the declaration its `target` names, or `none`.
-function Get-TsTypesTargets([string]$Source) {
-    $r = Invoke-Gate --map-query (Get-TsTypesDb) --width 0 --limit 0 --sql ("SELECT 'read=' || x.source || '|' || nm.value || '=' || (CASE WHEN rw.value IS NULL THEN 'none' ELSE " +
-        "substr(rw.value, 1, instr(rw.value, ':') - 1) || '@' || tf.value || ':' || tl.value END) AS r " +
-        "FROM expressions x JOIN expressions__ast k ON k.owner = x.id AND k.role = 'k' AND k.value IN ('Read', 'SafeRead') " +
-        "JOIN expressions__ast nm ON nm.owner = x.id AND nm.parent = k.parent AND nm.role = 'name' " +
-        "LEFT JOIN expressions__ast t ON t.owner = x.id AND t.parent = k.parent AND t.role = 'target' " +
-        "LEFT JOIN expressions__ast rw ON rw.owner = x.id AND rw.parent = t.n AND rw.role = 'row' " +
-        "LEFT JOIN expressions__ast tf ON tf.owner = x.id AND tf.parent = t.n AND tf.role = 'file' " +
-        "LEFT JOIN expressions__ast tl ON tl.owner = x.id AND tl.parent = t.n AND tl.role = 'line' " +
-        "WHERE x.source = '$Source' ORDER BY r")
-    Assert-Exit $r 0
-    return $r
-}
+function Get-TsTypesTargets([string]$Source) { return Get-TsReadTargets (Get-TsTypesDb) "x.source = '$Source'" }
 
 # T1 (G1): A STRUCTURAL DIRECTIVE'S CONTEXT TYPES ITS `let-` VARIABLES. The guard's predicate is the context, its `U` the class's `T` (named by `dir: EachDirective<U>`), and `T` is the
 # element of the list `[demoEachOf]` is bound to; `let-x` is `$implicit`, `let-x="prop"` that property, and `*demoEach="let x of rows"` the same.

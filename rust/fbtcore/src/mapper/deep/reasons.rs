@@ -25,6 +25,7 @@ pub(super) type Parts = BTreeMap<String, Vec<(String, String)>>;
 
 /// THE SHA A FILE IS RECORDED WITH: its content, its project's fingerprint, the rows version - and whether
 /// `--map-exclude` matches it. The one place it is folded, so the reasons below fold it the same way.
+#[cfg(test)]
 pub(super) fn salted(content: &str, fingerprint: Option<&str>, version: &str, excluded: bool) -> String {
     marked(content, fingerprint, version, excluded, false)
 }

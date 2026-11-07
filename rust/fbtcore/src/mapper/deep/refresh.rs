@@ -34,14 +34,6 @@ impl Clock {
         Clock { started: Instant::now(), steps: Vec::new(), hashed: None, unsnapshotted: Vec::new() }
     }
 
-    /// One step, timed. A step timed twice (the plain half's two turns) adds up.
-    pub fn time<T>(&mut self, name: &str, work: impl FnOnce() -> T) -> T {
-        let started = Instant::now();
-        let out = work();
-        self.add(name, started.elapsed().as_millis() as u64);
-        out
-    }
-
     /// The tree's hash, taken now and timed, with what it read.
     pub fn hash(&mut self, take: impl FnOnce() -> Hashes) -> Hashes {
         let started = Instant::now();

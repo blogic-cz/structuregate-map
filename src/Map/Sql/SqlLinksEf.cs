@@ -16,7 +16,7 @@ internal static partial class SqlLinks
         var typed = new HashSet<string>(StringComparer.Ordinal);
         foreach (var row in Query(db, "SELECT file, target, source FROM decorators WHERE target_kind = 'class' AND source GLOB '*typeof(*'") ?? [])
         {
-            var key = $"{Str(row[0])}|{Str(row[1])}";
+            var key = PairKey(row);
             typed.Add(key);
             foreach (var database in config.Databases)
             {

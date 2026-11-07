@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import ast
 
-from PyAst import IMPORTERS, arg_names, comprehension_names, dotted, reads_of
+from PyAst import IMPORTERS, arg_names, comprehension_names, dotted, reads_of, taken_names
 from PyComments import noqa_of
 
 # What a handler can hold and still do nothing: `pass`, `...`, or a lone string.
@@ -63,7 +63,7 @@ class Statements:
             # --unused-imports can follow a re-export to whoever imports it next.
             tree, rel, module = self.binder.tree, self.binder.rel, node.module or ""
             # The NAMES it takes decide between several files spelling the module (`Tree.unique`), as they do for `bind`.
-            taken = tuple(a.name for a in node.names if a.name != "*")
+            taken = taken_names(node)
             source = tree.relative(rel, node.level, module) if node.level else tree.module(rel, module, taken)
             if not source and alias.name != "*":
                 # A FOLDER WITH NO `__init__.py` IS A NAMESPACE PACKAGE: `from pkg.sub import mod` takes the file `pkg/sub/mod.py`.

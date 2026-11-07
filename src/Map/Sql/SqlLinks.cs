@@ -84,7 +84,7 @@ internal static partial class SqlLinks
             foreach (var row in Query(db, $"SELECT file, func, value FROM string_literals WHERE value IN ({list}) "
                 + $"UNION SELECT c.file, c.func, a.const FROM arguments a JOIN calls c ON c.id = a.call WHERE a.const IN ({list})") ?? [])
             {
-                var key = $"{Str(row[0])}|{Str(row[1])}";
+                var key = PairKey(row);
                 if (!byMethod.TryGetValue(key, out var set)) byMethod[key] = set = new(StringComparer.OrdinalIgnoreCase);
                 foreach (var (_, database) in names.Where(n => n.c == Str(row[2]))) set.Add(database);
             }
@@ -299,6 +299,9 @@ internal static partial class SqlLinks
         JsonValueKind.Number => cell.GetRawText(),
         _ => "",
     };
+
+    /// <summary>A row's first two cells as one key - `file|func`, `file|class`.</summary>
+    internal static string PairKey(JsonElement[] row) => $"{Str(row[0])}|{Str(row[1])}";
 
     internal static long Num(JsonElement cell) => cell.ValueKind == JsonValueKind.Number && cell.TryGetInt64(out var n) ? n
         : long.TryParse(Str(cell), out var parsed) ? parsed : 0;

@@ -66,19 +66,7 @@ export class ScopeComponent {
 function Get-TsScopeDb { return Get-TsRowsDbOf $script:TsScopeFiles -Shared }
 
 # Every Read of the expressions whose source is `$Source`: `read=<source>|<name>=<row prefix>@<file>:<line>` of the declaration its `target` names, or `none`.
-function Get-TsScopeTargets([string]$Source) {
-    $r = Invoke-Gate --map-query (Get-TsScopeDb) --width 0 --limit 0 --sql ("SELECT 'read=' || x.source || '|' || nm.value || '=' || (CASE WHEN rw.value IS NULL THEN 'none' ELSE " +
-        "substr(rw.value, 1, instr(rw.value, ':') - 1) || '@' || tf.value || ':' || tl.value END) AS r " +
-        "FROM expressions x JOIN expressions__ast k ON k.owner = x.id AND k.role = 'k' AND k.value IN ('Read', 'SafeRead') " +
-        "JOIN expressions__ast nm ON nm.owner = x.id AND nm.parent = k.parent AND nm.role = 'name' " +
-        "LEFT JOIN expressions__ast t ON t.owner = x.id AND t.parent = k.parent AND t.role = 'target' " +
-        "LEFT JOIN expressions__ast rw ON rw.owner = x.id AND rw.parent = t.n AND rw.role = 'row' " +
-        "LEFT JOIN expressions__ast tf ON tf.owner = x.id AND tf.parent = t.n AND tf.role = 'file' " +
-        "LEFT JOIN expressions__ast tl ON tl.owner = x.id AND tl.parent = t.n AND tl.role = 'line' " +
-        "WHERE x.source = '$Source' ORDER BY r")
-    Assert-Exit $r 0
-    return $r
-}
+function Get-TsScopeTargets([string]$Source) { return Get-TsReadTargets (Get-TsScopeDb) "x.source = '$Source'" }
 
 # N1: A LOOP VARIABLE OVER A LIST OF LISTS IS A LIST, whose own element the loop inside it takes.
 Test-Case 'tsrows scope: a loop inside a loop over a list of lists takes the element of the outer variable' {

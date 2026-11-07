@@ -20,7 +20,7 @@ import ast
 import os
 
 import PyDeps
-from PyAst import IMPORTERS, arg_names, dotted, qualnames
+from PyAst import IMPORTERS, arg_names, dotted, qualnames, taken_names
 # Re-exported: `PyMap.py` and `PyLaunch.py` take the path helpers from here, as they did before they moved to `PyDeps.py`.
 from PyDeps import exists_exact, listing, module_path, relative_path  # noqa: F401
 
@@ -353,7 +353,7 @@ class Binder:
                     out[head] = ("mod", head)
             return out
         module = node.module or ""
-        taken = tuple(alias.name for alias in node.names if alias.name != "*")
+        taken = taken_names(node)
         for alias in node.names:
             if alias.name == "*":
                 continue
