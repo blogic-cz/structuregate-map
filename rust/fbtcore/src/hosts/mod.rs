@@ -55,6 +55,7 @@ pub fn run(launch: &Launch) -> Result<Ran, String> {
 }
 
 const NODE_COMPILE_CACHE: &str = "NODE_COMPILE_CACHE";
+const TIERED_PGO: &str = "DOTNET_TieredPGO";
 
 /// THE TEMP FOLDER, never "" and never relative. An EMPTY `TMPDIR` makes `crate::hosts::temp_dir()` answer "", so the
 /// embedded scripts were staged into whatever folder the run started in - beside the user's files - and a host started
@@ -77,6 +78,12 @@ pub fn process(host: &str, args: &[String], cwd: &str, env: &[(String, String)])
     // PowerShell ignore it, and a cache the environment already names is the one used.
     if std::env::var_os(NODE_COMPILE_CACHE).is_none() && !env.iter().any(|(name, _)| name == NODE_COMPILE_CACHE) {
         command.env(NODE_COMPILE_CACHE, crate::hosts::temp_dir().join("structuregate-node-cache"));
+    }
+    // NO TIERED PGO IN A POWERSHELL 7 HOST: its JIT instruments every hot method of the engine before it optimises it, and
+    // the engine's dynamic sites never settle - the deep PowerShell half ran 29% faster without it, the file map's 13%, the
+    // output byte-identical. Windows PowerShell 5.1, node and python do not read it; a value the environment names is kept.
+    if std::env::var_os(TIERED_PGO).is_none() && !env.iter().any(|(name, _)| name == TIERED_PGO) {
+        command.env(TIERED_PGO, "0");
     }
     for (name, value) in env {
         command.env(name, value);

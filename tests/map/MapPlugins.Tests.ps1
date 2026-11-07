@@ -109,3 +109,25 @@ Test-Case 'map: --map-plugin without --map is refused' {
     Assert-Exit $result 2
     Assert-Line $result 'need --map'
 }
+
+# EVERY HOST THE MAP STARTS RUNS WITHOUT TIERED PGO (`rust/fbtcore/src/hosts/mod.rs`): a PowerShell 7 host spent a third of the deep
+# half's time instrumenting its own engine. A plugin is started by the same door, so it sees what every half sees.
+Test-Case 'map: a host the map starts runs with DOTNET_TieredPGO=0, unless the environment names it' {
+    $tree = Use-Tree @{ 'a.py' = "X = 1`n" }
+    $plugin = New-MapPlugin $tree @'
+Write-Output "MAP-ARTIFACT|probe|pgo|v$($env:DOTNET_TieredPGO)"
+Write-Output "MAP-DONE|1"
+'@
+    $previous = $env:DOTNET_TieredPGO
+    try {
+        $env:DOTNET_TieredPGO = $null
+        $found = Get-Map --root $tree --ext .py --map-plugin "$($script:PowerShell) -NoProfile -File `"$plugin`""
+        Assert-Exit $found 0
+        Assert-Equal $found.Map.artifacts.probe.pgo 'v0' 'what the host was started with'
+        $env:DOTNET_TieredPGO = '1'
+        $kept = Get-Map --root $tree --ext .py --map-plugin "$($script:PowerShell) -NoProfile -File `"$plugin`""
+        Assert-Equal $kept.Map.artifacts.probe.pgo 'v1' 'a value the environment names is kept'
+    } finally {
+        $env:DOTNET_TieredPGO = $previous
+    }
+}
