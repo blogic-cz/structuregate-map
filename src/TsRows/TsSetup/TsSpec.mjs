@@ -5,7 +5,7 @@
 import path from 'node:path';
 
 import { names } from './TsConfig.mjs';
-import { columnKinds, deriveJoins } from './TsSpecJoins.mjs';
+import { columnKinds, deriveJoins, sortedKeys } from './TsSpecJoins.mjs';
 import { deriveAnchors } from './TsSpecAnchors.mjs';
 import { REWRITTEN } from './TsStore.mjs';
 import { emit, revisionOf } from './TsRunIo.mjs';
@@ -38,7 +38,6 @@ export function deriveSpec(store, state, replacedRows) {
   const byTable = (o) => Object.fromEntries(tableNames.filter((t) => o[t] !== undefined).map((t) => [t, o[t]]));
   const jsonColumns = byTable({ ...kinds.jsonColumns, ...keptOf(state.json_columns) });
   const boolColumns = byTable({ ...kinds.boolColumns, ...keptOf(state.bool_columns) });
-  const sortedKeys = (o) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
   const joins = timed('typescript: deriveJoins', '', () => sortedKeys({ ...deriveJoins(store, idScheme, moved),
     ...Object.fromEntries(Object.entries(state.joins ?? {}).filter(([key]) => unmoved.has(key.slice(0, key.lastIndexOf('.'))))) }));
   const { anchors, unanchored } = timed('typescript: deriveAnchors', '', () => deriveAnchors(store, idScheme, joins, tableNames));

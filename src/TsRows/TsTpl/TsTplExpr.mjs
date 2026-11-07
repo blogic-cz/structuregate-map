@@ -18,6 +18,11 @@ function sanitizeName(name) {
   return i > 0 ? name.slice(0, i) : name;
 }
 
+/** A template AST node - a `TmplAst*` or an expression AST - by the interface every one implements (`visit`), so a
+ *  child-bearing field is found STRUCTURALLY instead of by name, and a node type this compiler version added is walked
+ *  without being listed. */
+export const isTmplNode = (v) => !!v && typeof v === 'object' && typeof v.visit === 'function';
+
 export function makeExprNormalizer(ng) {
   // Order matters only in that the FIRST match wins; the narrower class is listed first because
   // `ThisReceiver` extends `ImplicitReceiver`, `SafePropertyRead` extends `PropertyRead` and `Unary` extends
@@ -42,8 +47,6 @@ export function makeExprNormalizer(ng) {
     for (const [name, cls] of KINDS) if (ast instanceof cls) return name;
     return sanitizeName(ast?.constructor?.name);
   };
-
-  const isAst = (v) => !!v && typeof v === 'object' && typeof v.visit === 'function';
 
   /** `isAssignmentOperation` is static on `Binary` from v20, when assignment stopped being its own node. */
   const isAssignment = (op) => typeof ng.Binary?.isAssignmentOperation === 'function'
@@ -162,8 +165,8 @@ export function makeExprNormalizer(ng) {
         const out = { k };
         for (const [f, v] of Object.entries(a)) {
           if (f === 'span' || f === 'sourceSpan' || f === 'nameSpan') continue;
-          if (Array.isArray(v)) out[f] = v.map((x) => (isAst(x) ? normalizeExpr(x, params) : x));
-          else if (isAst(v)) out[f] = normalizeExpr(v, params);
+          if (Array.isArray(v)) out[f] = v.map((x) => (isTmplNode(x) ? normalizeExpr(x, params) : x));
+          else if (isTmplNode(v)) out[f] = normalizeExpr(v, params);
           else if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) out[f] = v;
         }
         return out;

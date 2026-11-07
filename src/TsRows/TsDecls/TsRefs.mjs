@@ -9,7 +9,7 @@
  * last.
  */
 
-import { asObject } from './TsNodes.mjs';
+import { asObject, joinKey, joinKey3 } from './TsNodes.mjs';
 
 const asRef = asObject;
 const str = (v) => (typeof v === 'string' ? v : null);
@@ -43,7 +43,7 @@ export function rollupRefIds(store) {
     for (const row of store.table(table)) {
       const name = str(row.name);
       if (name === null) continue;
-      const key = `${String(row.file)}#${name}`;
+      const key = joinKey(row.file, name);
       const kind = str(row.kind) ?? '';
       const accessorPair = (kind === 'getter' || kind === 'setter')
         && (kindOf.get(key) === 'getter' || kindOf.get(key) === 'setter')
@@ -79,7 +79,7 @@ export function rollupRefIds(store) {
     const names = Array.isArray(row.names) ? row.names : [];
     const outer = Array.isArray(row.exported_as) ? row.exported_as : [];
     for (let i = 0; i < outer.length; i++) {
-      if (typeof names[i] === 'string' && names[i] !== outer[i]) aliasOf.set(`${String(row.file)}#${outer[i]}`, names[i]);
+      if (typeof names[i] === 'string' && names[i] !== outer[i]) aliasOf.set(joinKey(row.file, outer[i]), names[i]);
     }
   }
 
@@ -89,10 +89,10 @@ export function rollupRefIds(store) {
     if (file === null || name === null) return null;
     const fid = idByPath.get(file);
     if (fid === undefined) return null;
-    const hit = declared.get(`${fid}#${name}`);
+    const hit = declared.get(joinKey(fid, name));
     if (hit !== undefined) return hit;
-    const local = aliasOf.get(`${fid}#${name}`);
-    return local === undefined ? null : declared.get(`${fid}#${local}`) ?? null;
+    const local = aliasOf.get(joinKey(fid, name));
+    return local === undefined ? null : declared.get(joinKey(fid, local)) ?? null;
   };
 
   for (const row of store.table('di')) {
@@ -125,7 +125,7 @@ export function rollupRefIds(store) {
       // ONLY A ROW THAT IS THE DECLARATION ITSELF: one a file's extraction made for a declaration in ANOTHER file (`owner_file` is not `file` - a computed type's `via: 'computed'` copy of a library member) is not it,
       // and binding to it made the reference depend on a file it never read, chosen by file order. A library member keeps its `target` and has no id.
       if (name === null || typeof row.line !== 'number' || (row.owner_file !== undefined && row.owner_file !== row.file)) continue;
-      const key = `${String(row.file)}#${row.line}#${name}`;
+      const key = joinKey3(row.file, row.line, name);
       if (placed.has(key)) continue;
       placed.set(key, row.id);
       if (table === 'functions' || table === 'members' || table === 'classes') callable.add(row.id);
@@ -133,7 +133,7 @@ export function rollupRefIds(store) {
   }
   const placeKey = (ref) => {
     const fid = idByPath.get(str(ref?.file) ?? '');
-    return fid === undefined || typeof ref?.line !== 'number' ? null : `${String(fid)}#${ref.line}#${String(ref.name)}`;
+    return fid === undefined || typeof ref?.line !== 'number' ? null : joinKey3(fid, ref.line, ref.name);
   };
   for (const row of store.table('calls')) {
     const ref = asRef(row.target);
@@ -206,7 +206,7 @@ export function rollupRefIds(store) {
     for (const row of store.table(table)) {
       const name = str(row.name);
       if (name === null || row.inline === true || (table === 'functions' && row.parent)) continue;
-      const key = `${String(row.file)}#${name}`;
+      const key = joinKey(row.file, name);
       const seen = topLevel.get(key);
       if (seen === undefined) topLevel.set(key, { id: row.id, table });
       else if (!(seen.table === 'functions' && table === 'consts')) refused.add(key);
@@ -224,7 +224,7 @@ export function rollupRefIds(store) {
   // what that file's own import binds it to: the ref still names the alias, which no declaration carries.
   const importedAs = new Map();
   for (const row of store.table('import_names')) {
-    if (row.declared_id !== undefined && str(row.local) !== null) importedAs.set(`${String(row.file)}#${row.local}`, row.declared_id);
+    if (row.declared_id !== undefined && str(row.local) !== null) importedAs.set(joinKey(row.file, row.local), row.declared_id);
   }
   const refIn = (ref, fileId) => (ref === null ? null
     : idOf(ref) ?? importedAs.get(`${String(fileId)}#${str(ref.name) ?? str(ref.expr) ?? ''}`) ?? null);
@@ -283,7 +283,7 @@ export function rollupRefIds(store) {
     const fid = str(ref?.file) === null ? undefined : idByPath.get(ref.file);
     if (fid === undefined) continue;
     const head = (str(row.token) ?? '').split('.')[0];
-    const id = topId(`${fid}#${str(ref.name) ?? ''}`) ?? (head && head !== row.token ? topId(`${fid}#${head}`) : null);
+    const id = topId(`${fid}#${str(ref.name) ?? ''}`) ?? (head && head !== row.token ? topId(joinKey(fid, head)) : null);
     if (id !== null) row.token_id = id;
   }
   // An assignment's target property is the same kind of reference and was the only one left carrying a name
@@ -311,21 +311,21 @@ export function rollupRefIds(store) {
   const classAtLine = new Map();
   const sharedLine = new Set();
   for (const c of store.table('classes')) {
-    const key = `${String(c.file)}#${String(c.line)}`;
+    const key = joinKey(c.file, c.line);
     if (classAtLine.has(key)) sharedLine.add(key);
     else classAtLine.set(key, c.id);
   }
   const baseIds = (ref) => {
     if (ref === null) return;
     const fid = ref.external === true || str(ref.file) === null ? undefined : idByPath.get(ref.file);
-    const key = `${String(fid)}#${String(ref.line)}`;
+    const key = joinKey(fid, ref.line);
     if (fid !== undefined && typeof ref.line === 'number' && !sharedLine.has(key) && classAtLine.has(key)) ref.id = classAtLine.get(key);
     for (const arg of Array.isArray(ref.type_args) ? ref.type_args : []) baseIds(asRef(arg));
   };
   for (const c of store.table('classes')) baseIds(asRef(c.extends));
   const ownMember = (cls, name) => {
     for (let at = cls, i = 0; at !== undefined && i < 32; at = parentOf.get(at), i++) {
-      const id = memberOf.get(`${String(at)}#${name}`);
+      const id = memberOf.get(joinKey(at, name));
       if (id !== undefined) return id;
     }
     return null;

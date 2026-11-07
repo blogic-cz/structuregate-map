@@ -9,7 +9,7 @@
  */
 import { dedupeSummary, summarizeExpr } from './TsExprSummary.mjs';
 import { makeTsExprNormalizer } from './TsExprNorm.mjs';
-import { isOuterWrapper } from './TsNodes.mjs';
+import { isAssignmentKind, isOuterWrapper } from './TsNodes.mjs';
 
 /**
  * THE SHAPE A FUNCTION RETURNS, as dotted paths - the write side of a read.
@@ -63,8 +63,8 @@ const MUTATORS = new Set(['push', 'pop', 'shift', 'unshift', 'splice', 'sort', '
 export function draftWrites(ts, fn, declOf = null) {
   const first = fn.parameters?.[0]?.name;
   if (first === undefined || !ts.isIdentifier(first)) return [];
-  // BY KIND RANGE: `ts.SyntaxKind[kind]` answers an ALIAS name for the first and last of a range (`FirstAssignment` for `=`).
-  const isAssignment = (k) => k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment;
+  // A FUNCTION VALUE a call may hand on and this walk follows - never an accessor or a constructor, which no argument is
+  // (TsBody's `isFunctionLike` asks another question: which nodes own a scope).
   const isFn = (n) => n != null && (ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n));
   const out = [];
   const walked = new Set();
@@ -136,7 +136,7 @@ export function draftWrites(ts, fn, declOf = null) {
         // A LOCAL ASSIGNED A PATH LATER (rows 104: `let c; if (..) { c = s.list.find(..); }`) becomes that path; assigning a local writes nothing.
         const path = pathOf(n.right);
         if (path !== null) aliases.set(n.left.text, path);
-      } else if (ts.isBinaryExpression(n) && isAssignment(n.operatorToken.kind)) {
+      } else if (ts.isBinaryExpression(n) && isAssignmentKind(ts, n.operatorToken.kind)) {
         note(n.left);
       } else if ((ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n))
         && (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken)) {

@@ -13,7 +13,7 @@
  * measured over a whole scope the largest body stayed well under it. A limit that never triggers defends
  * nothing and is one more number to defend; one that DID trigger would silently shorten a body's record.
  */
-import { locationOf, unwrapOuter } from './TsNodes.mjs';
+import { isAssignmentKind, locationOf, unwrapOuter } from './TsNodes.mjs';
 import { catchFacts, chainOf } from './TsCatch.mjs';
 import { loopFacts, loopKind } from './TsLoops.mjs';
 
@@ -108,10 +108,6 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
   const isFunctionLike = (node) => ts.isArrowFunction(node) || ts.isFunctionExpression(node)
     || ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isGetAccessor(node)
     || ts.isSetAccessor(node) || ts.isConstructorDeclaration(node);
-
-  /** `=` and every compound/logical assignment form, from the compiler's own token range. */
-  const isAssignmentOperator = (kind) => kind >= ts.SyntaxKind.FirstAssignment
-    && kind <= ts.SyntaxKind.LastAssignment;
 
   /**
    * Classify an assignment target by NODE KIND: a class property (`this.x`), or a plain binding.
@@ -217,7 +213,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
   const written = (left) => unwrapOuter(ts, left);
 
   function emitAssignment(node, ownerId, classId) {
-    if (!ts.isBinaryExpression(node) || !isAssignmentOperator(node.operatorToken.kind)) return;
+    if (!ts.isBinaryExpression(node) || !isAssignmentKind(ts, node.operatorToken.kind)) return;
     const left = written(node.left);
     // A DESTRUCTURING ASSIGNMENT (`[xs[i], xs[j]] = [xs[j], xs[i]]`) writes its pattern: one row, the pattern its target.
     const pattern = ts.isArrayLiteralExpression(left) || ts.isObjectLiteralExpression(left);

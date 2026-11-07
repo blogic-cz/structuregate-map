@@ -12,11 +12,13 @@
  *
  * Imports are flat: see `TsTypeRef.mjs`.
  */
+import { aliased } from './TsNodes.mjs';
+
 export function makeCaseFacts(ts, checker, fileOf) {
   /** The enum declaration a symbol is, or a member of; null for any other symbol. */
   const enumDecl = (symbol) => {
     let sym = symbol;
-    if (sym && (sym.flags & ts.SymbolFlags.Alias) !== 0) sym = checker.getAliasedSymbol(sym);
+    sym = aliased(ts, checker, sym);
     if (!sym) return null;
     if ((sym.flags & ts.SymbolFlags.EnumMember) !== 0) {
       const parent = sym.declarations?.[0]?.parent;
@@ -51,7 +53,7 @@ export function makeCaseFacts(ts, checker, fileOf) {
   function label(expr) {
     try {
       let sym = checker.getSymbolAtLocation(ts.isPropertyAccessExpression(expr) ? expr.name : expr);
-      if (sym && (sym.flags & ts.SymbolFlags.Alias) !== 0) sym = checker.getAliasedSymbol(sym);
+      sym = aliased(ts, checker, sym);
       const owner = sym && (sym.flags & ts.SymbolFlags.EnumMember) !== 0 ? enumDecl(sym) : null;
       const symbol = owner ? `${owner.name.text}.${sym.getName()}` : sym ? sym.getName() : '';
       let value = owner && sym.valueDeclaration ? checker.getConstantValue(sym.valueDeclaration) : undefined;

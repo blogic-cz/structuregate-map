@@ -27,6 +27,10 @@ const SUFFIXES = ['', '.ts', '.tsx', '.mts', '.cts', '.d.ts', '.js', '.mjs', '.c
 /** A body this short is not a duplication worth reporting - see the same constant in the other two halves. */
 export const MIN_BODY_STATEMENTS = 3;
 
+/** A node's body when it is one the duplicate search counts - a block of `MIN_BODY_STATEMENTS` or more - else null.
+ *  ONE RULE FOR BOTH MAPS: the plain rows half calls this too, so its `body_shape` groups are the ones this map lists. */
+export const countedBody = (node) => (node.body && node.body.statements && node.body.statements.length >= MIN_BODY_STATEMENTS ? node.body : null);
+
 /**
  * An expression smaller than this is shared vocabulary, not a copy. Counted in LEAVES, so a long variable
  * name cannot make a trivial expression look substantial - and a leaf here is a NAME or a LITERAL, never
@@ -439,9 +443,10 @@ export function runMap(ts, rel, text, sourceFile, known, root, aliases) {
                 else emit('MAP-USE', rel, specifier);
             }
         }
-        if (node.body && node.body.statements && node.body.statements.length >= MIN_BODY_STATEMENTS) {
+        const counted = countedBody(node);
+        if (counted) {
             const named = node.name && node.name.getText ? node.name.getText(sourceFile) : 'anonymous';
-            const shape = fingerprint(ts, node.body, sourceFile);
+            const shape = fingerprint(ts, counted, sourceFile);
             emit('MAP-BODY', rel, line(), named, shape.digest, shape.span);
         } else if (expressionKinds.has(node.kind)) {
             // A SECOND UNIT, beside the bodies. A body fingerprint only sees whole functions, so the

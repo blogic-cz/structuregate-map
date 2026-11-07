@@ -16,7 +16,7 @@
  * Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
 
-import { asObject } from './TsNodes.mjs';
+import { asObject, joinKey3 } from './TsNodes.mjs';
 
 const LITERALS = ['string_literals', 'number_literals', 'template_literals', 'functions'];
 const asRef = asObject;
@@ -60,12 +60,12 @@ export function rollupTemplateFills(store) {
   }
   const declsAt = new Map();
   for (const table of ['interfaces', 'classes', 'type_aliases']) {
-    for (const row of store.table(table)) declsAt.set(`${String(row.file)}#${row.line}#${String(row.name)}`, { table, row });
+    for (const row of store.table(table)) declsAt.set(joinKey3(row.file, row.line, row.name), { table, row });
   }
   const classById = new Map(store.table('classes').map((c) => [c.id, c]));
   const declOf = (ref) => {
     const fid = ref === null ? undefined : byFileAbs.get(ref.file);
-    return fid === undefined || typeof ref.line !== 'number' ? undefined : declsAt.get(`${String(fid)}#${ref.line}#${String(ref.name)}`);
+    return fid === undefined || typeof ref.line !== 'number' ? undefined : declsAt.get(joinKey3(fid, ref.line, ref.name));
   };
 
   /** Every row declaring `name` on the type a decl is, its own first and its bases' only when it has none - a visited set ends a cycle. `walked` gathers

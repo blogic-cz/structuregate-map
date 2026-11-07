@@ -4,6 +4,7 @@
  *
  * Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
+import { joinKey } from './TsNodes.mjs';
 
 const str = (v) => (typeof v === 'string' ? v : null);
 
@@ -19,7 +20,7 @@ export function makeContexts(store, owners, directivesAt, inputsAt) {
   for (const io of store.table('io')) {
     if (io.kind !== 'input' || io.class == null || str(io.binding_name) === null || str(io.member) === null) continue;
     const row = propByOwner.get(`class:${String(io.class)}#${io.member}`);
-    if (row !== undefined) inputMember.set(`${String(io.class)}#${io.binding_name}`, row);
+    if (row !== undefined) inputMember.set(joinKey(io.class, io.binding_name), row);
   }
   // THE CONTEXT A DIRECTIVE DECLARES, most specific first: `static ngTemplateContextGuard<T>(dir: X<T>, ctx: unknown): ctx is Ctx<T>` (its `guard_ref`), else the `TemplateRef<Ctx>`
   // it injects. Angular's own checker reads the guard alone; a directive that only types its `TemplateRef` still says what it hands the view.
@@ -46,7 +47,7 @@ export function makeContexts(store, owners, directivesAt, inputsAt) {
     const fed = new Map();
     if (!paramNames({ kind: 'class', id: classId }).length) return fed;
     for (const [name, ast] of inputsAt.get(nodeId) ?? []) {
-      const ref = inputMember.get(`${String(classId)}#${name}`)?.type_ref;
+      const ref = inputMember.get(joinKey(classId, name))?.type_ref;
       if (!ref || typeof ref !== 'object') continue;
       const value = valueOf(ast, component, scope);
       if (ref.param === true) {

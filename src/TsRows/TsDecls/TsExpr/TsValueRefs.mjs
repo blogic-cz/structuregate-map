@@ -6,7 +6,7 @@
  * halves together are past this repo's 500-line ceiling. Imports are flat: see `TsTypeRef.mjs`.
  */
 import { canonicalPath, startSite } from './TsPaths.mjs';
-import { unwrapOuter } from './TsNodes.mjs';
+import { asObject, isPlainString, literalText, unwrapOuter } from './TsNodes.mjs';
 
 /**
  * `undefined` AS A VALUE: `{$literal: 'undefined', $kind}` - JSON has no `undefined`, and the `$expr` an unresolved name
@@ -75,7 +75,7 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
       || !ELEMENT_METHODS.has(call.expression.name.text)) return null;
     const list = api.evalNode(call.expression.expression);
     if (!Array.isArray(list) || list.length < 2) return null;
-    const values = list.map((el) => (el !== null && typeof el === 'object' && !Array.isArray(el) ? el[access.name.text] : undefined));
+    const values = list.map((el) => (asObject(el) !== null ? el[access.name.text] : undefined));
     return values.every((v) => typeof v === 'string') ? [...new Set(values)] : null;
   }
 
@@ -118,13 +118,13 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
     if (ts.isElementAccessExpression(node)) {
       const receiver = api.evalNode(node.expression);
       const rawKey = api.evalNode(node.argumentExpression);
-      const key = rawKey !== null && typeof rawKey === 'object' && !Array.isArray(rawKey)
+      const key = asObject(rawKey) !== null
         ? rawKey.value : rawKey;
       if (Array.isArray(receiver) && typeof key === 'number' && Number.isInteger(key)
         && key >= 0 && key < receiver.length) {
         return { $index: node.getText(), value: receiver[key] };
       }
-      const plainObject = receiver !== null && typeof receiver === 'object' && !Array.isArray(receiver)
+      const plainObject = asObject(receiver) !== null
         && receiver.$expr === undefined && receiver.$call === undefined;
       if (plainObject && typeof key === 'string'
         && Object.prototype.hasOwnProperty.call(receiver, key)) {
@@ -285,7 +285,7 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
     visit(fn);
     if (calls.length !== 1) return null;
     const call = calls[0];
-    const text = (e) => (e !== undefined && (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) ? e.text : null);
+    const text = (e) => literalText(ts, e);
     let remote = text(call.arguments[0]);
     let expose = text(call.arguments[1]);
     const options = call.arguments[0];
@@ -336,7 +336,7 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
     visit(fn);
     if (calls.length !== 1) return null;
     const arg = calls[0].arguments[0];
-    if (arg === undefined || !(ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg))) return null;
+    if (!isPlainString(ts, arg)) return null;
     const at = arg.text.indexOf('/');
     if (at <= 0 || arg.text.startsWith('@') || arg.text.startsWith('.')) return null;
     return { remote: arg.text.slice(0, at), expose: `./${arg.text.slice(at + 1)}`, pick: pickOf(calls[0]), dynamic: true };

@@ -5,7 +5,7 @@
  * All three exist because the alternative is a consumer pattern-matching source lines, which is the one
  * thing this tool forbids in every language it maps.
  */
-import { locationOf, parentKind, propertyContext } from './TsNodes.mjs';
+import { isPlainString, literalText, locationOf, parentKind, propertyContext } from './TsNodes.mjs';
 import { literalUse, numberOf } from './TsLiterals.mjs';
 import { canonicalPath, relativeTo } from './TsPaths.mjs';
 
@@ -120,7 +120,7 @@ export function collectStrings(ts, store, node, owner, propName, evalNode, field
   const walk = (n) => {
     // `use`/`callee`/`target` are the vocabulary every half shares (TsLiterals.mjs); `context` stays this
     // half's own - the parent's SyntaxKind - for the readers that already ask for it.
-    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
+    if (isPlainString(ts, n)) {
       store.add('string_literals', 'sl', {
         ...owner, value: n.text, context: parentKind(ts, n),
         property: propertyContext(ts, n, propName), ...literalUse(ts, n, text), ...field(n), ...pathOf(n), ...locationOf(n),
@@ -220,7 +220,7 @@ function regexOf(ts, n) {
   if (!(ts.isNewExpression(n) || ts.isCallExpression(n)) || !ts.isIdentifier(n.expression)
     || n.expression.text !== 'RegExp') return null;
   const [first, second] = n.arguments ?? [];
-  const literal = (arg) => (arg && (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) ? arg.text : null);
+  const literal = (arg) => literalText(ts, arg);
   // A `RegExp` CONSTRUCTION OVER A LITERAL (`/x/g` handed to it) IS A CALL TOO (it was no row, only the inner literal): the pattern is the literal's, and the
   // flags argument OVERRIDES the literal's as JavaScript does - with none, the literal's own are copied.
   if (first && ts.isRegularExpressionLiteral(first)) {

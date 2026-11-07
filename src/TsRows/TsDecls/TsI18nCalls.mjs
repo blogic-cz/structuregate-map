@@ -16,6 +16,7 @@
  * inventing a key from an expression is the pattern-matching this extractor forbids, and the call row still
  * carries the argument, evaluated, for a consumer that wants to follow it.
  */
+import { joinKey } from './TsNodes.mjs';
 
 /**
  * The keys an argument STATICALLY IS - a plain string, or either branch of a resolved conditional.
@@ -68,7 +69,7 @@ function keyTakingDecls(store, methods, known) {
   for (const table of ['members', 'functions', 'type_members']) {
     for (const row of store.table(table)) {
       if (typeof row.name !== 'string' || !methods.has(row.name)) continue;
-      const key = `${String(row.file)}#${row.name}`;
+      const key = joinKey(row.file, row.name);
       qualified.add(key);
       keyById.set(row.id, key);
       const declared = Array.isArray(row.params) ? row.params : [];
@@ -94,7 +95,7 @@ function keyTakingDecls(store, methods, known) {
     // index is a zip and not a choice among candidates. A callee whose parameters the map never described
     // names no key position, and the test falls back to any bare parameter rather than disqualifying a
     // declaration on missing evidence.
-    const keyNames = stringParams.get(`${String(callee)}#${name}`);
+    const keyNames = stringParams.get(joinKey(callee, name));
     const argNames = Array.isArray(call.arg_params) ? call.arg_params : [];
     const isBare = (a, i) => {
       if (!a || typeof a !== 'object' || a.$kind !== 'Identifier') return false;
@@ -175,7 +176,7 @@ export function rollupI18nCalls(store, methods, only = null, dictMethods = new S
     const name = call.target?.name;
     if (typeof name !== 'string' || !(methods.has(name) || dictMethods.has(name))) continue;
     const home = typeof call.target?.file === 'string' ? known.get(call.target.file) : undefined;
-    if (home === undefined || !takesKey.has(`${String(home)}#${name}`)) continue;
+    if (home === undefined || !takesKey.has(joinKey(home, name))) continue;
     // A NAME IN BOTH LISTS IS A TRANSLATE CALL: the one-key reading is the narrower claim.
     if (!methods.has(name)) {
       const args = Array.isArray(call.args) ? call.args : [];

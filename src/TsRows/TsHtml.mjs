@@ -17,13 +17,7 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { slash } from './TsPaths.mjs';
-
-/** The path a mirror file takes, without its extension - `a/b/c.component.html` -> `a/b/c.component`. */
-function dropExt(rel) {
-  const cut = rel.lastIndexOf('.');
-  return cut > rel.lastIndexOf('/') ? rel.slice(0, cut) : rel;
-}
+import { dropExt, slash } from './TsPaths.mjs';
 
 /**
  * ONE NODE, AS THE MIRROR SPELLS IT.

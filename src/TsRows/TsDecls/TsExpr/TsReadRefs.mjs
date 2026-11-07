@@ -5,7 +5,7 @@
  * see `TsTypeRef.mjs`.
  */
 import { makeLaterTypes } from './TsLaterTypes.mjs';
-import { isOuterWrapper, unwrapOuter } from './TsNodes.mjs';
+import { aliased, argCall, elementTypes, isOuterWrapper, isPlainKeyName, joinKey, propertyOf, unwrapOuter } from './TsNodes.mjs';
 import { declSite, startSite } from './TsPaths.mjs';
 
 export function makeReadRefs(ts, checker) {
@@ -85,9 +85,7 @@ export function makeReadRefs(ts, checker) {
    */
   function resolveName(node) {
     let symbol = symbolOf(node);
-    if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
-      symbol = checker.getAliasedSymbol(symbol);
-    }
+    symbol = aliased(ts, checker, symbol);
     const all = symbol?.declarations ?? [];
     // A LIBRARY NAME THAT IS NOT A TOP-LEVEL DECLARATION is still declared (rows 75): `import { cloneDeep } from 'lodash'` binds the METHOD of an interface the package
     // types its export with (a `MethodSignature`), a namespace's member, a module. Those keep their place in the library's file, as the link `_.cloneDeep` always did -
@@ -153,7 +151,7 @@ export function makeReadRefs(ts, checker) {
     const at = unwrapOuter(ts, arg);
     if (!ts.isIdentifier(at)) return null;
     let symbol = checker.getSymbolAtLocation(at);
-    if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+    symbol = aliased(ts, checker, symbol);
     const decl = (symbol?.declarations ?? []).find((d) => {
       if (d.getSourceFile().isDeclarationFile) return false;
       if (ts.isBindingElement(d)) return ts.isIdentifier(d.name) && moduleLevel(d);
@@ -178,9 +176,7 @@ export function makeReadRefs(ts, checker) {
    */
   function targetLine(node) {
     const declarationsOf = (sym) => {
-      if (sym !== undefined && (sym.flags & ts.SymbolFlags.Alias) !== 0) {
-        try { sym = checker.getAliasedSymbol(sym); } catch { return []; }
-      }
+      try { sym = aliased(ts, checker, sym); } catch { return []; }
       return sym?.declarations ?? [];
     };
     const placeOfDecl = (decls) => {
@@ -216,7 +212,7 @@ export function makeReadRefs(ts, checker) {
     const method = ts.isMethodDeclaration(node) && node.parent !== undefined && ts.isObjectLiteralExpression(node.parent);
     const prop = method ? node : child.parent;
     if (prop === undefined || !(method || (ts.isPropertyAssignment(prop) && prop.initializer === child))) return null;
-    return ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name) || ts.isNumericLiteral(prop.name) ? prop : null;
+    return isPlainKeyName(ts, prop.name) ? prop : null;
   };
   function fieldTarget(node) {
     const prop = propOf(node);
@@ -236,7 +232,7 @@ export function makeReadRefs(ts, checker) {
         // A TYPE INFERRED FROM A LITERAL is no declared member: its property is that literal's own, and names nothing here.
         if (declaredOnly && first.parent !== undefined && ts.isObjectLiteralExpression(first.parent)) continue;
         const place = at(first);
-        places.set(`${place.file}#${place.line}`, place);
+        places.set(joinKey(place.file, place.line), place);
       }
       return places;
     };
@@ -281,7 +277,7 @@ export function makeReadRefs(ts, checker) {
     while (passes(e)) e = e.expression;
     if (!ts.isElementAccessExpression(e)) return null;
     let symbol = checker.getSymbolAtLocation(e.expression);
-    if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
+    symbol = aliased(ts, checker, symbol);
     if (symbol === undefined || (symbol.flags & ts.SymbolFlags.Enum) === 0) return null;
     // A STRING KEY - every arm of its type string-like - reads the member itself, no name lookup.
     const key = checker.getTypeAtLocation(e.argumentExpression);
@@ -334,8 +330,8 @@ export function makeReadRefs(ts, checker) {
    * `{path_refs, path_complete}`: the segments that resolved, and whether all did. Null when the literal fills no configured member, or its root has no type.
    */
   function pathRefs(node, specs) {
-    const prop = node.parent;
-    if (prop === undefined || !ts.isPropertyAssignment(prop) || prop.initializer !== node || !ts.isObjectLiteralExpression(prop.parent)) return null;
+    const prop = propertyOf(ts, node);
+    if (prop === null) return null;
     const filled = fieldTarget(node);
     if (filled === null) return null;
     const holderOf = (types) => types.flatMap((t) => (t.isUnion() ? t.types : [t])).flatMap((t) => {
@@ -357,7 +353,7 @@ export function makeReadRefs(ts, checker) {
     for (const segment of segments) {
       const arms = current.flatMap((t) => (t.isUnion() ? t.types : [t]));
       if (segment !== '' && [...segment].every((c) => c >= '0' && c <= '9')) {
-        current = arms.flatMap((t) => { const e = checker.getIndexTypeOfType(t, ts.IndexKind.Number); return e === undefined ? [] : [e]; });
+        current = arms.flatMap((t) => elementTypes(ts, checker, t));
         if (!current.length) break;
         refs.push({ name: segment, element: true });
         continue;
@@ -368,7 +364,7 @@ export function makeReadRefs(ts, checker) {
         const [decl] = member?.declarations ?? [];
         if (decl === undefined) continue;
         const place = at(decl);
-        found.set(`${place.file}#${place.line}`, { place, member });
+        found.set(joinKey(place.file, place.line), { place, member });
       }
       if (found.size !== 1) break;
       const [{ place, member }] = [...found.values()];
@@ -388,8 +384,8 @@ export function makeReadRefs(ts, checker) {
     }
     let n = object;
     while (n.parent !== undefined && (isOuterWrapper(ts, n.parent) || ts.isArrayLiteralExpression(n.parent))) n = n.parent;
-    const call = n.parent;
-    if (call === undefined || !ts.isCallExpression(call) || !call.arguments.includes(n)) return null;
+    const call = argCall(ts, n);
+    if (call === null) return null;
     const arg = call.arguments[root.index];
     return arg === undefined ? null : { type: checker.getTypeAtLocation(arg), at: arg };
   }

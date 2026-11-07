@@ -5,6 +5,7 @@
  *
  * Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
+import { joinKey, joinKey3 } from './TsNodes.mjs';
 
 const str = (v) => (typeof v === 'string' ? v : null);
 
@@ -20,24 +21,24 @@ export function makeOwners(store) {
   // Where a `type_ref` lands: the interface, alias or class that declares that type, by file + name.
   const ownerByFileName = new Map();
   for (const row of store.table('interfaces')) {
-    ownerByFileName.set(`${String(row.file)}#${String(row.name)}`, { kind: 'type', id: row.id });
+    ownerByFileName.set(joinKey(row.file, row.name), { kind: 'type', id: row.id });
   }
   for (const row of store.table('type_aliases')) {
-    ownerByFileName.set(`${String(row.file)}#${String(row.name)}`, { kind: 'type', id: row.id });
+    ownerByFileName.set(joinKey(row.file, row.name), { kind: 'type', id: row.id });
   }
   for (const row of store.table('classes')) {
-    ownerByFileName.set(`${String(row.file)}#${String(row.name)}`, { kind: 'class', id: row.id });
+    ownerByFileName.set(joinKey(row.file, row.name), { kind: 'class', id: row.id });
   }
   // AN ENUM IS AN OWNER TOO: a component holding one (`Kinds = Kind`, typed `typeof Kind`) is read `Kinds.Alpha`, and the
   // chain stopped at the field - the largest share of every stop on a real workspace. Its members answer by name.
   for (const row of store.table('enums')) {
     if (row.half !== 'typescript') continue;
-    ownerByFileName.set(`${String(row.file)}#${String(row.name)}`, { kind: 'enum', id: row.id });
+    ownerByFileName.set(joinKey(row.file, row.name), { kind: 'enum', id: row.id });
   }
   // AN ANONYMOUS OBJECT TYPE IS AN OWNER TOO (rows 71): a type literal or object literal is a `shapes` row, reached by the file, line and
   // column of its `{` - what a shape ref (`{shape: true, file, line, col}`) carries - and answers its members by name like any owner.
   const shapeByPlace = new Map();
-  for (const row of store.table('shapes')) shapeByPlace.set(`${String(row.file)}#${String(row.line)}#${String(row.col)}`, { kind: 'shape', id: row.id });
+  for (const row of store.table('shapes')) shapeByPlace.set(joinKey3(row.file, row.line, row.col), { kind: 'shape', id: row.id });
   // THE PROPERTIES OF A MAPPED TYPE (`Pick<Dto, 'a'>`, rows 72) are an owner of their own: each name answers with the member row declared where the
   // mapping took it from (`rowByPlace`), so only the kept names resolve. One owner per ref, as a ref is one list.
   const propsOwners = new Map();
@@ -46,7 +47,7 @@ export function makeOwners(store) {
     // A MAPPED TYPE A DECLARED ALIAS NAMES (`type T = Pick<Slot<unknown>, 'Result'>`, rows 73) is that alias: its own computed members carry the types the checker
     // instantiated - `Result: Base` - where `props` hold the source's DECLARED rows, a type parameter with no binding. `props` answer an anonymous mapping only.
     const declared = Array.isArray(ref?.props) && str(ref?.file) !== null && str(ref?.name) !== null && idByPath.has(ref.file)
-      ? ownerByFileName.get(`${String(idByPath.get(ref.file))}#${String(ref.name)}`) ?? null : null;
+      ? ownerByFileName.get(joinKey(idByPath.get(ref.file), ref.name)) ?? null : null;
     if (declared !== null && declared.kind === 'type') return declared;
     if (Array.isArray(ref?.props)) {
       if (!propsOwners.has(ref)) propsOwners.set(ref, { kind: 'props', id: propsOwners.size, by: new Map(ref.props.map((p) => [p.name, p])) });
@@ -56,9 +57,9 @@ export function makeOwners(store) {
     if (file === null) return null;
     const fid = idByPath.get(file);
     if (fid === undefined) return null;
-    if (ref.shape === true) return shapeByPlace.get(`${fid}#${String(ref.line)}#${String(ref.col)}`) ?? null;
+    if (ref.shape === true) return shapeByPlace.get(joinKey3(fid, ref.line, ref.col)) ?? null;
     const name = str(ref?.name);
-    return name === null ? null : ownerByFileName.get(`${fid}#${name}`) ?? null;
+    return name === null ? null : ownerByFileName.get(joinKey(fid, name)) ?? null;
   };
 
   // A property of a class and a property of a type are looked up in different tables and answer the same
@@ -115,7 +116,7 @@ export function makeOwners(store) {
   for (const table of ['members', 'type_members', 'shape_members']) {
     for (const row of store.table(table)) {
       if (row.kind === 'spread' || row.kind === 'index' || typeof row.line !== 'number') continue;
-      const key = `${String(row.file)}#${String(row.line)}#${String(row.name)}`;
+      const key = joinKey3(row.file, row.line, row.name);
       if (!rowByPlace.has(key)) rowByPlace.set(key, row);
     }
   }
@@ -254,7 +255,7 @@ export function makeOwners(store) {
       seen.add(`${current.kind}:${current.id}`);
       if (current.kind === 'props') {
         const at = current.by.get(name);
-        const row = at === undefined ? undefined : rowByPlace.get(`${String(idByPath.get(at.file))}#${String(at.line)}#${name}`);
+        const row = at === undefined ? undefined : rowByPlace.get(joinKey3(idByPath.get(at.file), at.line, name));
         if (row === undefined) continue;
         const one = { row, env: null };
         return { ...one, groups: [[one]] };

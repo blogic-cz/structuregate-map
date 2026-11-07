@@ -9,6 +9,7 @@
  * instead of being silently dropped. Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
 import { slash } from './TsPaths.mjs';
+import { joinKey, joinKey3 } from './TsNodes.mjs';
 
 const refsOf = (row, field) => row[field] ?? [];
 
@@ -38,7 +39,7 @@ export function makeScopes(store, diag) {
   const declaringModuleByFile = new Map();
   const declaringModule = new Map();
   for (const m of modules) {
-    byFileName.set(`${String(m.file)}#${String(m.name)}`, m);
+    byFileName.set(joinKey(m.file, m.name), m);
     const list = byName.get(String(m.name));
     if (list) list.push(m);
     else byName.set(String(m.name), [m]);
@@ -98,12 +99,12 @@ export function makeScopes(store, diag) {
     if (ref?.file) {
       const fid = fileIdByAbs.get(slash(ref.file));
       if (fid !== undefined) {
-        const exact = byFileName.get(`${String(fid)}#${name}`);
+        const exact = byFileName.get(joinKey(fid, name));
         if (exact) return [exact];
         // A DECLARABLE OF THAT FILE IS NO MODULE: a module exporting a component it declares beside itself
         // named the file's one NgModule, the export folded into a module already seen, and the component read
         // `out_of_scope` in every module importing it.
-        if (declarableByFileName.has(`${String(fid)}#${name}`)) return [];
+        if (declarableByFileName.has(joinKey(fid, name))) return [];
         // An ALIASED module import: the file is authoritative, and a file declaring exactly one NgModule
         // leaves nothing to guess.
         const inFile = modulesByFile.get(fid);
@@ -133,7 +134,7 @@ export function makeScopes(store, diag) {
   const declarableByName = new Map();
   for (const table of ['components', 'directives', 'pipes']) {
     for (const row of store.table(table)) {
-      declarableByFileName.set(`${String(row.file)}#${String(row.name)}`, row.class);
+      declarableByFileName.set(joinKey(row.file, row.name), row.class);
       const inFile = declarablesByFile.get(row.file);
       if (inFile) inFile.push(row.class);
       else declarablesByFile.set(row.file, [row.class]);
@@ -148,7 +149,7 @@ export function makeScopes(store, diag) {
     if (ref?.file) {
       const fid = fileIdByAbs.get(slash(ref.file));
       if (fid !== undefined) {
-        const exact = name === null ? undefined : declarableByFileName.get(`${String(fid)}#${name}`);
+        const exact = name === null ? undefined : declarableByFileName.get(joinKey(fid, name));
         if (exact !== undefined) return exact;
         const inFile = declarablesByFile.get(fid);
         if (inFile?.length === 1) return inFile[0] ?? null;
@@ -171,7 +172,7 @@ export function makeScopes(store, diag) {
   };
   const addExternal = (into, row, from) => {
     for (const p of Array.isArray(row?.external_pipes) ? row.external_pipes : []) {
-      if (p?.from === from) into.ext.set(`${String(p.file)}#${String(p.line)}#${String(p.name)}`, p);
+      if (p?.from === from) into.ext.set(joinKey3(p.file, p.line, p.name), p);
     }
   };
   const addRef = (into, ref) => {

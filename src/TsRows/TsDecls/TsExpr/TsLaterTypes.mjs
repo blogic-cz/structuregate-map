@@ -4,6 +4,7 @@
  *
  * Moved out of `TsReadRefs.mjs`, which had reached this repo's line ceiling. Imports are flat: see `TsTypeRef.mjs`.
  */
+import { argCall, elementTypes, isPlainKeyName, propertyOf } from './TsNodes.mjs';
 
 export function makeLaterTypes(ts, checker) {
   /**
@@ -27,10 +28,7 @@ export function makeLaterTypes(ts, checker) {
   const down = (types, levels) => {
     let out = types;
     for (let i = 0; i < levels; i++) {
-      out = out.flatMap((t) => (t.isUnion() ? t.types : [t])).flatMap((t) => {
-        const element = checker.getIndexTypeOfType(t, ts.IndexKind.Number);
-        return element === undefined ? [] : [element];
-      });
+      out = out.flatMap((t) => (t.isUnion() ? t.types : [t])).flatMap((t) => elementTypes(ts, checker, t));
     }
     return out;
   };
@@ -63,8 +61,8 @@ export function makeLaterTypes(ts, checker) {
   /** THE UN-ANNOTATED CONST AN ARGUMENT IS PUSHED INTO (rows 88): `list.push(x)` / `list.unshift(x)` - the method `Array` declares, checked by its declaration - makes `x` an
    *  ELEMENT of `list`, so `x` takes what `list` takes later, one level down. Null for any other call, or a receiver that is annotated (its type is then the contextual one). */
   const pushedInto = (n) => {
-    const call = n.parent;
-    if (call === undefined || !ts.isCallExpression(call) || !call.arguments.includes(n)) return null;
+    const call = argCall(ts, n);
+    if (call === null) return null;
     const callee = call.expression;
     if (!ts.isPropertyAccessExpression(callee) || !arrayMethod(callee, ['push', 'unshift'])) return null;
     let receiver = callee.expression;
@@ -75,9 +73,9 @@ export function makeLaterTypes(ts, checker) {
   /** A PROPERTY VALUE'S TYPE IS WHAT ITS OBJECT'S TYPES GIVE THE PROPERTY (rows 90, #107): `Children: [{..}].filter(..)` in an object that is itself a `HueRule`
    *  (by its contextual type, or the type it takes later) is `HueRule['Children']`. Null when `n` is no property value of an object literal. */
   const propertyTypes = (n) => {
-    const prop = n.parent;
-    if (prop === undefined || !ts.isPropertyAssignment(prop) || prop.initializer !== n || !ts.isObjectLiteralExpression(prop.parent)) return null;
-    if (!(ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name) || ts.isNumericLiteral(prop.name))) return [];
+    const prop = propertyOf(ts, n);
+    if (prop === null) return null;
+    if (!isPlainKeyName(ts, prop.name)) return [];
     const outer = prop.parent;
     const contextual = checker.getContextualType(outer);
     const holders = contextual !== undefined && pushedInto(climb(outer).n) === null ? [contextual] : laterTypes(outer);
@@ -171,8 +169,8 @@ export function makeLaterTypes(ts, checker) {
   const settledBy = (n) => {
     const fn = callbackOf(n);
     if (fn === null) return null;
-    const call = fn.parent;
-    if (call === undefined || !ts.isCallExpression(call) || !call.arguments.includes(fn) || !ts.isPropertyAccessExpression(call.expression)) return null;
+    const call = argCall(ts, fn);
+    if (call === null || !ts.isPropertyAccessExpression(call.expression)) return null;
     const access = call.expression;
     const promised = (access.name.text === 'then' || access.name.text === 'catch')
       && (checker.getSymbolAtLocation(access.name)?.declarations ?? []).some((d) => d.parent !== undefined && ts.isInterfaceDeclaration(d.parent) && d.parent.name.text === 'Promise');
@@ -183,8 +181,8 @@ export function makeLaterTypes(ts, checker) {
    *  `Array`'s own method (checked by its declaration), the callback an anonymous function among the arguments. Null otherwise. */
   const mappedBy = (n) => {
     const fn = callbackOf(n);
-    const call = fn?.parent;
-    if (call === undefined || !ts.isCallExpression(call) || !call.arguments.includes(fn) || !ts.isPropertyAccessExpression(call.expression)) return null;
+    const call = argCall(ts, fn);
+    if (call === null || !ts.isPropertyAccessExpression(call.expression)) return null;
     if (!arrayMethod(call.expression, ['map', 'flatMap'])) return null;
     return { call, flat: call.expression.name.text === 'flatMap' };
   };

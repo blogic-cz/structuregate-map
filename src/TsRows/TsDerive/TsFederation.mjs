@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { canonicalPath } from './TsPaths.mjs';
-import { isOuterWrapper } from './TsNodes.mjs';
+import { isOuterWrapper, joinKey, literalText } from './TsNodes.mjs';
 
 const CONFIGS = new Set(['module-federation.config.js', 'module-federation.config.ts']);
 
@@ -46,7 +46,7 @@ function objectOf(ts, sf, e) {
 /** A property's key as written, or null when it is computed. */
 const keyOf = (ts, p) => (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) || ts.isNoSubstitutionTemplateLiteral(p.name)
   ? p.name.text : null);
-const textOf = (ts, e) => (e !== undefined && (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) ? e.text : null);
+const textOf = literalText;
 
 /**
  * The remotes a HOST's config lists: `remotes: ['investment']`, `[['investment', url]]` (first item the name) or
@@ -143,7 +143,7 @@ export function rollupRemoteRoutes(ts, store, fe) {
   const classAt = new Map();
   const twice = new Set();
   for (const c of store.table('classes')) {
-    const key = `${String(c.file)}#${String(c.name)}`;
+    const key = joinKey(c.file, c.name);
     if (classAt.has(key)) twice.add(key); else classAt.set(key, c.id);
   }
   let resolved = 0;
@@ -156,7 +156,7 @@ export function rollupRemoteRoutes(ts, store, fe) {
     const claimed = configs.get(remote) ?? [];
     const target = claimed.length === 1 ? claimed[0].exposes.get(expose) : undefined;
     const fid = target === undefined ? null : exposedFile(target, claimed[0].dir, fe, fileByAbs);
-    const key = `${String(fid)}#${String(pick)}`;
+    const key = joinKey(fid, pick);
     if (fid === null || typeof pick !== 'string' || twice.has(key) || !classAt.has(key)) continue;
     r.load_children_remote = classAt.get(key);
     resolved += 1;

@@ -10,7 +10,7 @@
  * Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
 
-import { asObject } from './TsNodes.mjs';
+import { asObject, joinKey } from './TsNodes.mjs';
 
 const asObj = asObject;
 
@@ -54,7 +54,7 @@ function calleeIndex(store) {
   for (const table of ['functions', 'members']) {
     for (const row of store.table(table)) {
       if (typeof row.name !== 'string') continue;
-      const key = `${String(row.file)}#${row.name}`;
+      const key = joinKey(row.file, row.name);
       if (byKey.has(key)) ambiguous.add(key);
       else byKey.set(key, row);
     }
@@ -130,7 +130,7 @@ export function makeSpreadFolder(store) {
     const file = typeof target.file === 'string' ? idByPath.get(target.file) : undefined;
     const name = typeof target.name === 'string' ? target.name : null;
     if (file === undefined || name === null) return null;
-    const callee = callees.get(`${file}#${name}`);
+    const callee = callees.get(joinKey(file, name));
     if (callee === undefined) return null;
     const ret = returns.get(callee.id);
     if (ret === undefined || asObj(ret.value) === null) return null;

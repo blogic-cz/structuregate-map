@@ -10,7 +10,7 @@
  * only where the checker resolved it into `@angular/core`. Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
 import { slash } from './TsPaths.mjs';
-import { asObject } from './TsNodes.mjs';
+import { asObject, joinKey } from './TsNodes.mjs';
 
 const ANGULAR_CORE = '/@angular/core/';
 const CREATE_COMPONENT = 'createComponent';
@@ -113,7 +113,7 @@ export function rollupDynamicRenders(store, diag) {
   const componentsByName = new Map();
   for (const c of store.table('components')) {
     componentByClass.set(c.class, c);
-    componentByFileName.set(`${String(c.file)}#${String(c.name)}`, c);
+    componentByFileName.set(joinKey(c.file, c.name), c);
     const inFile = componentsByFile.get(c.file);
     if (inFile) inFile.push(c); else componentsByFile.set(c.file, [c]);
     const named = componentsByName.get(String(c.name));
@@ -125,7 +125,7 @@ export function rollupDynamicRenders(store, diag) {
     const file = str(ref.file);
     const fid = file === null ? undefined : fileIdBy.get(slash(file));
     if (fid !== undefined) {
-      const exact = name === null ? undefined : componentByFileName.get(`${String(fid)}#${name}`);
+      const exact = name === null ? undefined : componentByFileName.get(joinKey(fid, name));
       if (exact !== undefined) return { row: exact, byName: false };
       // Exactly one declared component in the referenced file IS the reference; two is an ambiguity the file
       // cannot settle, and it is refused rather than picked.
@@ -179,7 +179,7 @@ export function rollupDynamicRenders(store, diag) {
     for (const row of store.table(table)) {
       const name = str(row.name);
       if (name === null) continue;
-      const key = `${String(row.file)}#${name}`;
+      const key = joinKey(row.file, name);
       if (declByFileName.has(key)) declAmbiguous.add(key);
       else declByFileName.set(key, row.id);
     }
@@ -190,7 +190,7 @@ export function rollupDynamicRenders(store, diag) {
     const file = str(ref.file);
     if (name === null || file === null) return null;
     const fid = fileIdBy.get(slash(file));
-    return fid === undefined ? null : declByFileName.get(`${String(fid)}#${name}`) ?? null;
+    return fid === undefined ? null : declByFileName.get(joinKey(fid, name)) ?? null;
   };
 
   const returnsOf = new Map();
@@ -404,7 +404,7 @@ function outletSites(store, componentByClass) {
   const astOfBinding = new Map();
   for (const x of store.table('expressions')) if (x.binding != null) astOfBinding.set(x.binding, x.ast);
   const membersOfClass = new Map();
-  for (const m of store.table('members')) membersOfClass.set(`${String(m.class)}#${String(m.name)}`, m);
+  for (const m of store.table('members')) membersOfClass.set(joinKey(m.class, m.name), m);
   const assignedTo = new Map();
   for (const a of store.table('assignments')) {
     if (a.target_id === undefined) continue;
@@ -419,7 +419,7 @@ function outletSites(store, componentByClass) {
     const fromClass = classOfComponent.get(b.component) ?? null;
     if (fromClass == null) continue;
     const name = implicitReadName(astOfBinding.get(b.id));
-    const member = name === null ? undefined : membersOfClass.get(`${String(fromClass)}#${name}`);
+    const member = name === null ? undefined : membersOfClass.get(joinKey(fromClass, name));
     const slots = emptySlots();
     if (member !== undefined) {
       componentSlots(member.value, slots, new Set());

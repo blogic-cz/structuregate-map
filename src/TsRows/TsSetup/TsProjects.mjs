@@ -18,7 +18,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
-import { relativeTo, slash } from './TsPaths.mjs';
+import { asArray, relativeTo, slash } from './TsPaths.mjs';
 
 /** TypeScript's own default config filename - the one entry point that cannot be derived, because `tsc`
  *  itself defines it. Everything past it is read FROM it (`references`), never guessed. */
@@ -85,7 +85,7 @@ function declaredTsConfigs(meta, feRoot) {
   const out = [];
   for (const target of [...Object.values(meta.targets ?? {}), ...Object.values(meta.architect ?? {})]) {
     const v = target?.options?.tsConfig;
-    for (const c of Array.isArray(v) ? v : v === undefined ? [] : [v]) {
+    for (const c of asArray(v)) {
       const abs = path.resolve(feRoot, c);
       if (existsSync(abs) && !out.includes(abs)) out.push(abs);
     }

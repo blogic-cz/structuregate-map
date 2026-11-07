@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto';
 
 import { canonicalPath, relativeTo, slash } from './TsPaths.mjs';
-import { locationOf } from './TsNodes.mjs';
+import { initializedVar, locationOf, typeParamsOf } from './TsNodes.mjs';
 import { makeLibPipes } from './TsLibPipes.mjs';
 import { makeViewContexts } from './TsViewContext.mjs';
 import { makeInjectRows } from './TsInjects.mjs';
@@ -91,7 +91,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
       if (!at) continue;
       const sym = ts.isShorthandPropertyAssignment(p) ? checker.getShorthandAssignmentValueSymbol(p)
         : ts.isIdentifier(at) ? checker.getSymbolAtLocation(at) : undefined;
-      const decl = (sym?.declarations ?? []).find((d) => ts.isVariableDeclaration(d) && d.initializer);
+      const decl = initializedVar(ts, sym);
       const node = decl && decl.getSourceFile() === sf ? decl.initializer : at;
       const where = sf.getLineAndCharacterOfPosition(node.getStart());
       out[propName(p.name)] = where.line + 1;
@@ -311,7 +311,7 @@ export function makeClassRows({ ts, checker, store, feRoot, modifiersOf, typeRef
       abstract: mods.abstract, exported: mods.exported,
       extends: extendsInfo, implements: implementsInfo,
       // ITS TYPE PARAMETERS, in order: what a subclass's `extends Base<Payload>` binds them to (#98, `TsTplReads.mjs`).
-      ...(node.typeParameters?.length ? { type_params: node.typeParameters.map((p) => p.name.text) } : {}),
+      ...typeParamsOf(node),
       decorators: decorators.map((d) => d.name),
       angular: decorators.filter((d) => d.fromAngular).map((d) => d.name),
       jsdoc: jsdocOf(node),

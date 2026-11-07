@@ -21,6 +21,15 @@ const cache = new Map();
  *  on this very line: the ban is a literal `findstr`.) */
 export const slash = (p) => String(p).split('\\').join('/');
 
+/** A path without its extension - `a/b/c.component.html` -> `a/b/c.component`; a dot in a FOLDER name is no extension. */
+export function dropExt(rel) {
+  const cut = rel.lastIndexOf('.');
+  return cut > rel.lastIndexOf('/') ? rel.slice(0, cut) : rel;
+}
+
+/** A config value that may be one item or a list, as a list: `undefined` is none. */
+export const asArray = (v) => (Array.isArray(v) ? v : v === undefined ? [] : [v]);
+
 // BY THE SPELLING ASKED, before `path.resolve`: the extractor asks for the same few thousand compiler file names
 // millions of times, and resolving each one first cost more than the lookup it guards.
 const asked = new Map();

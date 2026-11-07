@@ -14,6 +14,7 @@ import { makeContexts } from './TsTplContext.mjs';
 import { judgeScope, makeScopes } from './TsModuleScope.mjs';
 import { makeHops } from './TsTplHops.mjs';
 import { makeEvents } from './TsTplEvents.mjs';
+import { joinKey } from './TsNodes.mjs';
 
 const str = (v) => (typeof v === 'string' ? v : null);
 
@@ -204,7 +205,7 @@ export function rollupTemplateReads(store) {
     // TWO DECLARATIONS OF ONE SELECTOR: `pickInScope` - the first match typed `#popper` with the library's copy, not the shared component the template renders.
     const hit = pickInScope(matching, component);
     if (hit === undefined) return null;
-    const key = `${String(ref.node)}#${ref.name}`;
+    const key = joinKey(ref.node, ref.name);
     if (!instanceOfRef.has(key)) {
       const classId = declaredBy.get(hit.id).class;
       instanceOfRef.set(key, contexts.instanceOf(classId, ref.node, component, scopeAt(ref.node, component, false, true), valueOf));

@@ -24,7 +24,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { canonicalPath, relativeCells, relativeTo } from './TsPaths.mjs';
+import { canonicalPath, dropExt, relativeCells, relativeTo } from './TsPaths.mjs';
 import { directories, findConfig, loadConfig, names, propertyPaths as readPropertyPaths } from './TsConfig.mjs';
 import { compare as compareRegistry, registryFromRows } from './TsRegistry.mjs';
 import { rollupGateChains } from './TsGateChain.mjs';
@@ -816,8 +816,7 @@ async function main() {
   const componentName = new Map(store.table('components').map((c) => [c.id, c.name]));
   for (const t of store.table('templates')) {
     const rel = t.path ?? `inline/${filePathById.get(t.file) ?? ''}`;
-    const cut = rel.lastIndexOf('.');
-    const key = cut > rel.lastIndexOf('/') ? rel.slice(0, cut) : rel;
+    const key = dropExt(rel);
     if (seenSource.has(key)) {
       diag.note('template_shared_by_components',
         { source: rel, template: t.id, component: componentName.get(t.component) ?? null });

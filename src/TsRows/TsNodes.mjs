@@ -115,3 +115,48 @@ export function unwrapOuter(ts, node) {
 
 /** A row cell that is an OBJECT (a ref, an options bag) - not null, not a list - or null. */
 export const asObject = (v) => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v : null);
+
+/** THE JOIN KEY of two row cells - `file#name`, `class#member`, `file#line` - spelled once: a site that spelled it
+ *  differently (a cell not stringified, another separator) missed every lookup without a word. */
+export const joinKey = (a, b) => `${String(a)}#${String(b)}`;
+/** The same key of three cells - `file#line#name`, `file#line#col`. */
+export const joinKey3 = (a, b, c) => `${String(a)}#${String(b)}#${String(c)}`;
+
+/** `=` and every compound or logical assignment, BY KIND RANGE: `ts.SyntaxKind[kind]` answers an alias name for the first
+ *  and last kind of a range (`FirstAssignment` for `=`), so a name test misses them. */
+export const isAssignmentKind = (ts, kind) => kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
+
+/** The call `n` is an ARGUMENT of - not its callee - or null. */
+export const argCall = (ts, n) => {
+  const call = n?.parent;
+  return call !== undefined && ts.isCallExpression(call) && call.arguments.includes(n) ? call : null;
+};
+
+/** The property assignment `n` is the VALUE of, inside an object literal - or null. */
+export const propertyOf = (ts, n) => {
+  const prop = n.parent;
+  return prop !== undefined && ts.isPropertyAssignment(prop) && prop.initializer === n && ts.isObjectLiteralExpression(prop.parent) ? prop : null;
+};
+
+/** A string written out whole - a string literal or a template with no substitution - never one built at run time. */
+export const isPlainString = (ts, n) => n !== undefined && n !== null && (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n));
+/** That string's text, or null for any other node. */
+export const literalText = (ts, n) => (isPlainString(ts, n) ? n.text : null);
+
+/** A declaration's generic parameters as the row cell `type_params`, or nothing when it has none - spread into the row. */
+export const typeParamsOf = (node) => (node.typeParameters?.length ? { type_params: node.typeParameters.map((p) => p.name.text) } : {});
+
+/** A property NAME that is written out - an identifier, a string or a number - never a computed one. */
+export const isPlainKeyName = (ts, name) => ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name);
+
+/** What a type's numeric index gives - an array's element - as a list: one type, or none. */
+export const elementTypes = (ts, checker, type) => {
+  const element = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+  return element === undefined ? [] : [element];
+};
+
+/** The variable declaration of a symbol that HAS an initializer - what a `const x = ...` the symbol names was set to - or undefined. */
+export const initializedVar = (ts, symbol) => (symbol?.declarations ?? []).find((d) => ts.isVariableDeclaration(d) && d.initializer);
+
+/** The symbol an import or re-export ALIAS stands for, followed through the checker; any other symbol - and none - as given. */
+export const aliased = (ts, checker, symbol) => (symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol);
