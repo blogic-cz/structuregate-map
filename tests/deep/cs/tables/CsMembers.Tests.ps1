@@ -46,9 +46,7 @@ function New-CsMembersDb([switch]$Shared) {
 
 # Every row of one query, as `v=` lines.
 function Get-CsMembersRows([string]$Db, [string]$Sql) {
-    $result = Invoke-Gate --map-query $Db --sql $Sql --width 0 --limit 0
-    Assert-Exit $result 0
-    return @($result.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | ForEach-Object { $_.Trim().Substring(2) })
+    return Get-MapQueryRows $Db $Sql
 }
 
 function Assert-CsMembersRow([string]$Db, [string]$Sql, [string]$Expected, [string]$What) {

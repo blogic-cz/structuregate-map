@@ -9,20 +9,7 @@
  * temporary folder, so `./TsPaths.mjs` is right here at run time even though the sources sit a level
  * apart. The folder exists because `src/TsRows/` reached this repo's own 15-file limit.
  */
-import { canonicalPath } from './TsPaths.mjs';
-
-/**
- * A declaration, anchored at its NAME.
- *
- * `node.getStart()` on a decorated class lands on `@Injectable({`, not on the class. Measured in the tool
- * this is ported from: about a quarter of the resolved type refs pointed at a decorator line, in an
- * application where nearly every injected service is decorated.
- */
-function declSite(d) {
-  const sf = d.getSourceFile();
-  const pos = d.name && typeof d.name.getStart === 'function' ? d.name.getStart() : d.getStart();
-  return { file: canonicalPath(sf.fileName), line: sf.getLineAndCharacterOfPosition(pos).line + 1 };
-}
+import { declSite, startSite } from './TsPaths.mjs';
 
 /** Whether a declaration is a type literal (`{ a: string }` in a type) or an object literal (`{ a: 1 }` in code): the two anonymous types a ref can reach. */
 export function isShapeNode(ts, d) {
@@ -30,11 +17,7 @@ export function isShapeNode(ts, d) {
 }
 
 /** Where a literal's `{` is, in the spelling every ref uses (absolute canonical file) - the key a `shapes` row and a shape ref share. */
-export function shapeSite(d) {
-  const sf = d.getSourceFile();
-  const at = sf.getLineAndCharacterOfPosition(d.getStart());
-  return { file: canonicalPath(sf.fileName), line: at.line + 1, col: at.character + 1 };
-}
+export const shapeSite = startSite;
 
 /** A type node -> `{type_ref, type_refs?}`: the declaration(s) it names, `type_ref: null` when the checker names none. */
 export function makeTypeResolver(ts, checker) {

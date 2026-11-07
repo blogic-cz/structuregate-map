@@ -9,9 +9,7 @@
 
 # One query through the exe, every cell whole.
 function Invoke-PyMembersQ([string]$Db, [string]$Sql) {
-    $result = Invoke-Gate --map-query $Db --width 0 --limit 0 --sql $Sql
-    Assert-Exit $result 0
-    return $result
+    return Invoke-MapQuery $Db --width 0 --limit 0 --sql $Sql
 }
 
 if ($script:Python) {

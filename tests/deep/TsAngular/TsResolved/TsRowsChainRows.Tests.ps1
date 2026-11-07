@@ -58,11 +58,7 @@ $script:TsChainFiles = @{
         "}`n"
 }
 
-function Get-TsChainDb {
-    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsChainFiles)
-    Assert-Exit $made.Result 0
-    return $made.Db
-}
+function Get-TsChainDb { return Get-TsRowsDbOf $script:TsChainFiles }
 
 Test-Case 'tsrows: an implicit return of a concise arrow is anchored at its body start, over one line or several' {
     $db = Get-TsChainDb

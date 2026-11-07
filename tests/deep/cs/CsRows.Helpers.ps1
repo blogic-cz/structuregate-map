@@ -26,9 +26,7 @@ function New-CsDb([hashtable]$Files, [string]$Ext = '.cs', [switch]$Shared) {
 
 function Invoke-CsQ {
     param([string]$Path, [Parameter(ValueFromRemainingArguments)][object[]]$LensArgs)
-    $result = Invoke-Gate --map-query $Path @LensArgs
-    Assert-Exit $result 0
-    return $result
+    return Invoke-MapQuery $Path @LensArgs
 }
 
 function Get-CsScalar([string]$Db, [string]$Sql) {

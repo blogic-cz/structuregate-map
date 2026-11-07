@@ -86,3 +86,21 @@ export function relativeCells(root) {
     return typeof value === 'string' && value.startsWith(under) ? relativeTo(base, value) : value;
   };
 }
+
+/**
+ * WHERE A DECLARATION IS: its NAME's line, as a row's own `line` is (`TsNodes.mjs::locationOf`). `getStart()` of a decorated
+ * declaration is its FIRST DECORATOR (`@Injectable({` above the class, `@Input()` above `label = 'x'`), a line no row sits at.
+ * A declaration with no name (a call signature, a constructor) starts where it starts.
+ */
+export function declSite(d) {
+  const sf = d.getSourceFile();
+  const pos = d.name && typeof d.name.getStart === 'function' ? d.name.getStart() : d.getStart();
+  return { file: canonicalPath(sf.fileName), line: sf.getLineAndCharacterOfPosition(pos).line + 1 };
+}
+
+/** `{file, line, col}` where a node starts - the place a `shapes` or `locals` row is keyed by. */
+export function startSite(node) {
+  const sf = node.getSourceFile();
+  const at = sf.getLineAndCharacterOfPosition(node.getStart());
+  return { file: canonicalPath(sf.fileName), line: at.line + 1, col: at.character + 1 };
+}

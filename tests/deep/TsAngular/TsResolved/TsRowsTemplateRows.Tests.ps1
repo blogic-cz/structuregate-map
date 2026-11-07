@@ -41,11 +41,7 @@ $script:TsTplInlineSrc = @("@Component({ selector: 'app-inl', standalone: true, 
 $script:TsTplFiles['apps/shop/src/inline.component.ts'] = "import { Component } from '@angular/core';`n" + ($script:TsTplInlineSrc -join "`n") +
     "`nexport class InlComponent { t = ''; }`n"
 
-function Get-TsTplDb {
-    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsTplFiles)
-    Assert-Exit $made.Result 0
-    return $made.Db
-}
+function Get-TsTplDb { return Get-TsRowsDbOf $script:TsTplFiles }
 
 # What a template node's matched directives are, `Name@NodeKind` - the cells `template_nodes.directives` holds, WrapComponent's only.
 function Get-TsTplMatches([string]$Db) {

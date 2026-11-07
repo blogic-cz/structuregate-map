@@ -9,7 +9,9 @@
  * last.
  */
 
-const asRef = (v) => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v : null);
+import { asObject } from './TsNodes.mjs';
+
+const asRef = asObject;
 const str = (v) => (typeof v === 'string' ? v : null);
 
 export function rollupRefIds(store) {

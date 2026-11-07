@@ -6,44 +6,7 @@
 
 . (Join-Path $PSScriptRoot 'nodes/NodeSql.Helpers.ps1')
 
-# The compiler this half BORROWS. Both packages, in one prefix, because the half checks for them together -
-# a root satisfying only `typescript` would let discovery work and template parsing fail one step later.
-function Get-TsRowsModules {
-    if ($null -ne $script:TsRowsCache) { return $script:TsRowsCache.Path }
-    $script:TsRowsCache = @{ Path = $null }
-    if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return $null }
-    $cache = Join-Path ([System.IO.Path]::GetTempPath()) 'sgtest-tsrows'
-    $modules = Join-Path $cache 'node_modules'
-    if ((Test-Path (Join-Path $modules 'typescript\package.json')) -and
-        (Test-Path (Join-Path $modules '@angular\compiler\package.json')) -and
-        (Test-Path (Join-Path $modules '@ngrx\effects\package.json')) -and
-        (Test-Path (Join-Path $modules '@angular\common\package.json'))) {
-        $script:TsRowsCache.Path = $modules
-        return $modules
-    }
-    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { return $null }
-    [void](New-Item -ItemType Directory -Path $cache -Force)
-    # PINNED TO ONE MAJOR: the half is written against the compiler API of these versions, and
-    # typescript 7 - the native port - does not expose `parseConfigFileTextToJson` at all, so
-    # `typescript@latest` tested a different tool.
-    # `@angular/core` as well, and not as a nicety: whether a decorator is ANGULAR's is resolved through the
-    # type checker to that package, so without it every decorator in a fixture is a local one.
-    # `@angular/router` and `@ngrx/store` as well: a route's lazy target and every state API are recognised
-    # by the declaration the CHECKER resolved, so without the packages a fixture's routes and actions are
-    # calls to nothing and the derived tables stay empty. `@angular/common`: a library pipe (`date`) is read off its typings.
-    # Under the cache's lock, and only if no other process filled it meanwhile: two shards installing at once
-    # corrupt the prefix, and a narrower install after a wider one prunes what the wider one added.
-    Use-CacheLock $cache {
-        if (-not (Test-Path (Join-Path $modules '@ngrx\effects\package.json'))) { & npm install --no-save --silent --prefix $cache 'typescript@5' '@angular/compiler@17' '@angular/core@17' '@angular/router@17' '@angular/common@17' '@ngrx/store@17' '@ngrx/effects@17' 2>&1 | Out-Null }
-    }
-    if ((Test-Path (Join-Path $modules 'typescript\package.json')) -and
-        (Test-Path (Join-Path $modules '@angular\compiler\package.json'))) {
-        $script:TsRowsCache.Path = $modules
-    }
-    return $script:TsRowsCache.Path
-}
-
-$script:TsRowsModules = Get-TsRowsModules
+$script:TsRowsModules = Get-SgTsModules
 $script:TsRowsPython = [bool]$script:Python
 if (-not $script:TsRowsModules) { Write-Host '    (no node/npm-installed typescript + @angular/compiler - the typescript row cases are not run)' }
 elseif (-not $script:TsRowsPython) { Write-Host '    (no python on this machine - the typescript row cases are not run)' }
@@ -237,6 +200,13 @@ function New-TsRowsDb([string]$Tree, [switch]$Shared) {
     return [pscustomobject]@{ Db = $db; Result = (Invoke-Gate $gateArgs); Tree = $Tree }
 }
 
+# The database of a workspace made of `$Files` (beside the base fixture), its run asserted green - shared per input with `-Shared`.
+function Get-TsRowsDbOf([hashtable]$Files, [switch]$Shared) {
+    $made = New-TsRowsDb (New-TsRowsWorkspace $Files) -Shared:$Shared
+    Assert-Exit $made.Result 0
+    return $made.Db
+}
+
 # ONE MAP PER INPUT, PER SUITE PROCESS: the harness's `Get-SharedMap` (harness/SharedMap.ps1) - the key, the snapshot
 # restored at the path it was built at, and the freeze.
 function Get-TsRowsSharedDb([string]$Tree, [object[]]$GateArgs) {
@@ -245,9 +215,7 @@ function Get-TsRowsSharedDb([string]$Tree, [object[]]$GateArgs) {
 
 # One SQL query through the exe's own lens, as rows of text.
 function Invoke-TsRowsQ([string]$Path, [string]$Sql) {
-    $result = Invoke-Gate --map-query $Path --sql $Sql
-    Assert-Exit $result 0
-    return $result
+    return Invoke-MapQuery $Path --sql $Sql
 }
 
 # A NODE IS (`owner`, `n`): `n` its preorder number within the cell the row `owner` names, `parent` the `n` of its parent

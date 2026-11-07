@@ -92,8 +92,7 @@ internal sealed partial class CsRows
                 case PropertyDeclarationSyntax property:
                     return property.Identifier.ValueText;
                 case AssignmentExpressionSyntax assigned:
-                    return CsFacts.Dotted(assigned.Left) is { Length: > 0 } written
-                        ? written : assigned.Left.ToString();
+                    return CsFacts.DottedOr(assigned.Left);
                 case StatementSyntax or MemberDeclarationSyntax:
                     return "";
             }
@@ -115,7 +114,7 @@ internal sealed partial class CsRows
                 (Key(key), (ExpressionSyntax?)assigned.Right),
             // `new Options { Region = "US" }` — the member is the name, the right-hand side is the value.
             AssignmentExpressionSyntax assigned =>
-                (CsFacts.Dotted(assigned.Left) is { Length: > 0 } written ? written : assigned.Left.ToString(),
+                (CsFacts.DottedOr(assigned.Left),
                  (ExpressionSyntax?)assigned.Right),
             // `new { PartName = "Header", model }` — named, or named by what it reads.
             AnonymousObjectMemberDeclaratorSyntax member =>

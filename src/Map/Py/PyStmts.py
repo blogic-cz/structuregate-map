@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import ast
 
-from PyAst import IMPORTERS, dotted, reads_of
+from PyAst import IMPORTERS, arg_names, comprehension_names, dotted, reads_of
 from PyComments import noqa_of
 
 # What a handler can hold and still do nothing: `pass`, `...`, or a lone string.
@@ -116,13 +116,12 @@ class Statements:
             self.binder.leave()
 
     def visit_ListComp(self, node) -> None:
-        self.own_scope(node, {n.id for g in node.generators for n in ast.walk(g.target) if isinstance(n, ast.Name)})
+        self.own_scope(node, comprehension_names(node))
 
     visit_SetComp = visit_DictComp = visit_GeneratorExp = visit_ListComp
 
     def visit_Lambda(self, node) -> None:
-        spec = node.args
-        self.own_scope(node, {a.arg for a in spec.posonlyargs + spec.args + spec.kwonlyargs + [spec.vararg, spec.kwarg] if a})
+        self.own_scope(node, set(arg_names(node.args)))
 
     def caught(self, handler) -> list:
         """What one handler catches, one entry per type - `""` for a bare `except:`."""

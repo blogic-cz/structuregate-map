@@ -11,7 +11,7 @@
  *  or an unnamed intersection (`EventEmitter<T & { cell: Cell }>`), which `args` leave out. */
 const argumentOf = (member) => member?.type_ref?.args?.[0] ?? member?.type_ref?.element ?? null;
 
-export function makeEvents({ store, propByOwner, directivesAt, declaredBy, contexts, resolveRef, scopes, judgeScope, baseTypedOf }) {
+export function makeEvents({ store, propByOwner, directivesAt, declaredBy, contexts, resolveRef, pickInScope, baseTypedOf }) {
   // THE OUTPUTS OF A CLASS by the name a template spells them: the `io` row's member, whose `type_ref` carries the emitter's arguments.
   const outputsOf = new Map();
   for (const io of store.table('io')) {
@@ -38,11 +38,8 @@ export function makeEvents({ store, propByOwner, directivesAt, declaredBy, conte
       const klass = declaredBy.get(d.id)?.class;
       return klass != null && outputOf(klass, row.name, null) !== null;
     });
-    // TWO MATCHED CANDIDATES: the one the host's SCOPE renders, as `renders` chooses (`judgeScope`).
-    const seen = matched.length > 1
-      ? matched.filter((d) => judgeScope(scopes(), { from_class: component.id, to_class: declaredBy.get(d.id).class, to_name: d.name }).scope !== 'out_of_scope')
-      : matched;
-    const hit = seen[0] ?? matched[0];
+    // TWO MATCHED CANDIDATES: the one the host's SCOPE renders (`TsTplReads.mjs::pickInScope`).
+    const hit = pickInScope(matched, component);
     if (hit === undefined) return null;
     const classId = declaredBy.get(hit.id).class;
     const instance = contexts.instanceOf(classId, row.node, component, scopeFor(), valueOf);

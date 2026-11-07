@@ -91,11 +91,10 @@ internal sealed class CsProject
 
     private static CsProject Read(JsonElement root)
     {
-        List<string> Strings(JsonElement owner, string name) => [.. owner.GetProperty(name).EnumerateArray().Select(e => e.GetString()!)];
         var references = new List<MetadataReference>();
-        var seen = new HashSet<string>(Strings(root, "exclude"), StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(JsonInput.Strings(root, "exclude"), StringComparer.OrdinalIgnoreCase);
         var path = root.GetProperty("path").GetString()!;
-        foreach (var assembly in Winners(Strings(root, "packaged"), Strings(root, "platform"))) Add(path, references, seen, assembly);
+        foreach (var assembly in Winners(JsonInput.Strings(root, "packaged"), JsonInput.Strings(root, "platform"))) Add(path, references, seen, assembly);
         var files = root.GetProperty("files");
         return new CsProject
         {
@@ -103,13 +102,13 @@ internal sealed class CsProject
             Name = root.GetProperty("name").GetString()!,
             Framework = root.GetProperty("framework").GetString()!,
             References = references,
-            Generated = Strings(root, "generated"),
+            Generated = JsonInput.Strings(root, "generated"),
             Usings = root.GetProperty("usings").GetString()!,
             Attributes = root.TryGetProperty("attributes", out var attributes) ? attributes.GetString() ?? "" : "",
             LangVersion = root.GetProperty("lang_version").GetString()!,
-            Defines = Strings(root, "defines"),
-            Files = new Compiled(files.GetProperty("explicit").GetBoolean(), Strings(files, "include"), Strings(files, "remove")),
-            Projects = Strings(root, "projects"),
+            Defines = JsonInput.Strings(root, "defines"),
+            Files = new Compiled(files.GetProperty("explicit").GetBoolean(), JsonInput.Strings(files, "include"), JsonInput.Strings(files, "remove")),
+            Projects = JsonInput.Strings(root, "projects"),
         };
     }
 

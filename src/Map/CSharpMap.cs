@@ -88,7 +88,7 @@ public static class CSharpMap
 
             // A GENERIC NAME TOO: a type reached only through `typeof(Pipeline<,>)` or a field of `Holder<int>` read as
             // unused while a bare identifier was the only use.
-            if (node is SimpleNameSyntax name && !IsMemberName(name) && !InUsing(name))
+            if (node is SimpleNameSyntax name && !CsFacts.IsTail(name) && !InUsing(name))
                 file.Uses.Add(name.Identifier.ValueText);
         }
 
@@ -260,16 +260,6 @@ public static class CSharpMap
         return "";
     }
 
-    /// <summary>The `Foo` in `x.Foo` and in `A.B.Foo` — a MEMBER, never a file another file imports.</summary>
-    private static bool IsMemberName(SimpleNameSyntax name) => name.Parent switch
-    {
-        MemberAccessExpressionSyntax access => access.Name == name,
-        QualifiedNameSyntax qualified => qualified.Right == name,
-        MemberBindingExpressionSyntax binding => binding.Name == name,
-        NameColonSyntax or NameEqualsSyntax => true,
-        _ => false,
-    };
-
     /// <summary>A `using` directive's segments are namespace parts. Counting one that happens to spell a
     /// type's name would draw an edge from an import list to an unrelated file.</summary>
     private static bool InUsing(SyntaxNode node)
@@ -354,7 +344,7 @@ public static class CSharpMap
         {
             tokens++;
             var text = token.IsKind(SyntaxKind.IdentifierToken)
-                && !(token.Parent is SimpleNameSyntax simple && IsMemberName(simple))
+                && !(token.Parent is SimpleNameSyntax simple && CsFacts.IsTail(simple))
                 ? "_"
                 : token.ValueText;
             hash.AppendData(Encoding.UTF8.GetBytes($"{token.RawKind}:{text}"));

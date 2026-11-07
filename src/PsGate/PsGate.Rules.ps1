@@ -266,7 +266,9 @@ function Test-EagerAddType([string]$Rel, [hashtable]$Ix) {
         if (-not $name) { continue }
         if ($name.ToLowerInvariant() -ne 'add-type') { continue }
         if (-not (Test-HasParameter $c 'memberdefinition')) { continue }
-        if ($null -ne (Get-DeferringScope $c)) { continue }
+        # THE SCOPE THAT DEFERS ITS COST (`Get-NearestScope`, PsGate.Rules.Scope.ps1): a function, or a scriptblock literal -
+        # assigning one does not run it. At statement level the cost is paid the moment the file is loaded.
+        if ($null -ne (Get-NearestScope $c)) { continue }
 
         Add-Finding -Rel $Rel -Node $c `
             -What 'compiles a -MemberDefinition on the STARTUP path - a csc run (~250 ms) before the first window' `
@@ -284,16 +286,4 @@ function Test-HasParameter([CommandAst]$Command, [string]$Name) {
         if ($Name.StartsWith($written)) { return $true }
     }
     return $false
-}
-
-# The scope that DEFERS this node's cost: a function, or a scriptblock literal. $null when the node sits at
-# statement level, where the cost is paid the moment the file is loaded. A scriptblock counts because
-# ASSIGNING one does not run it - the body pays when something invokes it, which is what a worker body is.
-function Get-DeferringScope([Ast]$Node) {
-    $current = $Node.Parent
-    while ($null -ne $current) {
-        if ($current -is [FunctionDefinitionAst] -or $current -is [ScriptBlockExpressionAst]) { return $current }
-        $current = $current.Parent
-    }
-    return $null
 }

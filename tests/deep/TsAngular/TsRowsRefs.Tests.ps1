@@ -198,4 +198,24 @@ Test-Case 'tsrows: an inject() in a constructor body is a di row of the class, a
     Assert-Line $r 'ci=svc|property|Other|1'
     Assert-Line (Invoke-TsRowsQ $made.Db "SELECT 'n=' || count(*) AS r FROM di d WHERE d.class = (SELECT id FROM classes WHERE name = 'CtorService')") 'n=3'
 }
+
+# WHAT ONLY TYPES A RETURNED LITERAL is stepped through, every kind alike (`TsNodes.mjs::unwrapOuter`): `({..}) as T`,
+# `{..} satisfies T`, `<T>{..}` and `({..})!` all return the literal, so each key's write lands on the declared property.
+Test-Case 'tsrows: a returned literal wrapped in as, satisfies, a type assertion or ! writes the declared property' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace @{
+        'apps/shop/src/state.ts' = "export interface State { asName: string; satName: string; angleName: string; bangName: string }`n" +
+            "export const viaAs = (): Partial<State> => ({ asName: 'a' }) as Partial<State>;`n" +
+            "export const viaSat = (): Partial<State> => ({ satName: 'b' } satisfies Partial<State>);`n" +
+            "export const viaAngle = (): Partial<State> => <Partial<State>>{ angleName: 'c' };`n" +
+            "export const viaBang = (): Partial<State> => ({ bangName: 'd' })!;`n"
+    })
+    Assert-Exit $made.Result 0
+    $r = Invoke-TsRowsQ $made.Db ("SELECT 'wrote=' || w.value AS s FROM expressions__write_refs w JOIN expressions x ON x.id = w.owner " +
+        "JOIN files f ON f.id = x.file WHERE f.path = 'apps/shop/src/state.ts' AND w.role = 'name'")
+    Assert-Line $r 'wrote=asName'
+    Assert-Line $r 'wrote=satName'
+    Assert-Line $r 'wrote=angleName'
+    Assert-Line $r 'wrote=bangName'
+}
+
 }

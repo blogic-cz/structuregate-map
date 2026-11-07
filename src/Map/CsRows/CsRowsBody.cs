@@ -227,7 +227,7 @@ internal sealed partial class CsRows
     {
         var caught = node.Catches.Select(c => c.Declaration is null
             ? "*"
-            : CsFacts.Dotted(c.Declaration.Type) is { Length: > 0 } written ? written : c.Declaration.Type.ToString());
+            : CsFacts.DottedOr(c.Declaration.Type));
         var test = string.Join(", ", caught);
         foreach (var clause in node.Catches) Handler(node, clause);
         Row("branches", "br",

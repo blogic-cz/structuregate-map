@@ -5,21 +5,16 @@
  * see `TsTypeRef.mjs`.
  */
 import { makeLaterTypes } from './TsLaterTypes.mjs';
+import { isOuterWrapper, unwrapOuter } from './TsNodes.mjs';
+import { declSite, startSite } from './TsPaths.mjs';
 
-export function makeReadRefs(ts, checker, canonicalPath) {
+export function makeReadRefs(ts, checker) {
   /**
    * WHERE A DECLARATION IS: its NAME's line, as a row's own `line` is (`TsNodes.mjs::locationOf`). `getStart()` of a decorated member is its FIRST DECORATOR (`@Input()`
    * above `label = 'x'`), so a target anchored there named a line no `members` row sits at, and every reader that finds a row by (file, line) missed
    * the member (rows 75). A declaration with no name (a call signature, a constructor) starts where it starts.
    */
-  const at = (d) => {
-    const sf = d.getSourceFile();
-    const pos = d.name && typeof d.name.getStart === 'function' ? d.name.getStart() : d.getStart();
-    return {
-      file: canonicalPath(sf.fileName),
-      line: sf.getLineAndCharacterOfPosition(pos).line + 1,
-    };
-  };
+  const at = declSite;
 
   /**
    * THE PROPERTY A READ LANDS ON, resolved to where it is DECLARED. A path published as a name alone
@@ -146,11 +141,7 @@ export function makeReadRefs(ts, checker, canonicalPath) {
   }
 
   /** `{file, line, col}` of a name node: the place a row is keyed by. */
-  function placeOf(name) {
-    const sf = name.getSourceFile();
-    const pos = sf.getLineAndCharacterOfPosition(name.getStart());
-    return { file: canonicalPath(sf.fileName), line: pos.line + 1, col: pos.character + 1 };
-  }
+  const placeOf = startSite;
 
   /**
    * THE VARIABLE A CALL ARGUMENT NAMES (rows 79, #103): `convert(HueIDs, hueLabels)` evaluates `hueLabels` to the const's value, and the value alone cannot be tied to
@@ -159,9 +150,7 @@ export function makeReadRefs(ts, checker, canonicalPath) {
    * row, or the `locals` row, that holds it). A class, an enum and a function already carry `$ref` in the value, and a library's own declaration has no row.
    */
   function resolveArg(arg) {
-    let at = arg;
-    while (ts.isParenthesizedExpression(at) || ts.isAsExpression(at) || ts.isNonNullExpression(at) || ts.isTypeAssertionExpression(at)
-      || (ts.isSatisfiesExpression && ts.isSatisfiesExpression(at))) at = at.expression;
+    const at = unwrapOuter(ts, arg);
     if (!ts.isIdentifier(at)) return null;
     let symbol = checker.getSymbolAtLocation(at);
     if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
@@ -219,8 +208,7 @@ export function makeReadRefs(ts, checker, canonicalPath) {
    * (`{ Message() { .. } }`, which is its own property), names the member as a literal does - `TsWalk.mjs::declareInline` stamps it on the `functions` row.
    * Parentheses, `as` and `satisfies` around the value are stepped through: `(x)`, `'a' as const` and `fn satisfies F` fill the member `x`, `'a'` and `fn` do.
    */
-  const wraps = (n) => ts.isPrefixUnaryExpression(n) || ts.isParenthesizedExpression(n) || ts.isAsExpression(n)
-    || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(n));
+  const wraps = (n) => ts.isPrefixUnaryExpression(n) || isOuterWrapper(ts, n);
   /** The property assignment (or object-literal method) a value is the value of, its name a plain one - or null. */
   const propOf = (node) => {
     let child = node;
@@ -399,8 +387,7 @@ export function makeReadRefs(ts, checker, canonicalPath) {
       return symbol === undefined ? null : { type: checker.getDeclaredTypeOfSymbol(symbol), at: cls };
     }
     let n = object;
-    while (n.parent !== undefined && (passes(n.parent) || ts.isArrayLiteralExpression(n.parent) || ts.isAsExpression(n.parent)
-      || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(n.parent)))) n = n.parent;
+    while (n.parent !== undefined && (isOuterWrapper(ts, n.parent) || ts.isArrayLiteralExpression(n.parent))) n = n.parent;
     const call = n.parent;
     if (call === undefined || !ts.isCallExpression(call) || !call.arguments.includes(n)) return null;
     const arg = call.arguments[root.index];

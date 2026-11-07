@@ -15,6 +15,7 @@
  */
 import { makeValueRefs, undefinedLiteral } from './TsValueRefs.mjs';
 import { draftWrites } from './TsExprDescribe.mjs';
+import { isOuterWrapper, unwrapOuter } from './TsNodes.mjs';
 
 /**
  * `describe` is the expressions writer, and it is OPTIONAL: given one, an unevaluable value also carries
@@ -207,8 +208,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
     if (ts.isPropertyAccessExpression(e)) {
       const owner = constObject(e.expression);
       const prop = owner?.properties.find((p) => ts.isPropertyAssignment(p) && p.name !== undefined && propNameOf(p.name) === e.name.text);
-      let init = prop?.initializer;
-      while (init !== undefined && (ts.isParenthesizedExpression(init) || ts.isAsExpression(init))) init = init.expression;
+      const init = unwrapOuter(ts, prop?.initializer);
       return init !== undefined && ts.isObjectLiteralExpression(init) ? init : null;
     }
     if (!ts.isIdentifier(e)) return null;
@@ -216,8 +216,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
     if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) symbol = checker.getAliasedSymbol(symbol);
     const decl = symbol?.valueDeclaration;
     if (decl === undefined || !ts.isVariableDeclaration(decl) || (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0) return null;
-    let init = decl.initializer;
-    while (init !== undefined && (ts.isParenthesizedExpression(init) || ts.isAsExpression(init) || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(init)))) init = init.expression;
+    const init = unwrapOuter(ts, decl.initializer);
     return init !== undefined && ts.isObjectLiteralExpression(init) ? init : null;
   }
 
@@ -248,8 +247,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
     const decl = symbol?.valueDeclaration;
     const fixed = decl !== undefined && ((ts.isVariableDeclaration(decl) && (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) !== 0)
       || (ts.isPropertyDeclaration(decl) && (ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Readonly) !== 0));
-    let init = fixed ? decl.initializer : undefined;
-    while (init !== undefined && (ts.isParenthesizedExpression(init) || ts.isAsExpression(init) || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(init)))) init = init.expression;
+    const init = fixed ? unwrapOuter(ts, decl.initializer) : undefined;
     const list = init !== undefined && ts.isNewExpression(init) ? init.arguments?.[0] : undefined;
     if (list === undefined || !ts.isArrayLiteralExpression(list) || !list.elements.every((e) => ts.isArrayLiteralExpression(e) && e.elements.length === 2)) return {};
     const key = describe(node.arguments[0], 'case')?.id;
@@ -295,10 +293,7 @@ export function makeEvaluator(ts, checker, symbolAt, describe = null) {
     if (node.kind === ts.SyntaxKind.NullKeyword) return null;
     // `void 0` IS `undefined`, the idiom for it - only over a literal: `void this.save()` keeps its call.
     if (ts.isVoidExpression(node) && ts.isNumericLiteral(node.expression)) return undefinedLiteral('VoidExpression');
-    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)
-      || ts.isNonNullExpression(node) || ts.isTypeAssertionExpression(node)) {
-      return evalNode(node.expression);
-    }
+    if (isOuterWrapper(ts, node)) return evalNode(node.expression);
     if (ts.isPrefixUnaryExpression(node)) {
       const inner = evalNode(node.operand);
       if (typeof inner === 'number' && node.operator === ts.SyntaxKind.MinusToken) return -inner;

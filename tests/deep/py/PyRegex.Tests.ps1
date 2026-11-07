@@ -18,9 +18,7 @@ function New-PyRegexDb([hashtable]$Files) {
 
 # One query through the exe, every cell whole.
 function Invoke-PyRegexQ([string]$Path, [Parameter(ValueFromRemainingArguments)][object[]]$LensArgs) {
-    $result = Invoke-Gate --map-query $Path --width 0 --limit 0 @LensArgs
-    Assert-Exit $result 0
-    return $result
+    return Invoke-MapQuery $Path --width 0 --limit 0 @LensArgs
 }
 
 # `|`-joined cells, so a case compares one exact line and a containment check cannot pass on a neighbour.

@@ -53,7 +53,7 @@ import PyDeps  # noqa: E402
 from PyBind import Binder, Tree  # noqa: E402
 from PyLaunch import launched  # noqa: E402
 from PyArgs import arguments  # noqa: E402
-from PyInputs import handed_of, options, roots_of, rows_of, text_of  # noqa: E402
+from PyInputs import emit, handed_of, options, roots_of, rows_of, text_of  # noqa: E402
 from PyComments import record_comments  # noqa: E402
 from PyStmts import Statements  # noqa: E402
 from PyRegex import regex_call  # noqa: E402
@@ -70,14 +70,6 @@ LANG = "python"
 # again on the next run. Without it `calls.target_path` existed only for files edited since the upgrade,
 # and a query naming it failed with `no such column` on every tree that had a database already.
 ROWS_VERSION = "20"
-
-
-def emit(*fields: object) -> None:
-    parts = []
-    for field in fields:
-        text = str(field)
-        parts.append(text.replace("|", "/").replace("\r", " ").replace("\n", " "))
-    print("|".join(parts))
 
 
 class Rows:

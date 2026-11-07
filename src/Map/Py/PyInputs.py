@@ -32,6 +32,16 @@ def options(flags: dict, switches: tuple = ()) -> SimpleNamespace:
     return SimpleNamespace(**{name.replace("-", "_"): value for name, value in values.items()})
 
 
+def emit(*fields: object) -> None:
+    """One protocol record. A field carrying `|` or a newline would split into the wrong slot on the other
+    side, so both are folded here rather than parsed around there."""
+    parts = []
+    for field in fields:
+        text = str(field)
+        parts.append(text.replace("|", "/").replace("\r", " ").replace("\n", " "))
+    print("|".join(parts))
+
+
 def rows_of(list_file: str) -> list:
     out = []
     with open(list_file, "r", encoding="utf-8") as handle:

@@ -35,12 +35,7 @@ function Invoke-MapFlight([string]$Tree) {
 
 # The first number a `--map-query --sql` prints.
 function Get-MapFlightNumber([string]$Tree, [string]$Sql) {
-    $r = Invoke-Gate --map-query (Join-Path $Tree 'map.sqlite') --sql $Sql
-    foreach ($line in $r.Lines) {
-        $trimmed = $line.Trim()
-        if ($trimmed.Length -gt 0 -and ($trimmed.ToCharArray() | Where-Object { -not [char]::IsDigit($_) }).Count -eq 0) { return $trimmed }
-    }
-    return ''
+    return Get-MapQueryNumber (Join-Path $Tree 'map.sqlite') --sql $Sql
 }
 
 # A workspace beside python and C#: every half the flight runs beside has a file to store.

@@ -227,10 +227,9 @@ def bound_inside(node) -> set:
     while stack:
         current, bound = stack.pop()
         if isinstance(current, COMPREHENSIONS):
-            bound = bound | {n.id for g in current.generators for n in ast.walk(g.target) if isinstance(n, ast.Name)}
+            bound = bound | comprehension_names(current)
         elif isinstance(current, ast.Lambda):
-            spec = current.args
-            bound = bound | {a.arg for a in spec.posonlyargs + spec.args + spec.kwonlyargs + [spec.vararg, spec.kwarg] if a}
+            bound = bound | set(arg_names(current.args))
         if isinstance(current, ast.Name) and isinstance(current.ctx, ast.Load):
             (inner if current.id in bound else outer).add(current.id)
         stack.extend((child, bound) for child in ast.iter_child_nodes(current))
@@ -359,3 +358,13 @@ def heads(rel: str, head: str, nested: list) -> list:
     line reads only those, and the package holding the importer is no edge - as on a dotted import (`packages`).
     A name `__init__.py` itself defines keeps the edge: the line reads it there."""
     return [] if holds(head, rel) and nested and all(nested) else [head]
+
+
+def arg_names(spec: ast.arguments) -> list:
+    """Every parameter a signature binds, in order: positional-only, positional, keyword-only, then `*args` and `**kwargs`."""
+    return [a.arg for a in spec.posonlyargs + spec.args + spec.kwonlyargs + [spec.vararg, spec.kwarg] if a is not None]
+
+
+def comprehension_names(node: ast.AST) -> set:
+    """The names the `for` targets of a comprehension bind - its own scope."""
+    return {n.id for g in node.generators for n in ast.walk(g.target) if isinstance(n, ast.Name)}

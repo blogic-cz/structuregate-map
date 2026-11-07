@@ -38,9 +38,12 @@ internal sealed class SqlVisitor : TSqlFragmentVisitor
     public SqlVisitor(string text) => this.text = text;
 
     /// <summary>A fragment's own text, whole.</summary>
-    private string Text(TSqlFragment? fragment) =>
-        fragment is null || fragment.StartOffset < 0 || fragment.StartOffset + fragment.FragmentLength > text.Length
-            ? "" : text.Substring(fragment.StartOffset, fragment.FragmentLength);
+    private string Text(TSqlFragment? fragment) => TextOf(fragment, text);
+
+    /// <summary>A fragment's text out of the script `of` it was parsed from; "" when its span falls outside it.</summary>
+    internal static string TextOf(TSqlFragment? fragment, string of) =>
+        fragment is null || fragment.StartOffset < 0 || fragment.StartOffset + fragment.FragmentLength > of.Length
+            ? "" : of.Substring(fragment.StartOffset, fragment.FragmentLength);
 
     internal static int EndLine(TSqlFragment fragment) =>
         fragment.LastTokenIndex >= 0 && fragment.ScriptTokenStream is { } tokens && fragment.LastTokenIndex < tokens.Count
@@ -153,7 +156,7 @@ internal sealed class SqlVisitor : TSqlFragmentVisitor
             foreign.ReferenceTableName?.SchemaIdentifier?.Value ?? "", foreign.ReferenceTableName?.BaseIdentifier?.Value ?? "",
             [.. foreign.ReferencedTableColumns.Select(c => c.Value)], foreign.StartLine);
 
-    private static string Last(ColumnReferenceExpression? column) =>
+    internal static string Last(ColumnReferenceExpression? column) =>
         column?.MultiPartIdentifier?.Identifiers is { Count: > 0 } parts ? parts[^1].Value : "";
 
     /// <summary>`ALTER TABLE x ADD CONSTRAINT ...` - the key belongs to a table declared elsewhere, so it

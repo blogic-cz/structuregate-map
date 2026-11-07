@@ -51,7 +51,7 @@ internal sealed partial class CsRows
             }
         }
         var written = type is null ? ""
-            : CsFacts.Dotted(type) is { Length: > 0 } dotted ? dotted : type.ToString();
+            : CsFacts.DottedOr(type);
         // WHAT A HANDLER CATCHES IS READ, every prefix of the chain too - the python half's rule.
         var reads = new SortedSet<string>(CsFacts.Of(type).Reads, StringComparer.Ordinal);
         if (written.Length > 0) reads.Add(written);

@@ -41,15 +41,12 @@ internal sealed class SqlConfig
         foreach (var entry in root.GetProperty("databases").EnumerateArray())
         {
             config.Databases.Add(new Database(entry.GetProperty("name").GetString()!, entry.GetProperty("project").GetString()!,
-                Strings(entry, "contexts"), Strings(entry, "connections")));
+                JsonInput.Strings(entry, "contexts"), JsonInput.Strings(entry, "connections")));
         }
-        config.SqlText.AddRange(Strings(root, "sql_text"));
-        if (root.TryGetProperty("unattributed_contexts", out _)) config.UnattributedContexts.AddRange(Strings(root, "unattributed_contexts"));
+        config.SqlText.AddRange(JsonInput.Strings(root, "sql_text"));
+        if (root.TryGetProperty("unattributed_contexts", out _)) config.UnattributedContexts.AddRange(JsonInput.Strings(root, "unattributed_contexts"));
         return config;
     }
-
-    private static List<string> Strings(JsonElement owner, string property) =>
-        [.. owner.GetProperty(property).EnumerateArray().Select(item => item.GetString()!)];
 
     /// <summary>The database a `.sqlproj` is: the configured name, else the project's own file name.</summary>
     public string DatabaseOf(string sqlproj) =>

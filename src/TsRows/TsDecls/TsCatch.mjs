@@ -11,7 +11,7 @@
  * `throw` there is not the handler's, as python leaves out a nested `def`.
  */
 
-/** `a.b.c` for a callee written as a name chain, '' for anything computed. The plain half's `dotted`. */
+/** `a.b.c` for a callee written as a name chain, '' for anything computed. The plain half's `dotted` is this one. */
 export function chainOf(ts, node) {
   const K = ts.SyntaxKind;
   if (!node) return '';

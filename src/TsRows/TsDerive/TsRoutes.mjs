@@ -8,8 +8,9 @@
  */
 import { hasUnresolved, makeSpreadFolder } from './TsRouteFold.mjs';
 import { relativeCells } from './TsPaths.mjs';
+import { asObject } from './TsNodes.mjs';
 
-const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const isObj = (v) => asObject(v) !== null;
 const arr = (v) => (Array.isArray(v) ? v : v === undefined || v === null ? [] : [v]);
 
 function refOf(v) {

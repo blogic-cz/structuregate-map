@@ -7,24 +7,8 @@
 
 . (Join-Path $PSScriptRoot 'nodes/NodeSql.Helpers.ps1')
 
-function Get-TsSkipModules {
-    $modules = Join-Path ([System.IO.Path]::GetTempPath()) 'sgtest-tsrows\node_modules'
-    if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return $null }
-    if ((Test-Path (Join-Path $modules 'typescript\package.json')) -and
-        (Test-Path (Join-Path $modules '@angular\compiler\package.json'))) { return $modules }
-    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { return $null }
-    $cache = Split-Path $modules
-    [void](New-Item -ItemType Directory -Path $cache -Force)
-    # Under the cache's lock, and only if no other process filled it meanwhile: two shards installing at once
-    # corrupt the prefix, and a narrower install after a wider one prunes what the wider one added.
-    Use-CacheLock $cache {
-        if (-not (Test-Path (Join-Path $modules '@angular\compiler\package.json'))) { & npm install --no-save --silent --prefix $cache 'typescript@5' '@angular/compiler@17' '@angular/core@17' '@angular/router@17' '@ngrx/store@17' 2>&1 | Out-Null }
-    }
-    if (Test-Path (Join-Path $modules '@angular\compiler\package.json')) { return $modules }
-    return $null
-}
-
-$script:TsSkipModules = Get-TsSkipModules
+# The compiler cache every TypeScript suite shares (`Get-SgTsModules`, tests/Assert.ps1).
+$script:TsSkipModules = Get-SgTsModules
 if (-not $script:TsSkipModules) { Write-Host '    (no node/npm-installed typescript + @angular/compiler - the typescript skip cases are not run)' }
 
 function Invoke-TsSkipMap([string]$Tree, [string]$Skip) {

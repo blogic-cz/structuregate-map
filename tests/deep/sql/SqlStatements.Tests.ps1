@@ -19,9 +19,7 @@ function New-SqlStmtDb([hashtable]$Files) {
 
 # Every row of one query, as `v=` lines.
 function Get-SqlStmtRows([string]$Db, [string]$Sql) {
-    $r = Invoke-Gate --map-query $Db --sql $Sql --width 0 --limit 0
-    Assert-Exit $r 0
-    return @($r.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | ForEach-Object { $_.Trim().Substring(2) })
+    return Get-MapQueryRows $Db $Sql
 }
 
 function Assert-SqlStmtRow([string]$Db, [string]$Sql, [string]$Expected, [string]$What) {

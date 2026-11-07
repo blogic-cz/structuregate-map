@@ -6,24 +6,8 @@
     Its helpers are its own - `-Only TsPlainBeside` runs this suite alone. The compiler cache is the one TsRows fills.
 #>
 
-function Get-TsBesideModules {
-    $modules = Join-Path ([System.IO.Path]::GetTempPath()) 'sgtest-tsrows\node_modules'
-    if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return $null }
-    if ((Test-Path (Join-Path $modules 'typescript\package.json')) -and
-        (Test-Path (Join-Path $modules '@angular\compiler\package.json'))) { return $modules }
-    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { return $null }
-    $cache = Split-Path $modules
-    [void](New-Item -ItemType Directory -Path $cache -Force)
-    # Under the cache's lock, and only if no other process filled it meanwhile: two shards installing at once
-    # corrupt the prefix, and a narrower install after a wider one prunes what the wider one added.
-    Use-CacheLock $cache {
-        if (-not (Test-Path (Join-Path $modules '@angular\compiler\package.json'))) { & npm install --no-save --silent --prefix $cache 'typescript@5' '@angular/compiler@17' '@angular/core@17' '@angular/router@17' '@ngrx/store@17' 2>&1 | Out-Null }
-    }
-    if (Test-Path (Join-Path $modules '@angular\compiler\package.json')) { return $modules }
-    return $null
-}
-
-$script:TsBesideModules = Get-TsBesideModules
+# The compiler cache every TypeScript suite shares (`Get-SgTsModules`, tests/Assert.ps1).
+$script:TsBesideModules = Get-SgTsModules
 if (-not $script:TsBesideModules) { Write-Host '    (no node/npm-installed typescript + @angular/compiler - the plain-beside-workspace cases are not run)' }
 
 function New-TsBesideTree {
@@ -49,9 +33,7 @@ function Invoke-TsBesideMap([string]$Tree) {
 }
 
 function Get-TsBesideRows([string]$Tree, [string]$Sql) {
-    $r = Invoke-Gate --map-query (Join-Path $Tree 'map.sqlite') --width 0 --sql $Sql
-    Assert-Exit $r 0
-    return $r
+    return Invoke-MapQuery (Join-Path $Tree 'map.sqlite') --width 0 --sql $Sql
 }
 
 if ($script:TsBesideModules) {
