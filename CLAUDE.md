@@ -23,6 +23,7 @@ cargo test --manifest-path rust/fbtcore/Cargo.toml          # the rust unit test
 powershell -NoProfile -File scripts\Connect-Gate.ps1 -Path <tree>  # wire a new consumer (-DryRun first)
 dotnet publish src/StructureGate.csproj -c Release -r win-x64 -p:PublishAot=true
 pwsh -NoProfile -File scripts/Install-Dependencies.ps1 -DryRun  # what this machine lacks to build (-DryRun off to install)
+npm ci                                                      # the typescript package.json pins: this repo's own deep map reads its .mjs with it
 pwsh -NoProfile -File scripts/Compare-Release.ps1 -Tree <real tree>  # BEFORE every release tag: old vs new map, exit 1 on a lost restriction
 ```
 

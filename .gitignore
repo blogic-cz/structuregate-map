@@ -14,6 +14,9 @@ __pycache__/
 # rust build output for fbtcore (the .lib/.dll are produced by the build, never committed)
 rust/*/target
 
+# the compiler this repo's own deep map borrows for its .mjs - package.json pins it, `npm ci` installs it
+node_modules/
+
 # THIS REPO IS ITS OWN CONSUMER. Connect-Gate.ps1 wired the gate into this build, and everything it
 # writes here is derived from the tree it just walked:
 #   buildtools/  the deployed exe and a COPY of StructureGate.targets (the source is at the root)
