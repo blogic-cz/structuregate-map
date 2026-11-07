@@ -1,0 +1,8 @@
+{
+  "name": "structuregate-self",
+  "private": true,
+  "description": "Only what this repository's own deep map borrows: the plain TypeScript half parses the gate's .mjs with this compiler. Nothing here is shipped; `npm ci` installs it (scripts/Install-Dependencies.ps1 does).",
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

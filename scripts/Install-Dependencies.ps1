@@ -10,6 +10,8 @@
       dotnet   the .NET 10 SDK - src/StructureGate.csproj targets net10.0
       cargo    the rust toolchain, 1.85 or newer - rust/fbtcore is edition 2024 and the build runs cargo
       node     the TypeScript half runs in node
+      typescript  the compiler package.json pins, into the gitignored node_modules/ (`npm ci`): this repo's own
+               deep map parses the gate's .mjs with it, as a consumer's map uses the consumer's own
       python   the python half runs in python's own `ast`
       cc       LINUX ONLY: build-essential, clang and zlib1g-dev - rustc links through `cc`, and a
                NativeAOT publish links with clang against zlib
@@ -22,7 +24,7 @@
     SCCACHE AND MOLD DO NOTHING UNTIL CARGO IS TOLD, so the user's ~/.cargo/config.toml is pointed at them -
     only once each one is installed: a `rustc-wrapper` naming a missing sccache fails every cargo build on the
     machine. A config that already has the table is left alone and the lines to add are printed instead.
-    Nothing is written into this repo, so a machine without them still builds it.
+    Nothing else is written into this repo, so a machine without them still builds it.
 
     A CONSUMER NEEDS NONE OF THIS: it receives the published exe and the targets file, nothing else.
 
@@ -135,6 +137,19 @@ function Install-Node {
     }
 }
 
+# THE COMPILER THIS REPO'S OWN DEEP MAP BORROWS: the plain TypeScript half takes the `typescript` in a node_modules beside
+# or above the tree it maps, and the gate's .mjs had none - a map of this repo, as dry-guard builds it, had no rows for them.
+function Install-SelfTypeScript {
+    $repo = Split-Path $PSScriptRoot -Parent
+    $pinned = Join-Path $repo 'node_modules/typescript/package.json'
+    if (Test-Path $pinned) { Write-Step 'have' "typescript $(([IO.File]::ReadAllText($pinned) | ConvertFrom-Json).version) (node_modules/)"; return }
+    Invoke-Step 'typescript (npm ci, into node_modules/)' {
+        Push-Location $repo
+        try { & npm ci --silent } finally { Pop-Location }
+        if ($LASTEXITCODE -ne 0) { throw "npm ci exited $LASTEXITCODE" }
+    }
+}
+
 function Install-Python {
     $command = if ($onWindows) { 'python' } else { 'python3' }
     if (Test-Tool $command) { Write-Step 'have' (& $command --version); return }
@@ -228,6 +243,7 @@ if ($onWindows) { Install-Msvc }
 Install-Dotnet
 Install-Rust
 Install-Node
+Install-SelfTypeScript
 Install-Python
 Install-Sccache
 # A sudo that cannot prompt fails the apt step, and that must not also cost the cargo config for what DID
