@@ -1,6 +1,6 @@
 ---
 name: rust-map-audit
-description: "Verify that the rust maps `structuregate` builds - the file graph (`--map`, e.g. buildmap.json) and the rust rows of the SQLite deep map (`--map-sqlite`: `files`, `consts`, `handlers`, `string_literals`, `number_literals` with `lang = 'rust'`) - actually CORRESPOND to the rust source they mirror: file by file, edge by edge, row by row. Use after a map run, after a structuregate upgrade, after a change to `rsmap/` or `mapper/deep/rust.rs`, or before anything downstream (a `--magic` sweep, an error-handling review, a refactor) trusts the map. Re-derives every fact from the SOURCE with `syn` in a scratch crate, never from the map, and reports mismatches with `file:line` evidence. Read-only: never edits the map, the gate, or the mapped tree."
+description: "Verify that the rust maps `structuregate` builds - the file graph (`--map`, e.g. buildmap.json) and the rust rows of the SQLite deep map (`--map-sqlite`: `files`, `consts`, `handlers`, `string_literals`, `number_literals` with `lang = 'rust'`) - actually CORRESPOND to the rust source they mirror: file by file, edge by edge, row by row. Use after a map run, after a structuregate upgrade, after a change to `rsmap/` or `mapper/deep/own/rust.rs`, or before anything downstream (a `--magic` sweep, an error-handling review, a refactor) trusts the map. Re-derives every fact from the SOURCE with `syn` in a scratch crate, never from the map, and reports mismatches with `file:line` evidence. Read-only: never edits the map, the gate, or the mapped tree."
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
@@ -121,7 +121,7 @@ get the same `use` as `format!`/`println!`.
 - **A method after `.` is a member, never a use** - no file edge, no declared-name reference.
 - **Only nameable items are declared.** A private `fn` missing from the declared list is the contract.
 - **Doc comments count as source lines**: `proc-macro2` returns them as `#[doc]` tokens.
-- **`ROWS_VERSION` in `mapper/deep/rust.rs` gates re-reading**: an unchanged file keeps rows written under the
+- **`ROWS_VERSION` in `mapper/deep/own/rust.rs` gates re-reading**: an unchanged file keeps rows written under the
   old version. A row matching the OLD rules on an unchanged sha is a STALE map, not a defect - say which.
 
 - **`let _ = name;`** silences an unused variable; it is not error handling, whatever the map does with it.

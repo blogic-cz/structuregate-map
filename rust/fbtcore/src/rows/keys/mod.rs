@@ -147,10 +147,10 @@ fn csharp(conn: &Connection, path_of: &dyn Fn(&str) -> String, out: &mut Vec<Ent
     enum_members(conn, "csharp", out)
 }
 
-/// Every half that names its declarations by file and name: python and plain TypeScript by `qualname`, the Angular half
+/// Every half that names its declarations by file and name: python, plain TypeScript and PowerShell by `qualname`, the Angular half
 /// (`half = 'typescript'`) by name - a member under its class's - and its framework rows by their class.
 fn named(conn: &Connection, path_of: &dyn Fn(&str) -> String, out: &mut Vec<Entry>, half: impl Fn(&str) -> bool) -> Result<()> {
-    for (lang, prefix) in [("python", "py"), ("ts", "ts")] {
+    for (lang, prefix) in [("python", "py"), ("ts", "ts"), ("powershell", "ps")] {
         for tbl in ["classes", "functions"] {
             if !has_columns(conn, tbl, &["id", "qualname", "file", "line"]) {
                 continue;

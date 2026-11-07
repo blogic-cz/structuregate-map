@@ -40,7 +40,7 @@ pub const TSGATE: Set = set!("tsgate": "TsGate/TsGate.mjs", "TsGate/TsGate.Rules
 pub const MAP_TYPESCRIPT: Set = set!("typescript": "TsGate/TsGate.mjs", "TsGate/TsGate.Rules.mjs", "TsGate/TsGate.Map.mjs", "TsGate/TsGate.Groups.mjs");
 pub const MAP_PYTHON: Set = set!("python": "Map/Py/PyMap.py", "Map/Py/PyAst.py", "Map/Py/PyBind.py", "Map/Py/PyDeps.py",
     "Map/Py/PyLaunch.py", "Map/Py/PyInputs.py");
-pub const MAP_POWERSHELL: Set = set!("powershell": "Map/PsMap.ps1");
+pub const MAP_POWERSHELL: Set = set!("powershell": "Map/PsMap.ps1", "Map/PsShape.ps1");
 
 /// The Angular half. `TsMap.mjs` imports every other one, so a name missing here fails the BUILD.
 pub const TSROWS: Set = set!("tsrows-node":
@@ -77,11 +77,14 @@ pub const PYROWS: Set = set!("python rows": "Map/Py/PyRows.py", "Map/Py/PyAst.py
     "Map/Py/PyDeps.py", "Map/Py/PyLaunch.py", "Map/Py/PyArgs.py", "Map/Py/PyInputs.py", "Map/Py/PyStmts.py", "Map/Py/PyComments.py",
     "Map/Py/PyRegex.py", "Map/Py/PyLiterals.py", "Map/Py/PyKeys.py");
 
+/// The PowerShell rows half. `PsShape.ps1` is the file map's too: sharing it keeps its fingerprints the ones buildmap.json groups by.
+pub const PSROWS: Set = set!("powershell rows": "Map/PsRows.ps1", "Map/PsShape.ps1");
+
 /// Every set a map run may launch, by the name its half asks for; the deep ones only for `--map-sqlite`.
 pub fn for_map(deep: bool) -> Vec<&'static Set> {
     let mut sets = vec![&MAP_TYPESCRIPT, &MAP_PYTHON, &MAP_POWERSHELL];
     if deep {
-        sets.extend([&TSROWS, &TSPLAIN, &PYROWS]);
+        sets.extend([&TSROWS, &TSPLAIN, &PYROWS, &PSROWS]);
     }
     sets
 }
@@ -121,11 +124,11 @@ pub fn sweep() {
         return;
     }
     let _ = std::fs::write(&marker, b"");
-    let current: Vec<String> = [&PSGATE, &TSGATE, &MAP_TYPESCRIPT, &MAP_PYTHON, &MAP_POWERSHELL, &TSROWS, &TSPLAIN, &PYROWS]
+    let current: Vec<String> = [&PSGATE, &TSGATE, &MAP_TYPESCRIPT, &MAP_PYTHON, &MAP_POWERSHELL, &TSROWS, &TSPLAIN, &PYROWS, &PSROWS]
         .iter()
         .map(|set| format!("structuregate-{}-{}", set.tag, digest(set)))
         .collect();
-    let tags: Vec<&str> = [&PSGATE, &TSGATE, &MAP_TYPESCRIPT, &MAP_PYTHON, &MAP_POWERSHELL, &TSROWS, &TSPLAIN, &PYROWS].iter().map(|s| s.tag).collect();
+    let tags: Vec<&str> = [&PSGATE, &TSGATE, &MAP_TYPESCRIPT, &MAP_PYTHON, &MAP_POWERSHELL, &TSROWS, &TSPLAIN, &PYROWS, &PSROWS].iter().map(|s| s.tag).collect();
     let Ok(entries) = std::fs::read_dir(&temp) else { return };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();

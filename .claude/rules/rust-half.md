@@ -32,7 +32,7 @@ Roslyn. It is called in process: its line counter by `count/` (the gate) and `ma
 
 THE DEEP MAP'S RUST ROWS (`--map-sqlite`) are `files`, `consts` and `handlers`, from `rsmap/consts.rs` and
 `rsmap/handlers.rs` (one parse, `rows_of`) stored by
-`mapper/deep/rust.rs` through `rows::apply` with `lang = 'rust'` - incremental by sha like the python half.
+`mapper/deep/own/rust.rs` through `rows::apply` with `lang = 'rust'` - incremental by sha like the python half.
 A constant is a module-level, inline-`mod`, `impl` or `trait` `const`/`static`, and a `thread_local!` static; one in a function body, a
 `#[cfg(test)]` module, a `#[cfg(test)]` item or `impl`, and `const _` are not, nor is one in a file that is test code as a whole (below). A handler is every way an error is dealt with - each `?`, `Err` arm, `if let Err`,
 `let Ok(..) else`, `unwrap`/`expect`, fallback, `.ok()`, `map_err`, `let _ =` and `catch_unwind` - named by `shape`,

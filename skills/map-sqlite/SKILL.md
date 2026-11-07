@@ -37,9 +37,10 @@ Every half writes into ONE database and the halves SHARE table names (`calls`, `
 | `typescript` | the Angular half (`angular.json`/`nx.json` present) | semantic, replaced WHOLE each run; every row also carries `half = 'typescript'` and most of its tables have no `file` |
 | `sql` | T-SQL (ScriptDom), files under a `.sqlproj` | its own `sql_*` tables, joined to the C# rows by `sql_links` |
 | `rust` | `syn`, in the exe | `files`, `consts`, both literal tables, and `handlers`: every `?`, `Err` arm, `unwrap`, `.ok()`, `let _ =`… with its `shape`, `panics`, `test` |
+| `powershell` | the PowerShell parser, run in the `--ps-host` | syntactic, per file, shaped like python's: `functions` (a class method `Class.Name`, `kind` `method`), `classes`, `calls` named as written and never bound (`kind` `command`, `invoke`, `method`, `static`), `imports` (dot-sources, `Import-Module`, `using module`), `branches`, `handlers`, `raises`, `assignments`, both literal tables, `regexes` and `expressions`; `body_shape`/`shape` are the JSON map's digests |
 | `go` | `gosyn`, in the exe | syntactic, per file, shaped like python's: `functions` (`Recv.Name` for a method), `calls` bound to the package's own func or the imported package's by `go.mod` (a method call binds only when the value's type is known: the receiver, a parameter, a local from a call that declares its result, a composite literal, a typed `var`), `consts` (top-level `const`/`var`), `string_literals`; `files.module` is the package |
 
-**Not here:** `.ps1` and `.md` are in the JSON map (`buildmap.json`) and write no rows in this
+**Not here:** `.md` is in the JSON map (`buildmap.json`) and write no rows in this
 database. A count over a shared table without `f.lang = ...` adds two languages together.
 `--tables` prints the languages present (`files:csharp 36`) beside the roots (`root` the first, `roots` a list of all) and file count, from `_meta`.
 

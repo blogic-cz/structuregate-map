@@ -69,6 +69,7 @@ never a sentence: a message can stay right while a count drifts.
 | `deep/Py*`, `deep/py/*` | the python deep map: rows, binding, lenses, incremental update |
 | `deep/CsRows`, `deep/cs/**` | the C# deep map, syntax and semantic, sharing one database with python |
 | `deep/Ts*`, `deep/TsAngular/*`, `deep/TsKeys/*`, `deep/TsPlain/*` | the TypeScript deep map with and without Angular |
+| `deep/ps/PsRows` | the PowerShell deep map: rows and scope, one digest with the file map, incremental, `similar_bodies` |
 | `deep/SqlMap`, `deep/sql/*` | the T-SQL half, `sql_links`, document facts |
 | `deep/FullText`, `deep/magic/*` | nothing stored is cut; `--magic` over every half |
 | `self/SelfMap` | the gate's OWN sources through its deep map: no SQLite JSON function in a string, no `*DEPTH*`/`*LEVELS*` constant, no literal compared with a `depth`/`level` |

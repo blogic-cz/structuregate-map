@@ -64,7 +64,7 @@ buildtools\structuregate.exe --root . <the tree's flags> --map --map-check --map
 | `cycles` | import cycles, as the loop |
 | `computed_imports` | every place a target is built at RUN TIME — `importlib.import_module(name)`, `import(expr)`, `. $lib`, `Type.GetType(name)` |
 | `duplicate_bodies` / `duplicate_expressions` | identical function bodies, and repeated expressions across files, with local names blanked. Size is in source CHARACTERS |
-| `similar_bodies` | the NEAR copies the digest cannot see: pairs of bodies (python and rust) sharing most of their statement shapes - names AND literals blanked, one shape per statement - but not all. `score` is shared/total in percent (one literal changed is 100, one line added to four is 80), `shared`/`total` the counts, `at` the two places. Below 75, or fewer than 3 shared, is not a pair; an identical pair is in `duplicate_bodies` instead |
+| `similar_bodies` | the NEAR copies the digest cannot see: pairs of bodies (python, rust and PowerShell) sharing most of their statement shapes - names AND literals blanked, one shape per statement - but not all. `score` is shared/total in percent (one literal changed is 100, one line added to four is 80), `shared`/`total` the counts, `at` the two places. Below 75, or fewer than 3 shared, is not a pair; an identical pair is in `duplicate_bodies` instead |
 | `halves` | which language halves and plugins ran — a half missing here mapped nothing, so its files' edges are absent, not empty |
 | `findings` | everything the run concluded, each line carrying its own severity |
 | `artifacts` / `steps` / `produced_by` / `read_by` | EMPTY unless a `--map-plugin` fills them — see the top of this skill |

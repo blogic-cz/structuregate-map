@@ -23,7 +23,7 @@ groups were built from (local names blanked, member names kept, comments ignored
 one `GROUP BY` away in SQL - with the source of every copy beside it.
 
 Which half wrote a row is `files.lang`: `python`, `csharp`, `typescript` (an Angular workspace, SEMANTIC rows),
-`ts` (any other `.ts .tsx .js .mjs` tree, SYNTACTIC rows).
+`ts` (any other `.ts .tsx .js .mjs` tree, SYNTACTIC rows), `powershell` (`.ps1 .psm1 .psd1`, SYNTACTIC rows).
 RUST has no `functions`/`calls`/`expressions` rows in the deep map: its copies are the JSON map's `duplicate_bodies`,
 `duplicate_expressions` and `similar_bodies` alone (`rust/...:line`), so read those for a rust tree.
 
@@ -76,7 +76,7 @@ SQL, group by the site set yourself or you will report one duplication several t
 
 ## Step 2 - near copies the fingerprint cannot see
 
-A fingerprint matches only identical shapes. The JSON map's `similar_bodies` (python and rust) is the
+A fingerprint matches only identical shapes. The JSON map's `similar_bodies` (python, rust and PowerShell) is the
 first near-copy signal: pairs of bodies sharing most statement shapes with names AND literals blanked,
 scored shared/total in percent - read it before the two queries below. Two more signals, both from rows:
 
