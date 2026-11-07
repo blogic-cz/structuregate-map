@@ -45,9 +45,7 @@ function New-TsStylesWorkspace([hashtable]$More = @{}) {
 
 # The lens at FULL width: a row here is a path and a selector, past the column a terminal would cut it at.
 function Invoke-TsStylesQ([string]$Path, [string]$Sql) {
-    $result = Invoke-Gate --map-query $Path --width 0 --sql $Sql
-    Assert-Exit $result 0
-    return $result
+    return Invoke-MapQuery $Path --width 0 --sql $Sql
 }
 
 $script:TsStylesRules ="SELECT 'sr=' || r.line || '|' || r.rule_line || '|' || r.selector || '|' || r.resolved || '|' || " +

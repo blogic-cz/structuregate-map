@@ -10,7 +10,9 @@
  * Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
 
-const asObj = (v) => ((!!v && typeof v === 'object' && !Array.isArray(v)) ? v : null);
+import { asObject } from './TsNodes.mjs';
+
+const asObj = asObject;
 
 /**
  * Does this value still hold something the evaluator could not resolve?

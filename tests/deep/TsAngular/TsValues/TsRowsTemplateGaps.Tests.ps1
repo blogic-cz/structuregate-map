@@ -107,11 +107,7 @@ export class HostComponent {
 }
 
 # ONE MAP PER SUITE PROCESS (`-Shared`): every case reads the same tree.
-function Get-TsGapDb {
-    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsGapFiles) -Shared
-    Assert-Exit $made.Result 0
-    return $made.Db
-}
+function Get-TsGapDb { return Get-TsRowsDbOf $script:TsGapFiles -Shared }
 
 # Every Read of the expressions whose source is `$Source`: `read=<source>|<name>=<row prefix>@<file>:<line>` of the declaration its `target` names, or `none`.
 function Get-TsGapTargets([string]$Source) {

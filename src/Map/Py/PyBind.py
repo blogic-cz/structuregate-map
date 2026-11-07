@@ -20,7 +20,7 @@ import ast
 import os
 
 import PyDeps
-from PyAst import IMPORTERS, dotted, qualnames
+from PyAst import IMPORTERS, arg_names, dotted, qualnames
 # Re-exported: `PyMap.py` and `PyLaunch.py` take the path helpers from here, as they did before they moved to `PyDeps.py`.
 from PyDeps import exists_exact, listing, module_path, relative_path  # noqa: F401
 
@@ -271,9 +271,7 @@ class Binder:
         self.written = None
 
     def enter_function(self, node, qualname: str) -> None:
-        spec = node.args
-        params = [a.arg for a in spec.posonlyargs + spec.args + spec.kwonlyargs]
-        params += [a.arg for a in (spec.vararg, spec.kwarg) if a is not None]
+        params = arg_names(node.args)
         self.scopes.append(("func", qualname, self.names(node.body, qualname + ".", params)))
 
     def enter_class(self, node, qualname: str) -> None:

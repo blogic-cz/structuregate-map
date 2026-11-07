@@ -50,9 +50,7 @@ function New-CsHandlersDb([hashtable]$Files) {
 
 # One query, every cell whole.
 function Get-CsHandlersRows([string]$Db, [string]$Sql) {
-    $r = Invoke-Gate --map-query $Db --width 0 --sql $Sql
-    Assert-Exit $r 0
-    return $r
+    return Invoke-MapQuery $Db --width 0 --sql $Sql
 }
 
 # One exact line, so a containment check cannot pass on a neighbour.

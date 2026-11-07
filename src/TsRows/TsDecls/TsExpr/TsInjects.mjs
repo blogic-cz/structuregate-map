@@ -15,21 +15,15 @@
  *
  * Imports are flat: see `TsTypeRef.mjs`.
  */
-import { locationOf } from './TsNodes.mjs';
+import { locationOf, isOuterWrapper, unwrapOuter } from './TsNodes.mjs';
 
 export function makeInjectRows({ ts, checker, store, typeRefAt, typeText, declFileOf, declFileOfSymbol, resolvedOf, propName, fromAngularCore }) {
   /** Whether a node is a call of Angular's `inject` - by the declaration it resolves to, never the name alone. */
   const isInject = (n) => ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'inject' && fromAngularCore(n.expression);
 
   /** What only TYPES an expression or groups it: `(x as T)`, `<T>x`, `x!`, `x satisfies T`. */
-  const isWrapper = (n) => ts.isParenthesizedExpression(n) || ts.isAsExpression(n) || ts.isTypeAssertionExpression(n)
-    || ts.isNonNullExpression(n) || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(n));
-
-  const unwrap = (n) => {
-    let at = n;
-    while (isWrapper(at)) at = at.expression;
-    return at;
-  };
+  const isWrapper = (n) => isOuterWrapper(ts, n);
+  const unwrap = (n) => unwrapOuter(ts, n);
 
   /** EVERY `inject(...)` OF A PROPERTY INITIALIZER, in source order. A function-valued initializer is a deferred body, run in whatever context calls it,
    *  so it is not walked: `lazy = () => inject(X)` is not a dependency of the class. */

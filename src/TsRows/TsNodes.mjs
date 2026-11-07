@@ -95,3 +95,23 @@ export function propertyContext(ts, node, propName) {
   if (ts.isDecorator(parent)) return parent.expression.getText();
   return null;
 }
+
+/**
+ * WHAT ONLY TYPES OR GROUPS AN EXPRESSION: `(x)`, `x as T`, `<T>x`, `x!`, `x satisfies T` - each is its `expression` at run
+ * time. One set for every caller: the copies this replaced had drifted to different subsets, so `{..} satisfies T` was a
+ * literal at one site and nothing at the next. `satisfies` is guarded for a TypeScript older than 4.9.
+ */
+export function isOuterWrapper(ts, node) {
+  return ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)
+    || ts.isNonNullExpression(node) || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(node));
+}
+
+/** The expression under every `isOuterWrapper` around `node` (`node` itself when none; `undefined` stays `undefined`). */
+export function unwrapOuter(ts, node) {
+  let at = node;
+  while (at !== undefined && at !== null && isOuterWrapper(ts, at)) at = at.expression;
+  return at;
+}
+
+/** A row cell that is an OBJECT (a ref, an options bag) - not null, not a list - or null. */
+export const asObject = (v) => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v : null);

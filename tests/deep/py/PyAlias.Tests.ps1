@@ -20,9 +20,7 @@ function New-PyAliasDb([hashtable]$Files) {
 
 # One lens through the exe, every cell whole.
 function Invoke-PyAliasQ([string]$Path, [Parameter(ValueFromRemainingArguments)][object[]]$LensArgs) {
-    $result = Invoke-Gate --map-query $Path --width 0 --limit 0 @LensArgs
-    Assert-Exit $result 0
-    return $result
+    return Invoke-MapQuery $Path --width 0 --limit 0 @LensArgs
 }
 
 # The output's rows split into cells, so a case asserts on one row and never on a neighbour's text.

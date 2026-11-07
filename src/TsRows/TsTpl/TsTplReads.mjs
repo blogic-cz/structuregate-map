@@ -182,7 +182,15 @@ export function rollupTemplateReads(store) {
     return rows.length && rows.every((r) => !NOT_FIELDS.has(String(r.kind ?? ''))) ? rows : null;
   };
   const hopRules = makeHops({ hopOf, indexByShape, scopes, fieldsOf });
-  const eventOf = makeEvents({ store, propByOwner, directivesAt, declaredBy, contexts, resolveRef, scopes, judgeScope, baseTypedOf: owners.baseTypedOf });
+  // TWO DECLARATIONS OF ONE SELECTOR (rows 80): the match is the one the host's SCOPE renders - the choice `renders` makes (`judgeScope`, the rule `rollupModuleScope`
+  // stamps) - and a candidate the host cannot see only when no other matches. One rule for a ref (`#popper`) and an output's `$event`.
+  const pickInScope = (matched, component) => {
+    const seen = matched.length > 1
+      ? matched.filter((d) => judgeScope(scopes(), { from_class: component.id, to_class: declaredBy.get(d.id).class, to_name: d.name }).scope !== 'out_of_scope')
+      : matched;
+    return seen[0] ?? matched[0];
+  };
+  const eventOf = makeEvents({ store, propByOwner, directivesAt, declaredBy, contexts, resolveRef, pickInScope, baseTypedOf: owners.baseTypedOf });
   // A GENERIC COMPONENT'S REF IS ITS INSTANCE AS THE ELEMENT INSTANTIATES IT (rows 74): `<demo-table #t [rows]="items">` over `DemoTable<T>` binds `T` from what `items` holds, so `t.selected`
   // reads as the item. The inputs are read once per ref, in the element's scope with no ref typed (a ref read inside another's input is not asked: they could ask each other for ever).
   const instanceOfRef = new Map();
@@ -193,10 +201,8 @@ export function rollupTemplateReads(store) {
       const one = declaredBy.get(d.id);
       return one !== undefined && one.class != null && (asked === '' ? d.is_component === true || d.is_component === 1 : one.exportAs.includes(asked));
     });
-    // TWO DECLARATIONS OF ONE SELECTOR (rows 80): the ref is the one the host's SCOPE renders - the choice `renders` makes (`judgeScope`, the rule `rollupModuleScope` stamps) - and
-    // a candidate the host cannot see only when no other matches: the first match typed `#popper` with the library's copy, not the shared component the template renders.
-    const seen = matching.length > 1 ? matching.filter((d) => judgeScope(scopes(), { from_class: component.id, to_class: declaredBy.get(d.id).class, to_name: d.name }).scope !== 'out_of_scope') : matching;
-    const hit = seen[0] ?? matching[0];
+    // TWO DECLARATIONS OF ONE SELECTOR: `pickInScope` - the first match typed `#popper` with the library's copy, not the shared component the template renders.
+    const hit = pickInScope(matching, component);
     if (hit === undefined) return null;
     const key = `${String(ref.node)}#${ref.name}`;
     if (!instanceOfRef.has(key)) {

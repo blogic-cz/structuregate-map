@@ -93,11 +93,7 @@ Test-Case 'go: the gate counts Go by its lexer, as the map does, and a file that
 
 # THE DEEP ROWS (`--map-sqlite`, `lang = 'go'`): one value of a query, as the rust suite reads its own.
 function Get-GoDeep([string]$Db, [string]$Sql) {
-    $r = Invoke-Gate --map-query $Db --sql $Sql --width 0
-    Assert-Exit $r 0
-    $line = $r.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | Select-Object -First 1
-    if ($null -eq $line) { return '' }
-    return $line.Trim().Substring(2)
+    return Get-MapQueryValue $Db $Sql
 }
 
 Test-Case 'go rows: functions, calls bound through the package and the import, consts, and --find reads them' {

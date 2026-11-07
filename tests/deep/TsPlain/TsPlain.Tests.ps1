@@ -25,9 +25,7 @@ function Invoke-TsPlainMap([string]$Tree, [string[]]$Extra = @()) {
 
 # One query, every cell whole.
 function Get-TsPlainRows([string]$Tree, [string]$Sql) {
-    $r = Invoke-Gate --map-query (Join-Path $Tree 'map.sqlite') --width 0 --sql $Sql
-    Assert-Exit $r 0
-    return $r
+    return Invoke-MapQuery (Join-Path $Tree 'map.sqlite') --width 0 --sql $Sql
 }
 
 function Get-TsPlainScalar([string]$Tree, [string]$Sql) {

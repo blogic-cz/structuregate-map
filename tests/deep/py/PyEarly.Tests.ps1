@@ -9,24 +9,8 @@
     Its helpers are its own - `-Only PyEarly` runs this suite alone.
 #>
 
-# A TypeScript 5 the PLAIN half can read (7.x has no in-process parser) - the cache the TsRows suites fill, or a
-# fresh install there.
-function Get-PyEarlyModules {
-    $modules = Join-Path ([System.IO.Path]::GetTempPath()) 'sgtest-tsrows/node_modules'
-    if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return $null }
-    if (Test-Path (Join-Path $modules 'typescript/package.json')) { return $modules }
-    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { return $null }
-    $cache = Split-Path $modules
-    [void](New-Item -ItemType Directory -Path $cache -Force)
-    # Under the cache's lock, and only if no other process filled it meanwhile: two shards installing at once
-    # corrupt the prefix, and a narrower install after a wider one prunes what the wider one added.
-    Use-CacheLock $cache {
-        if (-not (Test-Path (Join-Path $modules 'typescript/package.json'))) { & npm install --no-save --silent --prefix $cache 'typescript@5' 2>&1 | Out-Null }
-    }
-    if (Test-Path (Join-Path $modules 'typescript/package.json')) { return $modules }
-    return $null
-}
-$script:PyEarlyModules = Get-PyEarlyModules
+# The compiler cache every TypeScript suite shares (`Get-SgTsModules`, tests/Assert.ps1).
+$script:PyEarlyModules = Get-SgTsModules
 if (-not $script:PyEarlyModules) { Write-Host '    (no node/npm-installed typescript 5 - the early python cases are not run)' }
 
 # One `--map --map-sqlite` run over $Tree, traced; the result and what became of the early python answer.
@@ -49,12 +33,7 @@ function Invoke-PyEarly([string]$Tree) {
 
 # The first number a `--map-query --sql` prints.
 function Get-PyEarlyNumber([string]$Tree, [string]$Sql) {
-    $r = Invoke-Gate --map-query (Join-Path $Tree 'map.sqlite') --sql $Sql
-    foreach ($line in $r.Lines) {
-        $trimmed = $line.Trim()
-        if ($trimmed.Length -gt 0 -and ($trimmed.ToCharArray() | Where-Object { -not [char]::IsDigit($_) }).Count -eq 0) { return $trimmed }
-    }
-    return ''
+    return Get-MapQueryNumber (Join-Path $Tree 'map.sqlite') --sql $Sql
 }
 
 if ($script:PyEarlyModules -and (Get-Command python3, python -ErrorAction SilentlyContinue)) {

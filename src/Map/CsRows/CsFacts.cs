@@ -53,6 +53,9 @@ internal static class CsFacts
     /// <summary>What a sub-tree READS, CALLS and SPELLS OUT.</summary>
     public sealed record Touched(List<string> Reads, List<string> Calls, List<string> Strings);
 
+    /// <summary>`Dotted`, or the node's own text where it has no dotted form (`List<int>`, `a[0].b`).</summary>
+    public static string DottedOr(SyntaxNode node) => Dotted(node) is { Length: > 0 } written ? written : node.ToString();
+
     /// <summary>
     /// <c>a.b.c</c> for a name written out, "" for anything computed — an indexer, a call in the middle of
     /// the chain, a parenthesised receiver.

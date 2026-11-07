@@ -27,13 +27,7 @@ function Get-CsEdgesImports($Map, [string]$Rel) {
 }
 
 function Get-CsEdgesNumber([string]$Tree, [string]$Sql) {
-    $r = Invoke-Gate --map-query (Join-Path $Tree 'map.sqlite') --width 0 --sql $Sql
-    Assert-Exit $r 0
-    foreach ($line in $r.Lines) {
-        $trimmed = $line.Trim()
-        if ($trimmed.Length -gt 0 -and ($trimmed.ToCharArray() | Where-Object { -not [char]::IsDigit($_) }).Count -eq 0) { return $trimmed }
-    }
-    return ''
+    return Get-MapQueryNumber (Join-Path $Tree 'map.sqlite') --width 0 --sql $Sql
 }
 
 Test-Case 'edges: a name declared in two files joins the one the compiler bound, and the twin is not ambiguous' {

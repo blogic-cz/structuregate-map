@@ -63,11 +63,7 @@ export class ScopeComponent {
 }
 
 # ONE MAP PER SUITE PROCESS (`-Shared`): every case reads the same tree.
-function Get-TsScopeDb {
-    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsScopeFiles) -Shared
-    Assert-Exit $made.Result 0
-    return $made.Db
-}
+function Get-TsScopeDb { return Get-TsRowsDbOf $script:TsScopeFiles -Shared }
 
 # Every Read of the expressions whose source is `$Source`: `read=<source>|<name>=<row prefix>@<file>:<line>` of the declaration its `target` names, or `none`.
 function Get-TsScopeTargets([string]$Source) {

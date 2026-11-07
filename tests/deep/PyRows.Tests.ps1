@@ -31,9 +31,7 @@ function New-Db([hashtable]$Files) {
 # parameter named that cannot be bound at all.
 function Invoke-Q {
     param([string]$Path, [Parameter(ValueFromRemainingArguments)][object[]]$LensArgs)
-    $result = Invoke-Gate --map-query $Path @LensArgs
-    Assert-Exit $result 0
-    return $result
+    return Invoke-MapQuery $Path @LensArgs
 }
 
 if ($script:PyRowsPython) {

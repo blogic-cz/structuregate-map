@@ -10,6 +10,7 @@
  * only where the checker resolved it into `@angular/core`. Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
 import { slash } from './TsPaths.mjs';
+import { asObject } from './TsNodes.mjs';
 
 const ANGULAR_CORE = '/@angular/core/';
 const CREATE_COMPONENT = 'createComponent';
@@ -24,7 +25,7 @@ const COMPONENT_PORTAL = 'ComponentPortal';
 
 const str = (v) => (typeof v === 'string' ? v : null);
 const arr = (v) => (Array.isArray(v) ? v : []);
-const obj = (v) => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v : null);
+const obj = asObject;
 
 /** Is this evaluated call the named export of the framework, by RESOLVED declaration rather than by name? */
 const isCoreCall = (v, name) => {

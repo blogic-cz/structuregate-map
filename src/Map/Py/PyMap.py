@@ -28,7 +28,7 @@ from PyAst import (IMPORTERS, NEWLINE, block_span, char_column, dotted, heads, l
                    span, span_end, span_start, walked)
 from PyBind import Binder, Tree, declares, exists_exact, module_path, relative_path  # noqa: E402
 from PyLaunch import entry_spec, launched  # noqa: E402
-from PyInputs import options  # noqa: E402
+from PyInputs import emit, options, rows_of  # noqa: E402
 import PyDeps  # noqa: E402
 
 # A body this short is not a duplication worth reporting: two one-line wrappers returning the same attribute
@@ -55,16 +55,6 @@ MAX_LITERAL = 120
 # The calls that reach into a NAMESPACE by string. Not a list of frameworks - a list of the four ways python
 # itself turns a string into a binding, which is what makes a string an indirection rather than a word.
 INDIRECTION = ("getattr", "setattr", "hasattr", "__import__", "import_module")
-
-
-def emit(*fields: object) -> None:
-    """One protocol record. A field carrying `|` or a newline would split into the wrong slot on the other
-    side, so both are folded here rather than parsed around there."""
-    parts = []
-    for field in fields:
-        text = str(field)
-        parts.append(text.replace("|", "/").replace("\r", " ").replace("\n", " "))
-    print("|".join(parts))
 
 
 def blanked(node: ast.AST, literals: bool) -> str:
@@ -514,19 +504,6 @@ def read(root: str, rel: str, abs_path: str) -> None:
     expressions(rel, tree, table)
 
 
-def rows(list_file: str) -> list:
-    out = []
-    with open(list_file, "r", encoding="utf-8") as handle:
-        for raw in handle:
-            if not raw.strip():
-                continue
-            parts = raw.rstrip("\n").split("\t")
-            if len(parts) < 2:
-                continue
-            out.append((parts[0].strip(), parts[1].strip()))
-    return out
-
-
 def main() -> int:
     # --known-file is EVERY FILE OF THE MAP, when --list-file is only the files to parse: the rest are answered
     # from the caller's cache, and an entry point a launcher names is still found among them.
@@ -538,8 +515,8 @@ def main() -> int:
 
     root = os.path.abspath(args.root)
     try:
-        files = rows(args.list_file)
-        known = rows(args.known_file) if args.known_file else files
+        files = rows_of(args.list_file)
+        known = rows_of(args.known_file) if args.known_file else files
     except OSError as error:
         emit("MAP-FATAL", "the file list could not be read - %s" % error)
         return 0

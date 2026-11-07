@@ -5,7 +5,8 @@
  * Ported from the original Angular extractor, split out of `TsValue.mjs` because the two
  * halves together are past this repo's 500-line ceiling. Imports are flat: see `TsTypeRef.mjs`.
  */
-import { canonicalPath } from './TsPaths.mjs';
+import { canonicalPath, startSite } from './TsPaths.mjs';
+import { unwrapOuter } from './TsNodes.mjs';
 
 /**
  * `undefined` AS A VALUE: `{$literal: 'undefined', $kind}` - JSON has no `undefined`, and the `$expr` an unresolved name
@@ -141,10 +142,7 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
       // decides, so `$param_index` names the parameter and a reader holding a call's arguments puts the caller's in its place
       // (`rust/fbtcore/src/rows/ts/key/lists/key_lists.rs::handed`).
       // A CAST OR PARENTHESES AROUND IT (`(e as any)[item]`, rows 113) change no table: the parameter under them is read.
-      let object = node.expression;
-      while (ts.isParenthesizedExpression(object) || ts.isAsExpression(object) || ts.isNonNullExpression(object) || ts.isTypeAssertionExpression(object)) {
-        object = object.expression;
-      }
+      const object = unwrapOuter(ts, node.expression);
       const held = ts.isIdentifier(object) ? symbolAt(object)?.valueDeclaration : undefined;
       if (held !== undefined && ts.isParameter(held) && ts.isIdentifier(held.name)) {
         return { ...api.unresolved(node), $param_index: held.name.text };
@@ -164,9 +162,7 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
     if (!at || !ts.isVariableDeclaration(at) || at.initializer === undefined) return null;
     const statement = at.parent?.parent;
     if (!statement || !ts.isVariableStatement(statement) || ts.isSourceFile(statement.parent)) return null;
-    const sf = at.getSourceFile();
-    const pos = sf.getLineAndCharacterOfPosition(at.name.getStart());
-    return { file: canonicalPath(sf.fileName), line: pos.line + 1, col: pos.character + 1 };
+    return startSite(at.name);
   }
 
   /** An identifier reference -> the literal it was initialized with, when that is knowable. */

@@ -85,7 +85,7 @@ internal sealed partial class CsRows
             ("visibility", Visibility(modifiers, declared)),
             ("accessors", accessors),
             ("attributes", owner.AttributeLists.SelectMany(l => l.Attributes)
-                .Select(a => CsFacts.Dotted(a.Name) is { Length: > 0 } written ? written : a.Name.ToString()).ToList()),
+                .Select(a => CsFacts.DottedOr(a.Name)).ToList()),
             ("initializer", CsFacts.Text(initializer)),
             ("doc", CsFacts.Doc(owner)));
     }

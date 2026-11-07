@@ -13,19 +13,10 @@
  * NO REGEX - the build refuses one over this folder. Every decision is a SyntaxKind or a node member.
  */
 
-/** A dotted name - `a`, `this.b`, `a.b.c` - or '' when the chain holds anything but names. */
-export function dotted(ts, node) {
-    const K = ts.SyntaxKind;
-    if (!node) return '';
-    if (node.kind === K.Identifier || node.kind === K.PrivateIdentifier) return node.text;
-    if (node.kind === K.ThisKeyword) return 'this';
-    if (node.kind === K.SuperKeyword) return 'super';
-    if (node.kind === K.PropertyAccessExpression) {
-        const head = dotted(ts, node.expression);
-        return head ? head + '.' + node.name.text : '';
-    }
-    return '';
-}
+import { chainOf } from './TsCatch.mjs';
+
+/** A dotted name - `a`, `this.b`, `a.b.c` - or '' when the chain holds anything but names: `TsCatch.mjs::chainOf`, which both halves stage. */
+export const dotted = chainOf;
 
 /** A declaration's name as written: an identifier's text, a literal key's value, else its source. */
 export function nameText(ts, name, sourceFile) {

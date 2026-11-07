@@ -12,24 +12,12 @@
  *
  * Imports are flat: see `TsTypeRef.mjs`.
  */
-import { canonicalPath } from './TsPaths.mjs';
-
-function declSite(d) {
-  const sf = d.getSourceFile();
-  const pos = d.name && typeof d.name.getStart === 'function' ? d.name.getStart() : d.getStart();
-  return { file: canonicalPath(sf.fileName), line: sf.getLineAndCharacterOfPosition(pos).line + 1 };
-}
+import { declSite } from './TsPaths.mjs';
+import { unwrapOuter } from './TsNodes.mjs';
 
 export function makeWriteResolver(ts, checker) {
-  /** `({...} as Foo)` and `({...})` wrap the literal; the literal is what carries the keys. */
-  const unwrap = (n) => {
-    let current = n;
-    for (;;) {
-      if (ts.isParenthesizedExpression(current)) { current = current.expression; continue; }
-      if (ts.isAsExpression(current)) { current = current.expression; continue; }
-      return current;
-    }
-  };
+  /** `({...} as Foo)`, `({...})`, `{...} satisfies Foo`, `<Foo>{...}` wrap the literal; the literal is what carries the keys. */
+  const unwrap = (n) => unwrapOuter(ts, n);
 
   /** The object literals a node PRODUCES: itself, or what its `return`s produce. Nested functions are left
    *  to their own resolution, exactly as the written paths are built. */

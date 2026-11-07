@@ -36,7 +36,8 @@ export function makeTsExprNormalizer(ts, resolveRead, resolveName = null, resolv
     // Parentheses carry no meaning once the tree is explicit.
     if (ts.isParenthesizedExpression(node)) return norm(node.expression);
     if (ts.isNonNullExpression(node)) return { k: 'NonNull', expr: norm(node.expression) };
-    if (ts.isAsExpression(node)) return norm(node.expression);
+    // `as` and `satisfies` only type their operand (`TsNodes.mjs::isOuterWrapper`); `satisfies` left an `Other` leaf.
+    if (ts.isAsExpression(node) || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(node))) return norm(node.expression);
     // Old-style `<T>value` and `Foo<T>` are the same story as `as`: a type annotation wrapping a real
     // expression. Left on the `Other` leaf they hid their operand from the summary.
     if (ts.isTypeAssertionExpression(node)) return norm(node.expression);

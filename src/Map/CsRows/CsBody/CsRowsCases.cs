@@ -56,7 +56,7 @@ internal sealed partial class CsRows
             // AN ATTRIBUTE ON A MEMBER is that member's fact (`[ExternalId(7001)] Alpha`): a `decorators` row targeting
             // the member, and its names on the member's entry, so a reader joins a member to what it declares.
             var attributes = member.AttributeLists.SelectMany(l => l.Attributes)
-                .Select(a => CsFacts.Dotted(a.Name) is { Length: > 0 } written ? written : a.Name.ToString()).ToList();
+                .Select(a => CsFacts.DottedOr(a.Name)).ToList();
             members.Add([("name", member.Identifier.ValueText), ("value", Number(value)), ("attributes", attributes)]);
             Attributes(member.AttributeLists, member.Identifier.ValueText, "enum_member");
         }

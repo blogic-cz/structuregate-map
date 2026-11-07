@@ -146,11 +146,7 @@ export class GenComponent<T extends KindA | KindB> {
 }
 
 # ONE MAP PER SUITE PROCESS (`-Shared`): every case reads the same tree.
-function Get-TsSrcDb {
-    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsSrcFiles) -Shared
-    Assert-Exit $made.Result 0
-    return $made.Db
-}
+function Get-TsSrcDb { return Get-TsRowsDbOf $script:TsSrcFiles -Shared }
 
 # Every Read and SafeRead of the expressions whose source holds `$Like`: `read=<source>|<name>=<row prefix>@<file>:<line>` of the declaration its `target`
 # names, or `none` - the row prefix says which table (`m` member, `tm` type member, `sm` shape member), the place which declaration.

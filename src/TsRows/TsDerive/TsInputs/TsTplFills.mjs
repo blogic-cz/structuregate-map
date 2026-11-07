@@ -16,8 +16,10 @@
  * Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
 
+import { asObject } from './TsNodes.mjs';
+
 const LITERALS = ['string_literals', 'number_literals', 'template_literals', 'functions'];
-const asRef = (v) => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v : null);
+const asRef = asObject;
 
 export function rollupTemplateFills(store) {
   const waiting = new Map();

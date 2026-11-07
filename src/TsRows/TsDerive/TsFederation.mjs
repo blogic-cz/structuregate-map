@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { canonicalPath } from './TsPaths.mjs';
+import { isOuterWrapper } from './TsNodes.mjs';
 
 const CONFIGS = new Set(['module-federation.config.js', 'module-federation.config.ts']);
 
@@ -28,8 +29,7 @@ function objectOf(ts, sf, e) {
   while (at !== undefined && !seen.has(at)) {
     seen.add(at);
     if (ts.isObjectLiteralExpression(at)) return at;
-    if (ts.isParenthesizedExpression(at) || ts.isAsExpression(at)
-      || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(at))) { at = at.expression; continue; }
+    if (isOuterWrapper(ts, at)) { at = at.expression; continue; }
     if (!ts.isIdentifier(at)) return null;
     const name = at.text;
     at = undefined;

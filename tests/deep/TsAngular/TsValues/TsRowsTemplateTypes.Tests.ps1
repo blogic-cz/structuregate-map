@@ -173,11 +173,7 @@ export class InjectComponent {
 }
 
 # ONE MAP PER SUITE PROCESS (`-Shared`): every case reads the same tree.
-function Get-TsTypesDb {
-    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsTypesFiles) -Shared
-    Assert-Exit $made.Result 0
-    return $made.Db
-}
+function Get-TsTypesDb { return Get-TsRowsDbOf $script:TsTypesFiles -Shared }
 
 # Every Read of the expressions whose source is `$Source`: `read=<source>|<name>=<row prefix>@<file>:<line>` of the declaration its `target` names, or `none`.
 function Get-TsTypesTargets([string]$Source) {

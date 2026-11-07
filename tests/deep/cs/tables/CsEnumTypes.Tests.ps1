@@ -21,9 +21,7 @@ $script:CsEnumTypesFiles = @{
 }
 
 function Get-CsEnumTypesRows([string]$Db, [string]$Sql) {
-    $r = Invoke-Gate --map-query $Db --width 0 --sql $Sql
-    Assert-Exit $r 0
-    return $r
+    return Invoke-MapQuery $Db --width 0 --sql $Sql
 }
 
 Test-Case 'csenumtypes: an enum member links to the classes a declared convention selects by its name' {

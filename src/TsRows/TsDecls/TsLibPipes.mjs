@@ -16,7 +16,7 @@
  * Imports are flat: see `TsTypeRef.mjs`.
  */
 import { canonicalPath, relativeTo, slash } from './TsPaths.mjs';
-import { locationOf } from './TsNodes.mjs';
+import { locationOf, unwrapOuter } from './TsNodes.mjs';
 
 export function makeLibPipes({ ts, checker, symbolAt, feRoot, propName }) {
   const inLibrary = (decl) => decl.getSourceFile().isDeclarationFile
@@ -75,9 +75,7 @@ export function makeLibPipes({ ts, checker, symbolAt, feRoot, propName }) {
 
   /** Every class an `imports`/`exports` value names, followed as the compiler flattens it. */
   const classesIn = (expr, seen, out) => {
-    let e = expr;
-    while (e && (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e)
-      || (ts.isSatisfiesExpression && ts.isSatisfiesExpression(e)))) e = e.expression;
+    const e = unwrapOuter(ts, expr);
     if (!e || seen.has(e)) return;
     seen.add(e);
     if (ts.isArrayLiteralExpression(e)) {

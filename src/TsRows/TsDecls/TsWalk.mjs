@@ -179,7 +179,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
     const symbolAt = makeSymbolAt(ts, checker, log);
     const { modifiersOf, localExports } = makeModifiers(ts, log);
     const typeRefAt = makeTypeResolver(ts, checker);
-    const readRefs = makeReadRefs(ts, checker, canonicalPath);
+    const readRefs = makeReadRefs(ts, checker);
     const writeRefsOf = makeWriteResolver(ts, checker);
     // ONE ROW PER EXPRESSION, and `lang` says which side of the map it came from - a template expression
     // and a TypeScript one normalize to the SAME tree, so one consumer reads both.

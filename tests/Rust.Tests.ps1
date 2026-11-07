@@ -12,6 +12,8 @@
 
 # The node rows' SQL (a list cell is `<table>__<column>`, never JSON text).
 . (Join-Path $PSScriptRoot 'deep/nodes/NodeSql.Helpers.ps1')
+# `Get-Imports`: a file's edges out of the JSON map.
+. (Join-Path $PSScriptRoot 'map/Map.Helpers.ps1')
 
 function Get-RsMap {
     param([Parameter(ValueFromRemainingArguments)][object[]]$GateArgs)
@@ -23,13 +25,6 @@ function Get-RsMap {
     $map = Get-Content $path -Raw | ConvertFrom-Json
     Remove-Item $path -Force -ErrorAction SilentlyContinue
     return [pscustomobject]@{ Exit = $result.Exit; Lines = $result.Lines; Text = $result.Text; Map = $map }
-}
-
-# `,` so a one-edge answer stays an array - see Get-Measured in Assert.ps1.
-function Get-RsImports($Map, [string]$Rel) {
-    $property = $Map.imports.PSObject.Properties | Where-Object { $_.Name -eq $Rel }
-    if (-not $property) { return ,@() }
-    return ,@($property.Value)
 }
 
 # ---------------------------------------------------------------------------------------------------
@@ -76,8 +71,8 @@ Test-Case 'rs map: a mod declaration is an edge to the file rustc would load, an
     }
     $found = Get-RsMap --root $tree --map-check
     Assert-Exit $found 0
-    Assert-Equal ((Get-RsImports $found.Map 'src/lib.rs') -join ',') 'src/rows/mod.rs,src/scan.rs' 'lib.rs pulls in both'
-    Assert-Equal ((Get-RsImports $found.Map 'src/rows/mod.rs') -join ',') 'src/rows/half.rs' 'a mod.rs owns its folder'
+    Assert-Equal ((Get-Imports $found.Map 'src/lib.rs') -join ',') 'src/rows/mod.rs,src/scan.rs' 'lib.rs pulls in both'
+    Assert-Equal ((Get-Imports $found.Map 'src/rows/mod.rs') -join ',') 'src/rows/half.rs' 'a mod.rs owns its folder'
     Assert-NoLine $found 'NO READER src/lib.rs'
     Assert-NoLine $found 'NO READER src/scan.rs'
 }
@@ -89,7 +84,7 @@ Test-Case 'rs map: a #[path] attribute moves the file and the edge follows it' {
     }
     $found = Get-RsMap --root $tree --map-check
     Assert-Exit $found 0
-    Assert-Equal ((Get-RsImports $found.Map 'src/lib.rs') -join ',') 'src/gate/values.rs' 'lib.rs imports the moved file'
+    Assert-Equal ((Get-Imports $found.Map 'src/lib.rs') -join ',') 'src/gate/values.rs' 'lib.rs imports the moved file'
 }
 
 Test-Case 'rs map: a mod that names no file is BROKEN and fails --map-check' {
@@ -108,7 +103,7 @@ Test-Case 'rs map: a use of a PUB item is an edge, and a private item draws none
     }
     $found = Get-RsMap --root $tree
     Assert-Exit $found 0
-    Assert-Equal ((Get-RsImports $found.Map 'src/reader.rs') -join ',') 'src/store.rs' 'reader imports store and not quiet'
+    Assert-Equal ((Get-Imports $found.Map 'src/reader.rs') -join ',') 'src/store.rs' 'reader imports store and not quiet'
 }
 
 Test-Case 'rs map: a method call that spells a free function''s name is not an edge' {
@@ -119,7 +114,7 @@ Test-Case 'rs map: a method call that spells a free function''s name is not an e
         'src/reader.rs' = "fn go(x: Vec<u8>) { x.walk(); }`n"
     }
     $found = Get-RsMap --root $tree
-    Assert-Equal (Get-RsImports $found.Map 'src/reader.rs').Count 0 'reader imports nothing'
+    Assert-Equal (Get-Imports $found.Map 'src/reader.rs').Count 0 'reader imports nothing'
 }
 
 Test-Case 'rs map: a name a let, a parameter or a closure binds is a local, and a #[cfg(test)] item is not declared' {
@@ -134,10 +129,10 @@ Test-Case 'rs map: a name a let, a parameter or a closure binds is a local, and 
     }
     $found = Get-RsMap --root $tree
     Assert-Exit $found 0
-    Assert-Equal (Get-RsImports $found.Map 'src/b.rs').Count 0 'b names only its own locals'
-    Assert-Equal ((Get-RsImports $found.Map 'src/c.rs') -join ',') 'src/a.rs' 'c calls the item n'
-    Assert-Equal (Get-RsImports $found.Map 'src/d.rs').Count 0 'a #[cfg(test)] item is no target'
-    Assert-Equal (Get-RsImports $found.Map 'src/e.rs').Count 0 'a file''s own private n shadows a''s pub n'
+    Assert-Equal (Get-Imports $found.Map 'src/b.rs').Count 0 'b names only its own locals'
+    Assert-Equal ((Get-Imports $found.Map 'src/c.rs') -join ',') 'src/a.rs' 'c calls the item n'
+    Assert-Equal (Get-Imports $found.Map 'src/d.rs').Count 0 'a #[cfg(test)] item is no target'
+    Assert-Equal (Get-Imports $found.Map 'src/e.rs').Count 0 'a file''s own private n shadows a''s pub n'
 }
 
 Test-Case 'rs map: a name joins only into its own crate and the crates its Cargo.toml depends on' {
@@ -155,10 +150,10 @@ Test-Case 'rs map: a name joins only into its own crate and the crates its Cargo
     }
     $found = Get-RsMap --root $tree
     Assert-Exit $found 0
-    Assert-Equal (Get-RsImports $found.Map 'alpha/src/lib.rs').Count 0 'alpha cannot name beta'
-    Assert-Equal ((Get-RsImports $found.Map 'beta/src/lib.rs') -join ',') 'alpha/src/lib.rs' 'beta depends on alpha'
-    Assert-Equal (Get-RsImports $found.Map 'beta/build.rs').Count 0 'build.rs cannot name its own src'
-    Assert-Equal ((Get-RsImports $found.Map 'gamma/src/lib.rs') -join ',') 'alpha/src/lib.rs' 'a workspace = true dependency'
+    Assert-Equal (Get-Imports $found.Map 'alpha/src/lib.rs').Count 0 'alpha cannot name beta'
+    Assert-Equal ((Get-Imports $found.Map 'beta/src/lib.rs') -join ',') 'alpha/src/lib.rs' 'beta depends on alpha'
+    Assert-Equal (Get-Imports $found.Map 'beta/build.rs').Count 0 'build.rs cannot name its own src'
+    Assert-Equal ((Get-Imports $found.Map 'gamma/src/lib.rs') -join ',') 'alpha/src/lib.rs' 'a workspace = true dependency'
 }
 
 Test-Case 'rs map: a later path segment names into the tree only through crate, super or an in-tree import' {
@@ -173,11 +168,11 @@ Test-Case 'rs map: a later path segment names into the tree only through crate, 
     }
     $found = Get-RsMap --root $tree
     Assert-Exit $found 0
-    Assert-Equal (Get-RsImports $found.Map 'src/walk.rs').Count 0 'TokenTree::Group and std::env::temp_dir name nothing in the tree'
-    Assert-Equal (Get-RsImports $found.Map 'src/util.rs').Count 0 'self::reach is util''s own module'
-    Assert-Equal ((Get-RsImports $found.Map 'src/c.rs') -join ',') 'src/shapes.rs' 'a crate:: import still joins'
-    Assert-Equal (Get-RsImports $found.Map 'src/m.rs').Count 0 'a glob in the tests module does not reach the rest of the file'
-    Assert-Equal (Get-RsImports $found.Map 'src/n.rs').Count 0 'a fn''s local helper is its own'
+    Assert-Equal (Get-Imports $found.Map 'src/walk.rs').Count 0 'TokenTree::Group and std::env::temp_dir name nothing in the tree'
+    Assert-Equal (Get-Imports $found.Map 'src/util.rs').Count 0 'self::reach is util''s own module'
+    Assert-Equal ((Get-Imports $found.Map 'src/c.rs') -join ',') 'src/shapes.rs' 'a crate:: import still joins'
+    Assert-Equal (Get-Imports $found.Map 'src/m.rs').Count 0 'a glob in the tests module does not reach the rest of the file'
+    Assert-Equal (Get-Imports $found.Map 'src/n.rs').Count 0 'a fn''s local helper is its own'
 }
 
 Test-Case 'rs map: macro arguments are code, a macro_rules template names nothing, and cfg(not(test)) is production' {
@@ -193,11 +188,11 @@ Test-Case 'rs map: macro arguments are code, a macro_rules template names nothin
     }
     $found = Get-RsMap --root $tree
     Assert-Exit $found 0
-    Assert-Equal (Get-RsImports $found.Map 'src/m1.rs').Count 0 'a closure parameter inside format! arguments is a local'
-    Assert-Equal (Get-RsImports $found.Map 'src/m2.rs').Count 0 'a struct-literal label inside assert_eq! is a field'
-    Assert-Equal (Get-RsImports $found.Map 'src/m3.rs').Count 0 'a macro_rules metavariable names nothing'
-    Assert-Equal (Get-RsImports $found.Map 'src/m4.rs').Count 0 'a matches! binding is a local'
-    Assert-Equal ((Get-RsImports $found.Map 'src/u2.rs') -join ',') 'src/db2.rs' 'a cfg(not(test)) item is declared'
+    Assert-Equal (Get-Imports $found.Map 'src/m1.rs').Count 0 'a closure parameter inside format! arguments is a local'
+    Assert-Equal (Get-Imports $found.Map 'src/m2.rs').Count 0 'a struct-literal label inside assert_eq! is a field'
+    Assert-Equal (Get-Imports $found.Map 'src/m3.rs').Count 0 'a macro_rules metavariable names nothing'
+    Assert-Equal (Get-Imports $found.Map 'src/m4.rs').Count 0 'a matches! binding is a local'
+    Assert-Equal ((Get-Imports $found.Map 'src/u2.rs') -join ',') 'src/db2.rs' 'a cfg(not(test)) item is declared'
 }
 
 Test-Case 'rs map: an in-tree path is walked through the module tree - a module, a type''s member, a parent''s private item' {
@@ -228,16 +223,16 @@ Test-Case 'rs map: an in-tree path is walked through the module tree - a module,
     }
     $found = Get-RsMap --root $tree
     Assert-Exit $found 0
-    Assert-Equal ((Get-RsImports $found.Map 'src/a.rs') -join ',') 'src/schema.rs' 'use crate::schema is a MODULE: it joins schema.rs, not the file that declares a fn schema'
-    Assert-Equal ((Get-RsImports $found.Map 'src/a2.rs') -join ',') 'src/schema.rs' 'crate::schema::existing walks the module, not the name schema'
-    Assert-Equal ((Get-RsImports $found.Map 'src/y.rs') -join ',') 'src/sess.rs' 'Session::open after use crate::sess::Session is a member of Session, not a pub fn open elsewhere'
-    Assert-Equal ((Get-RsImports $found.Map 'src/q/child.rs') -join ',') 'src/q.rs' 'use super::query is the parent''s private item, not another file''s pub fn query'
-    Assert-Equal ((Get-RsImports $found.Map 'src/p/p_tests.rs') -join ',') 'src/p.rs' 'helper() under use super::* is the parent''s private item, not another file''s pub fn helper'
-    Assert-Equal ((Get-RsImports $found.Map 'src/pf.rs') -join ',') 'src/seeds.rs' 'a qualified crate::seeds::schema() is not hidden by the file''s own private fn schema'
-    Assert-Equal (Get-RsImports $found.Map 'src/t.rs').Count 0 'rusqlite::Connection::open under use super::* is a member of an extern type'
-    Assert-Equal ((Get-RsImports $found.Map 'src/r1.rs') -join ',') 'src/rows/cells/meta.rs' 'a re-export is followed: use cells::meta in rows/mod.rs makes crate::rows::meta the file cells/meta.rs'
-    Assert-Equal ((Get-RsImports $found.Map 'src/g/g_tests.rs') -join ',') 'src/g.rs,src/sess.rs' 'use super::* reaches the parent (the glob) and the type the parent imports (the followed import)'
-    Assert-Equal (Get-RsImports $found.Map 'src/db.rs').Count 0 'pub(crate) is visibility, not a path to the crate root'
+    Assert-Equal ((Get-Imports $found.Map 'src/a.rs') -join ',') 'src/schema.rs' 'use crate::schema is a MODULE: it joins schema.rs, not the file that declares a fn schema'
+    Assert-Equal ((Get-Imports $found.Map 'src/a2.rs') -join ',') 'src/schema.rs' 'crate::schema::existing walks the module, not the name schema'
+    Assert-Equal ((Get-Imports $found.Map 'src/y.rs') -join ',') 'src/sess.rs' 'Session::open after use crate::sess::Session is a member of Session, not a pub fn open elsewhere'
+    Assert-Equal ((Get-Imports $found.Map 'src/q/child.rs') -join ',') 'src/q.rs' 'use super::query is the parent''s private item, not another file''s pub fn query'
+    Assert-Equal ((Get-Imports $found.Map 'src/p/p_tests.rs') -join ',') 'src/p.rs' 'helper() under use super::* is the parent''s private item, not another file''s pub fn helper'
+    Assert-Equal ((Get-Imports $found.Map 'src/pf.rs') -join ',') 'src/seeds.rs' 'a qualified crate::seeds::schema() is not hidden by the file''s own private fn schema'
+    Assert-Equal (Get-Imports $found.Map 'src/t.rs').Count 0 'rusqlite::Connection::open under use super::* is a member of an extern type'
+    Assert-Equal ((Get-Imports $found.Map 'src/r1.rs') -join ',') 'src/rows/cells/meta.rs' 'a re-export is followed: use cells::meta in rows/mod.rs makes crate::rows::meta the file cells/meta.rs'
+    Assert-Equal ((Get-Imports $found.Map 'src/g/g_tests.rs') -join ',') 'src/g.rs,src/sess.rs' 'use super::* reaches the parent (the glob) and the type the parent imports (the followed import)'
+    Assert-Equal (Get-Imports $found.Map 'src/db.rs').Count 0 'pub(crate) is visibility, not a path to the crate root'
 }
 
 Test-Case 'rs map: a rust item does not make a C# name ambiguous - the languages join apart' {
@@ -249,7 +244,7 @@ Test-Case 'rs map: a rust item does not make a C# name ambiguous - the languages
         'src/lib.rs' = "pub struct Check;`n"
     }
     $found = Get-RsMap --root $tree --ext '.cs,.rs' --map-check
-    Assert-Equal ((Get-RsImports $found.Map 'Reader.cs') -join ',') 'Check.cs' 'Reader imports Check'
+    Assert-Equal ((Get-Imports $found.Map 'Reader.cs') -join ',') 'Check.cs' 'Reader imports Check'
     Assert-NoLine $found 'AMBIGUOUS Check'
 }
 
@@ -296,11 +291,7 @@ Test-Case 'rs map: an expression pasted inside two larger bodies is COPIED, and 
 
 # One `v=` cell out of a deep map, the way the deep suites read one.
 function Get-RsDeep([string]$Db, [string]$Sql) {
-    $r = Invoke-Gate --map-query $Db --sql $Sql --width 0
-    Assert-Exit $r 0
-    $line = $r.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | Select-Object -First 1
-    if ($null -eq $line) { return '' }
-    return $line.Trim().Substring(2)
+    return Get-MapQueryValue $Db $Sql
 }
 
 Test-Case 'rs rows: every const and static is a consts row - value, type, owner, file - and a local or a fixture is not' {

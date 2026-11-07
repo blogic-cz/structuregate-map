@@ -16,13 +16,15 @@
  *
  * Imports are flat: see `TsTypeRef.mjs`.
  */
+
+import { isOuterWrapper } from './TsNodes.mjs';
+
 export function propReads(ts, sf) {
   const names = new Map();
   const add = (name) => names.set(name, (names.get(name) ?? 0) + 1);
   let indexed = false;
   // `(this as any)`, `this!` and `(this)` are `this`: the wrapper changes the type, not what is read.
-  const wraps = (n) => ts.isParenthesizedExpression(n) || ts.isAsExpression(n) || ts.isNonNullExpression(n)
-    || ts.isTypeAssertionExpression(n) || (ts.isSatisfiesExpression && ts.isSatisfiesExpression(n));
+  const wraps = (n) => isOuterWrapper(ts, n);
   const bound = (call) => ts.isPropertyAccessExpression(call.expression)
     && ['bind', 'call', 'apply'].includes(call.expression.name.text);
   // `untilDestroyed(this)` OF `@ngneat/until-destroy` (rows 124) reads ONE member of the instance - its destroy method, `ngOnDestroy` or the name

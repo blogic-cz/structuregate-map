@@ -40,9 +40,7 @@ public class OrdersEndpoint(ISender sender, IPublisher publisher)
 '@
 
 function Get-CsDispatchRows([string]$Db, [string]$Sql) {
-    $r = Invoke-Gate --map-query $Db --width 0 --sql $Sql
-    Assert-Exit $r 0
-    return $r
+    return Invoke-MapQuery $Db --width 0 --sql $Sql
 }
 
 Test-Case 'csdispatch: a Send reaches the request handler of its argument type, a Publish every notification handler' {

@@ -9,6 +9,7 @@
  */
 import { dedupeSummary, summarizeExpr } from './TsExprSummary.mjs';
 import { makeTsExprNormalizer } from './TsExprNorm.mjs';
+import { isOuterWrapper } from './TsNodes.mjs';
 
 /**
  * THE SHAPE A FUNCTION RETURNS, as dotted paths - the write side of a read.
@@ -22,6 +23,8 @@ import { makeTsExprNormalizer } from './TsExprNorm.mjs';
  */
 function writtenPaths(node, prefix, out) {
   if (node === null) return;
+  // `({ .. })!` returns the literal: `!` only narrows its type.
+  if (node.k === 'NonNull') return writtenPaths(node.expr ?? null, prefix, out);
   if (node.k === 'Fn') {
     for (const r of node.returns ?? []) writtenPaths(r, prefix, out);
     return;
@@ -71,8 +74,7 @@ export function draftWrites(ts, fn, declOf = null) {
     walked.add(key);
     const aliases = new Map(paths);
     const pathOf = (e) => {
-      if (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e)
-        || (ts.isSatisfiesExpression !== undefined && ts.isSatisfiesExpression(e))) return pathOf(e.expression);
+      if (isOuterWrapper(ts, e)) return pathOf(e.expression);
       if (ts.isIdentifier(e)) return aliases.get(e.text) ?? null;
       if (ts.isPropertyAccessExpression(e)) {
         const base = pathOf(e.expression);

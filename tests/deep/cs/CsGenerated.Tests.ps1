@@ -20,13 +20,7 @@ function Invoke-CsGeneratedMap([string]$Tree) {
 }
 
 function Get-CsGeneratedNumber([string]$Tree, [string]$Sql) {
-    $r = Invoke-Gate --map-query (Join-Path $Tree 'map.sqlite') --width 0 --sql $Sql
-    Assert-Exit $r 0
-    foreach ($line in $r.Lines) {
-        $trimmed = $line.Trim()
-        if ($trimmed.Length -gt 0 -and ($trimmed.ToCharArray() | Where-Object { -not [char]::IsDigit($_) }).Count -eq 0) { return $trimmed }
-    }
-    return ''
+    return Get-MapQueryNumber (Join-Path $Tree 'map.sqlite') --width 0 --sql $Sql
 }
 
 Test-Case 'generated: a partial a generator was going to write is labelled generator, not an error of the file' {

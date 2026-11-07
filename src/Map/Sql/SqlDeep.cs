@@ -41,15 +41,7 @@ internal static class SqlDeep
     /// <summary>The stale files parsed into ONE batch, with the whole sha map beside them.</summary>
     public static (List<string> Errors, (byte[] Buffer, int Length) Payload) Batch(JsonElement input, SqlConfig config)
     {
-        var paths = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        var shas = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        var counters = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var file in input.GetProperty("paths").EnumerateObject()) paths[file.Name] = file.Value.GetString()!;
-        foreach (var file in input.GetProperty("shas").EnumerateObject()) shas[file.Name] = file.Value.GetString()!;
-        if (input.GetProperty("counters").ValueKind == JsonValueKind.Object)
-        {
-            foreach (var prefix in input.GetProperty("counters").EnumerateObject()) counters[prefix.Name] = prefix.Value.GetInt32();
-        }
+        var (paths, shas, counters) = JsonInput.Batch(input);
         var rows = new CsTables(counters);
         var read = new List<(string Rel, string Abs)>();
         // WHICH SQL A FILE IS - the config's `dialects`, decided by rust; a file it does not name is T-SQL.

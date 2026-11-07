@@ -30,21 +30,13 @@ internal static class DeepMap
     /// <summary>The session: every file that will be sent, its sha, and the ids the database has handed out.</summary>
     public static void Open(JsonElement input)
     {
-        paths = new(StringComparer.Ordinal);
-        shas = new(StringComparer.Ordinal);
-        counters = new(StringComparer.Ordinal);
-        foreach (var file in input.GetProperty("paths").EnumerateObject()) paths[file.Name] = file.Value.GetString()!;
-        foreach (var file in input.GetProperty("shas").EnumerateObject()) shas[file.Name] = file.Value.GetString()!;
+        (paths, shas, counters) = JsonInput.Batch(input);
         excluded = input.TryGetProperty("excluded", out var listed)
             ? [.. listed.EnumerateArray().Select(r => r.GetString()!)]
             : new HashSet<string>(StringComparer.Ordinal);
         walked = input.TryGetProperty("generated", out var named)
             ? [.. named.EnumerateArray().Select(r => r.GetString()!)]
             : new HashSet<string>(StringComparer.Ordinal);
-        if (input.GetProperty("counters").ValueKind == JsonValueKind.Object)
-        {
-            foreach (var prefix in input.GetProperty("counters").EnumerateObject()) counters[prefix.Name] = prefix.Value.GetInt32();
-        }
         byPath = new(StringComparer.OrdinalIgnoreCase);
         foreach (var (rel, abs) in paths) byPath[abs] = rel;
         var roots = input.TryGetProperty("roots", out var listedRoots) ? [.. listedRoots.EnumerateArray().Select(r => r.GetString()!)] : new List<string>();

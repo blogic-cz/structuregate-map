@@ -476,7 +476,7 @@ internal sealed partial class CsRows : CSharpSyntaxWalker
             var bound = CsSemantics.Bound(model, attribute);
             Row("decorators", "d",
                 ("line", Line(attribute)),
-                ("name", CsFacts.Dotted(attribute.Name) is { Length: > 0 } written ? written : attribute.Name.ToString()),
+                ("name", CsFacts.DottedOr(attribute.Name)),
                 ("target", target),
                 ("target_kind", targetKind),
                 // `[Route]` and `[RouteAttribute]` are the same attribute, and two `[Feature]` in two
@@ -493,7 +493,7 @@ internal sealed partial class CsRows : CSharpSyntaxWalker
     {
         var symbol = CsSemantics.Name(CsSemantics.Bound(model, type));
         if (symbol.Length > 0) return symbol;
-        return CsFacts.Dotted(type) is { Length: > 0 } written ? written : type.ToString();
+        return CsFacts.DottedOr(type);
     }
 
     /// <summary>

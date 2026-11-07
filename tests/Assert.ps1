@@ -370,6 +370,73 @@ function Get-TsModules {
     return $script:TsCache.Path
 }
 
+# The compiler the TypeScript halves BORROW, in the ONE cache every TypeScript suite shares (`sgtest-tsrows`). Both packages, in one prefix, because the half checks for them together -
+# a root satisfying only `typescript` would let discovery work and template parsing fail one step later.
+function Get-SgTsModules {
+    if ($null -ne $script:SgTsCache) { return $script:SgTsCache.Path }
+    $script:SgTsCache = @{ Path = $null }
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return $null }
+    $cache = Join-Path ([System.IO.Path]::GetTempPath()) 'sgtest-tsrows'
+    $modules = Join-Path $cache 'node_modules'
+    if ((Test-Path (Join-Path $modules 'typescript\package.json')) -and
+        (Test-Path (Join-Path $modules '@angular\compiler\package.json')) -and
+        (Test-Path (Join-Path $modules '@ngrx\effects\package.json')) -and
+        (Test-Path (Join-Path $modules '@angular\common\package.json'))) {
+        $script:SgTsCache.Path = $modules
+        return $modules
+    }
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { return $null }
+    [void](New-Item -ItemType Directory -Path $cache -Force)
+    # PINNED TO ONE MAJOR: the half is written against the compiler API of these versions, and
+    # typescript 7 - the native port - does not expose `parseConfigFileTextToJson` at all, so
+    # `typescript@latest` tested a different tool.
+    # `@angular/core` as well, and not as a nicety: whether a decorator is ANGULAR's is resolved through the
+    # type checker to that package, so without it every decorator in a fixture is a local one.
+    # `@angular/router` and `@ngrx/store` as well: a route's lazy target and every state API are recognised
+    # by the declaration the CHECKER resolved, so without the packages a fixture's routes and actions are
+    # calls to nothing and the derived tables stay empty. `@angular/common`: a library pipe (`date`) is read off its typings.
+    # Under the cache's lock, and only if no other process filled it meanwhile: two shards installing at once
+    # corrupt the prefix, and a narrower install after a wider one prunes what the wider one added.
+    Use-CacheLock $cache {
+        if (-not (Test-Path (Join-Path $modules '@ngrx\effects\package.json'))) { & npm install --no-save --silent --prefix $cache 'typescript@5' '@angular/compiler@17' '@angular/core@17' '@angular/router@17' '@angular/common@17' '@ngrx/store@17' '@ngrx/effects@17' 2>&1 | Out-Null }
+    }
+    if ((Test-Path (Join-Path $modules 'typescript\package.json')) -and
+        (Test-Path (Join-Path $modules '@angular\compiler\package.json'))) {
+        $script:SgTsCache.Path = $modules
+    }
+    return $script:SgTsCache.Path
+}
+
+# ONE `--map-query` OVER A DEEP MAP THAT HAS TO SUCCEED, its lens arguments as given (`--sql`, `--width 0`, ...). Every suite's
+# query helper is this, so an exit that is not 0 fails the case in one place.
+function Invoke-MapQuery([string]$Path, [Parameter(ValueFromRemainingArguments)][object[]]$LensArgs) {
+    $result = Invoke-Gate --map-query $Path @LensArgs
+    Assert-Exit $result 0
+    return $result
+}
+
+# Every row of one query, as its `v=` cells, whole and unlimited.
+function Get-MapQueryRows([string]$Path, [string]$Sql) {
+    $r = Invoke-MapQuery $Path --sql $Sql --width 0 --limit 0
+    return @($r.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | ForEach-Object { $_.Trim().Substring(2) })
+}
+
+# The first `v=` cell of one query, '' when there is none.
+function Get-MapQueryValue([string]$Path, [string]$Sql) {
+    $line = (Invoke-MapQuery $Path --sql $Sql --width 0).Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | Select-Object -First 1
+    if ($null -eq $line) { return '' }
+    return $line.Trim().Substring(2)
+}
+
+# The first line of a query that is all digits (a `count(*)`), '' when there is none.
+function Get-MapQueryNumber([string]$Path, [Parameter(ValueFromRemainingArguments)][object[]]$LensArgs) {
+    foreach ($line in (Invoke-MapQuery $Path @LensArgs).Lines) {
+        $trimmed = $line.Trim()
+        if ($trimmed.Length -gt 0 -and ($trimmed.ToCharArray() | Where-Object { -not [char]::IsDigit($_) }).Count -eq 0) { return $trimmed }
+    }
+    return ''
+}
+
 # The gate with a resolvable compiler. NODE_PATH is read by the node the gate spawns, so the fixture tree
 # needs no node_modules of its own.
 function Invoke-TsGate {

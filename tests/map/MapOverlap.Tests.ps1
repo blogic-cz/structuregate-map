@@ -9,23 +9,8 @@
     Read off the run's trace. Its helpers are its own - `-Only MapOverlap` runs this suite alone.
 #>
 
-# A TypeScript 5 the PLAIN half can read - the cache the TsRows suites fill, or a fresh install there.
-function Get-MapOverlapModules {
-    $modules = Join-Path ([System.IO.Path]::GetTempPath()) 'sgtest-tsrows/node_modules'
-    if (-not (Get-Command node -ErrorAction SilentlyContinue)) { return $null }
-    if (Test-Path (Join-Path $modules 'typescript/package.json')) { return $modules }
-    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { return $null }
-    $cache = Split-Path $modules
-    [void](New-Item -ItemType Directory -Path $cache -Force)
-    # Under the cache's lock, and only if no other process filled it meanwhile: two shards installing at once
-    # corrupt the prefix, and a narrower install after a wider one prunes what the wider one added.
-    Use-CacheLock $cache {
-        if (-not (Test-Path (Join-Path $modules 'typescript/package.json'))) { & npm install --no-save --silent --prefix $cache 'typescript@5' 2>&1 | Out-Null }
-    }
-    if (Test-Path (Join-Path $modules 'typescript/package.json')) { return $modules }
-    return $null
-}
-$script:MapOverlapModules = Get-MapOverlapModules
+# The compiler cache every TypeScript suite shares (`Get-SgTsModules`, tests/Assert.ps1).
+$script:MapOverlapModules = Get-SgTsModules
 if (-not $script:MapOverlapModules) { Write-Host '    (no node/npm-installed typescript 5 - the typescript overlap cases are not run)' }
 
 # One `--map --map-sqlite` run over $Tree, traced; the result and its spans by name.

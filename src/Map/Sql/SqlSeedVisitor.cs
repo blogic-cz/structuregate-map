@@ -52,19 +52,15 @@ internal sealed class SqlSeedVisitor : TSqlFragmentVisitor
         Steps.Add(new Step(at.StartLine, Steps.Count, action, schema, name, source, columns ?? [], targets ?? [],
             kinds ?? [], exprs ?? [], text));
 
-    private string Text(TSqlFragment? fragment, string of) =>
-        fragment is null || fragment.StartOffset < 0 || fragment.StartOffset + fragment.FragmentLength > of.Length
-            ? "" : of.Substring(fragment.StartOffset, fragment.FragmentLength);
-
     /// <summary>
     /// One value as `(kind, expr)`: `int`, `num` and `str` carry the literal's value, `null` nothing, `var`
     /// the variable's name, and `expr` the expression's own text - anything a deploy computes at run time.
     /// </summary>
     private (string Kind, string Expr) Value(ScalarExpression? expression)
     {
-        var spelled = Text(expression, original);
+        var spelled = SqlVisitor.TextOf(expression, original);
         // `$(Var)` IS SQLCMD, SUBSTITUTED AT DEPLOY TIME: what ScriptDom read is a stand-in for it.
-        if (spelled != Text(expression, prepared)) return ("expr", spelled);
+        if (spelled != SqlVisitor.TextOf(expression, prepared)) return ("expr", spelled);
         switch (expression)
         {
             case ParenthesisExpression inner: return Value(inner.Expression);
@@ -115,11 +111,8 @@ internal sealed class SqlSeedVisitor : TSqlFragmentVisitor
             kinds.Add(kind);
             exprs.Add(expr);
         }
-        Add(at, "values", schema, name, columns: columns, kinds: kinds, exprs: exprs, text: Text(at, original));
+        Add(at, "values", schema, name, columns: columns, kinds: kinds, exprs: exprs, text: SqlVisitor.TextOf(at, original));
     }
-
-    private static string Last(ColumnReferenceExpression? column) =>
-        column?.MultiPartIdentifier?.Identifiers is { Count: > 0 } parts ? parts[^1].Value : "";
 
     /// <summary>A table written to, as `(schema, name)`; `@table` and `#temp` keep their sigil.</summary>
     private static (string Schema, string Name)? Target(TableReference? target) => target switch
@@ -143,7 +136,7 @@ internal sealed class SqlSeedVisitor : TSqlFragmentVisitor
     public override void ExplicitVisit(SetVariableStatement node)
     {
         // `SET @x += 1` depends on what @x was: a value this map does not compute.
-        var (kind, expr) = node.AssignmentKind == AssignmentKind.Equals ? Value(node.Expression) : ("expr", Text(node, original));
+        var (kind, expr) = node.AssignmentKind == AssignmentKind.Equals ? Value(node.Expression) : ("expr", SqlVisitor.TextOf(node, original));
         Add(node, "set", "", node.Variable.Name, kinds: [kind], exprs: [expr]);
     }
 
@@ -173,7 +166,7 @@ internal sealed class SqlSeedVisitor : TSqlFragmentVisitor
         foreach (var assigned in node.SelectElements.OfType<SelectSetVariable>())
         {
             var (kind, expr) = node.FromClause is null && assigned.AssignmentKind == AssignmentKind.Equals
-                ? Value(assigned.Expression) : ("expr", Text(assigned, original));
+                ? Value(assigned.Expression) : ("expr", SqlVisitor.TextOf(assigned, original));
             Add(assigned, "set", "", assigned.Variable.Name, kinds: [kind], exprs: [expr]);
         }
         base.ExplicitVisit(node);
@@ -194,14 +187,14 @@ internal sealed class SqlSeedVisitor : TSqlFragmentVisitor
     private static string Output(SelectElement element) => element switch
     {
         SelectScalarExpression { ColumnName.Value: { } alias } => alias,
-        SelectScalarExpression { Expression: ColumnReferenceExpression column } => Last(column),
+        SelectScalarExpression { Expression: ColumnReferenceExpression column } => SqlVisitor.Last(column),
         _ => "",
     };
 
     public override void ExplicitVisit(InsertSpecification node)
     {
         if (Target(node.Target) is not var (schema, name)) return;
-        var columns = node.Columns.Select(Last).ToList();
+        var columns = node.Columns.Select(SqlVisitor.Last).ToList();
         switch (node.InsertSource)
         {
             case ValuesInsertSource values:
@@ -260,7 +253,7 @@ internal sealed class SqlSeedVisitor : TSqlFragmentVisitor
     private static ScalarExpression Cell(ScalarExpression expression, List<string> names, RowValue row)
     {
         if (expression is not ColumnReferenceExpression column) return expression;
-        var at = names.FindIndex(n => string.Equals(n, Last(column), StringComparison.OrdinalIgnoreCase));
+        var at = names.FindIndex(n => string.Equals(n, SqlVisitor.Last(column), StringComparison.OrdinalIgnoreCase));
         return at >= 0 && at < row.ColumnValues.Count ? row.ColumnValues[at] : expression;
     }
 
@@ -287,13 +280,13 @@ internal sealed class SqlSeedVisitor : TSqlFragmentVisitor
         foreach (var clause in node.SetClauses)
         {
             if (clause is not AssignmentSetClause { Column: { } column, Variable: null } set) return;
-            sets.Add((Last(column), set.AssignmentKind == AssignmentKind.Equals ? Value(set.NewValue) : ("expr", Text(set, original))));
+            sets.Add((SqlVisitor.Last(column), set.AssignmentKind == AssignmentKind.Equals ? Value(set.NewValue) : ("expr", SqlVisitor.TextOf(set, original))));
         }
         var keys = where.Select(w => Value(w.Value)).ToList();
         if (keys.Any(k => k.Kind == "expr")) return;
         Add(node, "update", schema, name, columns: [.. sets.Select(s => s.Column)], targets: [.. where.Select(w => w.Column)],
             kinds: [.. sets.Select(s => s.Value.Kind), .. keys.Select(k => k.Kind)],
-            exprs: [.. sets.Select(s => s.Value.Expr), .. keys.Select(k => k.Expr)], text: Text(node, original));
+            exprs: [.. sets.Select(s => s.Value.Expr), .. keys.Select(k => k.Expr)], text: SqlVisitor.TextOf(node, original));
     }
 
     private static bool Where(BooleanExpression condition, List<(string Column, ScalarExpression Value)> into)
@@ -307,10 +300,10 @@ internal sealed class SqlSeedVisitor : TSqlFragmentVisitor
                 var (column, value) = equals.FirstExpression is ColumnReferenceExpression first
                     ? (first, equals.SecondExpression) : (equals.SecondExpression as ColumnReferenceExpression, equals.FirstExpression);
                 if (column is null || value is ColumnReferenceExpression) return false;
-                into.Add((Last(column), value));
+                into.Add((SqlVisitor.Last(column), value));
                 return true;
             case InPredicate { NotDefined: false, Subquery: null, Expression: ColumnReferenceExpression listed } list:
-                foreach (var item in list.Values) into.Add((Last(listed), item));
+                foreach (var item in list.Values) into.Add((SqlVisitor.Last(listed), item));
                 return true;
             default: return false;
         }
@@ -321,19 +314,15 @@ internal sealed class SqlSeedVisitor : TSqlFragmentVisitor
     /// (`source` is its last line); an IF the data decides (`IF NOT EXISTS`) is no condition.</summary>
     public override void ExplicitVisit(IfStatement node)
     {
-        var predicate = Text(node.Predicate, original);
+        var predicate = SqlVisitor.TextOf(node.Predicate, original);
         if (predicate.Contains("$(", StringComparison.Ordinal))
         {
-            Add(node.ThenStatement, "if", "", predicate, source: EndLine(node.ThenStatement).ToString(CultureInfo.InvariantCulture));
+            Add(node.ThenStatement, "if", "", predicate, source: SqlVisitor.EndLine(node.ThenStatement).ToString(CultureInfo.InvariantCulture));
             if (node.ElseStatement is { } otherwise)
-                Add(otherwise, "if", "", $"NOT ({predicate})", source: EndLine(otherwise).ToString(CultureInfo.InvariantCulture));
+                Add(otherwise, "if", "", $"NOT ({predicate})", source: SqlVisitor.EndLine(otherwise).ToString(CultureInfo.InvariantCulture));
         }
         base.ExplicitVisit(node);
     }
-
-    private static int EndLine(TSqlFragment fragment) =>
-        fragment.LastTokenIndex >= 0 && fragment.ScriptTokenStream is { } tokens && fragment.LastTokenIndex < tokens.Count
-            ? tokens[fragment.LastTokenIndex].Line : fragment.StartLine;
 
     /// <summary>The temp column a select element reads, when it reads one of THAT temp.</summary>
     private static string? Read(SelectElement element, string temp, string alias, bool single)
@@ -385,13 +374,13 @@ internal sealed class SqlSeedVisitor : TSqlFragmentVisitor
                     for (var i = 0; i < row.ColumnValues.Count && (insert.Columns.Count == 0 || i < insert.Columns.Count); i++)
                     {
                         if (row.ColumnValues[i] is ColumnReferenceExpression from)
-                            map.TryAdd(Last(from), insert.Columns.Count == 0 ? $"#{i + 1}" : Last(insert.Columns[i]));
+                            map.TryAdd(SqlVisitor.Last(from), insert.Columns.Count == 0 ? $"#{i + 1}" : SqlVisitor.Last(insert.Columns[i]));
                     }
                     break;
                 case UpdateMergeAction update:
                     foreach (var set in update.SetClauses.OfType<AssignmentSetClause>())
                     {
-                        if (set.NewValue is ColumnReferenceExpression from) map.TryAdd(Last(from), Last(set.Column));
+                        if (set.NewValue is ColumnReferenceExpression from) map.TryAdd(SqlVisitor.Last(from), SqlVisitor.Last(set.Column));
                     }
                     break;
             }

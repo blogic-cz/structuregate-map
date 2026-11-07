@@ -13,7 +13,7 @@
  * measured over a whole scope the largest body stayed well under it. A limit that never triggers defends
  * nothing and is one more number to defend; one that DID trigger would silently shorten a body's record.
  */
-import { locationOf } from './TsNodes.mjs';
+import { locationOf, unwrapOuter } from './TsNodes.mjs';
 import { catchFacts, chainOf } from './TsCatch.mjs';
 import { loopFacts, loopKind } from './TsLoops.mjs';
 
@@ -214,12 +214,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
    * them. Nothing here knows what a "feature" is - that join belongs to the consumer.
    */
   /** The target a written left side NAMES, through what only TYPES it: `(o.x as T) = v` writes `o.x`. */
-  const written = (left) => {
-    let at = left;
-    while (ts.isParenthesizedExpression(at) || ts.isAsExpression(at) || ts.isTypeAssertionExpression(at)
-      || ts.isNonNullExpression(at) || (ts.isSatisfiesExpression && ts.isSatisfiesExpression(at))) at = at.expression;
-    return at;
-  };
+  const written = (left) => unwrapOuter(ts, left);
 
   function emitAssignment(node, ownerId, classId) {
     if (!ts.isBinaryExpression(node) || !isAssignmentOperator(node.operatorToken.kind)) return;
