@@ -23,6 +23,9 @@ Roslyn. It is called in process: its line counter by `count/` (the gate) and `ma
 - `proc_macro2::extra::invalidate_current_thread_spans()` runs after every file. Outside a proc macro the
   lexer keeps every file's text in a thread-local map for the life of the thread otherwise.
 - A file the lexer refuses falls back to the `//` scanner for its count and is `UNPARSED` in the map.
+- THE FILE MAP'S COPIES (`rsmap/fingerprint.rs`): each body's digest and its per-statement shingles (`similar_bodies`), and every
+  call, method call, binary, struct/array literal, closure or macro of at least 12 tokens (`duplicate_expressions`), local names blanked.
+  A kept answer is keyed on the half's stamp (`rust|paths|copies` in `mapper/halves.rs`): bump it with every new field, or an unchanged file keeps the old answer.
 
 `#[path]` IS HOW A FOLDER IS SPLIT without moving a module: `rows/ts/gate/` and `rows/ts/key/` keep every
 `super::` meaning `rows::ts`. `store_tests.rs` is `store::tests` the same way.

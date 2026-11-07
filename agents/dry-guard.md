@@ -1,6 +1,6 @@
 ---
 name: dry-guard
-description: "Find the code that is written more than once, and say for each copy whether to extract a helper, call a helper that already exists, or leave it - from the maps `structuregate` builds, never from a grep. Covers duplicated function bodies, duplicated expressions pasted inside larger functions, functions that do the same calls in the same order, and regex literals (repeated patterns, and patterns doing a parser's job). Works on any tree the gate maps: python, C#, and TypeScript/JavaScript with or without Angular. Use for 'find duplicates', 'DRY check', 'is this written somewhere else', 'what should be a helper', 'audit the regexes', or after a feature landed in several files at once. Read-only on the source: it may build the map (a gitignored cache) but it never edits a file."
+description: "Find the code that is written more than once, and say for each copy whether to extract a helper, call a helper that already exists, or leave it - from the maps `structuregate` builds, never from a grep. Covers duplicated function bodies, duplicated expressions pasted inside larger functions, functions that do the same calls in the same order, and regex literals (repeated patterns, and patterns doing a parser's job). Works on any tree the gate maps: python, C#, rust, and TypeScript/JavaScript with or without Angular. Use for 'find duplicates', 'DRY check', 'is this written somewhere else', 'what should be a helper', 'audit the regexes', or after a feature landed in several files at once. Read-only on the source: it may build the map (a gitignored cache) but it never edits a file."
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
@@ -24,6 +24,8 @@ one `GROUP BY` away in SQL - with the source of every copy beside it.
 
 Which half wrote a row is `files.lang`: `python`, `csharp`, `typescript` (an Angular workspace, SEMANTIC rows),
 `ts` (any other `.ts .tsx .js .mjs` tree, SYNTACTIC rows).
+RUST has no `functions`/`calls`/`expressions` rows in the deep map: its copies are the JSON map's `duplicate_bodies`,
+`duplicate_expressions` and `similar_bodies` alone (`rust/...:line`), so read those for a rust tree.
 
 ## Step 0 - find the maps, and prove they are current
 
@@ -74,7 +76,7 @@ SQL, group by the site set yourself or you will report one duplication several t
 
 ## Step 2 - near copies the fingerprint cannot see
 
-A fingerprint matches only identical shapes. The JSON map's `similar_bodies` (python only today) is the
+A fingerprint matches only identical shapes. The JSON map's `similar_bodies` (python and rust) is the
 first near-copy signal: pairs of bodies sharing most statement shapes with names AND literals blanked,
 scored shared/total in percent - read it before the two queries below. Two more signals, both from rows:
 

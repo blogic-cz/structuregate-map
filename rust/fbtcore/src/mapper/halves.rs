@@ -5,7 +5,7 @@
 //! map of a tree with no python in it.
 
 use super::protocol::{read, Collector};
-use crate::graph::{Computed, ModEntry, Place, Qualified};
+use crate::graph::{Computed, ModEntry, Place, Qualified, Shingled};
 use crate::hosts::plugins;
 use super::kept::Kept;
 use crate::rsmap::cargo;
@@ -32,7 +32,7 @@ pub fn mark(into: &mut Collector, prefix: &str, files: &[(String, String)], reas
 
 /// THE RUST HALF, in process: `syn` parses, and a `mod name;` is an exact edge.
 pub fn rust(into: &mut Collector, root: &str, prefix: &str, files: &[(String, String)], kept: &mut Option<Kept>) {
-    in_process(into, root, prefix, files, kept, ("rust", "rust in-process (syn)", "rust|paths".into()), rsmap::map_file);
+    in_process(into, root, prefix, files, kept, ("rust", "rust in-process (syn)", "rust|paths|copies".into()), rsmap::map_file);
     rust_crates(into, root, prefix, files);
 }
 
@@ -165,8 +165,19 @@ fn in_process(into: &mut Collector, root: &str, prefix: &str, files: &[(String, 
             file.uses_path.extend(by_folder.get(&folder).into_iter().flatten().filter(|p| **p != rel).cloned());
         }
         for body in row["bodies"].as_array().into_iter().flatten() {
-            let place = Place(format!("{prefix}{}", body["where"].as_str().unwrap_or("")), body["size"].as_u64().unwrap_or(0) as usize);
-            into.bodies.entry(body["digest"].as_str().unwrap_or("").into()).or_default().push(place);
+            let (digest, size) = (body["digest"].as_str().unwrap_or(""), body["size"].as_u64().unwrap_or(0) as usize);
+            let place = format!("{prefix}{}", body["where"].as_str().unwrap_or(""));
+            // A HALF THAT SENDS SHINGLES (rust) is compared for near copies too (`similar_bodies`).
+            let shingles = strings(&body["shingles"]);
+            if !shingles.is_empty() {
+                into.shingled.push(Shingled { place: place.clone(), size, digest: digest.into(), shingles });
+            }
+            into.bodies.entry(digest.into()).or_default().push(Place(place, size));
+        }
+        // AN EXPRESSION LONG ENOUGH TO BE A COPY (`duplicate_expressions`), at `rel:line`.
+        for e in row["expressions"].as_array().into_iter().flatten() {
+            let place = Place(format!("{prefix}{}", e["where"].as_str().unwrap_or("")), e["size"].as_u64().unwrap_or(0) as usize);
+            into.expressions.entry(e["digest"].as_str().unwrap_or("").into()).or_default().push(place);
         }
     }
     into.halves.insert(label.into());

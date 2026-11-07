@@ -269,6 +269,27 @@ Test-Case 'rs map: two identical bodies are ONE duplicate group, local names and
     Assert-Line $found 'src/a.rs:1:one'
 }
 
+Test-Case 'rs map: an expression pasted inside two larger bodies is COPIED, and a near-copy body is SIMILAR' {
+    # THE SAME CHAIN UNDER TWO SETS OF LOCAL NAMES, inside bodies that differ: no body digest sees it, the expression one does.
+    $a = "pub fn one(p: &[u8]) -> usize {`n    let total = p.iter().filter(|b| **b > 7).map(|b| *b as usize).sum::<usize>();`n    total`n}`n"
+    $b = "pub fn two(q: &[u8], z: bool) -> usize {`n    if z { return 0; }`n    let all = q.iter().filter(|c| **c > 7).map(|c| *c as usize).sum::<usize>();`n    all + 1`n}`n"
+    # SHARED VOCABULARY, under the token floor: no group.
+    $c = "pub fn three(x: &str) -> usize { x.len() + 1 }`n"
+    $d = "pub fn four(y: &str) -> usize { y.len() + 1 }`n"
+    # ONE LITERAL APART: no identical body, every statement shape shared.
+    $e = "pub fn five(v: &mut Vec<u32>) {`n    v.push(3);`n    v.sort();`n    v.dedup();`n}`n"
+    $f = "pub fn six(w: &mut Vec<u32>) {`n    w.push(5);`n    w.sort();`n    w.dedup();`n}`n"
+    $tree = Use-Tree @{ 'src/lib.rs' = "mod a;`nmod b;`nmod c;`nmod d;`nmod e;`nmod f;`n"; 'src/a.rs' = $a; 'src/b.rs' = $b; 'src/c.rs' = $c; 'src/d.rs' = $d; 'src/e.rs' = $e; 'src/f.rs' = $f }
+    $found = Get-RsMap --root $tree --map-check
+    Assert-Exit $found 0
+    Assert-Line $found 'COPIED    the same'
+    Assert-Line $found 'src/a.rs:2, src/b.rs:3'
+    Assert-NoLine $found 'src/c.rs:1'
+    Assert-Line $found 'SIMILAR   2 function bodies share 3 of 3 statement shape(s)'
+    Assert-Line $found 'src/e.rs:1:five, src/f.rs:1:six'
+    Assert-NoLine $found 'DUPLICATE'
+}
+
 # ---------------------------------------------------------------------------------------------------
 # The deep map - `consts`, in the columns the C# and python halves write
 # ---------------------------------------------------------------------------------------------------

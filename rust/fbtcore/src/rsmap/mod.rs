@@ -66,7 +66,12 @@ fn read(root: &Path, rel: &str, text: &str) -> Value {
     let bodies: Vec<Value> = found
         .bodies
         .iter()
-        .map(|b| json!({ "digest": b.digest, "where": format!("{rel}:{}:{}", b.line, b.name), "size": b.size }))
+        .map(|b| json!({ "digest": b.digest, "where": format!("{rel}:{}:{}", b.line, b.name), "size": b.size, "shingles": b.shingles }))
+        .collect();
+    let expressions: Vec<Value> = found
+        .expressions
+        .iter()
+        .map(|e| json!({ "digest": e.digest, "where": format!("{rel}:{}", e.line), "size": e.size }))
         .collect();
     json!({
         "rel": rel,
@@ -83,6 +88,7 @@ fn read(root: &Path, rel: &str, text: &str) -> Value {
         "globs": globs,
         "entry": found.has_main || modpath::is_crate_root(rel),
         "bodies": bodies,
+        "expressions": expressions,
     })
 }
 
