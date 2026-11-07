@@ -48,7 +48,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from PyAst import BOUND_INSIDE, MIN_EXPRESSION_NODES, NEWLINE, dotted, facts, reads_of, payload_text, segment, shape, sizes, used_names  # noqa: E402
+from PyAst import BOUND_INSIDE, MIN_EXPRESSION_NODES, NEWLINE, dotted, facts, is_str, reads_of, payload_text, segment, shape, sizes, used_names  # noqa: E402
 import PyDeps  # noqa: E402
 from PyBind import Binder, Tree  # noqa: E402
 from PyLaunch import launched  # noqa: E402
@@ -309,7 +309,7 @@ class Walker(Statements, ast.NodeVisitor):
                                                   **reads_of(node.value), calls=rhs["calls"], keys=keys))
         if not self.stack and name == "__all__" and isinstance(node.value, (ast.List, ast.Tuple)):
             for element in node.value.elts:
-                if isinstance(element, ast.Constant) and isinstance(element.value, str):
+                if is_str(element):
                     self.rows.add("exports", "e", dict(where, line=node.lineno, name=element.value))
 
     def visit_Return(self, node) -> None:
@@ -368,7 +368,7 @@ class Walker(Statements, ast.NodeVisitor):
         # there may be reached. A literal name is not that - it is `plugins.name`, bound like any call.
         if dotted(node.func) == "getattr" and len(node.args) >= 2:
             name = node.args[1]
-            if isinstance(name, ast.Constant) and isinstance(name.value, str):
+            if is_str(name):
                 target_path, target_name = self.binder.resolve(dotted(node.args[0]) + "." + name.value)
             else:
                 target_path = self.binder.module_of(dotted(node.args[0]))

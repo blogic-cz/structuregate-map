@@ -14,7 +14,7 @@ from __future__ import annotations
 import ast
 import os
 
-from PyAst import dotted
+from PyAst import dotted, is_str
 from PyBind import Tree, listing
 
 
@@ -90,7 +90,7 @@ def setup_specs(tree: ast.Module) -> list:
         for word in node.keywords:
             if word.arg == "entry_points":
                 specs += [c.value for c in ast.walk(word.value)
-                          if isinstance(c, ast.Constant) and isinstance(c.value, str)]
+                          if is_str(c)]
     return specs
 
 
@@ -101,7 +101,7 @@ def spec_scripts(tree: ast.Module) -> list:
         if (isinstance(node, ast.Call) and dotted(node.func).split(".")[-1] == "Analysis" and node.args
                 and isinstance(node.args[0], (ast.List, ast.Tuple))):
             scripts += [e.value for e in node.args[0].elts
-                        if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+                        if is_str(e)]
     return scripts
 
 

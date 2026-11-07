@@ -131,10 +131,7 @@ pub(super) fn shown(store: &Store<'_>, options: &[Offered]) -> Shown {
                 for prop in props {
                     let hint = name.as_ref().is_some_and(|n| inputs.contains(n)) || under_hint(&id);
                     let as_ = if hint { "hint" } else { "option" };
-                    let slot = found.entry(prop).or_insert((as_, id.clone()));
-                    if slot.0 == "hint" && as_ == "option" {
-                        *slot = (as_, id.clone());
-                    }
+                    note(&mut found, prop, as_, &id);
                 }
             }
             // A CHILD DECLARING THE SAME NAME shadows the item below it.
@@ -147,14 +144,19 @@ pub(super) fn shown(store: &Store<'_>, options: &[Offered]) -> Shown {
         for owner in owners {
             let props = out.entry(owner.clone()).or_default();
             for (prop, (as_, node)) in &found {
-                let slot = props.entry(prop.clone()).or_insert((*as_, node.clone()));
-                if slot.0 == "hint" && *as_ == "option" {
-                    *slot = (*as_, node.clone());
-                }
+                note(props, prop.clone(), as_, node);
             }
         }
     }
     out
+}
+
+/// Records that `prop` is shown `as_` at `node`. The first place stands, except that an option outranks a hint.
+fn note(props: &mut HashMap<String, (&'static str, String)>, prop: String, as_: &'static str, node: &str) {
+    let slot = props.entry(prop).or_insert((as_, node.to_string()));
+    if slot.0 == "hint" && as_ == "option" {
+        *slot = (as_, node.to_string());
+    }
 }
 
 /// Member row id -> each (control node, input) whose input is that `@Input` of a component the control's node renders.

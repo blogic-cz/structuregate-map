@@ -95,6 +95,21 @@ def dotted(node) -> str:
     return ""
 
 
+def is_str(node) -> bool:
+    """A string literal."""
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def callee_tail(call) -> str:
+    """The last name of a call's callee - `join` for `os.path.join(...)`, "" for a computed one."""
+    return dotted(call.func).split(".")[-1]
+
+
+def taken_names(node) -> tuple:
+    """The names a `from ... import` takes, a star left out."""
+    return tuple(a.name for a in node.names if a.name != "*")
+
+
 # THE FILE'S NODES, walked ONCE: a dozen passes each walked the same tree again through `ast.walk`, the half's
 # single largest cost. Same order as `ast.walk`, so nothing a pass emits moves. Keyed by the tree OBJECT, held
 # while it is in use - an `id` alone could name the next file's tree once this one is freed.
@@ -122,7 +137,7 @@ def looked_up(tree: ast.AST) -> dict:
             key, receiver = node.args[0], node.func.value
         else:
             continue
-        if isinstance(key, ast.Constant) and isinstance(key.value, str):
+        if is_str(key):
             found[id(key)] = receiver
     return found
 
@@ -137,12 +152,12 @@ def path_parts(tree: ast.AST) -> set:
     found = set()
     for node in walked(tree):
         parts = []
-        if isinstance(node, ast.Call) and dotted(node.func).split(".")[-1] in PATH_CALLS:
+        if isinstance(node, ast.Call) and callee_tail(node) in PATH_CALLS:
             parts = node.args
         elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
             parts = [node.left, node.right]
         for part in parts:
-            if isinstance(part, ast.Constant) and isinstance(part.value, str):
+            if is_str(part):
                 found.add(id(part))
     return found
 
@@ -199,7 +214,7 @@ def facts(node) -> dict:
             target = dotted(sub.func)
             if target:
                 calls.add(target)
-        elif isinstance(sub, ast.Constant) and isinstance(sub.value, str) and sub.value:
+        elif is_str(sub) and sub.value:
             strings.append(sub.value)
     out = {"reads": sorted(reads), "calls": sorted(calls), "strings": strings}
     inside = bound_inside(node)
@@ -249,7 +264,7 @@ def used_names(tree: ast.Module) -> set:
         if isinstance(node, ast.Name) and not isinstance(node.ctx, (ast.Store, ast.Del)):
             found.add(node.id)
         for hint in annotations_of(node):
-            if isinstance(hint, ast.Constant) and isinstance(hint.value, str):
+            if is_str(hint):
                 try:
                     parsed = ast.parse(hint.value, mode="eval")
                 except SyntaxError:
@@ -259,7 +274,7 @@ def used_names(tree: ast.Module) -> set:
         targets = node.targets if isinstance(node, ast.Assign) else []
         if any(isinstance(t, ast.Name) and t.id == "__all__" for t in targets) and \
                 isinstance(node.value, (ast.List, ast.Tuple)):
-            found.update(e.value for e in node.value.elts if isinstance(e, ast.Constant) and isinstance(e.value, str))
+            found.update(e.value for e in node.value.elts if is_str(e))
     return found
 
 

@@ -24,7 +24,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from PyAst import (IMPORTERS, NEWLINE, block_span, char_column, dotted, heads, line_table, looked_up, packages, path_parts, sizes,  # noqa: E402,F401
+from PyAst import (IMPORTERS, NEWLINE, block_span, callee_tail, char_column, dotted, is_str, heads, line_table, looked_up, packages, path_parts, sizes,  # noqa: E402,F401
                    span, span_end, span_start, walked)
 from PyBind import Binder, Tree, declares, exists_exact, module_path, relative_path  # noqa: E402
 from PyLaunch import entry_spec, launched  # noqa: E402
@@ -259,7 +259,7 @@ def dynamic(root: str, rel: str, tree: ast.Module) -> None:
         if name not in IMPORTERS:
             continue
         first = node.args[0]
-        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+        if is_str(first):
             path = module_path(root, first.value)
             if path:
                 emit("MAP-PATH", rel, path)
@@ -286,7 +286,7 @@ def keyed(tree: ast.Module) -> list:
     """
     found = []
     for node in walked(tree):
-        if isinstance(node, ast.Call) and dotted(node.func).split(".")[-1] in INDIRECTION:
+        if isinstance(node, ast.Call) and callee_tail(node) in INDIRECTION:
             found += list(node.args) + [word.value for word in node.keywords]
     for node in tree.body:
         if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:

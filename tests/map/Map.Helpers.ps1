@@ -33,3 +33,9 @@ function Get-Imports($Map, [string]$Rel) {
     if (-not $property) { return ,@() }
     return ,@($property.Value)
 }
+
+# What a file imports, sorted and joined - '' for none.
+function Get-ImportsText($Map, [string]$Rel) {
+    $listed = Get-Imports $Map $Rel
+    return ($listed | Sort-Object) -join ','
+}

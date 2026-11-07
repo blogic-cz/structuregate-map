@@ -6,8 +6,10 @@
     - A GENERIC OR QUALIFIED TYPE NAME is a reference: a `refs` row naming the type's DEFINITION, and an edge.
     - A CLASS A FRAMEWORK ACTIVATES BY CONVENTION (a controller, a page model, a hub) is `registered`, not NO READER.
 
-    Its helpers are its own - `-Only CsEdges` runs this suite alone.
+    Its helpers are its own and `map/Map.Helpers.ps1`'s - `-Only CsEdges` runs this suite alone.
 #>
+
+. (Join-Path $PSScriptRoot '../../map/Map.Helpers.ps1')
 
 $script:CsEdgesProject = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
 
@@ -17,13 +19,6 @@ function Invoke-CsEdgesMap([string]$Tree, [switch]$Deep) {
     $result = Invoke-Gate --root $Tree --ext .cs --skip 'bin,obj' --map --map-check --map-out (Join-Path $Tree 'm.json') @sqlite
     $map = [System.IO.File]::ReadAllText((Join-Path $Tree 'm.json')) | ConvertFrom-Json
     return [pscustomobject]@{ Result = $result; Map = $map }
-}
-
-# What a file imports, sorted and joined - '' for none.
-function Get-CsEdgesImports($Map, [string]$Rel) {
-    $listed = $Map.imports.$Rel
-    if ($null -eq $listed) { return '' }
-    return (@($listed) | Sort-Object) -join ','
 }
 
 function Get-CsEdgesNumber([string]$Tree, [string]$Sql) {
@@ -38,12 +33,12 @@ Test-Case 'edges: a name declared in two files joins the one the compiler bound,
         'Use.cs'            = 'namespace Demo; using Demo.Results; public class Use { public Result Go() => Result.Ok(); }'
     }
     $run = Invoke-CsEdgesMap $tree -Deep
-    Assert-Equal (Get-CsEdgesImports $run.Map 'Use.cs') 'Results/Result.cs' 'the bound edge'
+    Assert-Equal (Get-ImportsText $run.Map 'Use.cs') 'Results/Result.cs' 'the bound edge'
     Assert-NoLine $run.Result 'AMBIGUOUS'
     Assert-Equal (Get-CsEdgesNumber $tree "SELECT count(*) FROM file_refs r JOIN files f ON f.id = r.file WHERE f.path = 'Use.cs' AND r.target = 'Results/Result.cs'") '1' 'the file_refs row'
     # WITHOUT THE COMPILER the name join is what it always was: no edge, and the name reported.
     $plain = Invoke-CsEdgesMap $tree
-    Assert-Equal (Get-CsEdgesImports $plain.Map 'Use.cs') '' 'no edge from the name alone'
+    Assert-Equal (Get-ImportsText $plain.Map 'Use.cs') '' 'no edge from the name alone'
 }
 
 Test-Case 'edges: a bound target that no longer declares the name is no edge - the rows an unchanged file kept are not taken on their word' {
@@ -55,11 +50,11 @@ Test-Case 'edges: a bound target that no longer declares the name is no edge - t
         'Use.cs'       = 'namespace Demo; using Demo.A; public class Use { public Result Held; }'
     }
     $first = Invoke-CsEdgesMap $tree -Deep
-    Assert-Equal (Get-CsEdgesImports $first.Map 'Use.cs') 'A/Result.cs' 'bound to A first'
+    Assert-Equal (Get-ImportsText $first.Map 'Use.cs') 'A/Result.cs' 'bound to A first'
     # A's Result is renamed: Use.cs did not change, so its deep rows - and their target A - are kept.
     [System.IO.File]::WriteAllText((Join-Path $tree 'A/Result.cs'), 'namespace Demo.A; public class Renamed { }')
     $after = Invoke-CsEdgesMap $tree -Deep
-    Assert-Equal (Get-CsEdgesImports $after.Map 'Use.cs') '' 'no edge to a file that no longer declares Result'
+    Assert-Equal (Get-ImportsText $after.Map 'Use.cs') '' 'no edge to a file that no longer declares Result'
 }
 
 Test-Case 'refs: an open generic, a constructed generic and a qualified type name are rows naming the definition, and edges' {
@@ -74,7 +69,7 @@ Test-Case 'refs: an open generic, a constructed generic and a qualified type nam
     $refs = "SELECT count(*) FROM refs r JOIN files f ON f.id = r.file WHERE f.path = 'Reg.cs' AND r.kind = 'namedtype' AND r.symbol = "
     Assert-Equal (Get-CsEdgesNumber $tree ($refs + "'Demo.Pipeline<TReq, TRes>'")) '2' 'typeof(Pipeline<,>) and Pipeline<int, string>, by the definition'
     Assert-Equal (Get-CsEdgesNumber $tree ($refs + "'Demo.Other.Thing'")) '1' 'the qualified name'
-    Assert-Equal (Get-CsEdgesImports $run.Map 'Reg.cs') 'Pipeline.cs' 'the generic name is an edge of the file map'
+    Assert-Equal (Get-ImportsText $run.Map 'Reg.cs') 'Pipeline.cs' 'the generic name is an edge of the file map'
     Assert-NoLine $run.Result 'NO READER Pipeline.cs'
 }
 

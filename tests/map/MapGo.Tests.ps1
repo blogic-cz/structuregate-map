@@ -4,8 +4,10 @@
     `alias.Name` joins in the folder the import names through `go.mod` (or `vendor/`). A method reaches its file
     through its receiver type; build-constraint variants of one name are all targets; a `_test.go` declares nothing.
 
-    Its helpers are its own - `-Only MapGo` runs this suite alone.
+    Its helpers are its own and `map/Map.Helpers.ps1`'s - `-Only MapGo` runs this suite alone.
 #>
+
+. (Join-Path $PSScriptRoot 'Map.Helpers.ps1')
 
 $script:GoModule = "module example.com/demo`n`ngo 1.22`n"
 
@@ -14,12 +16,6 @@ function Invoke-GoMap([string]$Tree) {
     $result = Invoke-Gate --root $Tree --ext .go --map --map-check --map-out (Join-Path $Tree 'm.json')
     $map = [System.IO.File]::ReadAllText((Join-Path $Tree 'm.json')) | ConvertFrom-Json
     return [pscustomobject]@{ Result = $result; Map = $map }
-}
-
-function Get-GoImports($Map, [string]$Rel) {
-    $listed = $Map.imports.$Rel
-    if ($null -eq $listed) { return '' }
-    return (@($listed) | Sort-Object) -join ','
 }
 
 Test-Case 'go: an aliased import joins the folder go.mod names, a method file through its type, and the tool chain''s entries' {
@@ -37,9 +33,9 @@ Test-Case 'go: an aliased import joins the folder go.mod names, a method file th
     $run = Invoke-GoMap $tree
     Assert-Exit $run.Result 0
     Assert-Line $run.Result 'go in-process (gosyn)'
-    Assert-Equal (Get-GoImports $run.Map 'cmd/app/main.go') 'internal/store/store.go' 'through the alias st'
+    Assert-Equal (Get-ImportsText $run.Map 'cmd/app/main.go') 'internal/store/store.go' 'through the alias st'
     # THE METHOD FILE THROUGH ITS TYPE: `store.go` names `Store`, whose `Load` lives in `load.go`.
-    Assert-Equal (Get-GoImports $run.Map 'internal/store/store.go') 'internal/store/load.go,internal/util/util.go' 'the method file, and a generic function through its import'
+    Assert-Equal (Get-ImportsText $run.Map 'internal/store/store.go') 'internal/store/load.go,internal/util/util.go' 'the method file, and a generic function through its import'
     Assert-Equal $run.Map.files.'cmd/app/main.go'.entry $true 'package main with func main'
     Assert-Equal $run.Map.files.'internal/store/store_test.go'.entry $true 'a test file'
     Assert-Equal ((@($run.Map.files.'internal/util/reg.go'.registered)) -join ',') 'init' 'a file with init'
@@ -58,8 +54,8 @@ Test-Case 'go: two packages that declare one name never meet, and a test file de
         'c/c.go'       = "package c`n`nimport ""example.com/demo/a""`n`nfunc Go() int { return a.New() }`n"
     }
     $run = Invoke-GoMap $tree
-    Assert-Equal (Get-GoImports $run.Map 'c/c.go') 'a/a.go' 'only the package the import names'
-    Assert-Equal (Get-GoImports $run.Map 'b/use.go') '' 'not a name only the test build declares'
+    Assert-Equal (Get-ImportsText $run.Map 'c/c.go') 'a/a.go' 'only the package the import names'
+    Assert-Equal (Get-ImportsText $run.Map 'b/use.go') '' 'not a name only the test build declares'
     Assert-NoLine $run.Result 'AMBIGUOUS'
 }
 
@@ -72,7 +68,7 @@ Test-Case 'go: build-constraint variants of one name are all targets, and a vend
         'vendor/golang.org/x/lib/lib.go'      = "package lib`n`nconst Value = 3`n"
     }
     $run = Invoke-GoMap $tree
-    Assert-Equal (Get-GoImports $run.Map 'sys/use.go') 'sys/open_linux.go,sys/open_windows.go,vendor/golang.org/x/lib/lib.go' 'both variants and the vendored copy'
+    Assert-Equal (Get-ImportsText $run.Map 'sys/use.go') 'sys/open_linux.go,sys/open_windows.go,vendor/golang.org/x/lib/lib.go' 'both variants and the vendored copy'
     Assert-NoLine $run.Result 'AMBIGUOUS'
 }
 

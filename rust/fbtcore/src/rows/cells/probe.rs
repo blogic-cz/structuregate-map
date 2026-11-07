@@ -38,6 +38,7 @@ pub fn record(child: &str, owner: &str, nanos: u128) {
     });
 }
 
+#[cfg(test)]
 pub fn report() -> String {
     P.with(|p| {
         let p = p.borrow();

@@ -280,6 +280,7 @@ fn dimensions(per_way: &PerWay) -> IndexSet<String> {
 }
 
 /// The values every way in still permits between them, where that is less than the domain.
+#[cfg(test)]
 pub fn fold_values(ways: &[Way], gates: &GateMap, idx: &EnumIndex, per_way: Option<&PerWay>) -> Vec<Value> {
     let mut sides = SetSides::default();
     match per_way {

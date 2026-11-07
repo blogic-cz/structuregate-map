@@ -218,6 +218,22 @@ function Invoke-TsRowsQ([string]$Path, [string]$Sql) {
     return Invoke-MapQuery $Path --sql $Sql
 }
 
+# Each `Read`/`SafeRead` of the expressions $Where picks: `read=<source>|<name>=<row kind>@<file>:<line>`, or `=none` when
+# the read has no target.
+function Get-TsReadTargets([string]$Db, [string]$Where) {
+    $r = Invoke-Gate --map-query $Db --width 0 --limit 0 --sql ("SELECT 'read=' || x.source || '|' || nm.value || '=' || (CASE WHEN rw.value IS NULL THEN 'none' ELSE " +
+        "substr(rw.value, 1, instr(rw.value, ':') - 1) || '@' || tf.value || ':' || tl.value END) AS r " +
+        "FROM expressions x JOIN expressions__ast k ON k.owner = x.id AND k.role = 'k' AND k.value IN ('Read', 'SafeRead') " +
+        "JOIN expressions__ast nm ON nm.owner = x.id AND nm.parent = k.parent AND nm.role = 'name' " +
+        "LEFT JOIN expressions__ast t ON t.owner = x.id AND t.parent = k.parent AND t.role = 'target' " +
+        "LEFT JOIN expressions__ast rw ON rw.owner = x.id AND rw.parent = t.n AND rw.role = 'row' " +
+        "LEFT JOIN expressions__ast tf ON tf.owner = x.id AND tf.parent = t.n AND tf.role = 'file' " +
+        "LEFT JOIN expressions__ast tl ON tl.owner = x.id AND tl.parent = t.n AND tl.role = 'line' " +
+        "WHERE $Where ORDER BY r")
+    Assert-Exit $r 0
+    return $r
+}
+
 # A NODE IS (`owner`, `n`): `n` its preorder number within the cell the row `owner` names, `parent` the `n` of its parent
 # (NULL for the root, `n` = 0). AN OBJECT'S MEMBER IS A NODE ROW OF ITS OWN, its key in `role` - never a column of the
 # object's row (`rows/cells`): the columns of a `<table>__<column>` are fixed. `Get-TsFieldSql` is the scalar member `$Key`
