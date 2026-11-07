@@ -101,3 +101,37 @@ Test-Case 'psmap: a body with one literal changed and one statement added is a s
     $pairs = @($map.similar_bodies | ForEach-Object { ($_.at | Sort-Object) -join ',' })
     Assert-Equal ($pairs -join ';') 'a.ps1:1:Get-Alpha,b.ps1:1:Get-Beta' 'the near-copy pair'
 }
+
+# EVERY TABLE THE HALF WROTE, row for row and cell for cell, `_meta`, `_cells` and the text index aside (a run's times, not its rows).
+function Get-PsRowsDump([string]$Tree) {
+    $db = Join-Path $Tree 'map.sqlite'
+    $tables = Get-MapQueryRows $db ("SELECT 'v=' || name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\_%' ESCAPE '\' " +
+        "AND name NOT LIKE '%fts%' AND sql NOT LIKE '%VIRTUAL%' ORDER BY name")
+    $dump = foreach ($table in $tables) {
+        $columns = Get-PsRowsCells $Tree "SELECT 'v=' || name FROM pragma_table_info('$table') ORDER BY cid"
+        $cells = ($columns | ForEach-Object { "coalesce(quote(`"$_`"), 'NULL')" }) -join " || '|' || "
+        "== $table"
+        Get-PsRowsCells $Tree "SELECT 'v=' || $cells FROM `"$table`" ORDER BY 1"
+    }
+    return @($dump)
+}
+
+Test-WindowsCase 'psrows: Windows PowerShell 5.1 writes the rows pwsh 7 writes, cell for cell' {
+    # 5.1 IS THE DEFAULT HOST ON WINDOWS and the one consumers' builds launch; it serializes with JavaScriptSerializer where 7
+    # has System.Text.Json, and parses with its own grammar. A quote, a non-ASCII name and a here-string go through both.
+    $files = @{
+        'lib.ps1' = $script:PsRowsLibrary
+        'text.ps1' = "function Get-Žluť(`$p) {`n    `$a = 'it''s'`n    `$b = @`"`nline `$p`n`"@`n    return `$a + `$b`n}`n"
+    }
+    $old = Use-Tree $files
+    $new = Use-Tree $files
+    foreach ($run in @(@($old, 'powershell.exe'), @($new, 'pwsh'))) {
+        $result = Invoke-Gate --root $run[0] --ext .ps1 --map --map-out (Join-Path $run[0] 'm.json') --map-sqlite (Join-Path $run[0] 'map.sqlite') --ps-host $run[1]
+        Assert-Exit $result 0
+        Assert-Line $result 'powershell rows via'
+    }
+    $want = Get-PsRowsDump $new
+    $got = Get-PsRowsDump $old
+    Assert-Equal ($want.Count -gt 20) $true 'pwsh wrote rows'
+    Assert-Equal ($got -join "`n") ($want -join "`n") 'the 5.1 rows'
+}
