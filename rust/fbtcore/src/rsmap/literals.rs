@@ -12,7 +12,7 @@
 //! `vec![x; n]` and `matches!` by their grammar, any other by its literal tokens. An item-level macro
 //! (`include!`) is read as one, and a `thread_local!` static as a constant. A constant's TYPE is walked too: an
 //! array length is a number. An ATTRIBUTE is never read: a doc comment and `#[path = "x.rs"]` are not literals
-//! the code uses.
+//! the code uses. A byte string (`b".."`, `br#".."#`, `b'x'`) is a string like any other.
 
 use super::lines::LineStarts;
 use proc_macro2::{Spacing, TokenStream, TokenTree};
@@ -67,6 +67,15 @@ struct Walker<'s, 't> {
 
 const COMPARES: [&str; 6] = ["==", "!=", "<", "<=", ">", ">="];
 
+/// A byte string's value as text: itself when it is UTF-8, else its escaped form (`\xef\xbb\xbf`), so a
+/// marker of raw bytes is still a row a query can find.
+fn bytes(value: &[u8]) -> String {
+    match std::str::from_utf8(value) {
+        Ok(text) => text.to_string(),
+        Err(_) => value.escape_ascii().to_string(),
+    }
+}
+
 impl Walker<'_, '_> {
     fn text(&self, node: &impl Spanned) -> String {
         let span = node.span();
@@ -83,6 +92,8 @@ impl Walker<'_, '_> {
         let (value, number) = match lit {
             syn::Lit::Str(s) if !s.value().trim().is_empty() => (s.value(), None),
             syn::Lit::Char(c) if !c.value().is_whitespace() => (c.value().to_string(), None),
+            syn::Lit::ByteStr(b) if !b.value().trim_ascii().is_empty() => (bytes(&b.value()), None),
+            syn::Lit::Byte(b) if !b.value().is_ascii_whitespace() => (bytes(&[b.value()]), None),
             syn::Lit::Int(i) => (i.to_string(), i.base10_digits().parse::<f64>().ok()),
             syn::Lit::Float(f) => (f.to_string(), f.base10_digits().parse::<f64>().ok()),
             _ => return,

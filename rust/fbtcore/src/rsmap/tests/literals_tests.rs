@@ -87,3 +87,10 @@ fn a_format_string_is_at_its_std_position() {
         .iter().map(row).collect();
     assert_eq!(rows, ["1:w {}:format::", "1:1:argument:writeln!:", "1:2:argument:assert_eq!:", "1:m:format::", "1:v:argument:vec!:"]);
 }
+
+#[test]
+fn a_byte_string_is_a_string_literal_and_raw_bytes_are_escaped() {
+    let found = literals("fn f(h: &mut H) { h.update(b\"link:\"); h.update(b\"\\xFF\\x00\"); let q = br#\"{\"a\":1}\"#; let s = b' '; }\n");
+    let rows: Vec<String> = found.iter().map(row).collect();
+    assert_eq!(rows, ["1:link::argument:update:h", "1:\\xff\\x00:argument:update:h", "1:{\"a\":1}:assign::"]);
+}
