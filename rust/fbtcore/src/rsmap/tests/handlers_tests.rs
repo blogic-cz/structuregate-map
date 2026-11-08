@@ -58,3 +58,10 @@ fn a_handler_inside_a_macro_argument_is_a_row() {
     let found = handlers("fn f() { let s = format!(\"{}\", x?); assert!(y.ok().is_some()); }\n");
     assert_eq!(shapes(&found), ["question", "ok"]);
 }
+
+#[test]
+fn a_cfg_test_impl_is_test_code_and_a_plain_impl_is_not() {
+    let found = handlers("pub struct T;\nimpl T { fn a(&self) { let _ = go(); } }\n#[cfg(test)]\nimpl T { fn b(&self) { let _ = go(); x.unwrap(); } }\n");
+    let tests: Vec<(usize, bool)> = found.iter().map(|h| (h.line, h.test)).collect();
+    assert_eq!(tests, [(2, false), (4, true), (4, true)]);
+}
