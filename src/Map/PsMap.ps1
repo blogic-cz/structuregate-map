@@ -129,9 +129,10 @@ function Resolve-Import([string]$Rel, $Expression, [string]$Root, [hashtable]$Kn
 }
 
 function Read-File([string]$Rel, [string]$AbsolutePath, [string]$Root, [hashtable]$Known) {
-    $tokens = $null
-    $errors = $null
-    $ast = [Parser]::ParseFile($AbsolutePath, [ref]$tokens, [ref]$errors)
+    $parsed = Read-Ast $AbsolutePath
+    $ast = $parsed.Ast
+    $tokens = $parsed.Tokens
+    $errors = $parsed.Errors
     $prepared = Get-TokenKeys $tokens
     Write-Record 'MAP-LINES' $Rel $prepared.Lines
 
