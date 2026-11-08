@@ -7,6 +7,14 @@
 $script:MapPython = [bool]$script:Python
 if (-not $script:MapPython) { Write-Host '    (no python on this machine - the python map cases are not run)' }
 
+# THE FILE MAP OVER $Tree, checked, written INTO the tree as `m.json` (a failing case keeps it beside its sources), and
+# the map read back - for a half that needs no compiler on NODE_PATH, which `Get-Map` would install.
+function Invoke-TreeMap([string]$Tree, [Parameter(ValueFromRemainingArguments)][object[]]$GateArgs) {
+    $result = Invoke-Gate --root $Tree @GateArgs --map --map-check --map-out (Join-Path $Tree 'm.json')
+    $map = [System.IO.File]::ReadAllText((Join-Path $Tree 'm.json')) | ConvertFrom-Json
+    return [pscustomobject]@{ Result = $result; Map = $map }
+}
+
 # The map as an object. --map writes a FILE rather than stdout, so every assertion about content reads it
 # back the way a consumer would.
 function Get-Map {
