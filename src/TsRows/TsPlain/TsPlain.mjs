@@ -40,6 +40,7 @@ import { createRequire } from 'node:module';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadAliases } from './TsGate.Map.mjs';
+import { emit } from './TsProtocol.mjs';
 import { cacheCompiles, resolveToolchain } from './TsResolve.mjs';
 import { Rows, readFile, skippedFile } from './TsPlainRows.mjs';
 
@@ -57,14 +58,6 @@ const ROWS_VERSION = '10';
 const MAX_CHARS = 1_000_000;
 
 const NEWLINE = String.fromCharCode(10);
-
-function emit(...fields) {
-    const parts = [];
-    for (const field of fields) {
-        parts.push(String(field).split('|').join('/').split(NEWLINE).join(' ').split('\r').join(' '));
-    }
-    console.log(parts.join('|'));
-}
 
 function parseArgs(argv) {
     const out = { listFile: '', root: '.', state: '', rows: '', hashes: '', nodeModules: [], reset: false };

@@ -69,6 +69,14 @@ Test-Case 'map: the file headline comes off the doc comment' {
     Assert-Equal $found.Map.files.'A.cs'.language 'csharp' 'language'
 }
 
+Test-Case 'map: a bare carriage return inside a typescript headline is folded, never sent on as part of the record' {
+    # ONE PROTOCOL WRITER (`src/TsGate/TsProtocol.mjs`): the file map's own copy folded `|` and `\n` but let a lone `\r`
+    # through, which the plain and Angular halves' copies already folded.
+    $tree = Use-Tree @{ 'a.ts' = "/* Alpha`rBeta gamma */`nexport const x = 1;`n" }
+    $found = Get-Map --root $tree --ext .ts
+    Assert-Equal $found.Map.files.'a.ts'.summary 'Alpha Beta gamma' 'the headline'
+}
+
 # ---------------------------------------------------------------------------------------------------
 # The findings, and which of them may fail a gate
 # ---------------------------------------------------------------------------------------------------

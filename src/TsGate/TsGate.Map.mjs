@@ -20,6 +20,8 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { emit } from './TsProtocol.mjs';
+
 /** The suffixes a specifier may be missing, in the order a bundler would try them. */
 const SUFFIXES = ['', '.ts', '.tsx', '.mts', '.cts', '.d.ts', '.js', '.mjs', '.cjs', '.jsx',
     '/index.ts', '/index.tsx', '/index.mts', '/index.js', '/index.mjs', '/index.jsx'];
@@ -61,13 +63,6 @@ export const REQUIRED_MAP_KINDS = ['ImportDeclaration', 'ExportDeclaration', 'Ex
     'ImportEqualsDeclaration', 'ExportKeyword', 'ImportKeyword', 'PropertyAccessExpression', 'Identifier',
     'StringLiteral', 'NoSubstitutionTemplateLiteral',
     ...EXPRESSION_KINDS];
-
-/** One protocol record. A field carrying `|` would split into the wrong slot on the other side. */
-function emit(...fields) {
-    const parts = [];
-    for (const field of fields) parts.push(String(field).split('|').join('/').split('\n').join(' '));
-    console.log(parts.join('|'));
-}
 
 /**
  * ESM-IN-TYPESCRIPT WRITES `./x.js` AND MEANS `./x.ts`. Following only the literal suffix would report
