@@ -16,9 +16,7 @@ $script:CsEdgesProject = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><Targe
 # The file map over $Tree - with the deep map beside it when -Deep - and what it wrote.
 function Invoke-CsEdgesMap([string]$Tree, [switch]$Deep) {
     $sqlite = if ($Deep) { @('--map-sqlite', (Join-Path $Tree 'map.sqlite')) } else { @() }
-    $result = Invoke-Gate --root $Tree --ext .cs --skip 'bin,obj' --map --map-check --map-out (Join-Path $Tree 'm.json') @sqlite
-    $map = [System.IO.File]::ReadAllText((Join-Path $Tree 'm.json')) | ConvertFrom-Json
-    return [pscustomobject]@{ Result = $result; Map = $map }
+    return Invoke-TreeMap $Tree --ext .cs --skip 'bin,obj' @sqlite
 }
 
 function Get-CsEdgesNumber([string]$Tree, [string]$Sql) {
