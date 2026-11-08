@@ -11,11 +11,7 @@ import { execFileSync } from 'node:child_process';
 
 import { stub } from './TsCarried.mjs';
 
-export function emit(...fields) {
-  const parts = fields.map((f) => String(f).split('|').join('/').split('\r').join(' ')
-    .split('\n').join(' '));
-  process.stdout.write(parts.join('|') + '\n');
-}
+export { emit } from './TsProtocol.mjs';
 
 export function parseArgs(argv) {
   const args = { root: '', rows: '', state: '', fe: '', config: '', db: '', html: '', plan: '',
