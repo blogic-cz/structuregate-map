@@ -94,3 +94,18 @@ fn a_byte_string_is_a_string_literal_and_raw_bytes_are_escaped() {
     let rows: Vec<String> = found.iter().map(row).collect();
     assert_eq!(rows, ["1:link::argument:update:h", "1:\\xff\\x00:argument:update:h", "1:{\"a\":1}:assign::"]);
 }
+
+#[test]
+fn a_json_value_with_a_turbofish_comma_stays_one_expression() {
+    assert_eq!(pieces("json!({\"k\": r.get::<_, String>(0)?, \"j\": 5})"), ["l:\"k\"", "e:r . get :: < _ , String > (0) ?", "l:\"j\"", "e:5"]);
+    assert_eq!(pieces("json!({\"a\": [f::<A, B>(1), 2]})"), ["l:\"a\"", "e:f :: < A , B > (1)", "e:2"]);
+    // A run that never parses is kept as its parts.
+    assert_eq!(pieces("json!({\"k\": $x, \"j\": 5})"), ["l:\"k\"", "l:\"j\"", "e:5"]);
+}
+
+#[test]
+fn literals_under_a_cfg_test_impl_trait_or_statement_are_test_code() {
+    let found = literals("impl T { fn a(&self) { go(\"p\"); } }\n#[cfg(test)]\nimpl T { fn t(&self) { go(\"x\"); } }\n#[cfg(test)]\ntrait F { fn d(&self) { go(\"y\"); } }\nfn b() { #[cfg(test)] { go(\"z\"); } }\n");
+    let tests: Vec<(String, bool)> = found.iter().map(|l| (l.value.clone(), l.test)).collect();
+    assert_eq!(tests, [("p".to_string(), false), ("x".to_string(), true), ("y".to_string(), true), ("z".to_string(), true)]);
+}

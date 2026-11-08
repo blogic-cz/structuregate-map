@@ -65,3 +65,16 @@ fn a_cfg_test_impl_is_test_code_and_a_plain_impl_is_not() {
     let tests: Vec<(usize, bool)> = found.iter().map(|h| (h.line, h.test)).collect();
     assert_eq!(tests, [(2, false), (4, true), (4, true)]);
 }
+
+#[test]
+fn a_cfg_test_trait_const_static_or_statement_is_test_code() {
+    let found = handlers("#[cfg(test)]\ntrait F { fn d(&self) -> u8 { a.unwrap() } }\n#[cfg(test)]\nstatic S: u8 = b.unwrap();\n#[cfg(test)]\nconst C: u8 = c.unwrap();\nfn f() { #[cfg(test)] { d.unwrap(); } e.unwrap(); }\n");
+    let tests: Vec<(usize, bool)> = found.iter().map(|h| (h.line, h.test)).collect();
+    assert_eq!(tests, [(2, true), (4, true), (6, true), (7, true), (7, false)]);
+}
+
+#[test]
+fn a_question_mark_in_a_json_value_with_a_turbofish_is_a_row() {
+    let found = handlers("fn f() -> R { Ok(json!({ \"k\": r.get::<_, String>(0)?, \"j\": 5 })) }\n");
+    assert_eq!(shapes(&found), ["question"]);
+}

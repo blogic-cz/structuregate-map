@@ -119,7 +119,9 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
         // An inherent impl's constant is as visible as it says; a trait impl's is as visible as the trait.
         self.owner.push(owner);
         for item in &i.items {
-            if let syn::ImplItem::Const(c) = item {
+            if let syn::ImplItem::Const(c) = item
+                && !super::items::is_cfg_test(&c.attrs)
+            {
                 let exported = i.trait_.is_some() || public(&c.vis);
                 self.add("const", &c.ident, exported, &c.ty, Some(&c.expr));
             }
@@ -136,9 +138,14 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
     }
 
     fn visit_item_trait(&mut self, t: &'ast syn::ItemTrait) {
+        if super::items::is_cfg_test(&t.attrs) {
+            return;
+        }
         self.owner.push(t.ident.to_string());
         for item in &t.items {
-            if let syn::TraitItem::Const(c) = item {
+            if let syn::TraitItem::Const(c) = item
+                && !super::items::is_cfg_test(&c.attrs)
+            {
                 let default = c.default.as_ref().map(|(_, e)| e);
                 self.add("const", &c.ident, public(&t.vis), &c.ty, default);
             }
@@ -318,5 +325,13 @@ mod tests {
         assert_eq!(found[0].ty, "Cell<u8>");
         let mac: syn::Macro = syn::parse_str("thread_local! { static A: u8 = 1; static B: u8 = 2 }").unwrap();
         assert_eq!(thread_locals(&mac).len(), 2);
+    }
+
+    #[test]
+    fn a_cfg_test_associated_constant_or_trait_is_not_a_constant() {
+        let text = "impl X { #[cfg(test)] const FIX: u8 = 1; const KEEP: u8 = 2; }\n#[cfg(test)]\ntrait Fx { const FT: u8 = 3; }\n\
+                    pub trait Tr { #[cfg(test)] const TT: u8 = 4; const TK: u8 = 5; }\n";
+        let names: Vec<String> = consts(text).into_iter().map(|c| c.name).collect();
+        assert_eq!(names, ["KEEP", "TK"]);
     }
 }

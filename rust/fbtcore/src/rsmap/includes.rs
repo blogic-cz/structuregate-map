@@ -222,8 +222,9 @@ fn normal(base: &str, path: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn tree(files: &[(&str, &str)]) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!("fbt-includes-{}", blake3::hash(format!("{files:?}").as_bytes()).to_hex()));
+    /// A tree of its own per test: two tests writing the same folder at once read a half-written file.
+    fn tree(test: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("fbt-includes-{test}-{}", blake3::hash(format!("{files:?}").as_bytes()).to_hex()));
         for (file, text) in files {
             let path = root.join(file);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -234,7 +235,7 @@ mod tests {
 
     #[test]
     fn a_literal_is_relative_to_the_file_and_the_manifest_dir_to_the_package() {
-        let root = tree(&[("crates/a/Cargo.toml", "[package]\nname = \"a\"\n")]);
+        let root = tree("literal", &[("crates/a/Cargo.toml", "[package]\nname = \"a\"\n")]);
         let source = r#"
             const PAGE: &str = include_str!("page.html");
             const LIBS: [&str; 2] = [
@@ -248,7 +249,7 @@ mod tests {
 
     #[test]
     fn a_macro_rules_template_includes_each_literal_its_calls_pass() {
-        let root = tree(&[("crates/a/Cargo.toml", "[package]\nname = \"a\"\n")]);
+        let root = tree("template", &[("crates/a/Cargo.toml", "[package]\nname = \"a\"\n")]);
         let source = r#"
             macro_rules! set { ($tag:literal: $($p:literal),+) => { &[$(include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../src/", $p))),+] }; }
             pub const ONE: &[&[u8]] = set!("one": "Ts/A.mjs", "Ts/Sub/B.mjs");
