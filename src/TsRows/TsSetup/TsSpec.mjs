@@ -8,7 +8,7 @@ import { names } from './TsConfig.mjs';
 import { columnKinds, deriveJoins, sortedKeys } from './TsSpecJoins.mjs';
 import { deriveAnchors } from './TsSpecAnchors.mjs';
 import { REWRITTEN } from './TsStore.mjs';
-import { emit, revisionOf } from './TsRunIo.mjs';
+import { note, revisionOf } from './TsRunIo.mjs';
 import { timed } from './TsMetrics.mjs';
 
 /**
@@ -31,7 +31,7 @@ export function deriveSpec(store, state, replacedRows) {
     : tableNames.filter((t) => !(replacedRows[t] > 0) && !REWRITTEN.includes(t) && !store.rollupTables.has(t)
       && store.table(t).every((row) => store.hydrated.has(row))));
   const moved = tableNames.filter((t) => !unmoved.has(t));
-  if (replacedRows !== null) emit('MAP-NOTE', `the typescript half kept the spec of ${unmoved.size} of ${tableNames.length} table(s) no row of which moved`);
+  if (replacedRows !== null) note(`the typescript half kept the spec of ${unmoved.size} of ${tableNames.length} table(s) no row of which moved`);
   const keptOf = (spec) => Object.fromEntries(Object.entries(spec ?? {}).filter(([t]) => unmoved.has(t)));
   const kinds = timed('typescript: columnKinds', '', () => columnKinds(store, moved));
   // IN THE ORDER A WHOLE DERIVATION WRITES THEM: column kinds by table name as `tableNames` sorts, joins as `deriveJoins` sorts.
@@ -41,7 +41,7 @@ export function deriveSpec(store, state, replacedRows) {
   const joins = timed('typescript: deriveJoins', '', () => sortedKeys({ ...deriveJoins(store, idScheme, moved),
     ...Object.fromEntries(Object.entries(state.joins ?? {}).filter(([key]) => unmoved.has(key.slice(0, key.lastIndexOf('.'))))) }));
   const { anchors, unanchored } = timed('typescript: deriveAnchors', '', () => deriveAnchors(store, idScheme, joins, tableNames));
-  emit('MAP-NOTE', `the typescript half proved a file route for ${Object.keys(anchors).length} table(s) `
+  note(`the typescript half proved a file route for ${Object.keys(anchors).length} table(s) `
     + `over ${Object.keys(joins).length} join(s)`
     + (unanchored.length ? `, and none for ${unanchored.join(', ')}` : ''));
   return { tableNames, idScheme, unmoved, jsonColumns, boolColumns, joins, anchors, unanchored };

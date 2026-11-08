@@ -53,7 +53,7 @@ import { discoverProjects, findTypescriptRoot, findWorkspaceRoot, isAngularRoot 
 import { loadToolchain, resolveToolchain, TYPESCRIPT_ONLY, versionMismatch } from './TsResolve.mjs';
 import { Diagnostics, REWRITTEN, Store } from './TsStore.mjs';
 import { createHash } from 'node:crypto';
-import { emit, parseArgs, readCarry, readJson, writePayload } from './TsRunIo.mjs';
+import { emit, fatal, note, parseArgs, readCarry, readJson, writePayload } from './TsRunIo.mjs';
 import { markReachable, runTemplatePass, walkProjects } from './TsWalk.mjs';
 import { timed } from './TsMetrics.mjs';
 import { forgetParses, prewarm } from './TsProgram.mjs';
@@ -71,7 +71,7 @@ function uncarried(store, whole = []) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.root || !args.rows) {
-    emit('MAP-FATAL', 'both --root and --rows are required');
+    fatal('both --root and --rows are required');
     return 1;
   }
 
@@ -92,7 +92,7 @@ async function main() {
   const state = readJson(args.state, {});
   const found = resolveToolchain(fe, args.nodeModules, ...(angular ? [] : [TYPESCRIPT_ONLY]));
   if (!found.nodeModules) {
-    emit('MAP-FATAL', `no node_modules holding typescript${angular ? ' + @angular/compiler' : ''}. Tried: `
+    fatal(`no node_modules holding typescript${angular ? ' + @angular/compiler' : ''}. Tried: `
       + found.tried.join(', ') + ' - install the workspace dependencies, or pass --ts-node-modules '
       + '<dir> naming a checkout that has them');
     return 1;
@@ -102,7 +102,7 @@ async function main() {
   try {
     toolchain = await loadToolchain(found.nodeModules, angular);
   } catch (error) {
-    emit('MAP-FATAL', `the workspace's typescript + @angular/compiler could not be loaded - ${error.message}`);
+    fatal(`the workspace's typescript + @angular/compiler could not be loaded - ${error.message}`);
     return 1;
   }
   const { ts, ng, tsVersion, ngVersion } = toolchain;
@@ -112,7 +112,7 @@ async function main() {
   // as unparseable and reported `no project was discovered` about a workspace that plainly has one. A
   // missing API is said out loud, because the alternative is a map that is empty for a reason nobody can see.
   if (typeof ts.parseConfigFileTextToJson !== 'function') {
-    emit('MAP-FATAL', `typescript ${tsVersion} does not expose parseConfigFileTextToJson, which is how a `
+    fatal(`typescript ${tsVersion} does not expose parseConfigFileTextToJson, which is how a `
       + 'JSONC tsconfig and angular.json are read - this half cannot discover projects with it');
     return 1;
   }
@@ -120,7 +120,7 @@ async function main() {
   // A MAJOR MISMATCH IS ANNOUNCED, not discovered later from a missing gate: Angular's own parser
   // error-recovers, so a 17.x compiler reading an 18.x template records `@let` as text and says nothing.
   const warning = angular ? versionMismatch(fe, ngVersion) : null;
-  if (warning) emit('MAP-NOTE', `the typescript half ${warning}`);
+  if (warning) note(`the typescript half ${warning}`);
 
   // READ BEFORE ANYTHING IS WALKED, because the early exit below has to know it: a changed `gateInputs`
   // or `i18nCalls` list is a different map over the same bytes, and a run that skipped on the hashes
@@ -129,10 +129,10 @@ async function main() {
   try {
     config = loadConfig(args.config, fe);
   } catch (error) {
-    emit('MAP-FATAL', error.message);
+    fatal(error.message);
     return 1;
   }
-  if (config.file) emit('MAP-NOTE', `the typescript half read ${config.file}`);
+  if (config.file) note(`the typescript half read ${config.file}`);
 
   // NOTHING CHANGED, NOTHING TO DO. This half cannot be incremental per FILE - its rows are semantic, so
   // renaming a component changes the resolved rows of files that did not change, and a per-file cache
@@ -470,7 +470,7 @@ async function main() {
       ? { changed: changed.sort(), affected: [...affectedFiles(graph, changed)].sort(), cut }
       : null;
     if (sameSetup && moved.length) {
-      emit('MAP-NOTE', `the typescript half is reading everything: ${moved.length} changed file(s) can `
+      note(`the typescript half is reading everything: ${moved.length} changed file(s) can `
         + 'move what a template resolves');
     }
   }
@@ -500,11 +500,11 @@ async function main() {
   const rebuilt = new Set(state.rebuilt ?? []);
   const partial = planned !== null && Boolean(args.carry) && rebuilt.size > 0;
   if (planned !== null && Boolean(args.carry) && !rebuilt.size) {
-    emit('MAP-NOTE', 'the typescript half is reading everything: the map does not say which tables '
+    note('the typescript half is reading everything: the map does not say which tables '
       + 'are rebuilt from scratch, which only a full run can measure');
   }
   if (planned !== null && !args.carry) {
-    emit('MAP-NOTE', 'the typescript half is reading everything: nothing handed back the rows it '
+    note('the typescript half is reading everything: nothing handed back the rows it '
       + 'would not have re-extracted');
   }
 
@@ -557,7 +557,7 @@ async function main() {
     if (!carried) {
       // NOT A FULL RUN INSTEAD. The caller asked for a partial one and this half was going to
       // extract a fraction; falling back silently would write that fraction over a whole map.
-      emit('MAP-FATAL', `the rows handed back could not be read from ${args.carry}`);
+      fatal(`the rows handed back could not be read from ${args.carry}`);
       return 1;
     }
     // THE IDS THE RE-EXTRACTED FILES' ROWS ALREADY HAVE. Handed over beside the rows, because the
@@ -570,15 +570,15 @@ async function main() {
     emptyChanged(store, planned.changed);
     repointLater = heldProjects;
     replacedRows = carried.replaced ?? {};
-    emit('MAP-NOTE', `the typescript half put back ${loaded} row(s) it is not re-extracting and `
+    note(`the typescript half put back ${loaded} row(s) it is not re-extracting and `
       + `left ${skipped} to be derived again, and is reading ${affected.size} file(s) of ${now.size}`);
     if (reclaimable) {
-      emit('MAP-NOTE', `the typescript half can keep ${reclaimable} id(s) of the rows it re-extracts, `
+      note(`the typescript half can keep ${reclaimable} id(s) of the rows it re-extracts, `
         + 'so nothing outside those files has to be re-pointed');
     }
   }
   if (!projects.length) {
-    emit('MAP-FATAL', `no project was discovered in ${fe} - neither project.json, nor angular.json, `
+    fatal(`no project was discovered in ${fe} - neither project.json, nor angular.json, `
       + 'nor a root tsconfig naming its own sources');
     return 1;
   }
@@ -604,7 +604,7 @@ async function main() {
   if (rereads) {
     const late = cutShort(rereads, null, true);
     if (late) { emit('MAP-RETRY', late); return 0; }
-    emit('MAP-NOTE', `the typescript half read ${affected.size} file(s) again for ${planned.changed.length} `
+    note(`the typescript half read ${affected.size} file(s) again for ${planned.changed.length} `
       + `changed: ${rereads.checked.size} surface(s) looked at, ${rereads.moved.size} moved`);
   }
 
@@ -625,7 +625,7 @@ async function main() {
   if (!partial) {
     const drift = compareRegistry(registry, registryFromRows(store));
     if (drift !== null) {
-      emit('MAP-FATAL', `the registry rebuilt from rows does not match the one extracted - ${drift}`);
+      fatal(`the registry rebuilt from rows does not match the one extracted - ${drift}`);
       return 1;
     }
   }
@@ -637,12 +637,12 @@ async function main() {
     // render queue into it would parse the same template twice and store both copies.
     expand: !partial,
   }));
-  emit('MAP-NOTE', `the typescript half parsed ${templatePass.parsed} template(s)`);
+  note(`the typescript half parsed ${templatePass.parsed} template(s)`);
 
   // A TEMPLATE READ BECOMES A DECLARATION. After every template is parsed, because a read can land on a
   // member of a component whose own template has not been reached yet, and after the declarations exist.
   const reads = timed('typescript: rollupTemplateReads', '', () => rollupTemplateReads(store));
-  emit('MAP-NOTE', `the typescript half resolved ${reads.hops} template read(s) in ${reads.chains} chain(s)`);
+  note(`the typescript half resolved ${reads.hops} template read(s) in ${reads.chains} chain(s)`);
 
   // A TEMPLATE OUTSIDE THE INVENTORY ROOT is never walked, so its file row would keep no size at all - and
   // `chars` is set by NOTHING else. The parsed template already knows: copy it back before the walk, so the
@@ -690,14 +690,14 @@ async function main() {
     store.enterFile(null);
     if (res) { f.parsed = true; orphans += 1; }
   }
-  if (orphans) emit('MAP-NOTE', `the typescript half parsed ${orphans} orphan template(s)`);
+  if (orphans) note(`the typescript half parsed ${orphans} orphan template(s)`);
 
   // WHAT HAS TO HOLD FOR A NODE TO RENDER AT ALL, outermost first - a gate row says what one binding
   // decides, and this says what the node sits under. AFTER THE ORPHANS, which are templates too: run
   // before them, a full run left an orphan's gated nodes with no chain, and the partial run that was
   // handed those nodes back chained them and refused to store a change to rows it had not made.
   const chains = timed('typescript: rollupGateChains', '', () => rollupGateChains(store));
-  emit('MAP-NOTE', `the typescript half put ${chains.nodes} node(s) under a gate `
+  note(`the typescript half put ${chains.nodes} node(s) under a gate `
     + `(deepest chain ${chains.deepest})`);
   // AND NOT AGAIN FOR THE ORPHANS, though it is tempting. They are parsed after the inventory, so the
   // pass above ran before their `templates` rows existed and a few file rows keep no `chars` at all. The
@@ -719,12 +719,12 @@ async function main() {
   timed('typescript: rollupRefIds', '', () => rollupRefIds(store));
   // A FEDERATED REMOTE A ROUTE LOADS, through the tree's own `module-federation.config` - once every class has its id.
   const remotes = timed('typescript: rollupRemoteRoutes', '', () => rollupRemoteRoutes(ts, store, fe));
-  if (remotes.remotes) emit('MAP-NOTE', `the typescript half resolved ${remotes.resolved} of ${remotes.remotes} remote route(s)`);
+  if (remotes.remotes) note(`the typescript half resolved ${remotes.resolved} of ${remotes.remotes} remote route(s)`);
   // ...and then which PARAMETER each argument fills, which needs the call targets the pass above resolved.
   timed('typescript: rollupCallParams', '', () => rollupCallParams(store));
 
   const tree = timed('typescript: rollupRouteTree', '', () => rollupRouteTree(store, moduleRoots, diag));
-  emit('MAP-NOTE', `the typescript half closed ${tree.lazy} lazy route boundary(ies) and composed `
+  note(`the typescript half closed ${tree.lazy} lazy route boundary(ies) and composed `
     + `${tree.absolute} absolute path(s)`);
 
   // THE OTHER ROUTE A KEY TRAVELS: a service CALL, invisible to a template carrier. AFTER `arg_params`, and
@@ -743,51 +743,51 @@ async function main() {
   // before it mints from those tables: `routes` reads the walk's `consts` and `ng_modules`, sorted after the walk.
   if (partial) store.inMintOrder();
   if (i18nCalls.refs) {
-    emit('MAP-NOTE', `the typescript half found ${i18nCalls.refs} translation key(s) in service calls, `
+    note(`the typescript half found ${i18nCalls.refs} translation key(s) in service calls, `
       + `and ${i18nCalls.dynamic} call(s) with no static key`);
   }
-  if (i18nCalls.dictRefs || i18nCalls.dictDynamic) emit('MAP-NOTE', `the typescript half found `
+  if (i18nCalls.dictRefs || i18nCalls.dictDynamic) note(`the typescript half found `
     + `${i18nCalls.dictRefs} dictionary prefix(es), ${i18nCalls.dictDynamic} call(s) with no static prefix`);
-  emit('MAP-NOTE', `the typescript half skipped ${i18nCalls.skipped ?? -1} call(s) whose refs came `
+  note(`the typescript half skipped ${i18nCalls.skipped ?? -1} call(s) whose refs came `
     + `back with the rest (${affectedIds === null ? 'full run' : `${affectedIds.size} file(s) re-read`})`);
 
   const locales = timed('typescript: collectLocales', '', () => collectLocales(store, directories(config, 'locales', fe), diag));
   // A ROUTE PATH'S `{{key}}`s, after the locales they resolve to and before `translations.referenced` counts them.
-  emit('MAP-NOTE', `the typescript half found ${rollupRouteKeys(store)} translation key(s) in route paths`);
+  note(`the typescript half found ${rollupRouteKeys(store)} translation key(s) in route paths`);
 
   // A COMPONENT CREATED BY CODE IS A RENDER TOO - before the scope pass, which has a rule for an edge the
   // compiler never matched, and after the refs rollup, whose ids this pass follows.
   const dynamic = timed('typescript: rollupDynamicRenders', '', () => rollupDynamicRenders(store, diag));
-  emit('MAP-NOTE', `the typescript half found ${dynamic.edges} render edge(s) created in code across `
+  note(`the typescript half found ${dynamic.edges} render edge(s) created in code across `
     + `${dynamic.sites} site(s), ${dynamic.unresolved} with no statically nameable component`);
 
   // WHICH OF SEVERAL SAME-SELECTOR CANDIDATES ANGULAR WOULD USE - before anything that reads `renders.scope`.
   const scoping = makeScopes(store, diag);
   const scopes = timed('typescript: rollupModuleScope', '', () => rollupModuleScope(store, diag, scoping));
-  emit('MAP-NOTE', `the typescript half scoped renders: `
+  note(`the typescript half scoped renders: `
     + Object.entries(scopes).map(([k, v]) => `${k}=${v}`).join(', '));
   // WHICH PIPE EACH TEMPLATE USAGE RUNS, by the same scopes (#86) - their notes are made once, above.
   scoping.quiet();
   const piped = timed('typescript: rollupPipeRefs', '', () => rollupPipeRefs(store, diag, scoping));
-  emit('MAP-NOTE', `the typescript half resolved ${piped.resolved} of ${piped.usages} template pipe usage(s) by scope`);
+  note(`the typescript half resolved ${piped.resolved} of ${piped.usages} template pipe usage(s) by scope`);
 
   // WHICH ENTRY POINTS REACH A COMPONENT, and which inputs a template really binds - both read
   // `renders.scope`, so both run after it. `wholeApp` is true here: this half always maps the whole
   // workspace, which is the only case where "nothing renders this" is a claim and not a scope artefact.
   const reach = timed('typescript: rollupComponentReach', '', () => rollupComponentReach(store, { wholeApp: true }));
-  emit('MAP-NOTE', `the typescript half reached ${reach.classes} class(es) from ${reach.roots} entry `
+  note(`the typescript half reached ${reach.classes} class(es) from ${reach.roots} entry `
     + `point(s), ${reach.exclusive} exclusive to one area, ${reach.shared} shared; `
     + `${reach.unused} component(s) nothing renders`);
   const inputs = timed('typescript: rollupInputUsage', '', () => rollupInputUsage(store));
-  emit('MAP-NOTE', `the typescript half bound ${inputs.bound} input(s) across ${inputs.declared} declared, `
+  note(`the typescript half bound ${inputs.bound} input(s) across ${inputs.declared} declared, `
     + `${inputs.unused} never bound`);
   // A VALUE ONLY A TEMPLATE TYPES names the member the bound input declares (rows 107) - after the bindings are matched to their inputs.
   const fills = timed('typescript: rollupTemplateFills', '', () => rollupTemplateFills(store));
-  if (fills.filled) emit('MAP-NOTE', `the typescript half named the member of ${fills.filled} value(s) a template binding types`);
+  if (fills.filled) note(`the typescript half named the member of ${fills.filled} value(s) a template binding types`);
 
   // THE STATE GRAPH, from the evaluated values of the consts that declare it.
   const stateGraph = timed('typescript: rollupStateGraph', '', () => rollupStateGraph(store));
-  emit('MAP-NOTE', `the typescript half found ${stateGraph.actions} action(s), ${stateGraph.handlers} `
+  note(`the typescript half found ${stateGraph.actions} action(s), ${stateGraph.handlers} `
     + `reducer handler(s), ${stateGraph.selectors} selector(s), ${stateGraph.effects} effect(s)`);
 
   // THE INVERTED VIEWS, last: each is a join over tables that all have to be complete first.
@@ -796,14 +796,14 @@ async function main() {
   const index = rollupI18nIndex(store);
   timed('typescript: rollupGateIndex', '', () => rollupGateIndex(store));
   const coverage = timed('typescript: rollupTranslationCoverage', '', () => rollupTranslationCoverage(store));
-  emit('MAP-NOTE', `the typescript half indexed ${index.unique_keys} translation key(s), `
+  note(`the typescript half indexed ${index.unique_keys} translation key(s), `
     + `${coverage.defined} defined and ${coverage.missing} undefined, `
     + `${coverage.unused} translation(s) never referenced`);
   if (locales.files) {
-    emit('MAP-NOTE', `the typescript half read ${locales.keys} translation key(s) from `
+    note(`the typescript half read ${locales.keys} translation key(s) from `
       + `${locales.files} locale file(s)`);
   }
-  emit('MAP-NOTE', `the typescript half walked ${inv.files} file(s) under ${relativeTo(args.root, fe)} `
+  note(`the typescript half walked ${inv.files} file(s) under ${relativeTo(args.root, fe)} `
     + `and noted ${diag.total} diagnostic(s)`);
 
   // TWO COMPONENTS CAN SHARE ONE `templateUrl`, and the map has to say so: the nodes of that .html belong
@@ -843,7 +843,7 @@ async function main() {
   // THE READABLE VIEW, only when asked for: thousands of files that no build step opens are not free.
   if (args.html) {
     const mirror = writeHtmlMirror(store, args.html);
-    emit('MAP-NOTE', `the typescript half mirrored ${mirror.templates} template(s) to ${args.html}`);
+    note(`the typescript half mirrored ${mirror.templates} template(s) to ${args.html}`);
   }
 
   // WHAT COULD NOT BE ANSWERED, AS ROWS. A count says how many; only the items say which, and a map that
@@ -853,7 +853,7 @@ async function main() {
   for (const item of diag.items) store.emit('diagnostics', item);
 
   // `renders` IS WHAT ANGULAR INSTANTIATES - after every pass reading `renders.scope`, before the spec reads the tables.
-  emit('MAP-NOTE', `the typescript half set ${setAsideOutOfScope(store)} out-of-scope render candidate(s) aside in ${ASIDE}`);
+  note(`the typescript half set ${setAsideOutOfScope(store)} out-of-scope render candidate(s) aside in ${ASIDE}`);
 
   // THE SHA MAP IS WHAT THE DATABASE RECORDS THIS HALF BY. It is the file's own content hash, taken in the
   // same streamed read the line count already costs - see TsInventory. A file whose bytes could not be
@@ -906,7 +906,7 @@ async function main() {
     if (touched !== null) {
       const named = touched.map((t) => `${t.table}.${t.columns.join('/')} `
         + `(${t.rows} row(s), e.g. ${t.id})`).join(', ');
-      emit('MAP-FATAL', `rows this run did not produce were changed by it: ${named}. Those tables `
+      fatal(`rows this run did not produce were changed by it: ${named}. Those tables `
         + 'are not ones this run rebuilds whole, so the changes would never be stored and would read '
         + 'as stale for ever');
       return 1;
@@ -918,7 +918,7 @@ async function main() {
   if (partial) {
     // MEASURED, because a rule that stops matching looks exactly like a tree that changed: an id kept
     // is a reference nothing outside the file had to be re-pointed for.
-    emit('MAP-NOTE', `the typescript half kept ${store.reclaimed} id(s) that already named these rows`);
+    note(`the typescript half kept ${store.reclaimed} id(s) that already named these rows`);
   }
 
   // ...AND AGAIN ON THE WAY OUT: a pass after the walk mints a re-extracted file's row late (a template's render),
@@ -982,7 +982,7 @@ async function main() {
 main().then((code) => process.exit(code), (error) => {
   // A STUB READ THAT THREW is no failure of the run: it is asked again with every cell carried.
   if (uncarriedRead() !== null) { emit('MAP-UNCARRIED', uncarriedRead()); process.exit(0); }
-  emit('MAP-FATAL', `${error && error.message ? error.message : error}`);
+  fatal(`${error && error.message ? error.message : error}`);
   process.exit(1);
 });
 
