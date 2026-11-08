@@ -18,7 +18,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
-import { canonicalPath, inNodeModules, relativeTo } from './TsPaths.mjs';
+import { canonicalPath, inNodeModules, relativeTo } from '../TsPaths.mjs';
 import { DECLARING } from './TsShape.mjs';
 
 const NONE = Object.freeze([]);

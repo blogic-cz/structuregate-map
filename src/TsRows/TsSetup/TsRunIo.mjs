@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process';
 
 import { stub } from './TsCarried.mjs';
 
-export { emit, fatal, note } from './TsProtocol.mjs';
+export { emit, fatal, note } from '../../TsGate/TsProtocol.mjs';
 
 export function parseArgs(argv) {
   const args = { root: '', rows: '', state: '', fe: '', config: '', db: '', html: '', plan: '',

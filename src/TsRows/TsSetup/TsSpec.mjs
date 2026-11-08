@@ -5,9 +5,9 @@
 import path from 'node:path';
 
 import { names } from './TsConfig.mjs';
-import { columnKinds, deriveJoins, sortedKeys } from './TsSpecJoins.mjs';
-import { deriveAnchors } from './TsSpecAnchors.mjs';
-import { REWRITTEN } from './TsStore.mjs';
+import { columnKinds, deriveJoins, sortedKeys } from '../TsDerive/TsSpecJoins.mjs';
+import { deriveAnchors } from '../TsDerive/TsSpecAnchors.mjs';
+import { REWRITTEN } from '../TsStore.mjs';
 import { note, revisionOf } from './TsRunIo.mjs';
 import { timed } from './TsMetrics.mjs';
 

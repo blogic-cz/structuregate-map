@@ -8,8 +8,8 @@
  * or `unknown` - and a consumer that wants one answer filters on it while the alternatives stay visible
  * instead of being silently dropped. Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
-import { slash } from './TsPaths.mjs';
-import { joinKey, joinKey3 } from './TsNodes.mjs';
+import { slash } from '../TsPaths.mjs';
+import { joinKey, joinKey3 } from '../TsNodes.mjs';
 
 const refsOf = (row, field) => row[field] ?? [];
 

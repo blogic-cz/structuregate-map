@@ -11,11 +11,11 @@
 
 import { makeOwners } from './TsTplOwners.mjs';
 import { makeContexts } from './TsTplContext.mjs';
-import { SCOPE, judgeScope, makeScopes } from './TsModuleScope.mjs';
+import { SCOPE, judgeScope, makeScopes } from '../TsDerive/TsModuleScope.mjs';
 import { makeHops } from './TsTplHops.mjs';
 import { makeEvents } from './TsTplEvents.mjs';
-import { joinKey } from './TsNodes.mjs';
-import { isContextK, isReadK } from './TsExprSummary.mjs';
+import { joinKey } from '../TsNodes.mjs';
+import { isContextK, isReadK } from '../TsDecls/TsExpr/TsExprSummary.mjs';
 
 const str = (v) => (typeof v === 'string' ? v : null);
 

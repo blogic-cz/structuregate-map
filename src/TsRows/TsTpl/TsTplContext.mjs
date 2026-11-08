@@ -4,7 +4,7 @@
  *
  * Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
-import { joinKey } from './TsNodes.mjs';
+import { joinKey } from '../TsNodes.mjs';
 
 const str = (v) => (typeof v === 'string' ? v : null);
 

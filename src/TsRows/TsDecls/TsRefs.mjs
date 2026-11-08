@@ -9,7 +9,7 @@
  * last.
  */
 
-import { asObject, joinKey, joinKey3 } from './TsNodes.mjs';
+import { asObject, joinKey, joinKey3 } from '../TsNodes.mjs';
 
 const asRef = asObject;
 const str = (v) => (typeof v === 'string' ? v : null);

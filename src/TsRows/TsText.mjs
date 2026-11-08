@@ -6,7 +6,7 @@
  * thing this tool forbids in every language it maps.
  */
 import { isPlainString, literalText, locationOf, parentKind, propertyContext } from './TsNodes.mjs';
-import { literalUse, numberOf } from './TsLiterals.mjs';
+import { literalUse, numberOf } from './TsPlain/TsLiterals.mjs';
 import { canonicalPath, relativeTo } from './TsPaths.mjs';
 
 /**

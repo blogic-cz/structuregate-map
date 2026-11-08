@@ -12,7 +12,7 @@
  *
  * Imports are flat: see `TsTypeRef.mjs`.
  */
-import { aliased } from './TsNodes.mjs';
+import { aliased } from '../../../TsNodes.mjs';
 
 export function makeCaseFacts(ts, checker, fileOf) {
   /** The enum declaration a symbol is, or a member of; null for any other symbol. */

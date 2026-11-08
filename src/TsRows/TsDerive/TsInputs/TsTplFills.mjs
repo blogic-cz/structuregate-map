@@ -16,7 +16,7 @@
  * Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
 
-import { asObject, joinKey3 } from './TsNodes.mjs';
+import { asObject, joinKey3 } from '../../TsNodes.mjs';
 
 const LITERALS = ['string_literals', 'number_literals', 'template_literals', 'functions'];
 const asRef = asObject;

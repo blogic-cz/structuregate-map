@@ -16,7 +16,7 @@
  * inventing a key from an expression is the pattern-matching this extractor forbids, and the call row still
  * carries the argument, evaluated, for a consumer that wants to follow it.
  */
-import { joinKey } from './TsNodes.mjs';
+import { joinKey } from '../TsNodes.mjs';
 
 /**
  * The keys an argument STATICALLY IS - a plain string, or either branch of a resolved conditional.

@@ -13,7 +13,7 @@
  * NO REGEX - the build refuses one over this folder. Every decision is a SyntaxKind or a node member.
  */
 
-import { chainOf } from './TsCatch.mjs';
+import { chainOf } from '../TsDecls/TsCatch.mjs';
 
 /** A dotted name - `a`, `this.b`, `a.b.c` - or '' when the chain holds anything but names: `TsCatch.mjs::chainOf`, which both halves stage. */
 export const dotted = chainOf;

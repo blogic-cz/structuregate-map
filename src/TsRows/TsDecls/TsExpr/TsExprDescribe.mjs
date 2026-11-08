@@ -9,7 +9,7 @@
  */
 import { dedupeSummary, isContextK, isReadK, summarizeExpr } from './TsExprSummary.mjs';
 import { makeTsExprNormalizer } from './TsExprNorm.mjs';
-import { isAssignmentKind, isOuterWrapper } from './TsNodes.mjs';
+import { isAssignmentKind, isOuterWrapper } from '../../TsNodes.mjs';
 
 /**
  * THE SHAPE A FUNCTION RETURNS, as dotted paths - the write side of a read.

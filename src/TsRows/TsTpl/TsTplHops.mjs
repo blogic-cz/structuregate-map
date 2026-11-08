@@ -6,7 +6,7 @@
  * Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
 
-import { slash } from './TsPaths.mjs';
+import { slash } from '../TsPaths.mjs';
 
 export function makeHops({ hopOf, indexByShape, scopes, fieldsOf }) {
   /**

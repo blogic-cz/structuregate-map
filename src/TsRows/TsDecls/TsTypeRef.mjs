@@ -9,7 +9,7 @@
  * temporary folder, so `./TsPaths.mjs` is right here at run time even though the sources sit a level
  * apart. The folder exists because `src/TsRows/` reached this repo's own 15-file limit.
  */
-import { declSite, startSite } from './TsPaths.mjs';
+import { declSite, startSite } from '../TsPaths.mjs';
 
 /** Whether a declaration is a type literal (`{ a: string }` in a type) or an object literal (`{ a: 1 }` in code): the two anonymous types a ref can reach. */
 export function isShapeNode(ts, d) {

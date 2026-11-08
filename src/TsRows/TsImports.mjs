@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { canonicalPath, relativeTo } from './TsPaths.mjs';
 import { locationOf } from './TsNodes.mjs';
-import { UNRECORDED } from './TsReads.mjs';
+import { UNRECORDED } from './TsSetup/TsReads.mjs';
 
 /**
  * THE NAMES, PARSED - not the statement's text.

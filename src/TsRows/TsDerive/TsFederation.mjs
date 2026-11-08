@@ -17,8 +17,8 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { canonicalPath } from './TsPaths.mjs';
-import { isOuterWrapper, joinKey, literalText } from './TsNodes.mjs';
+import { canonicalPath } from '../TsPaths.mjs';
+import { isOuterWrapper, joinKey, literalText } from '../TsNodes.mjs';
 
 const CONFIGS = new Set(['module-federation.config.js', 'module-federation.config.ts']);
 

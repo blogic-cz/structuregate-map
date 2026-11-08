@@ -6,8 +6,8 @@
  * never read, so `components.unused` stays NULL rather than becoming a false positive on hundreds of live
  * components. Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
-import { slash } from './TsPaths.mjs';
-import { joinKey } from './TsNodes.mjs';
+import { slash } from '../TsPaths.mjs';
+import { joinKey } from '../TsNodes.mjs';
 import { SCOPE } from './TsModuleScope.mjs';
 
 const asRef = (v) => (v != null && typeof v === 'object' ? v : null);

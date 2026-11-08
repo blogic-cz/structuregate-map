@@ -12,7 +12,7 @@
  *
  * Imports are flat: see `TsTypeRef.mjs`.
  */
-import { isPlainString } from './TsNodes.mjs';
+import { isPlainString } from '../../TsNodes.mjs';
 
 export function makeTsExprNormalizer(ts, resolveRead, resolveName = null, resolveLocal = null, resolveParam = null) {
   /**

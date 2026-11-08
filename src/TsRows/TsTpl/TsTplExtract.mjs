@@ -14,7 +14,7 @@
  */
 import { readFileSync } from 'node:fs';
 
-import { relativeTo } from './TsPaths.mjs';
+import { relativeTo } from '../TsPaths.mjs';
 import { isTmplNode, makeExprNormalizer } from './TsTplExpr.mjs';
 import { makeEmitters, probeBindingTypes } from './TsTplEmit.mjs';
 import { isCustomElement, spanOf } from './TsTplKeys.mjs';

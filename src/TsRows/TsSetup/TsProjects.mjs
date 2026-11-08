@@ -18,7 +18,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
-import { asArray, relativeTo, slash } from './TsPaths.mjs';
+import { asArray, relativeTo, slash } from '../TsPaths.mjs';
 
 /** TypeScript's own default config filename - the one entry point that cannot be derived, because `tsc`
  *  itself defines it. Everything past it is read FROM it (`references`), never guessed. */

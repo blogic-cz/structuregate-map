@@ -19,9 +19,9 @@
  */
 
 import { isMainThread, MessageChannel, parentPort, receiveMessageOnPort, Worker, workerData } from 'node:worker_threads';
-import { Diagnostics, Store } from './TsStore.mjs';
+import { Diagnostics, Store } from '../TsStore.mjs';
 import { loadToolchain } from './TsResolve.mjs';
-import { bindingNames, walkProjects } from './TsWalk.mjs';
+import { bindingNames, walkProjects } from '../TsDecls/TsWalk.mjs';
 import { note } from './TsRunIo.mjs';
 
 const FIRST = '\u0001a';

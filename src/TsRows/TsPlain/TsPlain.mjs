@@ -39,9 +39,9 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { loadAliases } from './TsGate.Map.mjs';
-import { emit, fatal, note } from './TsProtocol.mjs';
-import { cacheCompiles, resolveToolchain } from './TsResolve.mjs';
+import { loadAliases } from '../../TsGate/TsGate.Map.mjs';
+import { emit, fatal, note } from '../../TsGate/TsProtocol.mjs';
+import { cacheCompiles, resolveToolchain } from '../TsSetup/TsResolve.mjs';
 import { Rows, readFile, skippedFile } from './TsPlainRows.mjs';
 
 /** What the `files` rows of this half are stamped with. NOT `typescript`: that is the Angular half's, and

@@ -19,9 +19,9 @@
  * NO REGEX - the build refuses one over this folder.
  */
 import { EXPRESSION_KINDS, MIN_EXPRESSION_LEAVES, alias, candidatesOf, countedBody, fingerprint,
-    isModuleSyntax, resolve, specifierOf, summary } from './TsGate.Map.mjs';
+    isModuleSyntax, resolve, specifierOf, summary } from '../../TsGate/TsGate.Map.mjs';
 import { bindCall, bindingNames, dotted, facts, isFunctionLike, nameText } from './TsPlainFacts.mjs';
-import { catchFacts } from './TsCatch.mjs';
+import { catchFacts } from '../TsDecls/TsCatch.mjs';
 import { literalUse, numberOf } from './TsLiterals.mjs';
 import { generatedHeader } from './TsGenerated.mjs';
 

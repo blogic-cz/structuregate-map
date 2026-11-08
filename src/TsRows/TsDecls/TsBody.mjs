@@ -13,9 +13,9 @@
  * measured over a whole scope the largest body stayed well under it. A limit that never triggers defends
  * nothing and is one more number to defend; one that DID trigger would silently shorten a body's record.
  */
-import { isAssignmentKind, locationOf, unwrapOuter } from './TsNodes.mjs';
+import { isAssignmentKind, locationOf, unwrapOuter } from '../TsNodes.mjs';
 import { catchFacts, chainOf } from './TsCatch.mjs';
-import { loopFacts, loopKind } from './TsLoops.mjs';
+import { loopFacts, loopKind } from './TsExpr/TsStatements/TsLoops.mjs';
 
 export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFileOf, declareInline, declareClass, propName, shapeAt, bindingFacts, injectAt, resolveArg, targetLine, fieldTarget, caseFacts }) {
   /**

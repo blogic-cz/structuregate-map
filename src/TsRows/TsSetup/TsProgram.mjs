@@ -11,7 +11,7 @@ import path from 'node:path';
 import { readdirSync, statSync } from 'node:fs';
 import { builtinModules } from 'node:module';
 
-import { inTree, slash, treeRoot } from './TsPaths.mjs';
+import { inTree, slash, treeRoot } from '../TsPaths.mjs';
 
 // Node's own registry, not a list to maintain: it cannot drift when Node adds a module.
 const NODE_BUILTINS = new Set(builtinModules);

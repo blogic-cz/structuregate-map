@@ -6,7 +6,7 @@
  *
  * Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
-import { joinKey } from './TsNodes.mjs';
+import { joinKey } from '../TsNodes.mjs';
 
 /** THE TYPE ARGUMENT an emitter was declared with: the first of its `args`, else its `element` - the one argument of a single-argument generic, kept when the argument is a type parameter
  *  or an unnamed intersection (`EventEmitter<T & { cell: Cell }>`), which `args` leave out. */

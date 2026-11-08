@@ -8,11 +8,11 @@
  */
 import { createHash } from 'node:crypto';
 
-import { canonicalPath, relativeTo, slash } from './TsPaths.mjs';
-import { initializedVar, locationOf, typeParamsOf } from './TsNodes.mjs';
+import { canonicalPath, relativeTo, slash } from '../TsPaths.mjs';
+import { initializedVar, locationOf, typeParamsOf } from '../TsNodes.mjs';
 import { makeLibPipes } from './TsLibPipes.mjs';
-import { makeViewContexts } from './TsViewContext.mjs';
-import { makeInjectRows } from './TsInjects.mjs';
+import { makeViewContexts } from './TsExpr/TsViewContext.mjs';
+import { makeInjectRows } from './TsExpr/TsInjects.mjs';
 
 /** The package a decorator must come FROM to be an Angular one. ONE identity resolved through the type
  *  checker, instead of a list of the five names - which says nothing about origin and would count a

@@ -10,7 +10,7 @@
  * the resolution was right and the last hop still had to be made by hand. Hence one row per member, at its
  * OWN line, with `path` carrying the dotted route and `parent` linking it to the member that contains it.
  */
-import { locationOf, typeParamsOf } from './TsNodes.mjs';
+import { locationOf, typeParamsOf } from '../TsNodes.mjs';
 
 export function makeTypeRows({ ts, checker, store, modifiersOf, typeRefAt, evalNode, propName, fileId }) {
   function enumRow(statement, fid) {

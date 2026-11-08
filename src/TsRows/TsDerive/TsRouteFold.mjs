@@ -10,7 +10,7 @@
  * Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
 
-import { asObject, joinKey } from './TsNodes.mjs';
+import { asObject, joinKey } from '../TsNodes.mjs';
 
 const asObj = asObject;
 
