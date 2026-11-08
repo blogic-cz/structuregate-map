@@ -43,7 +43,7 @@ on a large workspace. So `mapper/deep/ts.rs` hands node's rows to `rows::calls::
 derives the graph from the payload, DROPS it, and only then runs the closure over `Store`
 (`rust/fbtcore/src/rows/ts/store.rs`) reading every row back from SQLITE - full run and partial alike: holding
 both put the exe at many GB. `Store::from_payload` is a test fixture's door only. **A held list or object cell is
-rebuilt from its node rows when a pass first reads it** (`Cell::Nodes`, `cells::load`); one never read stays rows and is never rebuilt. A pass
+rebuilt from its node rows when a pass first reads it** (`Cell::Nodes` over a `cells::Source`); one never read stays rows and is never rebuilt. A pass
 must not collect every `ast` into a map up front: map ids to ROWS and read on lookup; a scan that asks something of
 EVERY row's tree reads it with `Row::peek`, which keeps nothing decoded, and checks the id before it asks - one scan that
 asked `get("ast")` of every expression and only then its id (`gate_curried::definition_guards`) held every tree of the

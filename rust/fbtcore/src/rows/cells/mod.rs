@@ -491,15 +491,6 @@ impl Source {
     }
 }
 
-/// One column's structure for one row, or None.
-pub fn load(db: &Connection, table: &str, column: &str, owner: &str) -> Result<Option<Value>> {
-    let child_table = child(table, column);
-    if schema::existing_columns(db, &child_table)?.is_empty() {
-        return Ok(None);
-    }
-    Reader::new(db, &child_table)?.get(owner)
-}
-
 /// Every row's structure in one column, by owner - for a small table read whole.
 pub fn load_all(db: &Connection, table: &str, column: &str) -> Result<HashMap<String, Value>> {
     let child_table = child(table, column);
