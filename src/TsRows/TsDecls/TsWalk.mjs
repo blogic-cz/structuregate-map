@@ -5,37 +5,37 @@
  * staged script lands in one folder.
  */
 
-import { timed } from './TsMetrics.mjs';
+import { timed } from '../TsSetup/TsMetrics.mjs';
 import path from 'node:path';
-import { canonicalPath, relativeTo } from './TsPaths.mjs';
-import { names } from './TsConfig.mjs';
-import { buildMatcher } from './TsTplMatch.mjs';
-import { makeTemplateExtractor } from './TsTplExtract.mjs';
-import { dynamicImportRow, importRow } from './TsImports.mjs';
-import { jsdocOf, locationOf as nodeLocation, makeSymbolAt } from './TsNodes.mjs';
+import { canonicalPath, relativeTo } from '../TsPaths.mjs';
+import { names } from '../TsSetup/TsConfig.mjs';
+import { buildMatcher } from '../TsTpl/TsTplMatch.mjs';
+import { makeTemplateExtractor } from '../TsTpl/TsTplExtract.mjs';
+import { dynamicImportRow, importRow } from '../TsImports.mjs';
+import { jsdocOf, locationOf as nodeLocation, makeSymbolAt } from '../TsNodes.mjs';
 import { makeAngularRows } from './TsAngular.mjs';
 import { makeBodyRows } from './TsBody.mjs';
-import { makeCaseFacts } from './TsCases.mjs';
-import { makeBindingFacts } from './TsBindings.mjs';
+import { makeCaseFacts } from './TsExpr/TsStatements/TsCases.mjs';
+import { makeBindingFacts } from './TsExpr/TsBindings.mjs';
 import { makeClassRows } from './TsClassRows.mjs';
 import { makeDeclRows } from './TsDeclRows.mjs';
-import { makeExprDescriber } from './TsExprDescribe.mjs';
-import { makeReadRefs } from './TsReadRefs.mjs';
-import { makeWriteResolver } from './TsWriteRefs.mjs';
+import { makeExprDescriber } from './TsExpr/TsExprDescribe.mjs';
+import { makeReadRefs } from './TsExpr/TsReadRefs.mjs';
+import { makeWriteResolver } from './TsExpr/TsWriteRefs.mjs';
 import { makeModifiers } from './TsModifiers.mjs';
-import { makeShapeRows } from './TsShapes.mjs';
-import { makeEvaluator } from './TsValue.mjs';
+import { makeShapeRows } from './TsExpr/TsShapes.mjs';
+import { makeEvaluator } from './TsExpr/TsValue.mjs';
 import { makeTypeResolver } from './TsTypeRef.mjs';
 import { makeTypeRows } from './TsTypeRows.mjs';
-import { collectComments, collectStrings, exportRow } from './TsText.mjs';
-import { createProgram, programFilePaths, projectSourceFiles } from './TsProgram.mjs';
-import { outsideProjects } from './TsOutside.mjs';
-import { note } from './TsRunIo.mjs';
-import { makeReadLog, surfaceOf } from './TsReads.mjs';
+import { collectComments, collectStrings, exportRow } from '../TsText.mjs';
+import { createProgram, programFilePaths, projectSourceFiles } from '../TsSetup/TsProgram.mjs';
+import { outsideProjects } from '../TsSetup/TsOutside.mjs';
+import { note } from '../TsSetup/TsRunIo.mjs';
+import { makeReadLog, surfaceOf } from '../TsSetup/TsReads.mjs';
 import { propReads } from './TsPropReads.mjs';
-import { generatedHeader } from './TsGenerated.mjs';
-import { shapeOf } from './TsShape.mjs';
-import { pairUp } from './TsPairWalk.mjs';
+import { generatedHeader } from '../TsPlain/TsGenerated.mjs';
+import { shapeOf } from '../TsSetup/TsShape.mjs';
+import { pairUp } from '../TsSetup/TsPairWalk.mjs';
 
 /**
  * ONE PHYSICAL FILE, ONE ROW - and the backfill that keeps it true.

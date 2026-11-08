@@ -15,8 +15,8 @@
  *
  * Imports are flat: see `TsTypeRef.mjs`.
  */
-import { canonicalPath, libraryDecl, relativeTo, slash } from './TsPaths.mjs';
-import { initializedVar, locationOf, unwrapOuter } from './TsNodes.mjs';
+import { canonicalPath, libraryDecl, relativeTo, slash } from '../TsPaths.mjs';
+import { initializedVar, locationOf, unwrapOuter } from '../TsNodes.mjs';
 
 export function makeLibPipes({ ts, checker, symbolAt, feRoot, propName }) {
   const classOf = (sym) => (sym?.declarations ?? []).find((d) => ts.isClassDeclaration(d)) ?? null;

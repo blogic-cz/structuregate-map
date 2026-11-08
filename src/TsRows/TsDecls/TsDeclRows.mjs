@@ -3,7 +3,7 @@
  *
  * Ported from the original Angular extractor. Imports are flat: see `TsTypeRef.mjs`.
  */
-import { locationOf } from './TsNodes.mjs';
+import { locationOf } from '../TsNodes.mjs';
 
 export function makeDeclRows({ ts, store, modifiersOf, localExports, evalCell, paramsOf, typeText,
   jsdocOf, collectBody, collectExpr, resolveRead, resolveMember, bindingFacts }) {

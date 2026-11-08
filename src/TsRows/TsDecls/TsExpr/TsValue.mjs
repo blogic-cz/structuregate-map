@@ -15,7 +15,7 @@
  */
 import { makeValueRefs, undefinedLiteral } from './TsValueRefs.mjs';
 import { draftWrites } from './TsExprDescribe.mjs';
-import { aliased, asObject, isOuterWrapper, isPlainString, unwrapOuter } from './TsNodes.mjs';
+import { aliased, asObject, isOuterWrapper, isPlainString, unwrapOuter } from '../../TsNodes.mjs';
 
 /**
  * `describe` is the expressions writer, and it is OPTIONAL: given one, an unevaluable value also carries

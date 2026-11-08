@@ -5,8 +5,8 @@
  * Ported from the original Angular extractor, split out of `TsValue.mjs` because the two
  * halves together are past this repo's 500-line ceiling. Imports are flat: see `TsTypeRef.mjs`.
  */
-import { canonicalPath, startSite } from './TsPaths.mjs';
-import { asObject, isPlainString, literalText, unwrapOuter } from './TsNodes.mjs';
+import { canonicalPath, startSite } from '../../TsPaths.mjs';
+import { asObject, isPlainString, literalText, unwrapOuter } from '../../TsNodes.mjs';
 
 /**
  * `undefined` AS A VALUE: `{$literal: 'undefined', $kind}` - JSON has no `undefined`, and the `$expr` an unresolved name

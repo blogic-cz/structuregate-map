@@ -13,8 +13,8 @@
  * that one's rows (the walk's `extracted`).
  */
 import path from 'node:path';
-import { relativeTo } from './TsPaths.mjs';
-import { walkTree } from './TsInventory.mjs';
+import { relativeTo } from '../TsPaths.mjs';
+import { walkTree } from '../TsInventory.mjs';
 
 /** The `.ts` sources under `fe` the walk could be asked about, as canonical paths. */
 export function treeSources(fe, skipDirs, skipFiles) {

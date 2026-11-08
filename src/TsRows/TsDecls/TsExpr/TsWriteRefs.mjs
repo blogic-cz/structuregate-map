@@ -12,8 +12,8 @@
  *
  * Imports are flat: see `TsTypeRef.mjs`.
  */
-import { declSite } from './TsPaths.mjs';
-import { unwrapOuter } from './TsNodes.mjs';
+import { declSite } from '../../TsPaths.mjs';
+import { unwrapOuter } from '../../TsNodes.mjs';
 
 export function makeWriteResolver(ts, checker) {
   /** `({...} as Foo)`, `({...})`, `{...} satisfies Foo`, `<Foo>{...}` wrap the literal; the literal is what carries the keys. */

@@ -12,7 +12,7 @@
  * is `remember`ed by the body walk and read here; a literal the walk never reached has none. A `.json` source holds data and a
  * declaration file holds types of a library: neither is read.
  */
-import { locationOf } from './TsNodes.mjs';
+import { locationOf } from '../../TsNodes.mjs';
 
 export function makeShapeRows({ ts, store, typeRefAt, typeText, propName, returnRefOf, fieldTarget }) {
   const contexts = new WeakMap();

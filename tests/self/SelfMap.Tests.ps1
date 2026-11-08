@@ -83,3 +83,14 @@ Test-Case 'selfmap: the gate''s own .mjs are mapped with the compiler package.js
     $rows = Get-MapQueryRows $db "SELECT 'v=' || f.path FROM functions fn JOIN files f ON f.id = fn.file WHERE f.lang = 'ts' AND fn.qualname = 'main'"
     Assert-Equal ($rows -join ';') 'TsPlain.mjs' 'the plain half''s own entry, read by the pinned compiler'
 }
+
+# EVERY IMPORT OF THE GATE'S OWN .mjs NAMES A FILE IN src/: the embedded sets are staged in their source layout
+# (`rust/fbtcore/src/embedded/mod.rs`), so the path node resolves at run time is the one the map resolves here, and a
+# module moved without its importers is BROKEN in this map before it is `ERR_MODULE_NOT_FOUND` in a consumer.
+Test-Case 'selfmap: every import of the gate''s own .mjs names a file in the source tree' {
+    $out = New-Tree @{}
+    $r = Invoke-Gate --root (Join-Path $script:Root 'src') --ext .mjs --map --map-out (Join-Path $out 'self.json') --map-check
+    $broken = @($r.Lines | Where-Object { $_.Contains('BROKEN') })
+    if ($broken) { throw "$($broken.Count) broken import(s):`n$($broken -join "`n")" }
+    Assert-Exit $r 0
+}

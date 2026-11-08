@@ -20,7 +20,7 @@
  * from above it, recorded or not, so the ids the other half hands out meanwhile are never these.
  */
 
-import { asStored, isStub, refuse, UNCARRIED } from './TsCarried.mjs';
+import { asStored, isStub, refuse, UNCARRIED } from './TsSetup/TsCarried.mjs';
 
 /** What every row of this half is stamped with, so the database can drop exactly its own rows again.
  *

@@ -9,8 +9,8 @@
  * EVERY API IS RECOGNISED BY ITS RESOLVED DECLARATION, never by its name: `createComponent` is Angular's
  * only where the checker resolved it into `@angular/core`. Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
-import { slash } from './TsPaths.mjs';
-import { asObject, joinKey } from './TsNodes.mjs';
+import { slash } from '../TsPaths.mjs';
+import { asObject, joinKey } from '../TsNodes.mjs';
 
 const ANGULAR_CORE = '/@angular/core/';
 const CREATE_COMPONENT = 'createComponent';

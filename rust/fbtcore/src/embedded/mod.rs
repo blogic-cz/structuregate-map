@@ -2,8 +2,10 @@
 //! needs one. A consumer holds two files; every checker and every map half travels inside the first, and a
 //! gate whose second half is missing or stale cannot happen.
 //!
-//! EACH SET IS STAGED INTO ONE FOLDER, because an entry module imports its siblings by a flat relative path
-//! (`./TsNodes.mjs`) whatever source subfolder they live in. The folder is named after the HASH of the set, so
+//! EACH SET IS STAGED INTO ONE FOLDER WITH ITS SOURCE LAYOUT KEPT, because a module imports another by its path
+//! in `src/` (`../TsNodes.mjs`): the import the map resolves is the one node runs, so a file moved without its
+//! importers fails the map as BROKEN instead of passing in source and failing in a consumer as
+//! `ERR_MODULE_NOT_FOUND`. The folder is named after the HASH of the set, so
 //! a rebuilt exe writes a new folder instead of running last week's half out of a stale temp file, and two
 //! builds of the same scripts share one.
 //!
@@ -103,14 +105,17 @@ pub fn stage(set: &Set) -> Result<String, String> {
     let folder = crate::hosts::temp_dir().join(format!("structuregate-{}-{}", set.tag, digest(set)));
     std::fs::create_dir_all(&folder).map_err(|e| format!("IOException: {e}"))?;
     for (source, bytes) in set.files {
-        let path = folder.join(name(source));
+        let path = folder.join(source);
         // CONTENT-ADDRESSED, so a file of the right length is the right file.
         if std::fs::metadata(&path).is_ok_and(|m| m.len() == bytes.len() as u64) {
             continue;
         }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("IOException: {e}"))?;
+        }
         std::fs::write(&path, bytes).map_err(|e| format!("IOException: {e}"))?;
     }
-    Ok(folder.join(name(set.files[0].0)).to_string_lossy().into_owned())
+    Ok(folder.join(set.files[0].0).to_string_lossy().into_owned())
 }
 
 /// WHAT KILLED AND EARLIER RUNS LEFT IN THE TEMP FOLDER, gone - at most once a day, because listing a busy
@@ -154,10 +159,6 @@ fn leftover(name: &str, age_secs: u64, tags: &[&str], current: &[String]) -> boo
     per_run && age_secs > 6 * 3600
 }
 
-fn name(source: &str) -> &str {
-    Path::new(source).file_name().and_then(|n| n.to_str()).unwrap_or(source)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,11 +179,11 @@ mod tests {
     }
 
     #[test]
-    fn a_set_is_staged_flat_under_its_hash_and_answers_with_its_entry() {
+    fn a_set_is_staged_in_its_source_layout_under_its_hash_and_answers_with_its_entry() {
         let entry = stage(&TSPLAIN).unwrap();
-        assert!(entry.ends_with("TsPlain.mjs"));
-        let folder = Path::new(&entry).parent().unwrap();
-        assert!(folder.join("TsResolve.mjs").is_file(), "a subfolder's script lands beside the entry");
+        assert!(Path::new(&entry).ends_with("TsRows/TsPlain/TsPlain.mjs"));
+        let folder = Path::new(&entry).parent().unwrap().parent().unwrap();
+        assert!(folder.join("TsSetup/TsResolve.mjs").is_file(), "a script in another subfolder keeps its path from src/");
         assert_eq!(stage(&TSPLAIN).unwrap(), entry, "the same set stages to the same folder");
     }
 }

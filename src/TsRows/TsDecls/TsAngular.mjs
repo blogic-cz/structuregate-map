@@ -8,8 +8,8 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
-import { asObject } from './TsNodes.mjs';
-import { asArray, canonicalPath, relativeTo, slash } from './TsPaths.mjs';
+import { asObject } from '../TsNodes.mjs';
+import { asArray, canonicalPath, relativeTo, slash } from '../TsPaths.mjs';
 
 const asString = (v) => (typeof v === 'string' ? v : null);
 

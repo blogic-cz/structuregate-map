@@ -4,7 +4,7 @@
  *
  * Moved out of `TsReadRefs.mjs`, which had reached this repo's line ceiling. Imports are flat: see `TsTypeRef.mjs`.
  */
-import { argCall, elementTypes, isPlainKeyName, propertyOf } from './TsNodes.mjs';
+import { argCall, elementTypes, isPlainKeyName, propertyOf } from '../../TsNodes.mjs';
 
 export function makeLaterTypes(ts, checker) {
   /**

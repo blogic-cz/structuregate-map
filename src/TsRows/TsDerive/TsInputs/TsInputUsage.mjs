@@ -4,9 +4,9 @@
  * Ported from the original Angular extractor. Imports are flat: see
  * `TsDecls/TsTypeRef.mjs`.
  */
-import { slash } from './TsPaths.mjs';
-import { joinKey } from './TsNodes.mjs';
-import { SCOPE } from './TsModuleScope.mjs';
+import { slash } from '../../TsPaths.mjs';
+import { joinKey } from '../../TsNodes.mjs';
+import { SCOPE } from '../TsModuleScope.mjs';
 
 const str = (v) => (typeof v === 'string' ? v : null);
 

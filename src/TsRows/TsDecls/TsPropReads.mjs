@@ -17,7 +17,7 @@
  * Imports are flat: see `TsTypeRef.mjs`.
  */
 
-import { isOuterWrapper } from './TsNodes.mjs';
+import { isOuterWrapper } from '../TsNodes.mjs';
 
 export function propReads(ts, sf) {
   const names = new Map();

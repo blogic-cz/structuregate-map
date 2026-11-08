@@ -5,8 +5,8 @@
  * see `TsTypeRef.mjs`.
  */
 import { makeLaterTypes } from './TsLaterTypes.mjs';
-import { aliased, argCall, elementTypes, isOuterWrapper, isPlainKeyName, joinKey, propertyOf, unwrapOuter } from './TsNodes.mjs';
-import { declSite, inNodeModules, libraryDecl, startSite } from './TsPaths.mjs';
+import { aliased, argCall, elementTypes, isOuterWrapper, isPlainKeyName, joinKey, propertyOf, unwrapOuter } from '../../TsNodes.mjs';
+import { declSite, inNodeModules, libraryDecl, startSite } from '../../TsPaths.mjs';
 
 export function makeReadRefs(ts, checker) {
   /**

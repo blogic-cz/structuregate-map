@@ -15,7 +15,7 @@
  *
  * Imports are flat: see `TsTypeRef.mjs`.
  */
-import { locationOf, isOuterWrapper, unwrapOuter } from './TsNodes.mjs';
+import { locationOf, isOuterWrapper, unwrapOuter } from '../../TsNodes.mjs';
 
 export function makeInjectRows({ ts, checker, store, typeRefAt, typeText, declFileOf, declFileOfSymbol, resolvedOf, propName, fromAngularCore }) {
   /** Whether a node is a call of Angular's `inject` - by the declaration it resolves to, never the name alone. */

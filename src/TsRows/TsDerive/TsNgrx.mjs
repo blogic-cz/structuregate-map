@@ -5,7 +5,7 @@
  * Ported from the original Angular extractor. Every API is recognised by its RESOLVED
  * declaration inside the state library, never by its name. Imports are flat: see `TsDecls/TsTypeRef.mjs`.
  */
-import { joinKey } from './TsNodes.mjs';
+import { joinKey } from '../TsNodes.mjs';
 
 const str = (v) => (typeof v === 'string' ? v : null);
 const arr = (v) => (Array.isArray(v) ? v : []);

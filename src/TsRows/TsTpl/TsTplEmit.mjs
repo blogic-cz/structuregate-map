@@ -6,7 +6,7 @@
  * `TsTplExtract.mjs` because the two together are past this repo's 500-line ceiling. Imports are flat: see
  * `TsDecls/TsTypeRef.mjs`.
  */
-import { dedupeSummary, summarizeExpr } from './TsExprSummary.mjs';
+import { dedupeSummary, summarizeExpr } from '../TsDecls/TsExpr/TsExprSummary.mjs';
 import { collectLiteralStrings, dynamicKeyParts, pipeArgStrings, spanOf, transformedByPipe } from './TsTplKeys.mjs';
 
 /**
