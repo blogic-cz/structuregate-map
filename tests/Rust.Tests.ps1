@@ -135,6 +135,30 @@ Test-Case 'rs map: a name a let, a parameter or a closure binds is a local, and 
     Assert-Equal (Get-Imports $found.Map 'src/e.rs').Count 0 'a file''s own private n shadows a''s pub n'
 }
 
+# AN INCLUDED FILE IS A SOFT EDGE (`rsmap/includes.rs`): its bytes are in the binary, so it is read - but it is data, so
+# a path outside `--ext` is no BROKEN import. Relative to the file, or to the package through CARGO_MANIFEST_DIR.
+Test-Case 'rs map: include_str! and include_bytes! are soft edges, never BROKEN when the file is not mapped' {
+    $tree = Use-Tree @{
+        'core/Cargo.toml'    = "[package]`nname = `"core`"`nversion = `"0.1.0`"`n"
+        'core/src/lib.rs'    = "pub mod view;`n"
+        'core/src/view.rs'   = "pub const PAGE: &str = include_str!(`"page.js`");`n" +
+                               "pub const LIBS: [&str; 1] = [include_str!(concat!(env!(`"CARGO_MANIFEST_DIR`"), `"/../web/vendor/lib.min.js`"))];`n" +
+                               "pub const LOGO: &[u8] = include_bytes!(`"gone.png`");`n"
+        'core/src/page.js'   = "var page = 1;`n"
+        'web/vendor/lib.min.js' = "var lib = 1;`n"
+    }
+    $found = Get-RsMap --root $tree --ext '.rs,.js' --map-check
+    Assert-Exit $found 0
+    $soft = $found.Map.soft_imports.PSObject.Properties | Where-Object { $_.Name -eq 'core/src/view.rs' }
+    Assert-Equal (@($soft.Value) -join ',') 'core/src/page.js,web/vendor/lib.min.js' 'both included files, relative to the file and to the package'
+    Assert-Equal (Get-Imports $found.Map 'core/src/view.rs').Count 0 'an include is no hard import'
+    Assert-NoLine $found 'NO READER web/vendor/lib.min.js'
+    Assert-NoLine $found 'gone.png'
+    $rsOnly = Get-RsMap --root $tree --map-check
+    Assert-Exit $rsOnly 0
+    Assert-NoLine $rsOnly 'BROKEN'
+}
+
 Test-Case 'rs map: a name joins only into its own crate and the crates its Cargo.toml depends on' {
     # Found on this repo's own tree: one name table drew `fbt -> fbtcore` though only fbtcore depends on fbt, and joined a
     # `build.rs` to the `src/` of its own package, which it cannot name.

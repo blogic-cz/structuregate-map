@@ -15,6 +15,7 @@ pub(crate) mod cargo;
 pub(crate) mod consts;
 pub(crate) mod fingerprint;
 pub(crate) mod handlers;
+pub(crate) mod includes;
 pub(crate) mod items;
 pub(crate) mod lines;
 pub(crate) mod literals;
@@ -81,6 +82,7 @@ fn read(root: &Path, rel: &str, text: &str) -> Value {
         "uses": found.uses,
         "rooted": found.rooted,
         "uses_path": uses_path,
+        "soft_uses_path": includes::read(root, rel, &source),
         "mods": mods,
         "own": found.own,
         "qualified": qualified,

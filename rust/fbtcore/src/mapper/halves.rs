@@ -32,7 +32,7 @@ pub fn mark(into: &mut Collector, prefix: &str, files: &[(String, String)], reas
 
 /// THE RUST HALF, in process: `syn` parses, and a `mod name;` is an exact edge.
 pub fn rust(into: &mut Collector, root: &str, prefix: &str, files: &[(String, String)], kept: &mut Option<Kept>) {
-    in_process(into, root, prefix, files, kept, ("rust", "rust in-process (syn)", "rust|paths|copies".into()), rsmap::map_file);
+    in_process(into, root, prefix, files, kept, ("rust", "rust in-process (syn)", "rust|paths|copies|includes".into()), rsmap::map_file);
     rust_crates(into, root, prefix, files);
 }
 
@@ -141,6 +141,7 @@ fn in_process(into: &mut Collector, root: &str, prefix: &str, files: &[(String, 
             file.rooted.entry(krate.clone()).or_default().extend(strings(names));
         }
         file.uses_path.extend(strings(&row["uses_path"]).into_iter().map(|p| format!("{prefix}{p}")));
+        file.soft_uses_path.extend(strings(&row["soft_uses_path"]).into_iter().map(|p| format!("{prefix}{p}")));
         // RUST'S MODULE TREE and the paths into it, for the join's walk (`graph/rspaths.rs`); a target is prefixed like `uses_path`.
         for m in row["mods"].as_array().into_iter().flatten() {
             file.mods.push(ModEntry {
