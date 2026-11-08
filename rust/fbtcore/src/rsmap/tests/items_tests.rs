@@ -146,3 +146,13 @@ fn a_template_s_let_binding_and_field_label_are_not_uses() {
     assert!(!found.uses.contains("files") && !found.uses.contains("kept"), "a field label is no use: {:?}", found.uses);
     assert!(found.uses.contains("R") && found.uses.contains("other"), "{:?}", found.uses);
 }
+
+#[test]
+fn a_let_pattern_and_a_let_s_own_right_hand_side_still_name_the_item() {
+    let found = items("fn f() { run! { let Shape { a } = make(); let maker = maker(); maker; let v = w; v } }\n");
+    for name in ["Shape", "make", "maker", "w"] {
+        assert!(found.uses.contains(name), "{name} is a use: {:?}", found.uses);
+    }
+    let after = items("fn f() { run! { let v = w; v } }\n");
+    assert!(!after.uses.contains("v"), "a name the let bound is its local after the `;`: {:?}", after.uses);
+}

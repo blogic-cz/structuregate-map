@@ -32,7 +32,7 @@ pub fn mark(into: &mut Collector, prefix: &str, files: &[(String, String)], reas
 
 /// THE RUST HALF, in process: `syn` parses, and a `mod name;` is an exact edge.
 pub fn rust(into: &mut Collector, root: &str, prefix: &str, files: &[(String, String)], kept: &mut Option<Kept>) {
-    in_process(into, root, prefix, files, kept, ("rust", "rust in-process (syn)", "rust|paths|copies|includes|templates".into()), rsmap::map_file);
+    in_process(into, root, prefix, files, kept, ("rust", "rust in-process (syn)", "rust|paths|copies|includes|lets".into()), rsmap::map_file);
     rust_crates(into, root, prefix, files);
 }
 

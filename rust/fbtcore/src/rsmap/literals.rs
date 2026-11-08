@@ -348,6 +348,26 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
         self.scoped(&t.attrs, |w| visit::visit_item_trait(w, t));
     }
 
+    /// `#[cfg(test)]` on one item of a plain trait, or on a `match` arm, is test code too.
+    fn visit_trait_item_fn(&mut self, f: &'ast syn::TraitItemFn) {
+        self.func.push(f.sig.ident.to_string());
+        self.scoped(&f.attrs, |w| visit::visit_trait_item_fn(w, f));
+        self.func.pop();
+    }
+
+    fn visit_trait_item_const(&mut self, c: &'ast syn::TraitItemConst) {
+        self.scoped(&c.attrs, |w| visit::visit_trait_item_const(w, c));
+    }
+
+    fn visit_arm(&mut self, a: &'ast syn::Arm) {
+        self.scoped(&a.attrs, |w| visit::visit_arm(w, a));
+    }
+
+    /// A `#[cfg(test)]` field's type (`[u8; 88]`) is test code.
+    fn visit_field(&mut self, f: &'ast syn::Field) {
+        self.scoped(&f.attrs, |w| visit::visit_field(w, f));
+    }
+
     fn visit_stmt(&mut self, s: &'ast syn::Stmt) {
         self.scoped(super::testmods::stmt_attrs(s), |w| visit::visit_stmt(w, s));
     }
