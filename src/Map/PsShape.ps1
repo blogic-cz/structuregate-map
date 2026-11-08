@@ -40,6 +40,16 @@ $script:Out = [System.Text.StringBuilder]::new()
 $script:LiteralKinds = @([TokenKind]::StringLiteral, [TokenKind]::StringExpandable, [TokenKind]::HereStringLiteral,
     [TokenKind]::HereStringExpandable, [TokenKind]::Number)
 
+# ONE FILE PARSED AS UTF-8, a byte-order mark still deciding. `[Parser]::ParseFile` decodes a file without one in the
+# host's default: UTF-8 under pwsh 7, the ANSI code page under Windows PowerShell 5.1 - which made every non-ASCII name
+# mojibake in the rows 5.1 wrote, against the UTF-8 text the store indexes beside them.
+function Read-Ast([string]$Path) {
+    $tokens = $null
+    $errors = $null
+    $ast = [Parser]::ParseInput([System.IO.File]::ReadAllText($Path), $Path, [ref]$tokens, [ref]$errors)
+    return [pscustomobject]@{ Ast = $ast; Tokens = $tokens; Errors = $errors }
+}
+
 function Write-Record {
     # One protocol record. A field carrying `|` or a newline would split into the wrong slot on the other
     # side, so both are folded here rather than parsed around there.

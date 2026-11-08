@@ -119,9 +119,10 @@ function Get-FunctionRow($Node, $Where, [string]$Kind, $Parameters, $Body, $Prep
 }
 
 function Read-File([string]$Rel, [string]$Abs, [string]$Sha) {
-    $tokens = $null
-    $errors = $null
-    $ast = [Parser]::ParseFile($Abs, [ref]$tokens, [ref]$errors)
+    $parsed = Read-Ast $Abs
+    $ast = $parsed.Ast
+    $tokens = $parsed.Tokens
+    $errors = $parsed.Errors
     $prepared = Get-TokenKeys $tokens
     $text = $ast.Extent.Text
     $lines = $text.Split("`n").Count
