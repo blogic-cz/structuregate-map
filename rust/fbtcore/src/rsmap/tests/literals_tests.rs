@@ -109,3 +109,11 @@ fn literals_under_a_cfg_test_impl_trait_or_statement_are_test_code() {
     let tests: Vec<(String, bool)> = found.iter().map(|l| (l.value.clone(), l.test)).collect();
     assert_eq!(tests, [("p".to_string(), false), ("x".to_string(), true), ("y".to_string(), true), ("z".to_string(), true)]);
 }
+
+#[test]
+fn literals_under_a_cfg_test_trait_item_arm_or_field_are_test_code() {
+    let found = literals("pub trait Tr {\n#[cfg(test)] const Q: u32 = 55;\n#[cfg(test)] fn t(&self) { go(\"tfn\"); }\nfn p(&self) { go(\"keep\"); }\n}\nfn g(v: u32) -> u32 { match v {\n#[cfg(test)] 77 => 1,\n_ => 0 } }\npub struct F { #[cfg(test)] pub f: [u8; 88], pub g: [u8; 9] }\n");
+    let tests: Vec<(String, bool)> = found.iter().map(|l| (l.value.clone(), l.test)).collect();
+    let want = [("55", true), ("tfn", true), ("keep", false), ("77", true), ("1", true), ("0", false), ("88", true), ("9", false)];
+    assert_eq!(tests, want.map(|(v, t)| (v.to_string(), t)));
+}

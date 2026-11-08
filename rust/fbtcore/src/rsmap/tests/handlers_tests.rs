@@ -78,3 +78,10 @@ fn a_question_mark_in_a_json_value_with_a_turbofish_is_a_row() {
     let found = handlers("fn f() -> R { Ok(json!({ \"k\": r.get::<_, String>(0)?, \"j\": 5 })) }\n");
     assert_eq!(shapes(&found), ["question"]);
 }
+
+#[test]
+fn a_cfg_test_trait_item_or_match_arm_is_test_code() {
+    let found = handlers("pub trait Tr {\n#[cfg(test)] fn t(&self) { a.unwrap(); }\nfn p(&self) { b.unwrap(); }\n}\nfn go(v: R) { match v {\n#[cfg(test)] Some(_) => c.unwrap(),\n#[cfg(test)] Err(e) => {}\n_ => d.unwrap() } }\n");
+    let tests: Vec<(usize, &str, bool)> = found.iter().map(|h| (h.line, h.shape, h.test)).collect();
+    assert_eq!(tests, [(2, "unwrap", true), (3, "unwrap", false), (7, "match", true), (6, "unwrap", true), (8, "unwrap", false)]);
+}
