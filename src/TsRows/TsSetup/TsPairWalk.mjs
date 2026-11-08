@@ -22,7 +22,7 @@ import { isMainThread, MessageChannel, parentPort, receiveMessageOnPort, Worker,
 import { Diagnostics, Store } from './TsStore.mjs';
 import { loadToolchain } from './TsResolve.mjs';
 import { bindingNames, walkProjects } from './TsWalk.mjs';
-import { emit } from './TsRunIo.mjs';
+import { note } from './TsRunIo.mjs';
 
 const FIRST = '\u0001a';
 const SECOND = '\u0001b';
@@ -105,7 +105,7 @@ export function pairUp({ ts, fe, nodeModules, angular, projects, propertyPaths, 
     }
   };
   const local = (why) => {
-    emit('MAP-NOTE', `the typescript half walks ${one.name} after all, on this thread - ${why}`);
+    note(`the typescript half walks ${one.name} after all, on this thread - ${why}`);
     let files = null;
     done = walkFirst({ ts, fe, nodeModules, project: one, projectId: firstId, propertyPaths, onFiles: (f) => { files = f; } });
     return files;
@@ -154,7 +154,7 @@ export function pairUp({ ts, fe, nodeModules, angular, projects, propertyPaths, 
       worker?.terminate();
       merge(store, diag, noted, registry, components, done, fork);
       done = null;
-      emit('MAP-NOTE', `the typescript half walked ${one.name} and ${two.name} at once`);
+      note(`the typescript half walked ${one.name} and ${two.name} at once`);
     },
   };
 }

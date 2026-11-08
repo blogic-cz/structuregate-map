@@ -40,7 +40,7 @@ import { createRequire } from 'node:module';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadAliases } from './TsGate.Map.mjs';
-import { emit } from './TsProtocol.mjs';
+import { emit, fatal, note } from './TsProtocol.mjs';
 import { cacheCompiles, resolveToolchain } from './TsResolve.mjs';
 import { Rows, readFile, skippedFile } from './TsPlainRows.mjs';
 
@@ -161,7 +161,7 @@ function write(file, payload) {
         writeFileSync(file, JSON.stringify(payload), 'utf8');
         return true;
     } catch (error) {
-        emit('MAP-FATAL', `the payload could not be written - ${error.message}`);
+        fatal(`the payload could not be written - ${error.message}`);
         return false;
     }
 }
@@ -170,7 +170,7 @@ function main() {
     const args = parseArgs(process.argv.slice(2));
     let state;
     try { state = JSON.parse(readFileSync(args.state, 'utf8')); } catch (error) {
-        emit('MAP-FATAL', `the database state could not be read - ${error.message}`);
+        fatal(`the database state could not be read - ${error.message}`);
         return;
     }
     const list = listOf(args.listFile);
@@ -178,7 +178,7 @@ function main() {
 
     const found = compiler(root, [...args.nodeModules.filter((d) => d), ...packageModules(list, root)]);
     if (!found.ts) {
-        emit('MAP-NOTE', `the plain typescript half did not run: ${found.why}`);
+        note(`the plain typescript half did not run: ${found.why}`);
         // NOTHING RECORDED IS KEPT: every file of this half is gone from the payload's point of view.
         const empty = { all: true, first: true, final: true, reset: false, shas: {}, read: [], counters: {},
             tables: {}, lang: LANG };

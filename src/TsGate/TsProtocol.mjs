@@ -11,3 +11,9 @@ export function emit(...fields) {
     const parts = fields.map((field) => String(field).split('|').join('/').split('\r').join(' ').split('\n').join(' '));
     process.stdout.write(parts.join('|') + '\n');
 }
+
+/** A LINE THE GATE PRINTS UNDER THE HALF'S NAME - what it did, skipped or could not resolve. The tag is spelled here once. */
+export const note = (...fields) => emit('MAP-NOTE', ...fields);
+
+/** THE HALF CANNOT GO ON: the run fails, and the rust side keeps no carried rows from it (`mapper/script.rs`). */
+export const fatal = (...fields) => emit('MAP-FATAL', ...fields);

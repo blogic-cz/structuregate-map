@@ -30,7 +30,7 @@ import { makeTypeRows } from './TsTypeRows.mjs';
 import { collectComments, collectStrings, exportRow } from './TsText.mjs';
 import { createProgram, programFilePaths, projectSourceFiles } from './TsProgram.mjs';
 import { outsideProjects } from './TsOutside.mjs';
-import { emit } from './TsRunIo.mjs';
+import { note } from './TsRunIo.mjs';
 import { makeReadLog, surfaceOf } from './TsReads.mjs';
 import { propReads } from './TsPropReads.mjs';
 import { generatedHeader } from './TsGenerated.mjs';
@@ -149,7 +149,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
       checker = log.wrap(checker);
     } catch (error) {
       diag.note('program_failed');
-      emit('MAP-NOTE', `the typescript half could not build the program of ${project.name} - ${error.message}`);
+      note(`the typescript half could not build the program of ${project.name} - ${error.message}`);
       continue;
     }
 
@@ -162,7 +162,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
       // choice hides: picking a references-only config emptied several libs' programs while the run still
       // reported success. Never let that pass quietly.
       diag.note('project_program_empty');
-      emit('MAP-NOTE', `the typescript half found no source file in ${project.name} through `
+      note(`the typescript half found no source file in ${project.name} through `
         + `${relativeTo(fe, project.tsconfig)} - check that the project's tsConfig names a config with `
         + 'files/include');
     }
@@ -417,7 +417,7 @@ export function walkProjects({ ts, store, fe, nodeModules, projects, diag, noted
   }
   if (!first) linkFunctions(store);
   diag.program = null;
-  if (skipped) emit('MAP-NOTE', `the typescript half left ${skipped} project program(s) unbuilt: nothing they own is read again`);
+  if (skipped) note(`the typescript half left ${skipped} project program(s) unbuilt: nothing they own is read again`);
   return { inAnyProgram, registry, components };
 }
 
