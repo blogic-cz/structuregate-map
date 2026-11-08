@@ -8,6 +8,7 @@
  */
 import { slash } from './TsPaths.mjs';
 import { joinKey } from './TsNodes.mjs';
+import { SCOPE } from './TsModuleScope.mjs';
 
 const asRef = (v) => (v != null && typeof v === 'object' ? v : null);
 const str = (v) => (typeof v === 'string' ? v : null);
@@ -54,7 +55,7 @@ export function rollupComponentReach(store, { wholeApp }) {
     // AN OUT-OF-SCOPE CANDIDATE RENDERS NOTHING (#77): a tag matched to a same-selector component its host's scope
     // cannot see is not where Angular instantiates it, so counting it as rendered left that component `unused = 0`
     // with no template reaching it. `unknown` still counts - nothing proves which candidate renders.
-    if (r.scope === 'out_of_scope') continue;
+    if (r.scope === SCOPE.outOfScope) continue;
     rendered.add(r.to_class);
     if (r.from_class == null || r.from_class === r.to_class) continue;
     const list = edges.get(r.from_class);

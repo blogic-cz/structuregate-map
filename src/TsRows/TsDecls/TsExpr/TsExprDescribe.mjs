@@ -7,7 +7,7 @@
  * contexts - the same value re-materializes under `assignments`, `calls`, `locals` and `returns` - and an
  * un-memoized sink wrote a fresh, byte-identical row each time: about a quarter of the rows duplicates.
  */
-import { dedupeSummary, summarizeExpr } from './TsExprSummary.mjs';
+import { dedupeSummary, isContextK, isReadK, summarizeExpr } from './TsExprSummary.mjs';
 import { makeTsExprNormalizer } from './TsExprNorm.mjs';
 import { isAssignmentKind, isOuterWrapper } from './TsNodes.mjs';
 
@@ -173,8 +173,8 @@ export function makeExprDescriber(ts, addRow, resolveRead, resolveName = null, l
 
   const pureReadChain = (e) => {
     if (e === null) return true;
-    if (e.k === 'Read' || e.k === 'SafeRead') return pureReadChain(e.receiver ?? null);
-    return e.k === 'This' || e.k === 'Implicit' || e.k === 'Literal';
+    if (isReadK(e)) return pureReadChain(e.receiver ?? null);
+    return isContextK(e) || e.k === 'Literal';
   };
 
   return (node, role) => {

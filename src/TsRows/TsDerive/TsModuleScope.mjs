@@ -280,10 +280,10 @@ export function judgeScope(scopes, r) {
   if (standalone) {
     // IT IS IN ITS OWN SCOPE (rows 82): the compiler puts a standalone component itself among its dependencies, so its own
     // selector in its own template is a render Angular instantiates, imported or not - `declared`, as a module's own declaration is.
-    if (r.to_class === r.from_class) return { scope: 'declared', standalone: true, byName: false };
+    if (r.to_class === r.from_class) return { scope: SCOPE.declared, standalone: true, byName: false };
     // Its own `imports` array IS the scope - the rule the compiler applies to a standalone component.
     const hit = reach(standaloneScope(standalone), r);
-    return { scope: hit === null ? 'out_of_scope' : 'imported', standalone: true, byName: hit === 'name' };
+    return { scope: hit === null ? SCOPE.outOfScope : SCOPE.imported, standalone: true, byName: hit === 'name' };
   }
   const mod = moduleOfClass(r.from_class);
   const scope = scopeOf(mod);
@@ -291,7 +291,7 @@ export function judgeScope(scopes, r) {
   const declaredHit = reach(scope.declared, r);
   const importedHit = declaredHit === null ? reach(scope.imported, r) : null;
   return {
-    scope: declaredHit !== null ? 'declared' : importedHit !== null ? 'imported' : 'out_of_scope',
+    scope: declaredHit !== null ? SCOPE.declared : importedHit !== null ? SCOPE.imported : SCOPE.outOfScope,
     module: mod.id, byName: declaredHit === 'name' || importedHit === 'name',
   };
 }
@@ -322,7 +322,7 @@ export function rollupModuleScope(store, diag, scopes = makeScopes(store, diag))
   // ambiguity this check exists to report.
   const perNode = new Map();
   for (const r of store.table('renders')) {
-    if (r.scope === 'out_of_scope' || !r.node) continue;
+    if (r.scope === SCOPE.outOfScope || !r.node) continue;
     const list = perNode.get(r.node);
     if (list) list.push(r);
     else perNode.set(r.node, [r]);
@@ -339,6 +339,10 @@ export function rollupModuleScope(store, diag, scopes = makeScopes(store, diag))
   }
   return counts;
 }
+
+/** WHAT A `renders` CANDIDATE'S `scope` SAYS: the module the host sits in declares the child, imports it, or neither -
+ *  and only the last is set aside. Every reader compares against these, so a producer and its readers cannot drift. */
+export const SCOPE = Object.freeze({ declared: 'declared', imported: 'imported', outOfScope: 'out_of_scope' });
 
 /** Where an `out_of_scope` candidate is published - beside `renders`, never in it. */
 export const ASIDE = 'renders_out_of_scope';
@@ -358,7 +362,7 @@ export function setAsideOutOfScope(store) {
   const aside = store.table(ASIDE);
   let at = 0;
   for (const r of all) {
-    if (r.scope === 'out_of_scope') aside.push(r);
+    if (r.scope === SCOPE.outOfScope) aside.push(r);
     else all[at++] = r;
   }
   all.length = at;

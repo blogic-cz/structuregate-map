@@ -11,10 +11,11 @@
 
 import { makeOwners } from './TsTplOwners.mjs';
 import { makeContexts } from './TsTplContext.mjs';
-import { judgeScope, makeScopes } from './TsModuleScope.mjs';
+import { SCOPE, judgeScope, makeScopes } from './TsModuleScope.mjs';
 import { makeHops } from './TsTplHops.mjs';
 import { makeEvents } from './TsTplEvents.mjs';
 import { joinKey } from './TsNodes.mjs';
+import { isContextK, isReadK } from './TsExprSummary.mjs';
 
 const str = (v) => (typeof v === 'string' ? v : null);
 
@@ -187,7 +188,7 @@ export function rollupTemplateReads(store) {
   // stamps) - and a candidate the host cannot see only when no other matches. One rule for a ref (`#popper`) and an output's `$event`.
   const pickInScope = (matched, component) => {
     const seen = matched.length > 1
-      ? matched.filter((d) => judgeScope(scopes(), { from_class: component.id, to_class: declaredBy.get(d.id).class, to_name: d.name }).scope !== 'out_of_scope')
+      ? matched.filter((d) => judgeScope(scopes(), { from_class: component.id, to_class: declaredBy.get(d.id).class, to_name: d.name }).scope !== SCOPE.outOfScope)
       : matched;
     return seen[0] ?? matched[0];
   };
@@ -223,7 +224,7 @@ export function rollupTemplateReads(store) {
     let current = node;
     // A WRITE HEADS ITS CHAIN (#99): `(valueChange)="f.On = $event"` writes `On` through the read `f`, and the member written
     // is resolved as a read of it would be - so a consumer can tell which element SETS a member, not only which reads it.
-    while (current && (current.k === 'Read' || current.k === 'SafeRead' || (current === node && current.k === 'Write'))) {
+    while (isReadK(current) || (current === node && current?.k === 'Write')) {
       const name = str(current.name);
       if (name === null) break;
       root = name;
@@ -235,7 +236,7 @@ export function rollupTemplateReads(store) {
     // A chain bottoming on anything but the component's own context (a pipe, a call, a keyed read, `a ?? b`) names its
     // `base`: `resolveChain` asks what that VALUE is and reads the names off it. A literal or an unknown kind types nothing.
     // An arrow function's parameter is not the component's: `(x) => x.done` resolves no member `x`.
-    const inContext = current === null || current.k === 'Implicit' || current.k === 'This';
+    const inContext = current === null || isContextK(current);
     if (inContext) return nodes[0]?.param ? { root: null, names: [], nodes: [], base: null } : { root, names, nodes, base: null };
     return { root: null, names, nodes, base: current };
   };
@@ -442,7 +443,7 @@ export function rollupTemplateReads(store) {
   const walk = (node, owner, scope) => {
     if (!node || typeof node !== 'object') return;
     if (Array.isArray(node)) { for (const x of node) walk(x, owner, scope); return; }
-    if (node.k === 'Read' || node.k === 'SafeRead' || node.k === 'Write') resolveChain(node, owner, scope);
+    if (isReadK(node) || node.k === 'Write') resolveChain(node, owner, scope);
     for (const v of Object.values(node)) walk(v, owner, scope);
   };
 

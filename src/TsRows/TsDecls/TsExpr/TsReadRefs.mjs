@@ -6,7 +6,7 @@
  */
 import { makeLaterTypes } from './TsLaterTypes.mjs';
 import { aliased, argCall, elementTypes, isOuterWrapper, isPlainKeyName, joinKey, propertyOf, unwrapOuter } from './TsNodes.mjs';
-import { declSite, startSite } from './TsPaths.mjs';
+import { declSite, inNodeModules, libraryDecl, startSite } from './TsPaths.mjs';
 
 export function makeReadRefs(ts, checker) {
   /**
@@ -90,9 +90,8 @@ export function makeReadRefs(ts, checker) {
     // A LIBRARY NAME THAT IS NOT A TOP-LEVEL DECLARATION is still declared (rows 75): `import { cloneDeep } from 'lodash'` binds the METHOD of an interface the package
     // types its export with (a `MethodSignature`), a namespace's member, a module. Those keep their place in the library's file, as the link `_.cloneDeep` always did -
     // never a name nothing declares. ONLY when every declaration is in a declaration file under `node_modules`: an in-tree declaration stays what it was.
-    const inLibrary = (d) => d.getSourceFile().isDeclarationFile && d.getSourceFile().fileName.includes('/node_modules/');
     const top = all.filter(moduleLevel);
-    const decls = top.length ? top : (all.length && all.every(inLibrary) ? all : []);
+    const decls = top.length ? top : (all.length && all.every(libraryDecl) ? all : []);
     const [first, ...rest] = decls.map(at);
     if (first === undefined) return null;
     const klass = ts.isClassDeclaration(decls[0]);
@@ -181,7 +180,7 @@ export function makeReadRefs(ts, checker) {
     };
     const placeOfDecl = (decls) => {
       const [first] = decls;
-      if (first === undefined || first.getSourceFile().fileName.includes('/node_modules/')) return null;
+      if (first === undefined || inNodeModules(first.getSourceFile().fileName)) return null;
       const impl = ts.isFunctionLike(first) && first.body === undefined
         ? decls.find((x) => x.getSourceFile() === first.getSourceFile() && ts.isFunctionLike(x) && x.body !== undefined) : undefined;
       return impl ?? first;

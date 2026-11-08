@@ -11,7 +11,7 @@ import path from 'node:path';
 import { readdirSync, statSync } from 'node:fs';
 import { builtinModules } from 'node:module';
 
-import { slash } from './TsPaths.mjs';
+import { inTree, slash, treeRoot } from './TsPaths.mjs';
 
 // Node's own registry, not a list to maintain: it cannot drift when Node adds a module.
 const NODE_BUILTINS = new Set(builtinModules);
@@ -255,13 +255,8 @@ export function createProgram(ts, tsconfigPath, nodeModules, diag, noted, checke
  * glob, so they are ROOT FILES of the real program.
  */
 export function programFilePaths(program, feRoot) {
-  const root = slash(path.resolve(feRoot)).toLowerCase();
-  const out = [];
-  for (const sf of program.getSourceFiles()) {
-    const f = slash(path.resolve(sf.fileName)).toLowerCase();
-    if (f.startsWith(root) && !f.includes('/node_modules/')) out.push(sf.fileName);
-  }
-  return out;
+  const root = treeRoot(feRoot);
+  return program.getSourceFiles().filter((sf) => inTree(root, sf.fileName)).map((sf) => sf.fileName);
 }
 
 /**
@@ -270,9 +265,6 @@ export function programFilePaths(program, feRoot) {
  * no row for a call's `target_id` to name.
  */
 export function projectSourceFiles(program, feRoot) {
-  const root = slash(path.resolve(feRoot)).toLowerCase();
-  return program.getSourceFiles().filter((sf) => {
-    const f = slash(path.resolve(sf.fileName)).toLowerCase();
-    return f.startsWith(root) && !f.includes('/node_modules/');
-  });
+  const root = treeRoot(feRoot);
+  return program.getSourceFiles().filter((sf) => inTree(root, sf.fileName));
 }

@@ -21,6 +21,21 @@ const cache = new Map();
  *  on this very line: the ban is a literal `findstr`.) */
 export const slash = (p) => String(p).split('\\').join('/');
 
+/** A PATH INSIDE AN INSTALLED PACKAGE - the one test every "is this ours" question asks, slashed first. */
+export const inNodeModules = (p) => slash(p).includes('/node_modules/');
+
+/** A DECLARATION A PACKAGE SHIPS: in a declaration file under `node_modules`, never an in-tree `.d.ts`. */
+export const libraryDecl = (decl) => decl.getSourceFile().isDeclarationFile && inNodeModules(decl.getSourceFile().fileName);
+
+/** The front-end root as `inTree` compares it: resolved, slashed, lower-cased. */
+export const treeRoot = (feRoot) => slash(path.resolve(feRoot)).toLowerCase();
+
+/** A FILE OF THE TREE under `root` (a `treeRoot`), not of a package installed in it. */
+export function inTree(root, fileName) {
+  const f = slash(path.resolve(fileName)).toLowerCase();
+  return f.startsWith(root) && !inNodeModules(f);
+}
+
 /** A path without its extension - `a/b/c.component.html` -> `a/b/c.component`; a dot in a FOLDER name is no extension. */
 export function dropExt(rel) {
   const cut = rel.lastIndexOf('.');
