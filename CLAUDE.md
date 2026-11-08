@@ -60,7 +60,7 @@ it to the child table `<table>__<column>` (`expressions__ast`, `assignments__rea
 a node is `(owner, n)` - `n` its preorder number, the root 0 - with `parent` (the parent's `n`), `role`, `ord`, `node`,
 `value`: FIXED columns, an object's every member a row, its name a `role` (`rust/fbtcore/src/rows/cells/mod.rs`); a
 delete reaches nodes through their row (`cells::delete_children`). A pass writing its own table uses `store::insert_rows`, never
-`serde_json::to_string` into a cell; a reader joins the child table (`cells::load`/`load_all` in rust), never
+`serde_json::to_string` into a cell; a reader joins the child table (`cells::Reader`/`load_all` in rust), never
 `json_each`/`json_extract`. `_meta` too: a key whose value is a list or an object is `_meta__value` nodes (owner = the
 key), read and written only through `rows::meta` (`rust/fbtcore/src/rows/cells/meta.rs`); the TypeScript file graph is
 the tables `ts_deps`/`ts_scope`. **No depth cap**: a parse goes to the end - no `depth > N`, no `*DEPTH*` constant,
