@@ -12,7 +12,7 @@
 //! `vec![x; n]` and `matches!` by their grammar, any other by its literal tokens. An item-level macro
 //! (`include!`) is read as one, and a `thread_local!` static as a constant. A constant's TYPE is walked too: an
 //! array length is a number. An ATTRIBUTE is never read: a doc comment and `#[path = "x.rs"]` are not literals
-//! the code uses. A byte string (`b".."`, `br#".."#`, `b'x'`) is a string like any other.
+//! the code uses, and neither is an `extern "C"` ABI name. A byte string (`b".."`, `br#".."#`, `b'x'`) is a string like any other.
 
 use super::lines::LineStarts;
 use proc_macro2::{Spacing, TokenStream, TokenTree};
@@ -77,6 +77,14 @@ fn bytes(value: &[u8]) -> String {
 }
 
 impl Walker<'_, '_> {
+    /// `visit` with the test count raised while `attrs` mark test code (`testmods::is_test`).
+    fn scoped(&mut self, attrs: &[syn::Attribute], visit: impl FnOnce(&mut Self)) {
+        let test = usize::from(super::testmods::is_test(attrs));
+        self.tests += test;
+        visit(self);
+        self.tests -= test;
+    }
+
     fn text(&self, node: &impl Spanned) -> String {
         let span = node.span();
         self.starts.slice(self.starts.offset(span.start()), self.starts.offset(span.end())).trim().to_string()
@@ -227,16 +235,13 @@ fn json_value(tokens: TokenStream, out: &mut Vec<Piece>) {
     if let [TokenTree::Group(g)] = trees.as_slice() {
         match g.delimiter() {
             proc_macro2::Delimiter::Brace => {
-                for entry in split_top(g.stream(), &is_comma) {
-                    let mut at = None;
+                let whole = |entry: &TokenStream| {
                     let items: Vec<TokenTree> = entry.clone().into_iter().collect();
-                    for (i, t) in items.iter().enumerate() {
-                        if is_single_colon(&items, i, t) {
-                            at = Some(i);
-                            break;
-                        }
-                    }
-                    let Some(at) = at else {
+                    colon_at(&items).is_none_or(|at| json_whole(&items[at + 1..].iter().cloned().collect()))
+                };
+                for entry in json_split(g.stream(), &whole) {
+                    let items: Vec<TokenTree> = entry.clone().into_iter().collect();
+                    let Some(at) = colon_at(&items) else {
                         token_literals(entry, out);
                         continue;
                     };
@@ -250,7 +255,7 @@ fn json_value(tokens: TokenStream, out: &mut Vec<Piece>) {
                 return;
             }
             proc_macro2::Delimiter::Bracket => {
-                for element in split_top(g.stream(), &is_comma) {
+                for element in json_split(g.stream(), &json_whole) {
                     json_value(element, out);
                 }
                 return;
@@ -262,6 +267,41 @@ fn json_value(tokens: TokenStream, out: &mut Vec<Piece>) {
         Ok(e) => out.push(Piece::Expr(e)),
         Err(_) => token_literals(tokens, out),
     }
+}
+
+/// The entries of a json object or array: cut at its top-level commas, and parts joined while the run is no whole
+/// value yet. A turbofish's comma (`r.get::<_, String>(0)?`) is in no group, so a plain cut split one value in two.
+/// A run that never becomes whole (a template's `$x`) is kept as its parts.
+fn json_split(tokens: TokenStream, whole: &dyn Fn(&TokenStream) -> bool) -> Vec<TokenStream> {
+    let mut out = Vec::new();
+    let mut held: Vec<TokenStream> = Vec::new();
+    for part in split_top(tokens, &is_comma) {
+        held.push(part);
+        let mut run = TokenStream::new();
+        for (i, piece) in held.iter().enumerate() {
+            if i > 0 {
+                run.extend([TokenTree::Punct(proc_macro2::Punct::new(',', Spacing::Alone))]);
+            }
+            run.extend(piece.clone());
+        }
+        if whole(&run) {
+            out.push(run);
+            held.clear();
+        }
+    }
+    out.extend(held);
+    out
+}
+
+/// A json value that stands alone: a nested object or array, or an expression.
+fn json_whole(value: &TokenStream) -> bool {
+    let trees: Vec<TokenTree> = value.clone().into_iter().collect();
+    matches!(trees.as_slice(), [TokenTree::Group(_)]) || syn::parse2::<syn::Expr>(value.clone()).is_ok()
+}
+
+/// Where an object entry's key ends: its first `:` that is not half of a `::`.
+fn colon_at(items: &[TokenTree]) -> Option<usize> {
+    items.iter().enumerate().position(|(i, t)| is_single_colon(items, i, t))
 }
 
 fn is_comma(t: &TokenTree) -> bool {
@@ -290,58 +330,60 @@ fn split_top(tokens: TokenStream, cut: &dyn Fn(&TokenTree) -> bool) -> Vec<Token
     parts.into_iter().filter(|p| !p.is_empty()).map(|p| p.into_iter().collect()).collect()
 }
 
-fn test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|a| a.path().is_ident("test")) || super::items::is_cfg_test(attrs)
-}
-
 impl<'ast> Visit<'ast> for Walker<'_, '_> {
     fn visit_attribute(&mut self, _: &'ast syn::Attribute) {}
 
     fn visit_item_mod(&mut self, m: &'ast syn::ItemMod) {
-        let test = usize::from(test_attr(&m.attrs));
-        self.tests += test;
-        visit::visit_item_mod(self, m);
-        self.tests -= test;
+        self.scoped(&m.attrs, |w| visit::visit_item_mod(w, m));
     }
 
+    /// A `#[cfg(test)]` `impl`, `trait`, `const`, `static` or statement is test code, as in `handlers.rs`.
     fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
         self.cls.push(super::consts::compact(&quote::ToTokens::to_token_stream(&*i.self_ty).to_string()));
-        visit::visit_item_impl(self, i);
+        self.scoped(&i.attrs, |w| visit::visit_item_impl(w, i));
         self.cls.pop();
     }
 
-    fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
-        let test = usize::from(test_attr(&f.attrs));
-        self.tests += test;
-        self.func.push(f.sig.ident.to_string());
-        visit::visit_item_fn(self, f);
-        self.func.pop();
-        self.tests -= test;
+    fn visit_item_trait(&mut self, t: &'ast syn::ItemTrait) {
+        self.scoped(&t.attrs, |w| visit::visit_item_trait(w, t));
     }
 
-    fn visit_impl_item_fn(&mut self, f: &'ast syn::ImplItemFn) {
-        // A `#[test]` or `#[cfg(test)]` method counts as test code exactly as a free fn does.
-        let test = usize::from(test_attr(&f.attrs));
-        self.tests += test;
+    fn visit_stmt(&mut self, s: &'ast syn::Stmt) {
+        self.scoped(super::testmods::stmt_attrs(s), |w| visit::visit_stmt(w, s));
+    }
+
+    fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
         self.func.push(f.sig.ident.to_string());
-        visit::visit_impl_item_fn(self, f);
+        self.scoped(&f.attrs, |w| visit::visit_item_fn(w, f));
         self.func.pop();
-        self.tests -= test;
+    }
+
+    /// A `#[test]` or `#[cfg(test)]` method counts as test code exactly as a free fn does.
+    fn visit_impl_item_fn(&mut self, f: &'ast syn::ImplItemFn) {
+        self.func.push(f.sig.ident.to_string());
+        self.scoped(&f.attrs, |w| visit::visit_impl_item_fn(w, f));
+        self.func.pop();
     }
 
     fn visit_item_const(&mut self, c: &'ast syn::ItemConst) {
-        self.visit_type(&c.ty);
-        self.with(Use::of("declared"), &c.expr);
+        self.scoped(&c.attrs, |w| {
+            w.visit_type(&c.ty);
+            w.with(Use::of("declared"), &c.expr);
+        });
     }
 
     fn visit_item_static(&mut self, s: &'ast syn::ItemStatic) {
-        self.visit_type(&s.ty);
-        self.with(Use::of("declared"), &s.expr);
+        self.scoped(&s.attrs, |w| {
+            w.visit_type(&s.ty);
+            w.with(Use::of("declared"), &s.expr);
+        });
     }
 
     fn visit_impl_item_const(&mut self, c: &'ast syn::ImplItemConst) {
-        self.visit_type(&c.ty);
-        self.with(Use::of("declared"), &c.expr);
+        self.scoped(&c.attrs, |w| {
+            w.visit_type(&c.ty);
+            w.with(Use::of("declared"), &c.expr);
+        });
     }
 
     fn visit_local(&mut self, l: &'ast syn::Local) {

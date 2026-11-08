@@ -7,6 +7,38 @@ use super::{forget_spans, items, lines, modpath};
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
+/// TEST CODE INSIDE A FILE: an item, `impl`, `trait`, `const`, `static` or statement under `#[test]` or `#[cfg(test)]`
+/// (`cfg(all(test, ..))` too). The handlers and literals walkers count these around their walk.
+pub(super) fn is_test(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|a| a.path().is_ident("test")) || items::is_cfg_test(attrs)
+}
+
+/// The attributes written on a statement: a `let`, a macro, or an expression that carries its own
+/// (`#[cfg(test)] { .. }`, a call). An item statement's are read by the item's own visit.
+pub(super) fn stmt_attrs(stmt: &syn::Stmt) -> &[syn::Attribute] {
+    use syn::Expr;
+    match stmt {
+        syn::Stmt::Local(l) => &l.attrs,
+        syn::Stmt::Macro(m) => &m.attrs,
+        syn::Stmt::Item(_) => &[],
+        syn::Stmt::Expr(e, _) => match e {
+            Expr::Block(x) => &x.attrs,
+            Expr::Unsafe(x) => &x.attrs,
+            Expr::Call(x) => &x.attrs,
+            Expr::MethodCall(x) => &x.attrs,
+            Expr::Macro(x) => &x.attrs,
+            Expr::Assign(x) => &x.attrs,
+            Expr::If(x) => &x.attrs,
+            Expr::Match(x) => &x.attrs,
+            Expr::ForLoop(x) => &x.attrs,
+            Expr::While(x) => &x.attrs,
+            Expr::Loop(x) => &x.attrs,
+            Expr::Try(x) => &x.attrs,
+            _ => &[],
+        },
+    }
+}
+
 /// A file of a cargo `tests/` integration crate: a `tests` folder not inside `src/` (there it is a module folder).
 fn integration(rel: &str) -> bool {
     let parts: Vec<&str> = rel.split('/').collect();

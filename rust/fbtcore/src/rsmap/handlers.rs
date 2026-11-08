@@ -239,11 +239,15 @@ fn caught(inner: Option<&syn::Pat>) -> (String, Vec<String>, bool) {
     }
 }
 
-fn is_test(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|a| a.path().is_ident("test")) || super::items::is_cfg_test(attrs)
-}
-
 impl Walker {
+    /// `visit` with the test count raised while `attrs` mark test code (`testmods::is_test`).
+    fn scoped(&mut self, attrs: &[syn::Attribute], visit: impl FnOnce(&mut Self)) {
+        let test = usize::from(super::testmods::is_test(attrs));
+        self.tests += test;
+        visit(self);
+        self.tests -= test;
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn add(&mut self, shape: &'static str, line: usize, try_line: usize, caught: (String, Vec<String>, bool), body: Body, passes: bool, panics: bool) {
         let (name, types, bare) = caught;
@@ -298,39 +302,47 @@ impl<'ast> Visit<'ast> for Walker {
     }
 
     fn visit_item_mod(&mut self, m: &'ast syn::ItemMod) {
-        let test = usize::from(is_test(&m.attrs));
-        self.tests += test;
-        visit::visit_item_mod(self, m);
-        self.tests -= test;
+        self.scoped(&m.attrs, |w| visit::visit_item_mod(w, m));
     }
 
+    /// A `#[cfg(test)]` `impl`, `trait`, `const`, `static` or statement is test code as a whole, as `consts.rs` reads it.
     fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
-        // A `#[cfg(test)] impl` is test code as a whole, as `consts.rs` already reads it.
-        let test = usize::from(is_test(&i.attrs));
-        self.tests += test;
         self.cls.push(compact(&quote::ToTokens::to_token_stream(&*i.self_ty).to_string()));
-        visit::visit_item_impl(self, i);
+        self.scoped(&i.attrs, |w| visit::visit_item_impl(w, i));
         self.cls.pop();
-        self.tests -= test;
+    }
+
+    fn visit_item_trait(&mut self, t: &'ast syn::ItemTrait) {
+        self.scoped(&t.attrs, |w| visit::visit_item_trait(w, t));
+    }
+
+    fn visit_item_const(&mut self, c: &'ast syn::ItemConst) {
+        self.scoped(&c.attrs, |w| visit::visit_item_const(w, c));
+    }
+
+    fn visit_item_static(&mut self, s: &'ast syn::ItemStatic) {
+        self.scoped(&s.attrs, |w| visit::visit_item_static(w, s));
+    }
+
+    fn visit_impl_item_const(&mut self, c: &'ast syn::ImplItemConst) {
+        self.scoped(&c.attrs, |w| visit::visit_impl_item_const(w, c));
+    }
+
+    fn visit_stmt(&mut self, s: &'ast syn::Stmt) {
+        self.scoped(super::testmods::stmt_attrs(s), |w| visit::visit_stmt(w, s));
     }
 
     fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
-        let test = usize::from(is_test(&f.attrs));
-        self.tests += test;
         self.func.push(f.sig.ident.to_string());
-        visit::visit_item_fn(self, f);
+        self.scoped(&f.attrs, |w| visit::visit_item_fn(w, f));
         self.func.pop();
-        self.tests -= test;
     }
 
+    /// A `#[test]` or `#[cfg(test)]` method counts as test code exactly as a free fn does.
     fn visit_impl_item_fn(&mut self, f: &'ast syn::ImplItemFn) {
-        // A `#[test]` or `#[cfg(test)]` method counts as test code exactly as a free fn does.
-        let test = usize::from(is_test(&f.attrs));
-        self.tests += test;
         self.func.push(f.sig.ident.to_string());
-        visit::visit_impl_item_fn(self, f);
+        self.scoped(&f.attrs, |w| visit::visit_impl_item_fn(w, f));
         self.func.pop();
-        self.tests -= test;
     }
 
     fn visit_expr_match(&mut self, m: &'ast syn::ExprMatch) {

@@ -138,3 +138,11 @@ fn macro_arguments_are_code_and_a_macro_rules_template_names_nothing() {
     }
     assert!(found.uses.contains("kept"));
 }
+
+#[test]
+fn a_template_s_let_binding_and_field_label_are_not_uses() {
+    let found = items("macro_rules! m { ($b:block) => {{ let value = $b; R { files: value, kept: other() } }}; }\n");
+    assert!(!found.uses.contains("value"), "a let binding is the body's local: {:?}", found.uses);
+    assert!(!found.uses.contains("files") && !found.uses.contains("kept"), "a field label is no use: {:?}", found.uses);
+    assert!(found.uses.contains("R") && found.uses.contains("other"), "{:?}", found.uses);
+}

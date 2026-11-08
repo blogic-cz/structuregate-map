@@ -403,7 +403,10 @@ impl<'ast> Visit<'ast> for Walker<'_, '_> {
         } else {
             let mut found = vec![];
             macro_paths(m.tokens.clone(), self.template, &mut |path| found.push(path));
-            found.retain(|p| !self.bound(&p[0]));
+            // A name the body binds with `let` (a template's `let value = $body; value`) is its local.
+            let mut lets = BTreeSet::new();
+            let_names(m.tokens.clone(), &mut lets);
+            found.retain(|p| !self.bound(&p[0]) && !(p.len() == 1 && lets.contains(&p[0])));
             self.paths.extend(found.into_iter().map(|p| (self.inline.clone(), p)));
         }
         visit::visit_macro(self, m);
@@ -447,13 +450,34 @@ fn macro_paths(stream: TokenStream, template: bool, found: &mut impl FnMut(Vec<S
                     path.push(next.to_string().trim_start_matches("r#").to_string());
                     i += 3;
                 }
-                found(path);
+                // `name: ..` is a field label or a binding's type (`R { files: .. }`), never a use.
+                let label = path.len() == 1 && matches!(tokens.get(i + 1), Some(TokenTree::Punct(p)) if p.as_char() == ':' && p.spacing() == proc_macro2::Spacing::Alone);
+                if !label {
+                    found(path);
+                }
             }
             TokenTree::Group(group) => macro_paths(group.stream(), template, found),
             _ => {}
         }
         after_dot = matches!(&tokens[i], TokenTree::Punct(p) if p.as_char() == '.');
         i += 1;
+    }
+}
+
+/// Every name a `let` (or `let mut`) binds in the tokens, at any depth.
+fn let_names(stream: TokenStream, out: &mut BTreeSet<String>) {
+    let tokens: Vec<TokenTree> = stream.into_iter().collect();
+    for (i, token) in tokens.iter().enumerate() {
+        match token {
+            TokenTree::Group(group) => let_names(group.stream(), out),
+            TokenTree::Ident(ident) if ident == "let" => {
+                let at = if matches!(tokens.get(i + 1), Some(TokenTree::Ident(m)) if m == "mut") { i + 2 } else { i + 1 };
+                if let Some(TokenTree::Ident(name)) = tokens.get(at) {
+                    out.insert(name.to_string());
+                }
+            }
+            _ => {}
+        }
     }
 }
 
