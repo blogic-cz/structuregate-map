@@ -140,7 +140,11 @@ Test-Case 'rs map: a name a let, a parameter or a closure binds is a local, and 
 Test-Case 'rs map: include_str! and include_bytes! are soft edges, never BROKEN when the file is not mapped' {
     $tree = Use-Tree @{
         'core/Cargo.toml'    = "[package]`nname = `"core`"`nversion = `"0.1.0`"`n"
-        'core/src/lib.rs'    = "pub mod view;`n"
+        'core/src/lib.rs'    = "pub mod view;`npub mod sets;`n"
+        # A macro_rules TEMPLATE: each literal its call passes is included in the metavariable's place.
+        'core/src/sets.rs'   = "macro_rules! set { (`$(`$p:literal),+) => { &[`$(include_bytes!(concat!(env!(`"CARGO_MANIFEST_DIR`"), `"/../web/`", `$p))),+] }; }`n" +
+                               "pub const SET: &[&[u8]] = set!(`"app.js`");`n"
+        'web/app.js'         = "var app = 1;`n"
         'core/src/view.rs'   = "pub const PAGE: &str = include_str!(`"page.js`");`n" +
                                "pub const LIBS: [&str; 1] = [include_str!(concat!(env!(`"CARGO_MANIFEST_DIR`"), `"/../web/vendor/lib.min.js`"))];`n" +
                                "pub const LOGO: &[u8] = include_bytes!(`"gone.png`");`n"
@@ -154,6 +158,8 @@ Test-Case 'rs map: include_str! and include_bytes! are soft edges, never BROKEN 
     Assert-Equal (Get-Imports $found.Map 'core/src/view.rs').Count 0 'an include is no hard import'
     Assert-NoLine $found 'NO READER web/vendor/lib.min.js'
     Assert-NoLine $found 'gone.png'
+    $set = $found.Map.soft_imports.PSObject.Properties | Where-Object { $_.Name -eq 'core/src/sets.rs' }
+    Assert-Equal (@($set.Value) -join ',') 'web/app.js' 'a template macro includes what its call passes'
     $rsOnly = Get-RsMap --root $tree --map-check
     Assert-Exit $rsOnly 0
     Assert-NoLine $rsOnly 'BROKEN'
