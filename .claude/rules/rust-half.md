@@ -17,7 +17,9 @@ Roslyn. It is called in process: its line counter by `count/` (the gate) and `ma
 - A source line is a line a TOKEN sits on. `proc-macro2` returns `///` and `//!` as `#[doc]` tokens;
   they are told apart from a typed attribute by the SOURCE under the `#` (a comment starts with `/`).
 - `mod name;` is an exact edge, resolved like rustc (`modpath.rs`: crate roots and `mod.rs` own their
-  folder, `#[path]` is relative to the declaring file). A path's ROOT decides what its later segments name (`rsmap/paths.rs`): `crate::`/`super::` and an in-tree `use` name them, `std::`, `Self::`, an own item and `TokenTree::Group` after an extern import name nothing, and a name through another crate joins only into that crate. AN IN-TREE PATH IS WALKED through the module tree (`graph/rspaths.rs`: `mod x;` and inline modules, `crate`/`super`/`self` anchors) and lands in the file of the module it reaches, following a module's imports and in-tree globs at an item (a re-export, a child's `use super::*;`); only an unresolved bare name is joined by name.
+  folder, `#[path]` is relative to the declaring file). `include_str!`/`include_bytes!`/`include!` of a literal path
+  (relative to the file) or of `concat!(env!("CARGO_MANIFEST_DIR"), "...")` (relative to the package) is a SOFT edge
+  (`rsmap/includes.rs`): never BROKEN, so a vendored `.js` outside `--ext` costs nothing and inside it is not dead. A path's ROOT decides what its later segments name (`rsmap/paths.rs`): `crate::`/`super::` and an in-tree `use` name them, `std::`, `Self::`, an own item and `TokenTree::Group` after an extern import name nothing, and a name through another crate joins only into that crate. AN IN-TREE PATH IS WALKED through the module tree (`graph/rspaths.rs`: `mod x;` and inline modules, `crate`/`super`/`self` anchors) and lands in the file of the module it reaches, following a module's imports and in-tree globs at an item (a re-export, a child's `use super::*;`); only an unresolved bare name is joined by name.
 - Only items another file can name are declared (`pub`, `pub(crate)`, … and every `macro_rules!`). A
   `#[cfg(test)]` item or module declares nothing, and a bare name a `let`, parameter or pattern binds is a local, never a use. A method after `.` is a member, never a use.
 - `proc_macro2::extra::invalidate_current_thread_spans()` runs after every file. Outside a proc macro the
@@ -25,7 +27,7 @@ Roslyn. It is called in process: its line counter by `count/` (the gate) and `ma
 - A file the lexer refuses falls back to the `//` scanner for its count and is `UNPARSED` in the map.
 - THE FILE MAP'S COPIES (`rsmap/fingerprint.rs`): each body's digest and its per-statement shingles (`similar_bodies`), and every
   call, method call, binary, struct/array literal, closure or macro of at least 12 tokens (`duplicate_expressions`), local names blanked.
-  A kept answer is keyed on the half's stamp (`rust|paths|copies` in `mapper/halves.rs`): bump it with every new field, or an unchanged file keeps the old answer.
+  A kept answer is keyed on the half's stamp (`rust|paths|copies|includes` in `mapper/halves.rs`): bump it with every new field, or an unchanged file keeps the old answer.
 
 `#[path]` IS HOW A FOLDER IS SPLIT without moving a module: `rows/ts/gate/` and `rows/ts/key/` keep every
 `super::` meaning `rows::ts`. `store_tests.rs` is `store::tests` the same way.
