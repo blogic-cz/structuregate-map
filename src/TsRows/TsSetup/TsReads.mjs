@@ -18,7 +18,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
-import { canonicalPath, relativeTo } from './TsPaths.mjs';
+import { canonicalPath, inNodeModules, relativeTo } from './TsPaths.mjs';
 import { DECLARING } from './TsShape.mjs';
 
 const NONE = Object.freeze([]);
@@ -141,7 +141,7 @@ export function makeReadLog(ts, feRoot) {
         for (const name of names) {
           const abs = canonicalPath(name);
           const low = abs.toLowerCase();
-          if (abs === ownAbs || !low.startsWith(root) || low.includes('/node_modules/')) continue;
+          if (abs === ownAbs || !low.startsWith(root) || inNodeModules(low)) continue;
           out.add(relativeTo(feRoot, abs));
         }
         return [...out].sort();

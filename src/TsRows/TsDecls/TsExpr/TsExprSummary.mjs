@@ -22,10 +22,17 @@ const throughNonNull = (n) => {
   return c;
 };
 
+/** A MEMBER READ, plain or `?.` - the kinds `TsExprNorm.mjs` and `TsTplExpr.mjs` write for one; a third safe-read kind
+ *  is added here once, not at every reader of a chain. */
+export const isReadK = (n) => !!n && (n.k === 'Read' || n.k === 'SafeRead');
+
+/** WHAT A CHAIN HANGS FROM WHEN IT IS THE COMPONENT'S OWN: the template's implicit receiver or `this`. */
+export const isContextK = (n) => !!n && (n.k === 'Implicit' || n.k === 'This');
+
 export function dottedPath(norm) {
   const parts = [];
   let n = throughNonNull(norm);
-  while (n && (n.k === 'Read' || n.k === 'SafeRead')) {
+  while (isReadK(n)) {
     parts.unshift(String(n.name));
     n = throughNonNull(n.receiver ?? null);
   }
@@ -41,8 +48,8 @@ export function dottedPath(norm) {
  */
 function hangsFromContext(norm) {
   let n = throughNonNull(norm);
-  while (n && (n.k === 'Read' || n.k === 'SafeRead')) n = throughNonNull(n.receiver ?? null);
-  return !n || n.k === 'Implicit' || n.k === 'This';
+  while (isReadK(n)) n = throughNonNull(n.receiver ?? null);
+  return !n || isContextK(n);
 }
 
 /** The innermost read of a chain: `x` in `x.a.b`. */
@@ -50,7 +57,7 @@ function rootRead(norm) {
   let n = throughNonNull(norm);
   for (;;) {
     const receiver = throughNonNull(n.receiver ?? null);
-    if (!receiver || (receiver.k !== 'Read' && receiver.k !== 'SafeRead')) return n;
+    if (!isReadK(receiver)) return n;
     n = receiver;
   }
 }
@@ -59,8 +66,7 @@ function rootName(norm) {
   let n = throughNonNull(norm) ?? norm;
   for (;;) {
     const receiver = throughNonNull(n.receiver ?? null);
-    if ((n.k === 'Read' || n.k === 'SafeRead') && receiver
-      && (receiver.k === 'Read' || receiver.k === 'SafeRead')) {
+    if (isReadK(n) && isReadK(receiver)) {
       n = receiver;
       continue;
     }

@@ -6,6 +6,7 @@
  */
 import { slash } from './TsPaths.mjs';
 import { joinKey } from './TsNodes.mjs';
+import { SCOPE } from './TsModuleScope.mjs';
 
 const str = (v) => (typeof v === 'string' ? v : null);
 
@@ -41,11 +42,11 @@ export function rollupInputUsage(store) {
   const cannotSee = new Set();
   for (const r of store.table('renders')) {
     if (r.node == null || r.to_class == null) continue;
-    const inScope = r.scope === 'declared' || r.scope === 'imported';
+    const inScope = r.scope === SCOPE.declared || r.scope === SCOPE.imported;
     if (inScope) { inScopeNodes.add(String(r.node)); inScopePairs.add(joinKey(r.node, r.to_class)); }
     // A COMPONENT'S OWN SELECTOR IN ITS TEMPLATE IS IN ITS SCOPE: Angular lets a component recurse with no import, though its scope row
     // says `out_of_scope` for a standalone one - so its inputs stay attributed (`from_class` is the component, `to_class` itself).
-    else if (r.scope === 'out_of_scope' && r.from_class !== r.to_class) cannotSee.add(joinKey(r.node, r.to_class));
+    else if (r.scope === SCOPE.outOfScope && r.from_class !== r.to_class) cannotSee.add(joinKey(r.node, r.to_class));
     const hit = targetsOfNode.get(r.node);
     if (hit) hit.add(r.to_class);
     else targetsOfNode.set(r.node, new Set([r.to_class]));

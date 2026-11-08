@@ -15,12 +15,10 @@
  *
  * Imports are flat: see `TsTypeRef.mjs`.
  */
-import { canonicalPath, relativeTo, slash } from './TsPaths.mjs';
+import { canonicalPath, libraryDecl, relativeTo, slash } from './TsPaths.mjs';
 import { initializedVar, locationOf, unwrapOuter } from './TsNodes.mjs';
 
 export function makeLibPipes({ ts, checker, symbolAt, feRoot, propName }) {
-  const inLibrary = (decl) => decl.getSourceFile().isDeclarationFile
-    && slash(decl.getSourceFile().fileName).includes('/node_modules/');
   const classOf = (sym) => (sym?.declarations ?? []).find((d) => ts.isClassDeclaration(d)) ?? null;
 
   /** The type arguments of a class's `static <name>: X<...>` member, or null. */
@@ -53,7 +51,7 @@ export function makeLibPipes({ ts, checker, symbolAt, feRoot, propName }) {
         if (!ts.isTypeQueryNode(el)) continue;
         const at = ts.isQualifiedName(el.exprName) ? el.exprName.right : el.exprName;
         const next = classOf(symbolAt(at));
-        if (next && inLibrary(next)) out.push(...pipesOfClass(next, seen));
+        if (next && libraryDecl(next)) out.push(...pipesOfClass(next, seen));
       }
     }
     memo.set(cls, out);
@@ -117,7 +115,7 @@ export function makeLibPipes({ ts, checker, symbolAt, feRoot, propName }) {
         const classes = [];
         classesIn(p.initializer, new Set(), classes);
         for (const cls of classes) {
-          if (!inLibrary(cls)) continue;
+          if (!libraryDecl(cls)) continue;
           if (cls.name && (staticArgs(cls, 'ɵcmp') || staticArgs(cls, 'ɵdir'))) declarables.add(cls.name.text);
           for (const pipe of pipesOfClass(cls)) {
             const key = `${from}\u0000${pipe.file}\u0000${pipe.line}\u0000${pipe.name}`;

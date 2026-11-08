@@ -7,6 +7,8 @@
  * see `TsDecls/TsTypeRef.mjs`.
  */
 
+import { SCOPE } from './TsModuleScope.mjs';
+
 /** Every selector a component or directive declares, and what it points at. */
 export function rollupSelectors(store) {
   for (const table of ['components', 'directives']) {
@@ -30,7 +32,7 @@ export function rollupRenderGraph(store) {
     // links a native `<header>` to any component named `header`, in any app; Angular instantiates it only where
     // the template's scope reaches it. `renders` keeps the candidate with its `scope`; the graph - and the atlas
     // and view walking it - keeps what really renders, as `component_reach` already did.
-    if (r.scope === 'out_of_scope') continue;
+    if (r.scope === SCOPE.outOfScope) continue;
     const key = `${String(r.from_class)}>${String(r.to_class)}>${String(r.kind)}`;
     const hit = aggregate.get(key);
     // A DYNAMIC EDGE HAS NO TAG. Coercing it would put the string "null" among real element names, which
