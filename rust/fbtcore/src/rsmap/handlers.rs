@@ -18,7 +18,7 @@
 //!   catch_unwind `std::panic::catch_unwind(..)`                 the one real catch, of a panic
 //!
 //! WHICH TYPE a method is called on is not known here - there is no type checker in this process - so an
-//! `.unwrap()` on an Option is a row too. `test` marks what sits in a `#[cfg(test)]` module or a `#[test]`
+//! `.unwrap()` on an Option is a row too. `test` marks what sits in a `#[cfg(test)]` module or `impl` or a `#[test]`
 //! function, where unwrapping is the idiom: a query about production code says `test = 0`.
 //!
 //! A HANDLER INSIDE A MACRO'S ARGUMENTS is a row when the body parses as expressions (`format!`, `println!`) or
@@ -305,9 +305,13 @@ impl<'ast> Visit<'ast> for Walker {
     }
 
     fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
+        // A `#[cfg(test)] impl` is test code as a whole, as `consts.rs` already reads it.
+        let test = usize::from(is_test(&i.attrs));
+        self.tests += test;
         self.cls.push(compact(&quote::ToTokens::to_token_stream(&*i.self_ty).to_string()));
         visit::visit_item_impl(self, i);
         self.cls.pop();
+        self.tests -= test;
     }
 
     fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
