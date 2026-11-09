@@ -80,3 +80,29 @@ Test-Case 'ancestors: --node is required, and --limit counts from the root' {
     Assert-Line $cut '... 4 more node(s); raise --limit'
     Assert-NoLine $cut 'Name'
 }
+
+Test-Case 'children: only the nodes one level down, each with how many it holds below' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $r = Invoke-Gate --map-query $m.Db --children $m.Owner --node 2 --table expressions__shape
+    Assert-Exit $r 0
+    Assert-Line $r "expressions__shape  $($m.Owner)  n 2  depth 1  (3 child(ren))"
+    Assert-Line $r '3  c[0] object  +1 below'
+    Assert-Line $r '5  c[1] object  +4 below'
+    Assert-Line $r '10  c[2] object  +6 below'
+    # Every `k` is a grandchild of node 2, never a child.
+    Assert-NoLine $r 'k string'
+}
+
+Test-Case 'children: the root by default, a scalar holds nothing below, and --limit counts children' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $r = Invoke-Gate --map-query $m.Db --children $m.Owner --table expressions__shape
+    Assert-Exit $r 0
+    Assert-Line $r "expressions__shape  $($m.Owner)  n 0  depth 0  (2 child(ren))"
+    Assert-Line $r '1  k string Call'
+    Assert-NoLine $r 'Call  +'
+    Assert-Line $r '2  c list  +14 below'
+    $cut = Invoke-Gate --map-query $m.Db --children $m.Owner --node 2 --table expressions__shape --limit 1
+    Assert-Line $cut '... 2 more node(s); raise --limit'
+}

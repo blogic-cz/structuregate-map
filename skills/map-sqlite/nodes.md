@@ -52,7 +52,9 @@ what sits anywhere below a node seconds against minutes.
 defaults to the root 0; `--table` takes one node table (`expressions__ast`) or a row table (`expressions`: every
 node table of it), and without it every node table holding that node answers. `--limit` counts nodes per tree.
 `--ancestors OWNER --node N [--table T]` prints the path from the root down to node N the same way, indented
-by depth from the root, the node itself last. A node no table holds is exit 2.
+by depth from the root, the node itself last. `--children OWNER [--node N] [--table T]` prints only the nodes one
+level below N, each that holds nodes of its own with `+K below` - the size of its subtree, so a large one can be
+asked of `--subtree` next. A node no table holds is exit 2.
 
 ```sql
 -- one node's whole subtree, indented, in source order
