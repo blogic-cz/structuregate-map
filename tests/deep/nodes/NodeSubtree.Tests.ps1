@@ -1,6 +1,6 @@
 <#
     --map-query --subtree: one node's whole subtree, read as the range n..last of its owner.
-    --ancestors, --children and --siblings read the same key the other ways.
+    --ancestors, --children, --siblings and --descendants-of-kind read the same key the other ways.
 
     The fixture's call `f(a.b, [1, 2])` has a python `expressions__shape` tree whose second child (`a.b`, an
     Attribute holding a Name) ends before a third sibling (the List) starts - so a range one node too long,
@@ -130,4 +130,36 @@ Test-Case 'siblings: the root stands alone, and --node is required' {
     $none = Invoke-Gate --map-query $m.Db --siblings $m.Owner --table expressions__shape
     Assert-Exit $none 2
     Assert-Line $none '--siblings needs the owner'
+}
+
+Test-Case 'descendants-of-kind: every object below the node whose kind is K, each at its depth with its size' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $r = Invoke-Gate --map-query $m.Db --descendants-of-kind $m.Owner --kind Name --table expressions__shape
+    Assert-Exit $r 0
+    Assert-Line $r "expressions__shape  $($m.Owner)  n 0..16  (2 node(s) of kind Name)"
+    Assert-Line $r '3    c[0] object Name  +1 below'
+    Assert-Line $r '8        c[0] object Name  +1 below'
+    Assert-NoLine $r 'Attribute'
+    $in = Invoke-Gate --map-query $m.Db --descendants-of-kind $m.Owner --kind Name --node 5 --table expressions__shape
+    Assert-Line $in "expressions__shape  $($m.Owner)  n 5..9  (1 node(s) of kind Name)"
+    Assert-NoLine $in '3    c[0]'
+    # The Constants sit after node 5's subtree ends, at 13 and 15: a range read past `last` would print them.
+    $after = Invoke-Gate --map-query $m.Db --descendants-of-kind $m.Owner --kind Constant --node 5 --table expressions__shape
+    Assert-Line $after "expressions__shape  $($m.Owner)  n 5..9  (0 node(s) of kind Constant)"
+    Assert-NoLine $after 'object Constant'
+}
+
+Test-Case 'descendants-of-kind: the node itself is not its own descendant, --limit counts, --kind is required' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $self = Invoke-Gate --map-query $m.Db --descendants-of-kind $m.Owner --kind Call --table expressions__shape
+    Assert-Exit $self 0
+    Assert-Line $self '(0 node(s) of kind Call)'
+    Assert-NoLine $self '0  object'
+    $cut = Invoke-Gate --map-query $m.Db --descendants-of-kind $m.Owner --kind Constant --table expressions__shape --limit 1
+    Assert-Line $cut '... 1 more node(s); raise --limit'
+    $none = Invoke-Gate --map-query $m.Db --descendants-of-kind $m.Owner --table expressions__shape
+    Assert-Exit $none 2
+    Assert-Line $none '--descendants-of-kind needs the owner and the kind'
 }

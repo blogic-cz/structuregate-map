@@ -55,7 +55,9 @@ node table of it), and without it every node table holding that node answers. `-
 by depth from the root, the node itself last. `--children OWNER [--node N] [--table T]` prints only the nodes one
 level below N, each that holds nodes of its own with `+K below` - the size of its subtree, so a large one can be
 asked of `--subtree` next. `--siblings OWNER --node N [--table T]` prints its parent's children the same way, N
-marked `<- asked` among them (the root has none). A node no table holds is exit 2.
+marked `<- asked` among them (the root has none). `--descendants-of-kind OWNER --kind K [--node N] [--table T]` prints
+every object strictly below N whose kind - its `k` member, or `kind` where a half names it so - is K, each with its kind
+and `+K below`, indented by depth (every `Call` inside one expression, every `Map` inside one literal). A node no table holds is exit 2.
 
 ```sql
 -- one node's whole subtree, indented, in source order

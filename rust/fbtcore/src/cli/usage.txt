@@ -213,7 +213,8 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         root down to that node), --children OWNER [--node N] [--table T]
                         (the nodes one level below it, each with how many it holds),
                         --siblings OWNER --node N [--table T] (its parent's children, it
-                        marked), --sql QUERY, --limit N (0: every
+                        marked), --descendants-of-kind OWNER --kind K [--node N] [--table T]
+                        (every object below it whose `k`/`kind` is K), --sql QUERY, --limit N (0: every
                         row), --width N (a cell is cut at 70 characters with ...[+N chars]; 0:
                         every cell whole - --find's file column is never cut). A note on stderr
                         says when the tree moved on since the map was written.
