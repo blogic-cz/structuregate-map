@@ -1,14 +1,15 @@
 //! `--subtree OWNER [--node N] [--table T]`: one node's whole subtree, printed as the tree it is.
 //! `--ancestors OWNER --node N [--table T]`: the path from the root down to that node.
 //! `--children OWNER [--node N] [--table T]`: the nodes that hang directly off it, each with its subtree's size.
+//! `--siblings OWNER --node N [--table T]`: the children of its parent, the node itself marked among them.
 //!
 //! A STRUCTURE IS NODE ROWS (`rows::cells`), and `n` is a gapless preorder with each node's `last`, so a node's
 //! subtree is the RANGE `n BETWEEN s.n AND s.last` of its owner and its ancestors are the nodes whose range holds
 //! it, `a.n <= x.n AND x.n <= a.last`, and its children are the nodes of its range one level down, `parent = s.n`
-//! inside `n BETWEEN s.n + 1 AND s.last` - each one read of the `(owner, n)` key, never a recursive walk over `parent`,
+//! inside `n BETWEEN s.n + 1 AND s.last`, and its siblings are its parent's children read the same way - each one read of the `(owner, n)` key, never a recursive walk over `parent`,
 //! which on a large tree cost a minute for what the range reads at once. `OWNER` is the row id the structure
 //! belongs to (`x:41`, `#5`); `--node` the `n` asked about (the root 0 when it is not given, except for
-//! `--ancestors`, which needs it); `--table` narrows to one node table (`expressions__ast`) or to every node table of one
+//! `--ancestors` and `--siblings`, which need it); `--table` narrows to one node table (`expressions__ast`) or to every node table of one
 //! row table (`expressions`). Without it every node table holding that node answers, one tree each.
 //!
 //! EACH LINE IS ONE NODE: its `n`, then its `role` (`[ord]` for a list item) and `node` indented by its depth -
@@ -23,6 +24,9 @@ use rusqlite::types::Value;
 use rusqlite::Connection;
 use std::fmt::Write as _;
 
+/// The columns every lens prints a node from, in `print_nodes` order.
+const READ: &str = "SELECT n, depth, role, ord, node, value, last FROM";
+
 /// Which way from the node a lens reads.
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum Way {
@@ -32,13 +36,16 @@ pub(super) enum Way {
     Up,
     /// The nodes one level below it.
     Children,
+    /// The nodes one level below its parent, it among them.
+    Siblings,
 }
 
 /// Prints every tree found and says whether there was one: a node no table holds is a refused question.
 pub(super) fn lens(db: &Connection, out: &mut String, way: Way, owner: &str, node: &str, table: &str, limit: usize, width: usize) -> Result<bool> {
-    let flag = match way { Way::Down => "--subtree", Way::Up => "--ancestors", Way::Children => "--children" };
-    if owner.is_empty() || (way == Way::Up && node.is_empty()) {
-        let node_arg = if way == Way::Up { "--node 5" } else { "[--node 5]" };
+    let flag = match way { Way::Down => "--subtree", Way::Up => "--ancestors", Way::Children => "--children", Way::Siblings => "--siblings" };
+    let needs_node = matches!(way, Way::Up | Way::Siblings);
+    if owner.is_empty() || (needs_node && node.is_empty()) {
+        let node_arg = if needs_node { "--node 5" } else { "[--node 5]" };
         let _ = writeln!(out, "{flag} needs the owner a structure belongs to: {flag} x:41 {node_arg} [--table expressions__ast]");
         return Ok(false);
     }
@@ -61,10 +68,9 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, owner: &str, nod
             return Ok(false);
         }
         let t = escape(child);
-        let (_, top) = query(db, &format!("SELECT last, depth FROM \"{t}\" WHERE owner = ?1 AND n = ?2"), &[&key, &start])?;
-        let Some([Value::Integer(last), Value::Integer(depth)]) = top.first().map(|r| [r[0].clone(), r[1].clone()]) else { continue };
+        let (_, top) = query(db, &format!("SELECT last, depth, parent FROM \"{t}\" WHERE owner = ?1 AND n = ?2"), &[&key, &start])?;
+        let Some([Value::Integer(last), Value::Integer(depth), up]) = top.first().map(|r| [r[0].clone(), r[1].clone(), r[2].clone()]) else { continue };
         found = true;
-        const READ: &str = "SELECT n, depth, role, ord, node, value, last FROM";
         let (total, base, nodes) = match way {
             Way::Down => {
                 let _ = writeln!(out, "{child}  {owner}  n {start}..{last}  ({} node(s))", last - start + 1);
@@ -77,15 +83,25 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, owner: &str, nod
                 (depth + 1, 0, query(db, &sql, &[&key, &start, &rows_limit])?.1)
             }
             Way::Children => {
-                let below = format!("\"{t}\" WHERE owner = ?1 AND n BETWEEN ?2 + 1 AND ?3 AND parent = ?2");
-                let (_, counted) = query(db, &format!("SELECT count(*) FROM {below}"), &[&key, &start, &last])?;
-                let total = match counted.first().map(|r| &r[0]) { Some(Value::Integer(c)) => *c, _ => 0 };
+                let (total, nodes) = one_level(db, &t, &key, start, last, rows_limit)?;
                 let _ = writeln!(out, "{child}  {owner}  n {start}  depth {depth}  ({total} child(ren))");
-                let sql = format!("{READ} {below} ORDER BY n LIMIT ?4");
-                (total, depth + 1, query(db, &sql, &[&key, &start, &last, &rows_limit])?.1)
+                (total, depth + 1, nodes)
+            }
+            Way::Siblings => {
+                // THE ROOT HAS NO PARENT, so nothing stands beside it: said, and the node is still found.
+                let Value::Integer(up) = up else {
+                    let _ = writeln!(out, "{child}  {owner}  n {start}  depth {depth}  (the root: no siblings)");
+                    continue;
+                };
+                let (_, held) = query(db, &format!("SELECT last FROM \"{t}\" WHERE owner = ?1 AND n = ?2"), &[&key, &up])?;
+                let up_last = match held.first().map(|r| &r[0]) { Some(Value::Integer(l)) => *l, _ => last };
+                let (total, nodes) = one_level(db, &t, &key, up, up_last, rows_limit)?;
+                let _ = writeln!(out, "{child}  {owner}  n {start}  parent {up}  depth {depth}  ({total} node(s) under {up}, it among them)");
+                (total, depth, nodes)
             }
         };
-        print_nodes(out, &nodes, base, last.max(start).to_string().len(), width, way == Way::Children);
+        let sizes = matches!(way, Way::Children | Way::Siblings);
+        print_nodes(out, &nodes, base, width, sizes, if way == Way::Siblings { start } else { -1 });
         if (nodes.len() as i64) < total {
             let _ = writeln!(out, "... {} more node(s); raise --limit", total - nodes.len() as i64);
         }
@@ -97,9 +113,19 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, owner: &str, nod
     Ok(found)
 }
 
+/// The nodes one level below `top` (whose subtree ends at `last`) and how many there are, `--limit` of them read.
+fn one_level(db: &Connection, t: &str, key: &Value, top: i64, last: i64, limit: i64) -> Result<(i64, Vec<Vec<Value>>)> {
+    let below = format!("\"{t}\" WHERE owner = ?1 AND n BETWEEN ?2 + 1 AND ?3 AND parent = ?2");
+    let (_, counted) = query(db, &format!("SELECT count(*) FROM {below}"), &[key, &top, &last])?;
+    let total = match counted.first().map(|r| &r[0]) { Some(Value::Integer(c)) => *c, _ => 0 };
+    let (_, nodes) = query(db, &format!("{READ} {below} ORDER BY n LIMIT ?4"), &[key, &top, &last, &limit])?;
+    Ok((total, nodes))
+}
+
 /// One line per node of `(n, depth, role, ord, node, value, last)`, indented by its depth below `base`; `sizes`
-/// adds how many nodes a node holds below it.
-fn print_nodes(out: &mut String, nodes: &[Vec<Value>], base: i64, pad: usize, width: usize, sizes: bool) {
+/// adds how many nodes a node holds below it, and the node numbered `mark` says it is the one asked about.
+fn print_nodes(out: &mut String, nodes: &[Vec<Value>], base: i64, width: usize, sizes: bool, mark: i64) {
+    let pad = nodes.iter().map(|r| cell(&r[0]).len()).max().unwrap_or(1);
     for r in nodes {
         let level = match r[1] { Value::Integer(d) => (d - base).max(0) as usize, _ => 0 };
         let role = match (&r[2], &r[3]) {
@@ -115,6 +141,7 @@ fn print_nodes(out: &mut String, nodes: &[Vec<Value>], base: i64, pad: usize, wi
             (true, Value::Integer(n), Some(Value::Integer(last))) if last > n => format!("  +{} below", last - n),
             _ => String::new(),
         };
-        let _ = writeln!(out, "{:>pad$}  {}{role}{gap}{}{value}{held}", cell(&r[0]), "  ".repeat(level), cell(&r[4]));
+        let asked = if matches!(r[0], Value::Integer(n) if n == mark) { "  <- asked" } else { "" };
+        let _ = writeln!(out, "{:>pad$}  {}{role}{gap}{}{value}{held}{asked}", cell(&r[0]), "  ".repeat(level), cell(&r[4]));
     }
 }

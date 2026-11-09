@@ -1,5 +1,6 @@
 <#
     --map-query --subtree: one node's whole subtree, read as the range n..last of its owner.
+    --ancestors, --children and --siblings read the same key the other ways.
 
     The fixture's call `f(a.b, [1, 2])` has a python `expressions__shape` tree whose second child (`a.b`, an
     Attribute holding a Name) ends before a third sibling (the List) starts - so a range one node too long,
@@ -105,4 +106,28 @@ Test-Case 'children: the root by default, a scalar holds nothing below, and --li
     Assert-Line $r '2  c list  +14 below'
     $cut = Invoke-Gate --map-query $m.Db --children $m.Owner --node 2 --table expressions__shape --limit 1
     Assert-Line $cut '... 2 more node(s); raise --limit'
+}
+
+Test-Case 'siblings: the children of its parent, the asked node marked among them, and nothing one level down' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $r = Invoke-Gate --map-query $m.Db --siblings $m.Owner --node 5 --table expressions__shape
+    Assert-Exit $r 0
+    Assert-Line $r "expressions__shape  $($m.Owner)  n 5  parent 2  depth 2  (3 node(s) under 2, it among them)"
+    Assert-Line $r '3  c[0] object  +1 below'
+    Assert-NoLine $r '+1 below  <- asked'
+    Assert-Line $r '5  c[1] object  +4 below  <- asked'
+    Assert-Line $r '10  c[2] object  +6 below'
+    Assert-NoLine $r 'k string'
+}
+
+Test-Case 'siblings: the root stands alone, and --node is required' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $root = Invoke-Gate --map-query $m.Db --siblings $m.Owner --node 0 --table expressions__shape
+    Assert-Exit $root 0
+    Assert-Line $root "expressions__shape  $($m.Owner)  n 0  depth 0  (the root: no siblings)"
+    $none = Invoke-Gate --map-query $m.Db --siblings $m.Owner --table expressions__shape
+    Assert-Exit $none 2
+    Assert-Line $none '--siblings needs the owner'
 }
