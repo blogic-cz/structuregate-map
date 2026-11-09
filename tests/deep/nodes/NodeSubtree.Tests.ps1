@@ -1,0 +1,56 @@
+<#
+    --map-query --subtree: one node's whole subtree, read as the range n..last of its owner.
+
+    The fixture's call `f(a.b, [1, 2])` has a python `expressions__shape` tree whose second child (`a.b`, an
+    Attribute holding a Name) ends before a third sibling (the List) starts - so a range one node too long,
+    or a depth not taken from the start, prints a line these cases refuse.
+#>
+
+$script:SubtreePython = [bool]$script:Python
+if (-not $script:SubtreePython) { Write-Host '    (no python on this machine - the --subtree cases are not run)' }
+
+# The deep map of one call, and the owner of that call's expression row.
+function New-SubtreeMap {
+    $tree = Use-Tree @{ 'a.py' = "def go(a):" + [char]10 + "    return f(a.b, [1, 2])" + [char]10 }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .py --map --map-out (Join-Path $tree 'm.json') --map-sqlite $db) 0
+    $ids = Invoke-Gate --map-query $db --sql "SELECT 'owner=' || id FROM expressions WHERE source = 'f(a.b, [1, 2])'"
+    $line = @($ids.Lines | Where-Object { $_.StartsWith('owner=') })
+    if ($line.Count -ne 1) { throw "no single expression row for the call. Output:`n$($ids.Text)" }
+    return @{ Db = $db; Owner = $line[0].Substring(6).Trim() }
+}
+
+Test-Case 'subtree: a node prints its own subtree, indented from where it starts, and stops before its sibling' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $r = Invoke-Gate --map-query $m.Db --subtree $m.Owner --node 5 --table expressions__shape
+    Assert-Exit $r 0
+    Assert-Line $r "expressions__shape  $($m.Owner)  n 5..9  (5 node(s))"
+    Assert-Line $r '5  c[1] object'
+    Assert-Line $r '6    k string Attribute'
+    Assert-Line $r '9        k string Name'
+    Assert-NoLine $r 'c[2]'
+    Assert-NoLine $r 'List'
+    Assert-NoLine $r 'Constant'
+}
+
+Test-Case 'subtree: the root by default, every node table of a row table, and --limit counts nodes' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $r = Invoke-Gate --map-query $m.Db --subtree $m.Owner --table expressions --limit 2
+    Assert-Exit $r 0
+    Assert-Line $r "expressions__shape  $($m.Owner)  n 0..16  (17 node(s))"
+    Assert-Line $r '... 15 more node(s); raise --limit'
+    Assert-Line $r "expressions__reads  $($m.Owner)  n 0.."
+}
+
+Test-Case 'subtree: a node no table holds, or a --node that is not a number, is exit 2' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $none = Invoke-Gate --map-query $m.Db --subtree $m.Owner --node 99 --table expressions__shape
+    Assert-Exit $none 2
+    Assert-Line $none "no node 99 of $($m.Owner) in any node table of expressions__shape"
+    $bad = Invoke-Gate --map-query $m.Db --subtree $m.Owner --node five
+    Assert-Exit $bad 2
+    Assert-Line $bad '--node takes a node'
+}
