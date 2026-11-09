@@ -54,7 +54,8 @@ node table of it), and without it every node table holding that node answers. `-
 `--ancestors OWNER --node N [--table T]` prints the path from the root down to node N the same way, indented
 by depth from the root, the node itself last. `--children OWNER [--node N] [--table T]` prints only the nodes one
 level below N, each that holds nodes of its own with `+K below` - the size of its subtree, so a large one can be
-asked of `--subtree` next. A node no table holds is exit 2.
+asked of `--subtree` next. `--siblings OWNER --node N [--table T]` prints its parent's children the same way, N
+marked `<- asked` among them (the root has none). A node no table holds is exit 2.
 
 ```sql
 -- one node's whole subtree, indented, in source order
