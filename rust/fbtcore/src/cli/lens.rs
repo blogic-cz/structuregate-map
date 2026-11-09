@@ -6,10 +6,10 @@ use super::Out;
 use serde_json::json;
 use std::path::Path;
 
-/// The lenses that take an argument. `--decorators`, `--dead`, `--defaults`, `--unused-imports` and `--magic` take one
+/// The lenses that take an argument. `--decorators`, `--dead`, `--defaults`, `--unused-imports`, `--magic` and `--rules` take one
 /// OR stand alone, so what follows is only theirs when it is not the next flag.
 const VALUED: [&str; 10] = ["schema", "find", "id", "file", "cat", "text", "grep", "reads", "key", "sql"];
-const OPTIONAL: [&str; 5] = ["decorators", "dead", "defaults", "unused-imports", "magic"];
+const OPTIONAL: [&str; 6] = ["decorators", "dead", "defaults", "unused-imports", "magic", "rules"];
 
 pub fn run(db: &str, arguments: &[String], out: &mut Out) -> i64 {
     // A DATABASE THAT IS NOT THERE IS EXIT 2, not an empty answer.

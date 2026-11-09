@@ -50,6 +50,7 @@ mod query;
 mod tree;
 mod rows;
 mod rsmap;
+mod rules;
 mod session;
 mod slice;
 mod sources;

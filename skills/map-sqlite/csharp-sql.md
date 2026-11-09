@@ -48,7 +48,7 @@ before concluding a method is dead.
   own lines), `errors`, `semantic`.
 * `http_endpoints`: every attribute-routed action (`[Route]`/`[Http*]`), one row per class route; `http_calls`: every `HttpClient` request (#143), and `http_links` the endpoint each reaches - see `nodes.md`.
 * `dispatch`, `enum_type_links` and `name_type_links` - WHICH CODE RUNS where the call names no class (a mediator's handler, a class
-  picked by an enum member's name or by a name string): [csharp-runs.md](csharp-runs.md).
+  picked by an enum member's name or by a name string): [csharp-runs.md](csharp-runs.md). The task columns (`calls.dropped`, `functions.awaits`/`body`/`inherited`) and the RULES that read them (`--rules`): [csharp-rules.md](csharp-rules.md).
 * `razor_renders`: a component that renders another (`component` the full type name, `tag`, `attributes`).
 * `handlers` adds `guard` (the `when` filter), `finally` and `symbol` (the bound exception type).
 * **`enums` and `switch_cases` are SHARED with the TypeScript half**, in its shape, so one query reads both

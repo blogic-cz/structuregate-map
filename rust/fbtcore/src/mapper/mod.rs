@@ -79,6 +79,7 @@ struct Run {
     map_reread: Vec<String>,
     sql_config: Option<String>,
     cs_config: Option<String>,
+    rules_config: Option<String>,
     facts_config: Option<String>,
     base_dir: String,
     build: String,
@@ -271,7 +272,8 @@ fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
     if !input.map {
         let _deep = crate::trace::stage("deep map");
         let exit = deep::only(&mut into, &deep_options(), &deep_files(), &mut ask, &mut out);
-        return json!({ "out": out, "exit": exit });
+        let rules = rules(input, &mut out);
+        return json!({ "out": out, "exit": exit.max(rules) });
     }
 
     // NOTHING IS PARSED WHEN NOTHING CHANGED - AND NOTHING CAME OR WENT, AND THE GATE IS THE SAME: a moved
@@ -391,11 +393,13 @@ fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
     let every: Vec<(String, String)> = into.files.keys().map(|rel| (rel.clone(), doc_at(rel).unwrap_or_else(|| absolute(input, rel)))).collect();
     halves::plugins(&mut into, &input.map_plugins, &input.roots[0], every);
 
-    // THE DEEP MAP, with every path already carrying its root prefix.
+    // THE DEEP MAP, with every path already carrying its root prefix - and the rules the consumer switched on over it.
+    let mut rules_exit = 0;
     if input.map_sqlite.is_some() {
         let _deep = crate::trace::stage("deep map");
         deep::run(&mut into, &deep_options(), &deep_files(), &mut ask, early);
         halves::bound(&mut into, input.map_sqlite.as_deref().unwrap_or(""));
+        rules_exit = rules(input, &mut out);
     }
     for (bucket, running) in pending {
         let reason = halves::finish(&mut into, &powershell(), &bucket.shell, &bucket.prefix, &mut kept, running);
@@ -439,12 +443,12 @@ fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
         return json!({ "out": out, "exit": 0 });
     }
     if !input.map_check {
-        return json!({ "out": out, "exit": 0 });
+        return json!({ "out": out, "exit": rules_exit });
     }
     let findings: Vec<(String, bool)> = answer["findings"].as_array().into_iter().flatten()
         .map(|f| (f["text"].as_str().unwrap_or("").to_string(), f["error"].as_bool().unwrap_or(false))).collect();
     let exit = check::report(&findings, &mut out);
-    json!({ "out": out, "exit": exit })
+    json!({ "out": out, "exit": exit.max(rules_exit) })
 }
 
 /// What the python half reads beyond the `.py` files it is given: the launchers it takes entry points from
@@ -518,4 +522,10 @@ fn extension(path: &str) -> String {
 fn extension_as_spelled(path: &str) -> String {
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
     name.rfind('.').map(|at| name[at..].to_string()).unwrap_or_default()
+}
+
+/// The deep-map rules `structuregate.rules.json` switches on, over the database just written (`crate::rules`).
+fn rules(input: &Run, out: &mut Vec<(&str, String)>) -> i64 {
+    let Some(db) = input.map_sqlite.as_deref() else { return 0 };
+    crate::rules::check(db, &crate::rules::read(input.rules_config.as_deref(), &input.base_dir), out)
 }
