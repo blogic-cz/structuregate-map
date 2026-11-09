@@ -2,11 +2,13 @@
 //! `--ancestors OWNER --node N [--table T]`: the path from the root down to that node.
 //! `--children OWNER [--node N] [--table T]`: the nodes that hang directly off it, each with its subtree's size.
 //! `--siblings OWNER --node N [--table T]`: the children of its parent, the node itself marked among them.
+//! `--descendants-of-kind OWNER --kind K [--node N] [--table T]`: every object below it whose kind is K.
 //!
 //! A STRUCTURE IS NODE ROWS (`rows::cells`), and `n` is a gapless preorder with each node's `last`, so a node's
 //! subtree is the RANGE `n BETWEEN s.n AND s.last` of its owner and its ancestors are the nodes whose range holds
 //! it, `a.n <= x.n AND x.n <= a.last`, and its children are the nodes of its range one level down, `parent = s.n`
-//! inside `n BETWEEN s.n + 1 AND s.last`, and its siblings are its parent's children read the same way - each one read of the `(owner, n)` key, never a recursive walk over `parent`,
+//! inside `n BETWEEN s.n + 1 AND s.last`, and its siblings are its parent's children read the same way, and its descendants of a kind are the `k`/`kind` members inside its range whose value is the
+//! kind, each joined to its parent, the object it names - each one read of the `(owner, n)` key, never a recursive walk over `parent`,
 //! which on a large tree cost a minute for what the range reads at once. `OWNER` is the row id the structure
 //! belongs to (`x:41`, `#5`); `--node` the `n` asked about (the root 0 when it is not given, except for
 //! `--ancestors` and `--siblings`, which need it); `--table` narrows to one node table (`expressions__ast`) or to every node table of one
@@ -38,11 +40,27 @@ pub(super) enum Way {
     Children,
     /// The nodes one level below its parent, it among them.
     Siblings,
+    /// Every object below it whose kind is the one asked for.
+    OfKind,
 }
 
+/// The member that names an object's KIND: `k` in the expression shapes, `kind` where a half names it so.
+const KIND_ROLES: &str = "('k', 'kind')";
+
 /// Prints every tree found and says whether there was one: a node no table holds is a refused question.
-pub(super) fn lens(db: &Connection, out: &mut String, way: Way, owner: &str, node: &str, table: &str, limit: usize, width: usize) -> Result<bool> {
-    let flag = match way { Way::Down => "--subtree", Way::Up => "--ancestors", Way::Children => "--children", Way::Siblings => "--siblings" };
+pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask, limit: usize, width: usize) -> Result<bool> {
+    let (owner, node, table, kind) = (ask.arg.as_str(), ask.node.as_str(), ask.table.as_str(), ask.kind.trim());
+    let flag = match way {
+        Way::Down => "--subtree",
+        Way::Up => "--ancestors",
+        Way::Children => "--children",
+        Way::Siblings => "--siblings",
+        Way::OfKind => "--descendants-of-kind",
+    };
+    if way == Way::OfKind && (owner.is_empty() || kind.is_empty()) {
+        let _ = writeln!(out, "{flag} needs the owner and the kind: {flag} x:41 --kind Call [--node 5] [--table expressions__ast]");
+        return Ok(false);
+    }
     let needs_node = matches!(way, Way::Up | Way::Siblings);
     if owner.is_empty() || (needs_node && node.is_empty()) {
         let node_arg = if needs_node { "--node 5" } else { "[--node 5]" };
@@ -99,8 +117,20 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, owner: &str, nod
                 let _ = writeln!(out, "{child}  {owner}  n {start}  parent {up}  depth {depth}  ({total} node(s) under {up}, it among them)");
                 (total, depth, nodes)
             }
+            Way::OfKind => {
+                // A KIND IS A MEMBER, so the range is read for the members and each joins its object, `k.parent`.
+                let named = format!(
+                    "\"{t}\" k JOIN \"{t}\" o ON o.owner = k.owner AND o.n = k.parent \
+                     WHERE k.owner = ?1 AND k.n BETWEEN ?2 + 1 AND ?3 AND k.role IN {KIND_ROLES} AND k.value = ?4 AND o.n > ?2"
+                );
+                let (_, counted) = query(db, &format!("SELECT count(*) FROM {named}"), &[&key, &start, &last, &kind])?;
+                let total = match counted.first().map(|r| &r[0]) { Some(Value::Integer(c)) => *c, _ => 0 };
+                let _ = writeln!(out, "{child}  {owner}  n {start}..{last}  ({total} node(s) of kind {kind})");
+                let sql = format!("SELECT o.n, o.depth, o.role, o.ord, o.node, k.value, o.last FROM {named} ORDER BY o.n LIMIT ?5");
+                (total, depth + 1, query(db, &sql, &[&key, &start, &last, &kind, &rows_limit])?.1)
+            }
         };
-        let sizes = matches!(way, Way::Children | Way::Siblings);
+        let sizes = matches!(way, Way::Children | Way::Siblings | Way::OfKind);
         print_nodes(out, &nodes, base, width, sizes, if way == Way::Siblings { start } else { -1 });
         if (nodes.len() as i64) < total {
             let _ = writeln!(out, "... {} more node(s); raise --limit", total - nodes.len() as i64);
