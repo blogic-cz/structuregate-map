@@ -32,10 +32,8 @@ const SEPARATED: &str = "'split', 'rsplit', 'splitn', 'rsplitn', 'split_once', '
 /// The methods that take one element of a sequence by position, the way `[n]` does.
 const POSITIONAL: &str = "'nth', 'elementat', 'get', 'at'";
 
-/// `f.path` is not test code - see the module doc.
-const NOT_TEST_PATH: &str = "NOT (('/' || lower(f.path)) GLOB '*/test/*' OR ('/' || lower(f.path)) GLOB '*/tests/*' \
-    OR lower(f.path) GLOB '*.tests/*' OR lower(f.path) GLOB '*_test.*' OR ('/' || lower(f.path)) GLOB '*/test_*' \
-    OR lower(f.path) GLOB '*.spec.*' OR lower(f.path) GLOB '*.test.*' OR lower(f.path) GLOB '*tests.cs')";
+// `f.path` is not test code - see the module doc.
+use crate::rules::NOT_TEST_PATH;
 
 pub(super) fn lens(db: &Connection, out: &mut String, fragment: &str, limit: usize, width: usize) -> Result<()> {
     let tables = tables_of(db);

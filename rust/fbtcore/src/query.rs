@@ -14,13 +14,14 @@
 //! and a count read off that is wrong.
 
 mod bound;
-mod cat;
+pub(crate) mod cat;
 mod dead;
 mod decorators;
 mod defaults;
 pub mod fresh;
 mod lenses;
 mod magic;
+mod rules;
 mod unused;
 
 use anyhow::Result;
@@ -329,6 +330,7 @@ pub fn render(db_path: &Path, ask: &Ask) -> Result<Answer> {
         "defaults" => defaults::lens(&db, &mut out, &ask.arg, limit, width),
         "unused-imports" => unused::lens(&db, &mut out, &ask.arg, limit, width),
         "magic" => magic::lens(&db, &mut out, &ask.arg, limit, width),
+        "rules" => rules::lens(&db, &mut out, &ask.arg, limit, width),
         "sql" => query(&db, &ask.arg, &[]).map(|(columns, rows)| {
             show(&mut out, &rows, &columns, limit, width);
         }),
@@ -366,7 +368,7 @@ fn lenses(out: &mut String) {
         "--tables", "--schema T", "--find NAME", "--id ROW", "--file FRAGMENT",
         "--cat FRAGMENT [--lines a-b]", "--text FTS", "--grep TEXT [--table T]",
         "--reads NAME", "--key SETTINGS_KEY", "--decorators [FRAGMENT]", "--dead [FRAGMENT]", "--defaults [FRAGMENT]", "--unused-imports [FRAGMENT]",
-        "--magic [FRAGMENT]", "--sql QUERY"]});
+        "--magic [FRAGMENT]", "--rules [FRAGMENT]", "--sql QUERY"]});
     // python's `json.dumps(..., indent=1)`: one space a level, and a newline after it.
     let mut buffer = Vec::new();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b" ");

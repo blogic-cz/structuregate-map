@@ -89,6 +89,11 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         member's NAME (a reflection dictionary over Type.Name) - links each member to
                         the classes deriving from base in that namespace (enum_type_links). Found
                         beside the exe when not given; without it no name links anything.
+  --rules-config <file> `structuregate.rules.json`: the deep-map rules a --map-sqlite run enforces,
+                        {"rules": {"<id>": "off"|"warn"|"error"}} - cs-task-dropped, cs-task-not-async,
+                        cs-async-no-await, cs-task-no-cancellation, cs-task-ienumerable. Every rule is
+                        off unless named; one at error fails the run. `// async-ok` waives a line.
+                        Found beside the exe when not given.
   --sql-parse <file|->  PARSE ONE SQL TEXT and print what the deep SQL map would hold for it, as
                         JSON on stdout - statements, objects, refs, column_refs, clauses, joins,
                         functions, ctes, nodes and diagnostics - with no tree, no database file and
@@ -201,7 +206,8 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         path goes to the lens: --tables, --schema T, --find NAME, --id ROW,
                         --file FRAGMENT, --cat FRAGMENT [--lines a-b], --text FTS,
                         --grep TEXT [--table T], --magic [FRAGMENT] (numbers, strings and
-                        split/join separators nothing names), --sql QUERY, --limit N (0: every
+                        split/join separators nothing names), --rules [FRAGMENT] (every
+                        deep-map rule and what it finds), --sql QUERY, --limit N (0: every
                         row), --width N (a cell is cut at 70 characters with ...[+N chars]; 0:
                         every cell whole - --find's file column is never cut). A note on stderr
                         says when the tree moved on since the map was written.

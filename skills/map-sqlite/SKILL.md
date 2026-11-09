@@ -97,7 +97,7 @@ buildtools/structuregate.exe --map-query buildmap.sqlite --tables
 | **which defs and constants could be DELETED** (candidates, never a verdict; the `unused imports` column names the lines that go with each) | `--dead [path fragment]` |
 | **is this default ever changed by a caller** (`passed` / `never passed` / `cannot tell` + why; `bound` is the same verdict over the bound calls alone) | `--defaults [path fragment]` |
 | **which import lines does nothing use** (re-exports followed to their takers; a C# `using` as the compiler judges it, none in a file with errors) | `--unused-imports [path fragment]` |
-| **which numbers, strings and split/join separators does nothing NAME** (every half; tests left out) | `--magic [path fragment]` |
+| **which numbers, strings and split/join separators does nothing NAME** (every half; tests left out); **what each C# task rule finds** ([csharp-rules.md](csharp-rules.md)) | `--magic [path fragment]`, `--rules [path fragment]` |
 | **where does it appear in the SOURCE** | `--text "cache AND key"` |
 | anything SQL can express | `--sql "SELECT ..."` |
 

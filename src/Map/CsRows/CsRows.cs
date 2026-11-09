@@ -417,6 +417,11 @@ internal sealed partial class CsRows : CSharpSyntaxWalker
             // text says one thing per file and this says the same thing everywhere.
             ("type", CsSemantics.Declared(model, node)),
             ("is_async", modifiers.Any(m => m.IsKind(SyntaxKind.AsyncKeyword)) ? 1 : 0),
+            // What the `--rules` checks read (`rust/fbtcore/src/rules/`): how often the body waits, whether there is a
+            // body, and whether the signature belongs to a base or an interface.
+            ("awaits", CsFacts.Awaits(node)),
+            ("body", CsFacts.HasBody(node) ? 1 : 0),
+            ("inherited", CsSemantics.Inherited(model, node) ? 1 : 0),
             ("doc", CsFacts.Doc(node)),
             ("end_line", EndLine(node)));
         Attributes(AttributesOf(node), name, kind);

@@ -95,7 +95,7 @@ fn candidates(db: &Connection, path: &str) -> Vec<std::path::PathBuf> {
 }
 
 /// One mapped file read as it is on disk, or None when no recorded root holds it.
-fn on_disk(db: &Connection, path: &str) -> Option<String> {
+pub(crate) fn on_disk(db: &Connection, path: &str) -> Option<String> {
     candidates(db, path)
         .iter()
         .find_map(|full| std::fs::read(full).ok())

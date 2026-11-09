@@ -399,6 +399,7 @@ internal sealed partial class CsRows
             ("type", type ?? CsSemantics.Type(model, node)),
             ("args", arguments?.Arguments.Count ?? 0),
             ("kwargs", arguments?.Arguments.Count(a => a.NameColon is not null) ?? 0),
+            ("dropped", CsFacts.Dropped(node) ? 1 : 0),
             ("source", CsFacts.Text(node)));
         Arguments(call, target, arguments);
         if (node is ExpressionSyntax expression) RegexCall(expression, target, arguments);

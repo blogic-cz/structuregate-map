@@ -175,6 +175,24 @@ internal static class CsSemantics
     }
 
     /// <summary>
+    /// WHETHER A METHOD'S SIGNATURE IS SOMEBODY ELSE'S: an `override`, or an implementation of an interface member,
+    /// explicit or not. Its parameters are not its own to add to, so a rule about a signature leaves it alone.
+    /// </summary>
+    public static bool Inherited(SemanticModel? model, SyntaxNode declaration)
+    {
+        if (model is null) return false;
+        try
+        {
+            if (model.GetDeclaredSymbol(declaration) is not IMethodSymbol method) return false;
+            if (method.IsOverride || !method.ExplicitInterfaceImplementations.IsEmpty) return true;
+            var type = method.ContainingType;
+            return type is not null && type.AllInterfaces.Any(face => face.GetMembers(method.Name).Any(member =>
+                SymbolEqualityComparer.Default.Equals(type.FindImplementationForInterfaceMember(member), method)));
+        }
+        catch (ArgumentException) { return false; }
+    }
+
+    /// <summary>
     /// THE PARAMETER AN ARGUMENT IS BEING PASSED TO, named by the CALLEE's declaration.
     ///
     /// This is the one fact no parse tree carries and the reason the semantic pass is worth its cost:

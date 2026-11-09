@@ -44,7 +44,8 @@ use std::path::Path;
 // with a hole after it.
 // 36: a `string.Format` whose format is a parameter is that parameter as one hole, marked `format`.
 // 37: a call to a method of the tree is the strings it returns, its parameters the caller's arguments; `AddQueryString` its url.
-pub(super) const CS_ROWS_VERSION: &str = "37";
+// 38: `calls.dropped`, `functions.awaits`/`body`/`inherited` - what the deep-map rules (`rules/`) read.
+pub(super) const CS_ROWS_VERSION: &str = "38";
 /// The same for the SQL extractor. 7: `sql_dynamic`, an object created by dynamic SQL.
 // 8: a CTE name is the statement's own - never a `sql_refs` row, and never hiding a table in a later statement.
 // 9: `sql_statements` (a row per statement, `fingerprint` filled by `rows/sqlshape/`), its tree `sql_nodes`, and

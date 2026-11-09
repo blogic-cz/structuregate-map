@@ -250,6 +250,48 @@ internal static class CsFacts
     /// no marker read as the whole call, and a reader acted on the half it was shown.</summary>
     public static string Text(SyntaxNode? node) => node is null ? "" : node.ToString().Trim();
 
+    /// <summary>
+    /// HOW OFTEN A FUNCTION WAITS IN ITS OWN BODY: each `await`, `await foreach` and `await using` whose nearest
+    /// function is this one - a lambda or a local function inside it waits for itself. `async` with none runs
+    /// synchronously and only wraps its result in a task (CS1998).
+    /// </summary>
+    public static int Awaits(SyntaxNode function) =>
+        function.DescendantNodes(n => n == function || !IsFunction(n)).Count(n => n switch
+        {
+            AwaitExpressionSyntax => true,
+            CommonForEachStatementSyntax loop => loop.AwaitKeyword.IsKind(SyntaxKind.AwaitKeyword),
+            UsingStatementSyntax block => block.AwaitKeyword.IsKind(SyntaxKind.AwaitKeyword),
+            LocalDeclarationStatementSyntax local => local.AwaitKeyword.IsKind(SyntaxKind.AwaitKeyword),
+            _ => false,
+        });
+
+    private static bool IsFunction(SyntaxNode node) =>
+        node is AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax or BaseMethodDeclarationSyntax or AccessorDeclarationSyntax;
+
+    /// <summary>Whether a function has a body of its own: an abstract, interface, `extern` or `partial` declaration
+    /// has none, and a rule about what a body does has nothing to read there.</summary>
+    public static bool HasBody(SyntaxNode function) => function switch
+    {
+        BaseMethodDeclarationSyntax method => method.Body is not null || method.ExpressionBody is not null,
+        LocalFunctionStatementSyntax local => local.Body is not null || local.ExpressionBody is not null,
+        AccessorDeclarationSyntax accessor => accessor.Body is not null || accessor.ExpressionBody is not null,
+        PropertyDeclarationSyntax property => property.ExpressionBody is not null || property.AccessorList?.Accessors.Any(HasBody) == true,
+        IndexerDeclarationSyntax indexer => indexer.ExpressionBody is not null || indexer.AccessorList?.Accessors.Any(HasBody) == true,
+        _ => false,
+    };
+
+    /// <summary>
+    /// A CALL WHOSE RESULT NOBODY TAKES: the whole expression of a statement - `Save();`, `x?.Save();`. A task
+    /// dropped this way is fire-and-forget: its exception reaches nobody. `_ = Save();` TAKES it, on purpose.
+    /// </summary>
+    public static bool Dropped(SyntaxNode call)
+    {
+        var at = call;
+        while (at.Parent is ConditionalAccessExpressionSyntax access && access.WhenNotNull == at) at = access;
+        while (at.Parent is ParenthesizedExpressionSyntax wrapped) at = wrapped;
+        return at.Parent is ExpressionStatementSyntax;
+    }
+
     /// <summary>The first line of a doc comment's `&lt;summary&gt;`, or "". A member's intent is written
     /// there the way a python function's is written in its docstring, and the `doc` column holds both.</summary>
     public static string Doc(SyntaxNode node)
