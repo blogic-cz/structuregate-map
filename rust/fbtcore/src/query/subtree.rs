@@ -3,6 +3,7 @@
 //! `--children OWNER [--node N] [--table T]`: the nodes that hang directly off it, each with its subtree's size.
 //! `--siblings OWNER --node N [--table T]`: the children of its parent, the node itself marked among them.
 //! `--descendants-of-kind OWNER --kind K [--node N] [--table T]`: every object below it whose kind is K.
+//! `--path-to OWNER --node N [--from F] [--table T]`: the way down from F (the root) to N, and its accessor path.
 //!
 //! A STRUCTURE IS NODE ROWS (`rows::cells`), and `n` is a gapless preorder with each node's `last`, so a node's
 //! subtree is the RANGE `n BETWEEN s.n AND s.last` of its owner and its ancestors are the nodes whose range holds
@@ -42,6 +43,8 @@ pub(super) enum Way {
     Siblings,
     /// Every object below it whose kind is the one asked for.
     OfKind,
+    /// The nodes from `--from` down to it, and the roles that lead there.
+    PathTo,
 }
 
 /// The member that names an object's KIND: `k` in the expression shapes, `kind` where a half names it so.
@@ -56,12 +59,13 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
         Way::Children => "--children",
         Way::Siblings => "--siblings",
         Way::OfKind => "--descendants-of-kind",
+        Way::PathTo => "--path-to",
     };
     if way == Way::OfKind && (owner.is_empty() || kind.is_empty()) {
         let _ = writeln!(out, "{flag} needs the owner and the kind: {flag} x:41 --kind Call [--node 5] [--table expressions__ast]");
         return Ok(false);
     }
-    let needs_node = matches!(way, Way::Up | Way::Siblings);
+    let needs_node = matches!(way, Way::Up | Way::Siblings | Way::PathTo);
     if owner.is_empty() || (needs_node && node.is_empty()) {
         let node_arg = if needs_node { "--node 5" } else { "[--node 5]" };
         let _ = writeln!(out, "{flag} needs the owner a structure belongs to: {flag} x:41 {node_arg} [--table expressions__ast]");
@@ -71,10 +75,14 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
         let _ = writeln!(out, "--node takes a node's n, a number: {node}");
         return Ok(false);
     };
+    let Ok(from) = (if ask.from.is_empty() { Ok(0) } else { ask.from.trim().parse::<i64>() }) else {
+        let _ = writeln!(out, "--from takes a node's n, a number: {}", ask.from);
+        return Ok(false);
+    };
     let key = cells::owner_value(owner);
     let rows_limit = i64::try_from(limit).unwrap_or(i64::MAX);
     let (_, registered) = query(db, &format!("SELECT tbl, child FROM {} ORDER BY child", cells::REGISTRY), &[])?;
-    let mut found = false;
+    let (mut found, mut refused) = (false, false);
     for row in registered {
         let (Value::Text(parent), Value::Text(child)) = (&row[0], &row[1]) else { continue };
         if !table.is_empty() && table != parent && table != child {
@@ -129,6 +137,33 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
                 let sql = format!("SELECT o.n, o.depth, o.role, o.ord, o.node, k.value, o.last FROM {named} ORDER BY o.n LIMIT ?5");
                 (total, depth + 1, query(db, &sql, &[&key, &start, &last, &kind, &rows_limit])?.1)
             }
+            Way::PathTo => {
+                // THE WAY DOWN IS THE ANCESTORS OF N THAT START AT OR BELOW F: F must hold N, or there is no way.
+                let (_, held) = query(db, &format!("SELECT last, depth FROM \"{t}\" WHERE owner = ?1 AND n = ?2"), &[&key, &from])?;
+                let Some([Value::Integer(from_last), Value::Integer(from_depth)]) = held.first().map(|r| [r[0].clone(), r[1].clone()]) else {
+                    let _ = writeln!(out, "{child}  {owner}  no node {from} to start from");
+                    refused = true;
+                    continue;
+                };
+                if start < from || start > from_last {
+                    let _ = writeln!(out, "{child}  {owner}  n {start} is not below n {from} (n {from}..{from_last})");
+                    refused = true;
+                    continue;
+                }
+                let sql = format!("{READ} \"{t}\" WHERE owner = ?1 AND n BETWEEN ?2 AND ?3 AND last >= ?3 ORDER BY n");
+                let mut nodes = query(db, &sql, &[&key, &from, &start])?.1;
+                // A LIST ITEM IS `[ord]` AFTER ITS LIST, whose role it repeats: `c[1].k`, never `c.c[1].k`.
+                let steps: Vec<String> = nodes.iter().skip(1).map(|r| label(if matches!(r[3], Value::Integer(_)) { &Value::Null } else { &r[2] }, &r[3])).collect();
+                let path = steps.iter().fold(String::new(), |acc, s| match (acc.is_empty(), s.starts_with('[')) {
+                    (true, _) | (false, true) => acc + s,
+                    (false, false) => acc + "." + s,
+                });
+                let path = if path.is_empty() { "(the start itself)".to_string() } else { path };
+                let total = nodes.len() as i64;
+                let _ = writeln!(out, "{child}  {owner}  n {from} to {start}  ({total} node(s))  path {path}");
+                nodes.truncate(limit);
+                (total, from_depth, nodes)
+            }
         };
         let sizes = matches!(way, Way::Children | Way::Siblings | Way::OfKind);
         print_nodes(out, &nodes, base, width, sizes, if way == Way::Siblings { start } else { -1 });
@@ -140,7 +175,17 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
         let narrowed = if table.is_empty() { String::new() } else { format!(" of {table}") };
         let _ = writeln!(out, "no node {start} of {owner} in any node table{narrowed}");
     }
-    Ok(found)
+    Ok(found && !refused)
+}
+
+/// A node's place in its parent: its `role`, `[ord]` for a list item, both for a named list's item.
+fn label(role: &Value, ord: &Value) -> String {
+    match (role, ord) {
+        (Value::Null, Value::Integer(i)) => format!("[{i}]"),
+        (Value::Null, _) => String::new(),
+        (role, Value::Integer(i)) => format!("{}[{i}]", cell(role)),
+        (role, _) => cell(role),
+    }
 }
 
 /// The nodes one level below `top` (whose subtree ends at `last`) and how many there are, `--limit` of them read.
@@ -158,12 +203,7 @@ fn print_nodes(out: &mut String, nodes: &[Vec<Value>], base: i64, width: usize, 
     let pad = nodes.iter().map(|r| cell(&r[0]).len()).max().unwrap_or(1);
     for r in nodes {
         let level = match r[1] { Value::Integer(d) => (d - base).max(0) as usize, _ => 0 };
-        let role = match (&r[2], &r[3]) {
-            (Value::Null, Value::Integer(i)) => format!("[{i}]"),
-            (Value::Null, _) => String::new(),
-            (role, Value::Integer(i)) => format!("{}[{i}]", cell(role)),
-            (role, _) => cell(role),
-        };
+        let role = label(&r[2], &r[3]);
         let value = match &r[5] { Value::Null => String::new(), v => format!(" {}", clip(&cell(v), width)) };
         let gap = if role.is_empty() { "" } else { " " };
         // HOW MUCH HANGS BELOW, said only where a list shows one level: a subtree and a path show it already.
