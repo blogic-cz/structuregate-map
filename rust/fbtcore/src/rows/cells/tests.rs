@@ -66,6 +66,30 @@ fn every_node_is_a_row_joined_by_owner_and_parent() {
         "x:9/5 p=3 \"name\" string=\"a\"",
     ]);
     assert_eq!(rows[3]["ord"], 0);
+    let span: Vec<(i64, i64)> = rows.iter().map(|r| (r["last"].as_i64().unwrap(), r["depth"].as_i64().unwrap())).collect();
+    assert_eq!(span, [(5, 0), (1, 1), (5, 1), (5, 2), (4, 3), (5, 3)]);
+}
+
+#[test]
+fn a_subtree_is_the_range_from_its_node_to_its_last_and_holds_exactly_what_hangs_below_it() {
+    // Siblings after a deep arm, an empty list and object, a list of lists: each a subtree that ends somewhere else.
+    let tree = json!({"k": "Call", "args": [{"k": "Read", "name": "a", "receiver": {"k": "Implicit"}}, [], {}, [[1, 2], [3]]],
+                      "then": {"k": "Literal", "v": 1}, "tail": "x"});
+    let db = Connection::open_in_memory().unwrap();
+    let mut writer = Writer::new(&db, "t", "c").unwrap();
+    writer.tree("x:1", &tree).unwrap();
+    writer.finish().unwrap();
+    let below = |sql: &str| -> Vec<(i64, i64)> {
+        db.prepare(sql).unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect()
+    };
+    // Every node's descendants by the range, against the same by `parent`; its depth against its ancestors by the range.
+    let by_range = below("SELECT s.n, e.n FROM t__c s JOIN t__c e ON e.owner = s.owner AND e.n BETWEEN s.n AND s.last ORDER BY 1, 2");
+    let by_parent = below("WITH RECURSIVE d(top, n) AS (SELECT n, n FROM t__c UNION ALL \
+        SELECT d.top, e.n FROM t__c e JOIN d ON e.owner = 'x:1' AND e.parent = d.n) SELECT top, n FROM d ORDER BY 1, 2");
+    assert_eq!(by_range, by_parent);
+    let depth = below("SELECT x.depth, (SELECT count(*) FROM t__c a WHERE a.owner = x.owner AND a.n < x.n AND x.n <= a.last) FROM t__c x");
+    assert!(depth.iter().all(|(d, ancestors)| d == ancestors), "{depth:?}");
+    assert!(depth.iter().any(|(d, _)| *d == 4));
 }
 
 #[test]
