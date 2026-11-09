@@ -47,6 +47,12 @@ of its owner; above it is `x.n BETWEEN a.n AND a.last`. Both read the `(owner, n
 query over every subtree took a fraction of a second against tens of seconds recursive over `parent`, and one asking
 what sits anywhere below a node seconds against minutes.
 
+`--map-query <db> --subtree OWNER [--node N] [--table T]` prints it without SQL: one line per node, its `n`, then
+`role` (`[ord]` for a list item) and `node` indented by depth below the start, and a scalar's value. `--node`
+defaults to the root 0; `--table` takes one node table (`expressions__ast`) or a row table (`expressions`: every
+node table of it), and without it every node table holding that node answers. `--limit` counts nodes per tree.
+A node no table holds is exit 2.
+
 ```sql
 -- one node's whole subtree, indented, in source order
 SELECT printf('%.*c', e.depth * 2, ' ') || coalesce(e.role, '') || ' ' || e.node || ' ' || coalesce(e.value, '')
