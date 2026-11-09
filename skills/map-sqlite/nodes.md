@@ -51,7 +51,8 @@ what sits anywhere below a node seconds against minutes.
 `role` (`[ord]` for a list item) and `node` indented by depth below the start, and a scalar's value. `--node`
 defaults to the root 0; `--table` takes one node table (`expressions__ast`) or a row table (`expressions`: every
 node table of it), and without it every node table holding that node answers. `--limit` counts nodes per tree.
-A node no table holds is exit 2.
+`--ancestors OWNER --node N [--table T]` prints the path from the root down to node N the same way, indented
+by depth from the root, the node itself last. A node no table holds is exit 2.
 
 ```sql
 -- one node's whole subtree, indented, in source order

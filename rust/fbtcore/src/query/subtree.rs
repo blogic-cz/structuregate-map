@@ -1,14 +1,17 @@
 //! `--subtree OWNER [--node N] [--table T]`: one node's whole subtree, printed as the tree it is.
+//! `--ancestors OWNER --node N [--table T]`: the path from the root down to that node.
 //!
-//! A STRUCTURE IS NODE ROWS (`rows::cells`), and a node's subtree is the RANGE `n BETWEEN s.n AND s.last` of its
-//! owner, so this is one read of the `(owner, n)` key - never a recursive walk over `parent`, which on a large
-//! tree cost a minute for what the range reads at once. `OWNER` is the row id the structure belongs to (`x:41`,
-//! `#5`); `--node` the `n` to start at, the root 0 when it is not given; `--table` narrows to one node table
-//! (`expressions__ast`) or to every node table of one row table (`expressions`). Without it every node table
-//! holding that node answers, one tree each.
+//! A STRUCTURE IS NODE ROWS (`rows::cells`), and `n` is a gapless preorder with each node's `last`, so a node's
+//! subtree is the RANGE `n BETWEEN s.n AND s.last` of its owner and its ancestors are the nodes whose range holds
+//! it, `a.n <= x.n AND x.n <= a.last` - both one read of the `(owner, n)` key, never a recursive walk over `parent`,
+//! which on a large tree cost a minute for what the range reads at once. `OWNER` is the row id the structure
+//! belongs to (`x:41`, `#5`); `--node` the `n` asked about (`--subtree` starts at the root 0 when it is not given;
+//! `--ancestors` needs it); `--table` narrows to one node table (`expressions__ast`) or to every node table of one
+//! row table (`expressions`). Without it every node table holding that node answers, one tree each.
 //!
-//! EACH LINE IS ONE NODE: its `n`, then its `role` (`[ord]` for a list item) and `node` indented by its depth below
-//! the start, and a scalar's `value`. `--limit` counts nodes per tree; `--width` cuts a value as every lens does.
+//! EACH LINE IS ONE NODE: its `n`, then its `role` (`[ord]` for a list item) and `node` indented by its depth -
+//! below the start for a subtree, below the root for ancestors - and a scalar's `value`. `--limit` counts nodes per
+//! tree; `--width` cuts a value as every lens does.
 
 use super::{cell, clip, columns_of, escape, query};
 use crate::rows::cells;
@@ -17,10 +20,21 @@ use rusqlite::types::Value;
 use rusqlite::Connection;
 use std::fmt::Write as _;
 
+/// Which way from the node a lens reads.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Way {
+    /// The node and everything below it.
+    Down,
+    /// The root, every node between, and the node.
+    Up,
+}
+
 /// Prints every tree found and says whether there was one: a node no table holds is a refused question.
-pub(super) fn lens(db: &Connection, out: &mut String, owner: &str, node: &str, table: &str, limit: usize, width: usize) -> Result<bool> {
-    if owner.is_empty() {
-        let _ = writeln!(out, "--subtree needs the owner a structure belongs to: --subtree x:41 [--node 5] [--table expressions__ast]");
+pub(super) fn lens(db: &Connection, out: &mut String, way: Way, owner: &str, node: &str, table: &str, limit: usize, width: usize) -> Result<bool> {
+    let flag = if way == Way::Down { "--subtree" } else { "--ancestors" };
+    if owner.is_empty() || (way == Way::Up && node.is_empty()) {
+        let node_arg = if way == Way::Down { "[--node 5]" } else { "--node 5" };
+        let _ = writeln!(out, "{flag} needs the owner a structure belongs to: {flag} x:41 {node_arg} [--table expressions__ast]");
         return Ok(false);
     }
     let Ok(start) = (if node.is_empty() { Ok(0) } else { node.trim().parse::<i64>() }) else {
@@ -28,6 +42,7 @@ pub(super) fn lens(db: &Connection, out: &mut String, owner: &str, node: &str, t
         return Ok(false);
     };
     let key = cells::owner_value(owner);
+    let rows_limit = i64::try_from(limit).unwrap_or(i64::MAX);
     let (_, registered) = query(db, &format!("SELECT tbl, child FROM {} ORDER BY child", cells::REGISTRY), &[])?;
     let mut found = false;
     for row in registered {
@@ -37,33 +52,24 @@ pub(super) fn lens(db: &Connection, out: &mut String, owner: &str, node: &str, t
         }
         // A MAP WRITTEN BEFORE A SUBTREE WAS A RANGE has no `last`: said once, and the map rebuilds on its next run.
         if !columns_of(db, child).iter().any(|c| c == "last") {
-            let _ = writeln!(out, "{child} has no `last` column: the map predates --subtree - rebuild it with the entry point");
+            let _ = writeln!(out, "{child} has no `last` column: the map predates {flag} - rebuild it with the entry point");
             return Ok(false);
         }
         let t = escape(child);
         let (_, top) = query(db, &format!("SELECT last, depth FROM \"{t}\" WHERE owner = ?1 AND n = ?2"), &[&key, &start])?;
         let Some([Value::Integer(last), Value::Integer(depth)]) = top.first().map(|r| [r[0].clone(), r[1].clone()]) else { continue };
         found = true;
-        let total = last - start + 1;
-        let _ = writeln!(out, "{child}  {owner}  n {start}..{last}  ({total} node(s))");
-        let (_, nodes) = query(
-            db,
-            &format!("SELECT n, depth, role, ord, node, value FROM \"{t}\" WHERE owner = ?1 AND n BETWEEN ?2 AND ?3 ORDER BY n LIMIT ?4"),
-            &[&key, &start, &last, &i64::try_from(limit).unwrap_or(i64::MAX)],
-        )?;
-        let pad = last.to_string().len();
-        for r in &nodes {
-            let level = match r[1] { Value::Integer(d) => (d - depth).max(0) as usize, _ => 0 };
-            let role = match (&r[2], &r[3]) {
-                (Value::Null, Value::Integer(i)) => format!("[{i}]"),
-                (Value::Null, _) => String::new(),
-                (role, Value::Integer(i)) => format!("{}[{i}]", cell(role)),
-                (role, _) => cell(role),
-            };
-            let value = match &r[5] { Value::Null => String::new(), v => format!(" {}", clip(&cell(v), width)) };
-            let gap = if role.is_empty() { "" } else { " " };
-            let _ = writeln!(out, "{:>pad$}  {}{role}{gap}{}{value}", cell(&r[0]), "  ".repeat(level), cell(&r[4]));
-        }
+        const READ: &str = "SELECT n, depth, role, ord, node, value FROM";
+        let (total, base, nodes) = if way == Way::Down {
+            let _ = writeln!(out, "{child}  {owner}  n {start}..{last}  ({} node(s))", last - start + 1);
+            let sql = format!("{READ} \"{t}\" WHERE owner = ?1 AND n BETWEEN ?2 AND ?3 ORDER BY n LIMIT ?4");
+            (last - start + 1, depth, query(db, &sql, &[&key, &start, &last, &rows_limit])?.1)
+        } else {
+            let _ = writeln!(out, "{child}  {owner}  n {start}  depth {depth}  ({} node(s) from the root)", depth + 1);
+            let sql = format!("{READ} \"{t}\" WHERE owner = ?1 AND n <= ?2 AND last >= ?2 ORDER BY n LIMIT ?3");
+            (depth + 1, 0, query(db, &sql, &[&key, &start, &rows_limit])?.1)
+        };
+        print_nodes(out, &nodes, base, last.max(start).to_string().len(), width);
         if (nodes.len() as i64) < total {
             let _ = writeln!(out, "... {} more node(s); raise --limit", total - nodes.len() as i64);
         }
@@ -73,4 +79,20 @@ pub(super) fn lens(db: &Connection, out: &mut String, owner: &str, node: &str, t
         let _ = writeln!(out, "no node {start} of {owner} in any node table{narrowed}");
     }
     Ok(found)
+}
+
+/// One line per node of `(n, depth, role, ord, node, value)`, indented by its depth below `base`.
+fn print_nodes(out: &mut String, nodes: &[Vec<Value>], base: i64, pad: usize, width: usize) {
+    for r in nodes {
+        let level = match r[1] { Value::Integer(d) => (d - base).max(0) as usize, _ => 0 };
+        let role = match (&r[2], &r[3]) {
+            (Value::Null, Value::Integer(i)) => format!("[{i}]"),
+            (Value::Null, _) => String::new(),
+            (role, Value::Integer(i)) => format!("{}[{i}]", cell(role)),
+            (role, _) => cell(role),
+        };
+        let value = match &r[5] { Value::Null => String::new(), v => format!(" {}", clip(&cell(v), width)) };
+        let gap = if role.is_empty() { "" } else { " " };
+        let _ = writeln!(out, "{:>pad$}  {}{role}{gap}{}{value}", cell(&r[0]), "  ".repeat(level), cell(&r[4]));
+    }
 }

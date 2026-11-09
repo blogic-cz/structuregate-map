@@ -54,3 +54,29 @@ Test-Case 'subtree: a node no table holds, or a --node that is not a number, is 
     Assert-Exit $bad 2
     Assert-Line $bad '--node takes a node'
 }
+
+Test-Case 'ancestors: the path from the root down to a node, indented from the root, and no sibling on the way' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $r = Invoke-Gate --map-query $m.Db --ancestors $m.Owner --node 9 --table expressions__shape
+    Assert-Exit $r 0
+    Assert-Line $r "expressions__shape  $($m.Owner)  n 9  depth 5  (6 node(s) from the root)"
+    Assert-Line $r '0  object'
+    Assert-Line $r '5      c[1] object'
+    Assert-Line $r '9            k string Name'
+    # Node 1 (the root's `k`) and node 6 (the Attribute's `k`) are siblings on the way, never ancestors.
+    Assert-NoLine $r 'Call'
+    Assert-NoLine $r 'Attribute'
+}
+
+Test-Case 'ancestors: --node is required, and --limit counts from the root' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $none = Invoke-Gate --map-query $m.Db --ancestors $m.Owner --table expressions__shape
+    Assert-Exit $none 2
+    Assert-Line $none '--ancestors needs the owner'
+    $cut = Invoke-Gate --map-query $m.Db --ancestors $m.Owner --node 9 --table expressions__shape --limit 2
+    Assert-Exit $cut 0
+    Assert-Line $cut '... 4 more node(s); raise --limit'
+    Assert-NoLine $cut 'Name'
+}

@@ -114,7 +114,7 @@ pub struct Ask {
     pub table: String,
     /// `--lines a-b`, which narrows `--cat`.
     pub lines: String,
-    /// `--node N`, where `--subtree` starts (the root when empty).
+    /// `--node N`, where `--subtree` starts (the root when empty) and the node `--ancestors` climbs from.
     pub node: String,
     pub limit: usize,
     pub width: usize,
@@ -334,7 +334,8 @@ pub fn render(db_path: &Path, ask: &Ask) -> Result<Answer> {
         "unused-imports" => unused::lens(&db, &mut out, &ask.arg, limit, width),
         "magic" => magic::lens(&db, &mut out, &ask.arg, limit, width),
         "rules" => rules::lens(&db, &mut out, &ask.arg, limit, width),
-        "subtree" => subtree::lens(&db, &mut out, &ask.arg, &ask.node, &ask.table, limit, width).map(|shown| refused = !shown),
+        "subtree" => subtree::lens(&db, &mut out, subtree::Way::Down, &ask.arg, &ask.node, &ask.table, limit, width).map(|shown| refused = !shown),
+        "ancestors" => subtree::lens(&db, &mut out, subtree::Way::Up, &ask.arg, &ask.node, &ask.table, limit, width).map(|shown| refused = !shown),
         "sql" => query(&db, &ask.arg, &[]).map(|(columns, rows)| {
             show(&mut out, &rows, &columns, limit, width);
         }),
@@ -372,7 +373,7 @@ fn lenses(out: &mut String) {
         "--tables", "--schema T", "--find NAME", "--id ROW", "--file FRAGMENT",
         "--cat FRAGMENT [--lines a-b]", "--text FTS", "--grep TEXT [--table T]",
         "--reads NAME", "--key SETTINGS_KEY", "--decorators [FRAGMENT]", "--dead [FRAGMENT]", "--defaults [FRAGMENT]", "--unused-imports [FRAGMENT]",
-        "--magic [FRAGMENT]", "--rules [FRAGMENT]", "--subtree OWNER [--node N] [--table T]", "--sql QUERY"]});
+        "--magic [FRAGMENT]", "--rules [FRAGMENT]", "--subtree OWNER [--node N] [--table T]", "--ancestors OWNER --node N [--table T]", "--sql QUERY"]});
     // python's `json.dumps(..., indent=1)`: one space a level, and a newline after it.
     let mut buffer = Vec::new();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b" ");

@@ -209,7 +209,8 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         split/join separators nothing names), --rules [FRAGMENT] (every
                         deep-map rule and what it finds), --subtree OWNER [--node N]
                         [--table T] (one node's whole subtree, indented, read as one range of
-                        n..last), --sql QUERY, --limit N (0: every
+                        n..last), --ancestors OWNER --node N [--table T] (the path from the
+                        root down to that node), --sql QUERY, --limit N (0: every
                         row), --width N (a cell is cut at 70 characters with ...[+N chars]; 0:
                         every cell whole - --find's file column is never cut). A note on stderr
                         says when the tree moved on since the map was written.
