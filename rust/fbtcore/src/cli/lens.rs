@@ -8,7 +8,7 @@ use std::path::Path;
 
 /// The lenses that take an argument. `--decorators`, `--dead`, `--defaults`, `--unused-imports`, `--magic` and `--rules` take one
 /// OR stand alone, so what follows is only theirs when it is not the next flag.
-const VALUED: [&str; 12] = ["schema", "find", "id", "file", "cat", "text", "grep", "reads", "key", "subtree", "ancestors", "sql"];
+const VALUED: [&str; 13] = ["schema", "find", "id", "file", "cat", "text", "grep", "reads", "key", "subtree", "ancestors", "children", "sql"];
 const OPTIONAL: [&str; 6] = ["decorators", "dead", "defaults", "unused-imports", "magic", "rules"];
 
 pub fn run(db: &str, arguments: &[String], out: &mut Out) -> i64 {
