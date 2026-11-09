@@ -57,7 +57,10 @@ level below N, each that holds nodes of its own with `+K below` - the size of it
 asked of `--subtree` next. `--siblings OWNER --node N [--table T]` prints its parent's children the same way, N
 marked `<- asked` among them (the root has none). `--descendants-of-kind OWNER --kind K [--node N] [--table T]` prints
 every object strictly below N whose kind - its `k` member, or `kind` where a half names it so - is K, each with its kind
-and `+K below`, indented by depth (every `Call` inside one expression, every `Map` inside one literal). A node no table holds is exit 2.
+and `+K below`, indented by depth (every `Call` inside one expression, every `Map` inside one literal).
+`--path-to OWNER --node N [--from F] [--table T]` prints the way down from F (the root 0 by default) to N, and in its
+header the accessor path the roles spell (`items[0].values[5].k`, a list item `[ord]` after its list); an N that F does
+not hold is exit 2. A node no table holds is exit 2.
 
 ```sql
 -- one node's whole subtree, indented, in source order

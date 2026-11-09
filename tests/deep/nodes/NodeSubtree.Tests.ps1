@@ -1,6 +1,6 @@
 <#
     --map-query --subtree: one node's whole subtree, read as the range n..last of its owner.
-    --ancestors, --children, --siblings and --descendants-of-kind read the same key the other ways.
+    --ancestors, --children, --siblings, --descendants-of-kind and --path-to read the same key the other ways.
 
     The fixture's call `f(a.b, [1, 2])` has a python `expressions__shape` tree whose second child (`a.b`, an
     Attribute holding a Name) ends before a third sibling (the List) starts - so a range one node too long,
@@ -162,4 +162,35 @@ Test-Case 'descendants-of-kind: the node itself is not its own descendant, --lim
     $none = Invoke-Gate --map-query $m.Db --descendants-of-kind $m.Owner --table expressions__shape
     Assert-Exit $none 2
     Assert-Line $none '--descendants-of-kind needs the owner and the kind'
+}
+
+Test-Case 'path-to: the way down from the root to a node, no sibling on it, and the accessor path that names it' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $r = Invoke-Gate --map-query $m.Db --path-to $m.Owner --node 9 --table expressions__shape
+    Assert-Exit $r 0
+    Assert-Line $r "expressions__shape  $($m.Owner)  n 0 to 9  (6 node(s))  path c[1].c[0].k"
+    Assert-Line $r '5      c[1] object'
+    Assert-Line $r '9            k string Name'
+    # Node 6 (the Attribute's `k`) and node 10 (the List) stand beside the way, never on it.
+    Assert-NoLine $r 'Attribute'
+    Assert-NoLine $r 'c[2]'
+}
+
+Test-Case 'path-to: --from starts lower, a node outside it is exit 2, and the start alone is its own path' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $r = Invoke-Gate --map-query $m.Db --path-to $m.Owner --node 9 --from 5 --table expressions__shape
+    Assert-Exit $r 0
+    Assert-Line $r "expressions__shape  $($m.Owner)  n 5 to 9  (4 node(s))  path c[0].k"
+    Assert-Line $r '5  c[1] object'
+    Assert-NoLine $r '0  object'
+    $out = Invoke-Gate --map-query $m.Db --path-to $m.Owner --node 13 --from 5 --table expressions__shape
+    Assert-Exit $out 2
+    Assert-Line $out 'n 13 is not below n 5 (n 5..9)'
+    $self = Invoke-Gate --map-query $m.Db --path-to $m.Owner --node 5 --from 5 --table expressions__shape
+    Assert-Line $self 'path (the start itself)'
+    $none = Invoke-Gate --map-query $m.Db --path-to $m.Owner --table expressions__shape
+    Assert-Exit $none 2
+    Assert-Line $none '--path-to needs the owner'
 }
