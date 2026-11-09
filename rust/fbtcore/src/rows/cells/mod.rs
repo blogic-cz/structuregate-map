@@ -14,7 +14,11 @@
 //! cell belongs to, `n` its preorder number in the cell - the root is 0 - and `parent` the `n` of the node it hangs
 //! off (NULL for the root). `role` is its key in the parent object (an item of a member list carries the list's key
 //! too, NULL in a top-level list), `ord` its index in a list, `node` one of `object`, `list`, `string`, `number`,
-//! `bool`, `null`, and `value` a scalar's own (a boolean 0/1). THE COLUMNS ARE FIXED: a member's NAME is a `role`,
+//! `bool`, `null`, and `value` a scalar's own (a boolean 0/1). `last` is the `n` of the last node of its SUBTREE and
+//! `depth` its distance from the root: `n` is a gapless preorder, so a subtree is the RANGE `n BETWEEN s.n AND s.last`
+//! of one owner and a node's ancestors are `x.n BETWEEN a.n AND a.last` - a range of the `(owner, n)` key, never a
+//! `WITH RECURSIVE` over `parent` (measured on a large workspace's `expressions__ast`: every `expr` subtree 0.2 s
+//! against 23 s recursive, a node holding a `Read` anywhere below it 4 s against 262 s). THE COLUMNS ARE FIXED: a member's NAME is a `role`,
 //! never a column - names are data as often as they are fields (an object literal's keys, a property map, a
 //! document's headers), and a column per name was a table past SQLite's column limit, `Home` and `home` one
 //! column. The root of every cell is one node, so `[]` and `{}` are rows too and an absent cell is no row at all.
@@ -79,14 +83,30 @@ pub struct Node<'v> {
     pub ord: Option<i64>,
     pub node: &'static str,
     pub value: Value,
+    /// The `n` of the last node of its subtree: itself for a scalar or an empty list or object.
+    pub last: i64,
+    /// Its distance from the root, the root 0.
+    pub depth: i64,
 }
 
 /// Every node of one structure, in PREORDER - `n` counts up from the root's 0. No recursion.
+/// A node's `last` is known only once its subtree is walked, so one structure's nodes are held and emitted after.
 pub fn walk<'v>(value: &'v Value, mut emit: impl FnMut(Node<'v>) -> Result<()>) -> Result<()> {
     // (value, parent n, role, ord)
     let mut stack: Vec<(&'v Value, Option<i64>, Option<&'v str>, Option<i64>)> = vec![(value, None, None, None)];
-    let mut n = 0i64;
+    let mut nodes: Vec<Node<'v>> = Vec::new();
+    // The nodes whose subtree is still open, the root first: a node that does not hang off the last of them
+    // closes it - its subtree ended at the node before.
+    let mut open: Vec<usize> = Vec::new();
     while let Some((value, parent, role, ord)) = stack.pop() {
+        let n = nodes.len() as i64;
+        while let Some(&top) = open.last() {
+            if Some(top as i64) == parent {
+                break;
+            }
+            nodes[top].last = n - 1;
+            open.pop();
+        }
         let mut kids: Vec<(&'v Value, Option<i64>, Option<&'v str>, Option<i64>)> = Vec::new();
         let (node, scalar) = match value {
             Value::Object(map) => {
@@ -103,12 +123,16 @@ pub fn walk<'v>(value: &'v Value, mut emit: impl FnMut(Node<'v>) -> Result<()>) 
             Value::Number(_) => ("number", value.clone()),
             Value::String(_) => ("string", value.clone()),
         };
-        emit(Node { n, parent, role, ord, node, value: scalar })?;
-        n += 1;
+        nodes.push(Node { n, parent, role, ord, node, value: scalar, last: n, depth: open.len() as i64 });
+        open.push(n as usize);
         // Pushed reversed so they pop in order.
         stack.extend(kids.into_iter().rev());
     }
-    Ok(())
+    let end = nodes.len() as i64 - 1;
+    for top in open {
+        nodes[top].last = end;
+    }
+    nodes.into_iter().try_for_each(&mut emit)
 }
 
 /// One structure as its node rows (maps), appended to `out` - what a test reads; the store writes through `Writer`.
@@ -123,6 +147,8 @@ pub fn flatten(owner: &str, value: &Value, out: &mut Vec<Value>) {
         row.insert("ord".into(), node.ord.map(Value::from).unwrap_or(Value::Null));
         row.insert("node".into(), Value::from(node.node));
         row.insert("value".into(), node.value);
+        row.insert("last".into(), Value::from(node.last));
+        row.insert("depth".into(), Value::from(node.depth));
         out.push(Value::Object(row));
         Ok(())
     });
@@ -149,7 +175,7 @@ fn owner_key(owner: &SqlValue) -> String {
 }
 
 /// THE COLUMNS OF EVERY CHILD TABLE, fixed and in this order.
-pub const COLUMNS: &[&str] = &["owner", "n", "parent", "role", "ord", "node", "value"];
+pub const COLUMNS: &[&str] = &["owner", "n", "parent", "role", "ord", "node", "value", "last", "depth"];
 
 /// A child table, made once and registered - its indexes, the `(owner, n)` key among them, come after its rows
 /// (`index_values`).
@@ -158,7 +184,7 @@ pub fn create(db: &Connection, table: &str, column: &str) -> Result<String> {
     let t = schema::escape(&child_table);
     db.execute_batch(&format!(
         "CREATE TABLE IF NOT EXISTS \"{t}\" (owner NOT NULL, n INTEGER NOT NULL, parent INTEGER, role TEXT, \
-         ord INTEGER, node TEXT NOT NULL, value);"
+         ord INTEGER, node TEXT NOT NULL, value, last INTEGER NOT NULL, depth INTEGER NOT NULL);"
     ))?;
     register(db, table, column)?;
     Ok(child_table)
@@ -238,7 +264,7 @@ impl<'c> Writer<'c> {
             let int = |v: Option<i64>| v.map_or(SqlValue::Null, SqlValue::Integer);
             self.held.extend([owner.clone(), SqlValue::Integer(node.n), int(node.parent),
                 node.role.map_or(SqlValue::Null, |r| SqlValue::Text(r.to_string())), int(node.ord),
-                SqlValue::Text(node.node.to_string()), value]);
+                SqlValue::Text(node.node.to_string()), value, SqlValue::Integer(node.last), SqlValue::Integer(node.depth)]);
             if self.held.len() == BATCH * COLUMNS.len() {
                 self.many.execute(rusqlite::params_from_iter(self.held.iter()))?;
                 self.held.clear();

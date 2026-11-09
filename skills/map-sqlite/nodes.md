@@ -13,6 +13,8 @@
 | `ord` | its index in a list |
 | `node` | `object`, `list`, `string`, `number`, `bool` (0/1) or `null` |
 | `value` | a scalar's own value |
+| `last` | the `n` of the LAST node of its subtree (itself for a scalar). `n` is a gapless preorder, so a node's whole subtree is `e.owner = s.owner AND e.n BETWEEN s.n AND s.last` |
+| `depth` | its distance from the root, the root 0 |
 
 **THE COLUMNS ARE FIXED: EVERY MEMBER OF AN OBJECT IS A ROW OF ITS OWN**, its name in `role` - never a column of
 its parent, because a name is data as often as it is a field (an object literal's keys, a property map, a
@@ -38,6 +40,24 @@ SELECT DISTINCT x.id, x.source FROM expressions x
 JOIN expressions__ast n ON n.owner = x.id
 JOIN expressions__ast k ON k.owner = n.owner AND k.parent = n.n AND k.role = 'k' AND k.value = 'Read'
 JOIN expressions__ast m ON m.owner = n.owner AND m.parent = n.n AND m.role = 'name' AND m.value = 'DATA_DIR';
+```
+
+**A SUBTREE OR THE ANCESTORS OF A NODE ARE ONE RANGE, NEVER `WITH RECURSIVE`.** Below a node is `n BETWEEN s.n AND s.last`
+of its owner; above it is `x.n BETWEEN a.n AND a.last`. Both read the `(owner, n)` key: measured on a large workspace, a
+query over every subtree took a fraction of a second against tens of seconds recursive over `parent`, and one asking
+what sits anywhere below a node seconds against minutes.
+
+```sql
+-- one node's whole subtree, indented, in source order
+SELECT printf('%.*c', e.depth * 2, ' ') || coalesce(e.role, '') || ' ' || e.node || ' ' || coalesce(e.value, '')
+FROM expressions__ast s JOIN expressions__ast e ON e.owner = s.owner AND e.n BETWEEN s.n AND s.last
+WHERE s.owner = 'x:41' AND s.n = 5 ORDER BY e.n;
+
+-- every Call whose arguments read DATA_DIR at ANY depth
+SELECT DISTINCT c.owner, c.parent FROM expressions__ast c
+JOIN expressions__ast p ON p.owner = c.owner AND p.n = c.parent
+JOIN expressions__ast m ON m.owner = c.owner AND m.n > p.n AND m.n <= p.last AND m.role = 'name' AND m.value = 'DATA_DIR'
+WHERE c.role = 'k' AND c.value = 'Call';
 ```
 
 Absent is `NOT EXISTS (SELECT 1 FROM t__c j WHERE j.owner = t.id)`; an EMPTY list is a root with no child

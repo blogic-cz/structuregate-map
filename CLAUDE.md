@@ -58,7 +58,7 @@ The ban is a literal `findstr`, so a needle can match its own rationale comment 
 **Everything parsed is NODES.** A row cell holding a list or an object is never JSON text: `store::insert` writes
 it to the child table `<table>__<column>` (`expressions__ast`, `assignments__reads`), one row per node -
 a node is `(owner, n)` - `n` its preorder number, the root 0 - with `parent` (the parent's `n`), `role`, `ord`, `node`,
-`value`: FIXED columns, an object's every member a row, its name a `role` (`rust/fbtcore/src/rows/cells/mod.rs`); a
+`value`, `last` (the subtree's last `n`: a subtree is a range, never a recursive CTE), `depth`: FIXED columns, an object's every member a row, its name a `role` (`rust/fbtcore/src/rows/cells/mod.rs`); a
 delete reaches nodes through their row (`cells::delete_children`). A pass writing its own table uses `store::insert_rows`, never
 `serde_json::to_string` into a cell; a reader joins the child table (`cells::Reader`/`load_all` in rust), never
 `json_each`/`json_extract`. `_meta` too: a key whose value is a list or an object is `_meta__value` nodes (owner = the
