@@ -1,6 +1,6 @@
 <#
     --map-query --subtree: one node's whole subtree, read as the range n..last of its owner.
-    --ancestors, --children, --siblings, --descendants-of-kind and --path-to read the same key the other ways.
+    --ancestors, --children, --siblings, --descendants-of-kind, --path-to and --leaves read the same key the other ways.
 
     The fixture's call `f(a.b, [1, 2])` has a python `expressions__shape` tree whose second child (`a.b`, an
     Attribute holding a Name) ends before a third sibling (the List) starts - so a range one node too long,
@@ -193,4 +193,32 @@ Test-Case 'path-to: --from starts lower, a node outside it is exit 2, and the st
     $none = Invoke-Gate --map-query $m.Db --path-to $m.Owner --table expressions__shape
     Assert-Exit $none 2
     Assert-Line $none '--path-to needs the owner'
+}
+
+Test-Case 'leaves: only the nodes of the subtree that hold nothing, at their depth, and none past its end' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $r = Invoke-Gate --map-query $m.Db --leaves $m.Owner --table expressions__shape
+    Assert-Exit $r 0
+    Assert-Line $r "expressions__shape  $($m.Owner)  n 0..16  (7 leaf node(s) of 17)"
+    Assert-Line $r ' 1    k string Call'
+    Assert-Line $r '16            k string Constant'
+    Assert-NoLine $r 'object'
+    Assert-NoLine $r 'c list'
+    $in = Invoke-Gate --map-query $m.Db --leaves $m.Owner --node 5 --table expressions__shape
+    Assert-Line $in "expressions__shape  $($m.Owner)  n 5..9  (2 leaf node(s) of 5)"
+    Assert-Line $in '6    k string Attribute'
+    Assert-NoLine $in 'Call'
+    Assert-NoLine $in 'List'
+}
+
+Test-Case 'leaves: a leaf is its own only leaf, and --limit counts leaves' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $one = Invoke-Gate --map-query $m.Db --leaves $m.Owner --node 4 --table expressions__shape
+    Assert-Exit $one 0
+    Assert-Line $one "expressions__shape  $($m.Owner)  n 4..4  (1 leaf node(s) of 1)"
+    Assert-Line $one '4  k string Name'
+    $cut = Invoke-Gate --map-query $m.Db --leaves $m.Owner --table expressions__shape --limit 2
+    Assert-Line $cut '... 5 more node(s); raise --limit'
 }

@@ -8,8 +8,8 @@ use std::path::Path;
 
 /// The lenses that take an argument. `--decorators`, `--dead`, `--defaults`, `--unused-imports`, `--magic` and `--rules` take one
 /// OR stand alone, so what follows is only theirs when it is not the next flag.
-const VALUED: [&str; 16] = [
-    "schema", "find", "id", "file", "cat", "text", "grep", "reads", "key", "subtree", "ancestors", "children", "siblings", "descendants-of-kind", "path-to", "sql",
+const VALUED: [&str; 17] = [
+    "schema", "find", "id", "file", "cat", "text", "grep", "reads", "key", "subtree", "ancestors", "children", "siblings", "descendants-of-kind", "path-to", "leaves", "sql",
 ];
 const OPTIONAL: [&str; 6] = ["decorators", "dead", "defaults", "unused-imports", "magic", "rules"];
 
