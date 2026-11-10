@@ -120,6 +120,8 @@ pub struct Ask {
     pub kind: String,
     /// `--from F`, where `--path-to` starts down from (the root when empty).
     pub from: String,
+    /// `--depth A[-B]`, the levels below the node `--depth-range` prints.
+    pub depth: String,
     pub limit: usize,
     pub width: usize,
 }
@@ -344,6 +346,7 @@ pub fn render(db_path: &Path, ask: &Ask) -> Result<Answer> {
         "descendants-of-kind" => subtree::lens(&db, &mut out, subtree::Way::OfKind, ask, limit, width).map(|shown| refused = !shown),
         "path-to" => subtree::lens(&db, &mut out, subtree::Way::PathTo, ask, limit, width).map(|shown| refused = !shown),
         "leaves" => subtree::lens(&db, &mut out, subtree::Way::Leaves, ask, limit, width).map(|shown| refused = !shown),
+        "depth-range" => subtree::lens(&db, &mut out, subtree::Way::Levels, ask, limit, width).map(|shown| refused = !shown),
         "ancestors" => subtree::lens(&db, &mut out, subtree::Way::Up, ask, limit, width).map(|shown| refused = !shown),
         "sql" => query(&db, &ask.arg, &[]).map(|(columns, rows)| {
             show(&mut out, &rows, &columns, limit, width);
@@ -382,7 +385,7 @@ fn lenses(out: &mut String) {
         "--tables", "--schema T", "--find NAME", "--id ROW", "--file FRAGMENT",
         "--cat FRAGMENT [--lines a-b]", "--text FTS", "--grep TEXT [--table T]",
         "--reads NAME", "--key SETTINGS_KEY", "--decorators [FRAGMENT]", "--dead [FRAGMENT]", "--defaults [FRAGMENT]", "--unused-imports [FRAGMENT]",
-        "--magic [FRAGMENT]", "--rules [FRAGMENT]", "--subtree OWNER [--node N] [--table T]", "--ancestors OWNER --node N [--table T]", "--children OWNER [--node N] [--table T]", "--siblings OWNER --node N [--table T]", "--descendants-of-kind OWNER --kind K [--node N] [--table T]", "--path-to OWNER --node N [--from F] [--table T]", "--leaves OWNER [--node N] [--table T]", "--sql QUERY"]});
+        "--magic [FRAGMENT]", "--rules [FRAGMENT]", "--subtree OWNER [--node N] [--table T]", "--ancestors OWNER --node N [--table T]", "--children OWNER [--node N] [--table T]", "--siblings OWNER --node N [--table T]", "--descendants-of-kind OWNER --kind K [--node N] [--table T]", "--path-to OWNER --node N [--from F] [--table T]", "--leaves OWNER [--node N] [--table T]", "--depth-range OWNER --depth A[-B] [--node N] [--table T]", "--sql QUERY"]});
     // python's `json.dumps(..., indent=1)`: one space a level, and a newline after it.
     let mut buffer = Vec::new();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b" ");

@@ -1,6 +1,7 @@
 <#
     --map-query --subtree: one node's whole subtree, read as the range n..last of its owner.
-    --ancestors, --children, --siblings, --descendants-of-kind, --path-to and --leaves read the same key the other ways.
+    --ancestors, --children, --siblings, --descendants-of-kind, --path-to, --leaves and --depth-range read the same
+    key the other ways.
 
     The fixture's call `f(a.b, [1, 2])` has a python `expressions__shape` tree whose second child (`a.b`, an
     Attribute holding a Name) ends before a third sibling (the List) starts - so a range one node too long,
@@ -221,4 +222,32 @@ Test-Case 'leaves: a leaf is its own only leaf, and --limit counts leaves' {
     Assert-Line $one '4  k string Name'
     $cut = Invoke-Gate --map-query $m.Db --leaves $m.Owner --table expressions__shape --limit 2
     Assert-Line $cut '... 5 more node(s); raise --limit'
+}
+
+Test-Case 'depth-range: the nodes of the subtree A to B levels below the node, counted from it, each with its size' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $r = Invoke-Gate --map-query $m.Db --depth-range $m.Owner --depth 2 --table expressions__shape
+    Assert-Exit $r 0
+    Assert-Line $r "expressions__shape  $($m.Owner)  n 0..16  levels 2..2 below it  (3 node(s))"
+    Assert-Line $r ' 5      c[1] object  +4 below'
+    Assert-NoLine $r 'c list'
+    Assert-NoLine $r 'k string'
+    $in = Invoke-Gate --map-query $m.Db --depth-range $m.Owner --depth 0-1 --node 5 --table expressions__shape
+    Assert-Line $in "expressions__shape  $($m.Owner)  n 5..9  levels 0..1 below it  (3 node(s))"
+    Assert-Line $in '5  c[1] object  +4 below'
+    Assert-Line $in '7    c list  +2 below'
+    # Node 8 is two levels below 5, and node 10 is outside its subtree at the same depth as node 6.
+    Assert-NoLine $in '8  '
+    Assert-NoLine $in 'List'
+}
+
+Test-Case 'depth-range: --depth is required, a reversed or negative range is exit 2' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    foreach ($bad in @(@(), @('--depth', '2-1'), @('--depth', '-1'))) {
+        $r = Invoke-Gate --map-query $m.Db --depth-range $m.Owner --table expressions__shape @bad
+        Assert-Exit $r 2
+        Assert-Line $r '--depth-range needs --depth A or A-B'
+    }
 }

@@ -61,7 +61,9 @@ and `+K below`, indented by depth (every `Call` inside one expression, every `Ma
 `--path-to OWNER --node N [--from F] [--table T]` prints the way down from F (the root 0 by default) to N, and in its
 header the accessor path the roles spell (`items[0].values[5].k`, a list item `[ord]` after its list); an N that F does
 not hold is exit 2. `--leaves OWNER [--node N] [--table T]` prints only the nodes of N's subtree that hold nothing
-(`last = n`: every scalar, and an empty list or object), indented by depth from N. A node no table holds is exit 2.
+(`last = n`: every scalar, and an empty list or object), indented by depth from N. `--depth-range OWNER --depth A[-B]
+[--node N] [--table T]` prints the nodes of N's subtree A to B levels below N (`--depth 1` its children, `--depth 0-2` it
+and two levels down), each holding more with `+K below` - the shape of a large tree without its whole range. A node no table holds is exit 2.
 
 ```sql
 -- one node's whole subtree, indented, in source order

@@ -5,6 +5,7 @@
 //! `--descendants-of-kind OWNER --kind K [--node N] [--table T]`: every object below it whose kind is K.
 //! `--path-to OWNER --node N [--from F] [--table T]`: the way down from F (the root) to N, and its accessor path.
 //! `--leaves OWNER [--node N] [--table T]`: the nodes of its subtree that hold nothing, each one's own `last`.
+//! `--depth-range OWNER --depth A[-B] [--node N] [--table T]`: the nodes of its subtree A to B levels below it.
 //!
 //! A STRUCTURE IS NODE ROWS (`rows::cells`), and `n` is a gapless preorder with each node's `last`, so a node's
 //! subtree is the RANGE `n BETWEEN s.n AND s.last` of its owner and its ancestors are the nodes whose range holds
@@ -48,6 +49,8 @@ pub(super) enum Way {
     PathTo,
     /// The nodes of its subtree that hold no node of their own.
     Leaves,
+    /// The nodes of its subtree between two levels below it.
+    Levels,
 }
 
 /// The member that names an object's KIND: `k` in the expression shapes, `kind` where a half names it so.
@@ -64,6 +67,20 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
         Way::OfKind => "--descendants-of-kind",
         Way::PathTo => "--path-to",
         Way::Leaves => "--leaves",
+        Way::Levels => "--depth-range",
+    };
+    // THE LEVELS ARE COUNTED BELOW THE NODE: `--depth 1` is its children, `--depth 0-2` it and two levels down.
+    let levels = match ask.depth.trim().split_once('-') {
+        None => ask.depth.trim().parse::<u32>().map(|one| (one, one)),
+        Some((a, b)) => a.trim().parse::<u32>().and_then(|a| b.trim().parse::<u32>().map(|b| (a, b))),
+    };
+    let (near, far) = match (way, levels) {
+        (Way::Levels, Ok((a, b))) if a <= b => (i64::from(a), i64::from(b)),
+        (Way::Levels, _) => {
+            let _ = writeln!(out, "{flag} needs --depth A or A-B, the levels below the node (A <= B): {flag} x:41 --depth 1-2 [--node 5] [--table expressions__ast]");
+            return Ok(false);
+        }
+        _ => (0, 0),
     };
     if way == Way::OfKind && (owner.is_empty() || kind.is_empty()) {
         let _ = writeln!(out, "{flag} needs the owner and the kind: {flag} x:41 --kind Call [--node 5] [--table expressions__ast]");
@@ -149,6 +166,15 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
                 let _ = writeln!(out, "{child}  {owner}  n {start}..{last}  ({total} leaf node(s) of {})", last - start + 1);
                 (total, depth, query(db, &format!("{READ} {leaves} ORDER BY n LIMIT ?4"), &[&key, &start, &last, &rows_limit])?.1)
             }
+            Way::Levels => {
+                let band = format!("\"{t}\" WHERE owner = ?1 AND n BETWEEN ?2 AND ?3 AND depth BETWEEN ?4 AND ?5");
+                let (lo, hi) = (depth + near, depth + far);
+                let (_, counted) = query(db, &format!("SELECT count(*) FROM {band}"), &[&key, &start, &last, &lo, &hi])?;
+                let total = match counted.first().map(|r| &r[0]) { Some(Value::Integer(c)) => *c, _ => 0 };
+                let _ = writeln!(out, "{child}  {owner}  n {start}..{last}  levels {near}..{far} below it  ({total} node(s))");
+                let sql = format!("{READ} {band} ORDER BY n LIMIT ?6");
+                (total, depth, query(db, &sql, &[&key, &start, &last, &lo, &hi, &rows_limit])?.1)
+            }
             Way::PathTo => {
                 // THE WAY DOWN IS THE ANCESTORS OF N THAT START AT OR BELOW F: F must hold N, or there is no way.
                 let (_, held) = query(db, &format!("SELECT last, depth FROM \"{t}\" WHERE owner = ?1 AND n = ?2"), &[&key, &from])?;
@@ -177,7 +203,7 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
                 (total, from_depth, nodes)
             }
         };
-        let sizes = matches!(way, Way::Children | Way::Siblings | Way::OfKind);
+        let sizes = matches!(way, Way::Children | Way::Siblings | Way::OfKind | Way::Levels);
         print_nodes(out, &nodes, base, width, sizes, if way == Way::Siblings { start } else { -1 });
         if (nodes.len() as i64) < total {
             let _ = writeln!(out, "... {} more node(s); raise --limit", total - nodes.len() as i64);

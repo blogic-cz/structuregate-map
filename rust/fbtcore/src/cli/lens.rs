@@ -8,8 +8,8 @@ use std::path::Path;
 
 /// The lenses that take an argument. `--decorators`, `--dead`, `--defaults`, `--unused-imports`, `--magic` and `--rules` take one
 /// OR stand alone, so what follows is only theirs when it is not the next flag.
-const VALUED: [&str; 17] = [
-    "schema", "find", "id", "file", "cat", "text", "grep", "reads", "key", "subtree", "ancestors", "children", "siblings", "descendants-of-kind", "path-to", "leaves", "sql",
+const VALUED: [&str; 18] = [
+    "schema", "find", "id", "file", "cat", "text", "grep", "reads", "key", "subtree", "ancestors", "children", "siblings", "descendants-of-kind", "path-to", "leaves", "depth-range", "sql",
 ];
 const OPTIONAL: [&str; 6] = ["decorators", "dead", "defaults", "unused-imports", "magic", "rules"];
 
@@ -49,7 +49,7 @@ pub fn run(db: &str, arguments: &[String], out: &mut Out) -> i64 {
 
 /// The arguments as one question.
 fn read(arguments: &[String]) -> serde_json::Value {
-    let (mut lens, mut arg, mut table, mut lines, mut node, mut kind, mut from): (String, String, String, String, String, String, String) = Default::default();
+    let (mut lens, mut arg, mut table, mut lines, mut node, mut kind, mut from, mut depth): (String, String, String, String, String, String, String, String) = Default::default();
     let (mut limit, mut width) = (50_i64, 70_i64);
     let mut i = 0;
     while i < arguments.len() {
@@ -71,8 +71,13 @@ fn read(arguments: &[String]) -> serde_json::Value {
                 node = next.cloned().unwrap_or_default();
                 i += 1;
             }
-            "kind" | "from" => {
-                if bare == "kind" { kind = next.cloned().unwrap_or_default() } else { from = next.cloned().unwrap_or_default() }
+            "kind" | "from" | "depth" => {
+                let value = next.cloned().unwrap_or_default();
+                match bare {
+                    "kind" => kind = value,
+                    "from" => from = value,
+                    _ => depth = value,
+                }
                 i += 1;
             }
             "limit" | "width" => {
@@ -98,5 +103,5 @@ fn read(arguments: &[String]) -> serde_json::Value {
         }
         i += 1;
     }
-    json!({ "lens": lens, "arg": arg, "table": table, "lines": lines, "node": node, "kind": kind, "from": from, "limit": limit, "width": width })
+    json!({ "lens": lens, "arg": arg, "table": table, "lines": lines, "node": node, "kind": kind, "from": from, "depth": depth, "limit": limit, "width": width })
 }
