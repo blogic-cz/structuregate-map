@@ -217,7 +217,9 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         (every object below it whose `k`/`kind` is K), --path-to OWNER
                         --node N [--from F] [--table T] (the way down from F, the root by
                         default, to N, and its accessor path), --leaves OWNER [--node N]
-                        [--table T] (the nodes of its subtree that hold nothing), --sql QUERY,
+                        [--table T] (the nodes of its subtree that hold nothing),
+                        --depth-range OWNER --depth A[-B] [--node N] [--table T] (the nodes
+                        of its subtree A to B levels below it), --sql QUERY,
                         --limit N (0: every
                         row), --width N (a cell is cut at 70 characters with ...[+N chars]; 0:
                         every cell whole - --find's file column is never cut). A note on stderr
