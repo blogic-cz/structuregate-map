@@ -4,6 +4,7 @@
 //! `--siblings OWNER --node N [--table T]`: the children of its parent, the node itself marked among them.
 //! `--descendants-of-kind OWNER --kind K [--node N] [--table T]`: every object below it whose kind is K.
 //! `--path-to OWNER --node N [--from F] [--table T]`: the way down from F (the root) to N, and its accessor path.
+//! `--leaves OWNER [--node N] [--table T]`: the nodes of its subtree that hold nothing, each one's own `last`.
 //!
 //! A STRUCTURE IS NODE ROWS (`rows::cells`), and `n` is a gapless preorder with each node's `last`, so a node's
 //! subtree is the RANGE `n BETWEEN s.n AND s.last` of its owner and its ancestors are the nodes whose range holds
@@ -45,6 +46,8 @@ pub(super) enum Way {
     OfKind,
     /// The nodes from `--from` down to it, and the roles that lead there.
     PathTo,
+    /// The nodes of its subtree that hold no node of their own.
+    Leaves,
 }
 
 /// The member that names an object's KIND: `k` in the expression shapes, `kind` where a half names it so.
@@ -60,6 +63,7 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
         Way::Siblings => "--siblings",
         Way::OfKind => "--descendants-of-kind",
         Way::PathTo => "--path-to",
+        Way::Leaves => "--leaves",
     };
     if way == Way::OfKind && (owner.is_empty() || kind.is_empty()) {
         let _ = writeln!(out, "{flag} needs the owner and the kind: {flag} x:41 --kind Call [--node 5] [--table expressions__ast]");
@@ -136,6 +140,14 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
                 let _ = writeln!(out, "{child}  {owner}  n {start}..{last}  ({total} node(s) of kind {kind})");
                 let sql = format!("SELECT o.n, o.depth, o.role, o.ord, o.node, k.value, o.last FROM {named} ORDER BY o.n LIMIT ?5");
                 (total, depth + 1, query(db, &sql, &[&key, &start, &last, &kind, &rows_limit])?.1)
+            }
+            Way::Leaves => {
+                // A LEAF ENDS WHERE IT STARTS: `last = n`, a scalar or an empty list or object.
+                let leaves = format!("\"{t}\" WHERE owner = ?1 AND n BETWEEN ?2 AND ?3 AND last = n");
+                let (_, counted) = query(db, &format!("SELECT count(*) FROM {leaves}"), &[&key, &start, &last])?;
+                let total = match counted.first().map(|r| &r[0]) { Some(Value::Integer(c)) => *c, _ => 0 };
+                let _ = writeln!(out, "{child}  {owner}  n {start}..{last}  ({total} leaf node(s) of {})", last - start + 1);
+                (total, depth, query(db, &format!("{READ} {leaves} ORDER BY n LIMIT ?4"), &[&key, &start, &last, &rows_limit])?.1)
             }
             Way::PathTo => {
                 // THE WAY DOWN IS THE ANCESTORS OF N THAT START AT OR BELOW F: F must hold N, or there is no way.
