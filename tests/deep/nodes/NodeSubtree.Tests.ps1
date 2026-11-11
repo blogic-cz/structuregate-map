@@ -1,6 +1,6 @@
 <#
     --map-query --subtree: one node's whole subtree, read as the range n..last of its owner.
-    --ancestors, --children, --siblings, --descendants-of-kind, --path-to, --leaves and --depth-range read the same
+    --ancestors, --children, --siblings, --descendants-of-kind, --path-to, --leaves, --depth-range and --lca read the same
     key the other ways.
 
     The fixture's call `f(a.b, [1, 2])` has a python `expressions__shape` tree whose second child (`a.b`, an
@@ -250,4 +250,34 @@ Test-Case 'depth-range: --depth is required, a reversed or negative range is exi
         Assert-Exit $r 2
         Assert-Line $r '--depth-range needs --depth A or A-B'
     }
+}
+
+Test-Case 'lca: the deepest node holding both, and the accessor path from it down to each' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $r = Invoke-Gate --map-query $m.Db --lca $m.Owner --node 4 --with 9 --table expressions__shape
+    Assert-Exit $r 0
+    Assert-Line $r "expressions__shape  $($m.Owner)  n 4 and 9  common ancestor n 2  depth 1"
+    Assert-Line $r '2  c list  +14 below'
+    Assert-Line $r '  to 4: [0].k'
+    Assert-Line $r '  to 9: [1].c[0].k'
+    # The root holds 9 and 6 too, but node 5 is the deepest that does.
+    $deep = Invoke-Gate --map-query $m.Db --lca $m.Owner --node 9 --with 6 --table expressions__shape
+    Assert-Line $deep "expressions__shape  $($m.Owner)  n 9 and 6  common ancestor n 5  depth 2"
+    Assert-Line $deep '  to 6: k'
+}
+
+Test-Case 'lca: a node that holds the other is the ancestor, and a missing or absent --with is exit 2' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $r = Invoke-Gate --map-query $m.Db --lca $m.Owner --node 5 --with 9 --table expressions__shape
+    Assert-Exit $r 0
+    Assert-Line $r 'common ancestor n 5  depth 2'
+    Assert-Line $r '  to 5: (the start itself)'
+    $absent = Invoke-Gate --map-query $m.Db --lca $m.Owner --node 5 --with 99 --table expressions__shape
+    Assert-Exit $absent 2
+    Assert-Line $absent 'no node 99 to meet n 5'
+    $none = Invoke-Gate --map-query $m.Db --lca $m.Owner --node 5 --table expressions__shape
+    Assert-Exit $none 2
+    Assert-Line $none '--lca needs the owner and two nodes'
 }
