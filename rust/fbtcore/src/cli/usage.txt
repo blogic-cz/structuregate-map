@@ -219,7 +219,9 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         default, to N, and its accessor path), --leaves OWNER [--node N]
                         [--table T] (the nodes of its subtree that hold nothing),
                         --depth-range OWNER --depth A[-B] [--node N] [--table T] (the nodes
-                        of its subtree A to B levels below it), --sql QUERY,
+                        of its subtree A to B levels below it), --lca OWNER --node A --with B
+                        [--table T] (the deepest node holding both, and its path to each),
+                        --sql QUERY,
                         --limit N (0: every
                         row), --width N (a cell is cut at 70 characters with ...[+N chars]; 0:
                         every cell whole - --find's file column is never cut). A note on stderr

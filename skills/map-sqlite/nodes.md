@@ -63,7 +63,9 @@ header the accessor path the roles spell (`items[0].values[5].k`, a list item `[
 not hold is exit 2. `--leaves OWNER [--node N] [--table T]` prints only the nodes of N's subtree that hold nothing
 (`last = n`: every scalar, and an empty list or object), indented by depth from N. `--depth-range OWNER --depth A[-B]
 [--node N] [--table T]` prints the nodes of N's subtree A to B levels below N (`--depth 1` its children, `--depth 0-2` it
-and two levels down), each holding more with `+K below` - the shape of a large tree without its whole range. A node no table holds is exit 2.
+and two levels down), each holding more with `+K below` - the shape of a large tree without its whole range. `--lca OWNER --node A --with B
+[--table T]` prints the deepest node whose range holds both (`n <= min AND last >= max`, the last in preorder) and the
+accessor path from it to each (`to 9: [1].c[0].k`); a `--with` no table holds is exit 2. A node no table holds is exit 2.
 
 ```sql
 -- one node's whole subtree, indented, in source order

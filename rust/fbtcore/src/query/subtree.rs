@@ -6,6 +6,7 @@
 //! `--path-to OWNER --node N [--from F] [--table T]`: the way down from F (the root) to N, and its accessor path.
 //! `--leaves OWNER [--node N] [--table T]`: the nodes of its subtree that hold nothing, each one's own `last`.
 //! `--depth-range OWNER --depth A[-B] [--node N] [--table T]`: the nodes of its subtree A to B levels below it.
+//! `--lca OWNER --node A --with B [--table T]`: the deepest node holding both, and the path from it to each.
 //!
 //! A STRUCTURE IS NODE ROWS (`rows::cells`), and `n` is a gapless preorder with each node's `last`, so a node's
 //! subtree is the RANGE `n BETWEEN s.n AND s.last` of its owner and its ancestors are the nodes whose range holds
@@ -51,6 +52,8 @@ pub(super) enum Way {
     Leaves,
     /// The nodes of its subtree between two levels below it.
     Levels,
+    /// The deepest node whose range holds it and the `--with` node.
+    Lca,
 }
 
 /// The member that names an object's KIND: `k` in the expression shapes, `kind` where a half names it so.
@@ -68,7 +71,13 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
         Way::PathTo => "--path-to",
         Way::Leaves => "--leaves",
         Way::Levels => "--depth-range",
+        Way::Lca => "--lca",
     };
+    let with = ask.with.trim().parse::<i64>();
+    if way == Way::Lca && (owner.is_empty() || node.is_empty() || with.is_err()) {
+        let _ = writeln!(out, "{flag} needs the owner and two nodes, each an n: {flag} x:41 --node 4 --with 9 [--table expressions__ast]");
+        return Ok(false);
+    }
     // THE LEVELS ARE COUNTED BELOW THE NODE: `--depth 1` is its children, `--depth 0-2` it and two levels down.
     let levels = match ask.depth.trim().split_once('-') {
         None => ask.depth.trim().parse::<u32>().map(|one| (one, one)),
@@ -103,7 +112,7 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
     let key = cells::owner_value(owner);
     let rows_limit = i64::try_from(limit).unwrap_or(i64::MAX);
     let (_, registered) = query(db, &format!("SELECT tbl, child FROM {} ORDER BY child", cells::REGISTRY), &[])?;
-    let (mut found, mut refused) = (false, false);
+    let (mut found, mut refused, mut trailer) = (false, false, String::new());
     for row in registered {
         let (Value::Text(parent), Value::Text(child)) = (&row[0], &row[1]) else { continue };
         if !table.is_empty() && table != parent && table != child {
@@ -188,23 +197,35 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
                     refused = true;
                     continue;
                 }
-                let sql = format!("{READ} \"{t}\" WHERE owner = ?1 AND n BETWEEN ?2 AND ?3 AND last >= ?3 ORDER BY n");
-                let mut nodes = query(db, &sql, &[&key, &from, &start])?.1;
-                // A LIST ITEM IS `[ord]` AFTER ITS LIST, whose role it repeats: `c[1].k`, never `c.c[1].k`.
-                let steps: Vec<String> = nodes.iter().skip(1).map(|r| label(if matches!(r[3], Value::Integer(_)) { &Value::Null } else { &r[2] }, &r[3])).collect();
-                let path = steps.iter().fold(String::new(), |acc, s| match (acc.is_empty(), s.starts_with('[')) {
-                    (true, _) | (false, true) => acc + s,
-                    (false, false) => acc + "." + s,
-                });
-                let path = if path.is_empty() { "(the start itself)".to_string() } else { path };
+                let (mut nodes, path) = way_down(db, &t, &key, from, start)?;
                 let total = nodes.len() as i64;
                 let _ = writeln!(out, "{child}  {owner}  n {from} to {start}  ({total} node(s))  path {path}");
                 nodes.truncate(limit);
                 (total, from_depth, nodes)
             }
+            Way::Lca => {
+                // THE LOWEST COMMON ANCESTOR is the deepest range holding both: the last such node in preorder.
+                let other = with.as_ref().map_or(start, |w| *w);
+                let (_, there) = query(db, &format!("SELECT n FROM \"{t}\" WHERE owner = ?1 AND n = ?2"), &[&key, &other])?;
+                if there.is_empty() {
+                    let _ = writeln!(out, "{child}  {owner}  no node {other} to meet n {start}");
+                    refused = true;
+                    continue;
+                }
+                let (lo, hi) = (start.min(other), start.max(other));
+                let sql = format!("{READ} \"{t}\" WHERE owner = ?1 AND n <= ?2 AND last >= ?3 ORDER BY n DESC LIMIT 1");
+                let nodes = query(db, &sql, &[&key, &lo, &hi])?.1;
+                let (Some(Value::Integer(meet)), Some(Value::Integer(meet_depth))) = (nodes.first().map(|r| r[0].clone()), nodes.first().map(|r| r[1].clone())) else { continue };
+                let _ = writeln!(out, "{child}  {owner}  n {start} and {other}  common ancestor n {meet}  depth {meet_depth}");
+                for end in [start, other] {
+                    let _ = writeln!(trailer, "  to {end}: {}", way_down(db, &t, &key, meet, end)?.1);
+                }
+                (1, meet_depth, nodes)
+            }
         };
-        let sizes = matches!(way, Way::Children | Way::Siblings | Way::OfKind | Way::Levels);
+        let sizes = matches!(way, Way::Children | Way::Siblings | Way::OfKind | Way::Levels | Way::Lca);
         print_nodes(out, &nodes, base, width, sizes, if way == Way::Siblings { start } else { -1 });
+        out.push_str(&std::mem::take(&mut trailer));
         if (nodes.len() as i64) < total {
             let _ = writeln!(out, "... {} more node(s); raise --limit", total - nodes.len() as i64);
         }
@@ -214,6 +235,19 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
         let _ = writeln!(out, "no node {start} of {owner} in any node table{narrowed}");
     }
     Ok(found && !refused)
+}
+
+/// The nodes from `from` down to `to` (which `from` holds) and the accessor path their roles spell.
+fn way_down(db: &Connection, t: &str, key: &Value, from: i64, to: i64) -> Result<(Vec<Vec<Value>>, String)> {
+    let sql = format!("{READ} \"{t}\" WHERE owner = ?1 AND n BETWEEN ?2 AND ?3 AND last >= ?3 ORDER BY n");
+    let nodes = query(db, &sql, &[key, &from, &to])?.1;
+    // A LIST ITEM IS `[ord]` AFTER ITS LIST, whose role it repeats: `c[1].k`, never `c.c[1].k`.
+    let steps: Vec<String> = nodes.iter().skip(1).map(|r| label(if matches!(r[3], Value::Integer(_)) { &Value::Null } else { &r[2] }, &r[3])).collect();
+    let path = steps.iter().fold(String::new(), |acc, s| match (acc.is_empty(), s.starts_with('[')) {
+        (true, _) | (false, true) => acc + s,
+        (false, false) => acc + "." + s,
+    });
+    Ok((nodes, if path.is_empty() { "(the start itself)".to_string() } else { path }))
 }
 
 /// A node's place in its parent: its `role`, `[ord]` for a list item, both for a named list's item.
