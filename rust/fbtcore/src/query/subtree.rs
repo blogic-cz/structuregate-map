@@ -7,6 +7,7 @@
 //! `--leaves OWNER [--node N] [--table T]`: the nodes of its subtree that hold nothing, each one's own `last`.
 //! `--depth-range OWNER --depth A[-B] [--node N] [--table T]`: the nodes of its subtree A to B levels below it.
 //! `--lca OWNER --node A --with B [--table T]`: the deepest node holding both, and the path from it to each.
+//! `--nth-child OWNER --index I [--node N] [--table T]`: its child I (0 the first, -1 the last), as a subtree.
 //!
 //! A STRUCTURE IS NODE ROWS (`rows::cells`), and `n` is a gapless preorder with each node's `last`, so a node's
 //! subtree is the RANGE `n BETWEEN s.n AND s.last` of its owner and its ancestors are the nodes whose range holds
@@ -54,6 +55,8 @@ pub(super) enum Way {
     Levels,
     /// The deepest node whose range holds it and the `--with` node.
     Lca,
+    /// One of its children, by place, and everything below that child.
+    NthChild,
 }
 
 /// The member that names an object's KIND: `k` in the expression shapes, `kind` where a half names it so.
@@ -72,7 +75,13 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
         Way::Leaves => "--leaves",
         Way::Levels => "--depth-range",
         Way::Lca => "--lca",
+        Way::NthChild => "--nth-child",
     };
+    let index = ask.index.trim().parse::<i64>();
+    if way == Way::NthChild && (owner.is_empty() || index.is_err()) {
+        let _ = writeln!(out, "{flag} needs the owner and a child's place, 0 the first and -1 the last: {flag} x:41 --index 1 [--node 5] [--table expressions__ast]");
+        return Ok(false);
+    }
     let with = ask.with.trim().parse::<i64>();
     if way == Way::Lca && (owner.is_empty() || node.is_empty() || with.is_err()) {
         let _ = writeln!(out, "{flag} needs the owner and two nodes, each an n: {flag} x:41 --node 4 --with 9 [--table expressions__ast]");
@@ -202,6 +211,24 @@ pub(super) fn lens(db: &Connection, out: &mut String, way: Way, ask: &super::Ask
                 let _ = writeln!(out, "{child}  {owner}  n {from} to {start}  ({total} node(s))  path {path}");
                 nodes.truncate(limit);
                 (total, from_depth, nodes)
+            }
+            Way::NthChild => {
+                // A PLACE FROM THE END counts back from the last child: -1 is the last, so it skips `-I - 1` from there.
+                let place = index.as_ref().map_or(0, |i| *i);
+                let below = format!("\"{t}\" WHERE owner = ?1 AND n BETWEEN ?2 + 1 AND ?3 AND parent = ?2");
+                let (_, counted) = query(db, &format!("SELECT count(*) FROM {below}"), &[&key, &start, &last])?;
+                let count = match counted.first().map(|r| &r[0]) { Some(Value::Integer(c)) => *c, _ => 0 };
+                let (order, skip) = if place < 0 { ("DESC", -place - 1) } else { ("ASC", place) };
+                let sql = format!("SELECT n, last FROM {below} ORDER BY n {order} LIMIT 1 OFFSET ?4");
+                let (_, picked) = query(db, &sql, &[&key, &start, &last, &skip])?;
+                let Some([Value::Integer(at), Value::Integer(at_last)]) = picked.first().map(|r| [r[0].clone(), r[1].clone()]) else {
+                    let _ = writeln!(out, "{child}  {owner}  n {start} has {count} child(ren): no child {place}");
+                    refused = true;
+                    continue;
+                };
+                let _ = writeln!(out, "{child}  {owner}  n {start}  child {place} of {count}  n {at}..{at_last}  ({} node(s))", at_last - at + 1);
+                let sql = format!("{READ} \"{t}\" WHERE owner = ?1 AND n BETWEEN ?2 AND ?3 ORDER BY n LIMIT ?4");
+                (at_last - at + 1, depth + 1, query(db, &sql, &[&key, &at, &at_last, &rows_limit])?.1)
             }
             Way::Lca => {
                 // THE LOWEST COMMON ANCESTOR is the deepest range holding both: the last such node in preorder.

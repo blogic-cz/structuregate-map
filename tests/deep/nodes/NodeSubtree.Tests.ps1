@@ -1,6 +1,6 @@
 <#
     --map-query --subtree: one node's whole subtree, read as the range n..last of its owner.
-    --ancestors, --children, --siblings, --descendants-of-kind, --path-to, --leaves, --depth-range and --lca read the same
+    --ancestors, --children, --siblings, --descendants-of-kind, --path-to, --leaves, --depth-range, --lca and --nth-child read the same
     key the other ways.
 
     The fixture's call `f(a.b, [1, 2])` has a python `expressions__shape` tree whose second child (`a.b`, an
@@ -280,4 +280,38 @@ Test-Case 'lca: a node that holds the other is the ancestor, and a missing or ab
     $none = Invoke-Gate --map-query $m.Db --lca $m.Owner --node 5 --table expressions__shape
     Assert-Exit $none 2
     Assert-Line $none '--lca needs the owner and two nodes'
+}
+
+Test-Case 'nth-child: child I of the node by its place, printed with all it holds and nothing of its siblings' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $r = Invoke-Gate --map-query $m.Db --nth-child $m.Owner --index 1 --node 2 --table expressions__shape
+    Assert-Exit $r 0
+    Assert-Line $r "expressions__shape  $($m.Owner)  n 2  child 1 of 3  n 5..9  (5 node(s))"
+    Assert-Line $r '5  c[1] object'
+    Assert-Line $r '9        k string Name'
+    # Child 0 (nodes 3..4) and child 2 (the List) are its siblings, never in it.
+    Assert-NoLine $r '4    k string Name'
+    Assert-NoLine $r 'List'
+    # Every `k` is a grandchild of node 2: the first child is the Name's object, never the Call's `k` beside 2.
+    $first = Invoke-Gate --map-query $m.Db --nth-child $m.Owner --index 0 --node 2 --table expressions__shape
+    Assert-Line $first "expressions__shape  $($m.Owner)  n 2  child 0 of 3  n 3..4  (2 node(s))"
+}
+
+Test-Case 'nth-child: a negative place counts from the last, and a place past either end or no --index is exit 2' {
+    if (-not $script:SubtreePython) { return }
+    $m = New-SubtreeMap
+    $last = Invoke-Gate --map-query $m.Db --nth-child $m.Owner --index -1 --node 2 --table expressions__shape
+    Assert-Exit $last 0
+    Assert-Line $last 'child -1 of 3  n 10..16  (7 node(s))'
+    $back = Invoke-Gate --map-query $m.Db --nth-child $m.Owner --index -3 --node 2 --table expressions__shape
+    Assert-Line $back 'child -3 of 3  n 3..4  (2 node(s))'
+    foreach ($place in @('3', '-4')) {
+        $out = Invoke-Gate --map-query $m.Db --nth-child $m.Owner --index $place --node 2 --table expressions__shape
+        Assert-Exit $out 2
+        Assert-Line $out "n 2 has 3 child(ren): no child $place"
+    }
+    $none = Invoke-Gate --map-query $m.Db --nth-child $m.Owner --node 2 --table expressions__shape
+    Assert-Exit $none 2
+    Assert-Line $none '--nth-child needs the owner and a child'
 }
