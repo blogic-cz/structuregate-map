@@ -65,7 +65,8 @@ not hold is exit 2. `--leaves OWNER [--node N] [--table T]` prints only the node
 [--node N] [--table T]` prints the nodes of N's subtree A to B levels below N (`--depth 1` its children, `--depth 0-2` it
 and two levels down), each holding more with `+K below` - the shape of a large tree without its whole range. `--lca OWNER --node A --with B
 [--table T]` prints the deepest node whose range holds both (`n <= min AND last >= max`, the last in preorder) and the
-accessor path from it to each (`to 9: [1].c[0].k`); a `--with` no table holds is exit 2. A node no table holds is exit 2.
+accessor path from it to each (`to 9: [1].c[0].k`); a `--with` no table holds is exit 2. `--nth-child OWNER --index I [--node N] [--table T]` prints N's child I in source
+order (0 the first, -1 the last, -2 the one before it) as its whole subtree; a place past either end is exit 2. A node no table holds is exit 2.
 
 ```sql
 -- one node's whole subtree, indented, in source order
