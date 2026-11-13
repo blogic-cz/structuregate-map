@@ -74,10 +74,15 @@ else the Markdown export) and write the file and `<save>.meta.json` (`id`, `name
 `modifiedTime`, `pulled`), each beside its target and renamed over it, so a failed pull leaves the last
 snapshot whole.
 
+Every wait is bounded: 30 s to connect, send and start answering, 300 s for a body - a stalled network fails the
+document instead of hanging the run. A busy API (429, 5xx) is asked 3 times, 2 s then 4 s apart. A `.json` save
+of a file that is no Google Doc (an uploaded `.docx` or PDF) says so instead of a bare `HTTP 400`. The token is
+sent only in headers and the `tokeninfo` POST body, never in a URL.
+
 | exit | meaning |
 |---|---|
 | 0 | every document is saved and current |
-| 1 | a document failed; its line says why (token refused, 404, network) |
+| 1 | a document failed; its line says why (token refused, 404, not a Google Doc, busy API, stalled network) |
 | 2 | the config is wrong |
 
 The map run never fetches anything. Committing the snapshots is the consumer's choice.
