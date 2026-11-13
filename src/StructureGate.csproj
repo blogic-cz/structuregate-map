@@ -348,6 +348,8 @@
     <NativeLibrary Include="userenv.lib" />
     <NativeLibrary Include="ws2_32.lib" />
     <NativeLibrary Include="advapi32.lib" />
+    <!-- WaitOnAddress / WakeByAddress*: rust's std parks threads through them since 1.100. -->
+    <NativeLibrary Include="synchronization.lib" />
   </ItemGroup>
 
   <Target Name="CopyFbtCoreDll" AfterTargets="BuildFbtCore" Condition="'$(PublishAot)' != 'true'">
