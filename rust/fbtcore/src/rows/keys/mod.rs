@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 mod source;
-pub use source::source_state;
+pub use source::{source_state, GATE_VERSION};
 
 /// One keyed row before the duplicates are told apart.
 struct Entry {

@@ -154,3 +154,18 @@ fn a_json_save_of_a_file_that_is_no_google_doc_says_so() {
     let (url, _) = serve(vec![(200, r#"{"version": "2"}"#), (400, "")]);
     assert_eq!(pull(&quick(), &md, "T", &url, &url).unwrap_err(), "HTTP 400");
 }
+
+#[test]
+fn a_disabled_api_is_named_not_blamed_on_the_documents_sharing() {
+    let dir = scratch("disabled");
+    let mut s = source(&dir.0);
+    s.path = s.path.with_extension("json");
+    const OFF: &str = r#"{"error": {"code": 403, "status": "PERMISSION_DENIED", "details": [{"reason": "SERVICE_DISABLED",
+        "metadata": {"service": "docs.googleapis.com", "consumer": "projects/42", "activationUrl": "https://example.com/enable"}}]}}"#;
+    let (url, _) = serve(vec![(200, r#"{"version": "5"}"#), (403, OFF)]);
+    let why = pull(&quick(), &s, "T", &url, &url).unwrap_err();
+    assert_eq!(why, "HTTP 403: the Google Docs API (docs.googleapis.com) is disabled in the token's Cloud project 42 - enable it at https://example.com/enable, wait a few minutes, then pull again");
+    assert!(!why.starts_with(REFUSED), "{why}");
+    let (url, _) = serve(vec![(200, r#"{"version": "5"}"#), (403, r#"{"error": {"code": 403, "details": [{"reason": "ACCESS_TOKEN_SCOPE_INSUFFICIENT"}]}}"#)]);
+    assert!(pull(&quick(), &s, "T", &url, &url).unwrap_err().starts_with(REFUSED));
+}

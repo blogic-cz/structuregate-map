@@ -159,7 +159,9 @@ fn random_uuid() -> String {
 /// The run's records, one per line.
 pub(super) fn records(run: &Finished, install: &str) -> String {
     let ms = |ns: u128| (ns / 1_000_000) as u64;
-    let version = run.resource("service.version").cloned().unwrap_or(Value::from(""));
+    // THE RELEASE TAG compiled in by the release workflow (`dev` in any other build) - not the .NET assembly's
+    // version, which is 1.0.0.0 in every release.
+    let version = crate::rows::keys::GATE_VERSION;
     let mode = run.fact("structuregate.mode").and_then(Value::as_str).unwrap_or("").to_string();
     let uptime_s = (run.end_ns.saturating_sub(run.started_ns())) as f64 / 1e9;
     let record = |t: u128, k: &str, n: &str, d: Value| json!({ "t": ms(t), "s": run.trace_id, "i": install, "v": version, "k": k, "n": n, "d": d }).to_string();

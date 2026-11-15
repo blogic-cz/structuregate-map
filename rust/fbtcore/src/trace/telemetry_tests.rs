@@ -50,7 +50,8 @@ fn stages_of_one_name_are_one_series_and_nothing_of_the_tree_is_written() {
     assert_eq!(kinds, ["session/start", "machine/machine", "event/run", "metric/run", "session/end"]);
     let walk = lines[3]["d"]["stats"].as_array().unwrap().iter().find(|s| s["name"] == "stage.walk").unwrap().clone();
     assert_eq!((walk["n"].as_u64(), walk["sum"].as_f64(), walk["min"].as_f64(), walk["max"].as_f64()), (Some(2), Some(6.0), Some(2.0), Some(4.0)));
-    assert!(lines.iter().all(|r| r["v"] == "v9.9.9" && r["i"] == "id-1" && r["s"] == "t1"));
+    let tag = crate::rows::keys::GATE_VERSION;
+    assert!(lines.iter().all(|r| r["v"] == tag && r["i"] == "id-1" && r["s"] == "t1"), "not the release tag {tag}: {text}");
 }
 
 #[test]

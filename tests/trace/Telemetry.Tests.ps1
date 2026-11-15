@@ -67,6 +67,8 @@ Test-Case 'a run is one whole spool file: session start and end, the run, its st
     Assert-Equal "$($run[0].d.mode)" 'gate' 'the mode'
     Assert-Equal (@($spool.Records | Select-Object -ExpandProperty s -Unique)).Count 1 'every record is one session'
     Assert-Equal (@($spool.Records | Select-Object -ExpandProperty i -Unique)).Count 1 'every record is one install'
+    # THE RELEASE TAG (`dev` in a build of the working tree), never the .NET assembly's 1.0.0.0 every release carries.
+    Assert-Equal "$($spool.Records[0].v)" $(if ($env:STRUCTUREGATE_VERSION) { $env:STRUCTUREGATE_VERSION } else { 'dev' }) 'the version'
     $stats = @((Get-SpoolRecord $spool 'metric' 'run')[0].d.stats)
     $walk = @($stats | Where-Object { $_.name -eq 'stage.walk and count' })
     Assert-Equal $walk.Count 1 'the walk as a timing series'

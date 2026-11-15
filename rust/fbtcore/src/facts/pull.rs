@@ -140,7 +140,19 @@ fn get(http: &Http, url: &str, bearer: &str) -> Result<Vec<u8>, String> {
     let mut tries = 0;
     loop {
         tries += 1;
-        let response = http.agent.get(url).header("Authorization", &format!("Bearer {bearer}")).call();
+        // A STATUS IS NOT AN ERROR HERE, so a refusal's body is still there to read: Google says in it WHY.
+        let response = http.agent.get(url).config().http_status_as_error(false).build().header("Authorization", &format!("Bearer {bearer}")).call();
+        let response = match response {
+            Ok(mut answer) if answer.status().as_u16() >= 400 => {
+                let code = answer.status().as_u16();
+                let body = answer.body_mut().with_config().limit(1024 * 1024).read_to_vec().unwrap_or_default();
+                if let Some(off) = disabled_api(code, &body) {
+                    return Err(off);
+                }
+                Err(ureq::Error::StatusCode(code))
+            }
+            other => other,
+        };
         return match response {
             Ok(mut ok) => ok.body_mut().with_config().limit(64 * 1024 * 1024).read_to_vec().map_err(|e| format!("the download broke off - {e}")),
             Err(ureq::Error::StatusCode(code)) if busy(code) && tries < TRIES => {
@@ -155,6 +167,28 @@ fn get(http: &Http, url: &str, bearer: &str) -> Result<Vec<u8>, String> {
             Err(other) => Err(format!("the network - {other}")),
         };
     }
+}
+
+/// A 403 that is not about the token or the document: the API itself is switched off in the token's Cloud project
+/// (`SERVICE_DISABLED`). Said as such, with the API's name and where to switch it on - "may not read the document"
+/// sent people sharing a document that was never the problem.
+fn disabled_api(code: u16, body: &[u8]) -> Option<String> {
+    if code != 403 {
+        return None;
+    }
+    let answer: Value = serde_json::from_slice(body).ok()?;
+    let details = answer["error"]["details"].as_array()?;
+    let info = details.iter().find(|d| d["reason"] == "SERVICE_DISABLED")?;
+    let meta = &info["metadata"];
+    let service = meta["service"].as_str().unwrap_or("an API");
+    let api = match service {
+        "docs.googleapis.com" => "the Google Docs API",
+        "drive.googleapis.com" => "the Google Drive API",
+        _ => "the API",
+    };
+    let project = meta["consumer"].as_str().map(|c| format!(" {}", c.trim_start_matches("projects/"))).unwrap_or_default();
+    let enable = meta["activationUrl"].as_str().map(|u| format!(" - enable it at {u}, wait a few minutes, then pull again")).unwrap_or_else(|| " - enable it in the Cloud console, then pull again".into());
+    Some(format!("HTTP 403: {api} ({service}) is disabled in the token's Cloud project{project}{enable}"))
 }
 
 /// A status that says the API is busy or failed for a moment, not that the request was wrong.

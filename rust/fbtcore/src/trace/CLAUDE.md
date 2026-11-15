@@ -123,6 +123,7 @@ EXIT into `<root>/spool/`, in telemetry-agent's record shapes:
 - **One file at exit**: a killed run leaves nothing - never a `died` session, never a heartbeat to keep.
 - **Plain `telemetry-agent`, never `--once`**: the plain one exits at once when `<root>/agent.lock` is held, so a
   burst of runs costs one agent; `--once` skips the lock and two runs would ship a batch twice.
+- **`v` is the release tag** (`GATE_VERSION`, `dev` outside a release), never the assembly's 1.0.0.0.
 - **`<root>/install_id`**: a random v4 UUID made once (written `.part`, renamed), never from the host or the user.
 - **Nothing of the tree leaves**: no path, file name, command line, host name or root. `public_name` drops single
   files and metric spans and folds the spans that carry a tree's name (`csharp project: <csproj>`, `deep: hash
