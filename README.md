@@ -128,7 +128,7 @@ maintainer edits, and `.claude/rules/` for a half's deep detail.
 | [src/TsGate/CLAUDE.md](src/TsGate/CLAUDE.md) | `--ts-discipline`: the TypeScript rules |
 | [src/TsRows/CLAUDE.md](src/TsRows/CLAUDE.md) | the Angular half: the rows it writes |
 | [rust/fbtcore/src/rows/ts/CLAUDE.md](rust/fbtcore/src/rows/ts/CLAUDE.md) | the Angular closure, gates and key reachability |
-| [rust/fbtcore/src/trace/CLAUDE.md](rust/fbtcore/src/trace/CLAUDE.md) | `STRUCTUREGATE_TRACE`, `--trace-report`, OpenTelemetry |
+| [rust/fbtcore/src/trace/CLAUDE.md](rust/fbtcore/src/trace/CLAUDE.md) | `STRUCTUREGATE_TRACE`, `--trace-report`, OpenTelemetry, `STRUCTUREGATE_TELEMETRY` (telemetry-agent) |
 | [tests/CLAUDE.md](tests/CLAUDE.md) | the black-box suites and what each one pins |
 
 ## License

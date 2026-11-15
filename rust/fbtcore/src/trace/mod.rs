@@ -28,6 +28,10 @@
 pub mod metrics;
 mod otlp;
 pub mod report;
+mod sink;
+mod telemetry;
+
+pub(crate) use sink::rolled;
 
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -55,6 +59,8 @@ struct Run {
     path: Option<String>,
     /// The file it REPLACES the last run's line in - a deep map's `<db>.last-run.jsonl`.
     last: Option<String>,
+    /// The telemetry-agent root the run's records are spooled into (`telemetry.rs`), when `STRUCTUREGATE_TELEMETRY` asks.
+    telemetry: Option<std::path::PathBuf>,
     trace_id: String,
     started: Instant,
     started_ns: u128,
@@ -97,12 +103,16 @@ impl Run {
     }
 }
 
-/// Starts the run's root span - when `--trace` or `STRUCTUREGATE_TRACE` names a file, or `last` does (a deep map's
-/// own). `resource` says WHAT ran (version, host), `attributes` what it was asked (root, mode, arguments).
+/// Starts the run's root span - when `--trace` or `STRUCTUREGATE_TRACE` names a file, `last` does (a deep map's
+/// own), or `STRUCTUREGATE_TELEMETRY` asks for telemetry. `resource` says WHAT ran (version, host), `attributes` what it was asked (root, mode, arguments).
 pub fn begin(given: Option<&str>, last: Option<String>, detail: bool, resource: Vec<(&str, Value)>, attributes: Vec<(&str, Value)>) {
     let path = Some(given.map(String::from).unwrap_or_else(|| std::env::var(ENV).unwrap_or_default())).filter(|p| !p.trim().is_empty());
-    if path.is_none() && last.is_none() {
+    let telemetry = telemetry::root();
+    if path.is_none() && last.is_none() && telemetry.is_none() {
         return;
+    }
+    if telemetry.is_some() {
+        telemetry::catch_panics();
     }
     let detail = detail || std::env::var(DETAIL_ENV).is_ok_and(|v| !v.is_empty() && v != "0");
     DETAIL.store(detail, Ordering::Relaxed);
@@ -113,6 +123,7 @@ pub fn begin(given: Option<&str>, last: Option<String>, detail: bool, resource: 
     let mut run = Run {
         path,
         last,
+        telemetry,
         trace_id: blake3::hash(seed.as_bytes()).to_hex()[..32].to_string(),
         started: Instant::now(),
         started_ns,
@@ -387,21 +398,20 @@ pub fn finish(exit: i64) -> Option<String> {
         let parent = Some(spans[0].id.clone());
         spans.push(Span { id, parent, name, start_ns: end_ns.saturating_sub(ns), end_ns, attributes });
     }
-    let mut line = otlp::encode(&run.trace_id, &run.resource, &spans, exit).to_string();
-    line.push('\n');
-    let mut failed = Vec::new();
-    if let Some(path) = &run.path
-        && let Err(why) = append(path, &line)
-    {
-        failed.push(format!("NOTE: the trace was not written to {path} ({why})"));
-    }
-    // THE LAST RUN'S FILE IS REPLACED, never appended to: it is that one run, and stays one line's size.
-    if let Some(last) = &run.last
-        && let Err(why) = std::fs::write(last, &line)
-    {
-        failed.push(format!("NOTE: the last run's trace was not written to {last} ({why})"));
-    }
+    // EVERY SINK THIS RUN SWITCHED ON gets the one finished run (`sink.rs`).
+    let mut sinks: Vec<Box<dyn sink::Sink>> = Vec::new();
+    sinks.extend(run.path.clone().map(|p| Box::new(sink::Append(p)) as Box<dyn sink::Sink>));
+    sinks.extend(run.last.clone().map(|p| Box::new(sink::Replace(p)) as Box<dyn sink::Sink>));
+    sinks.extend(run.telemetry.clone().map(|p| Box::new(telemetry::Agent(p)) as Box<dyn sink::Sink>));
+    let finished = sink::Finished::new(&run.trace_id, &run.resource, &spans, exit, end_ns);
+    let failed: Vec<String> = sinks.iter().filter_map(|sink| sink.write(&finished).err()).collect();
     (!failed.is_empty()).then(|| failed.join("\n"))
+}
+
+/// `finish(2)` for a run that ended in a PANIC: a telemetry spool gets the panic the hook kept as its crash.
+pub fn finish_panicked() -> Option<String> {
+    telemetry::escaped();
+    finish(2)
 }
 
 /// THIS RUN DID NOTHING WORTH KEEPING: the last run's trace beside the database stays as it is. Replacing it on every
@@ -415,43 +425,6 @@ pub fn keep_previous_run() {
 /// Where a deep map's last run is traced: `<db>.last-run.jsonl`.
 pub fn last_run(db: &str) -> String {
     format!("{db}{LAST_RUN}")
-}
-
-/// ONE WRITE of a whole line, in append mode: builds running side by side append to the same file, and a line
-/// written in pieces could interleave with theirs.
-fn append(path: &str, line: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    if let Some(folder) = std::path::Path::new(path).parent().filter(|f| !f.as_os_str().is_empty()) {
-        std::fs::create_dir_all(folder)?;
-    }
-    roll(path);
-    std::fs::OpenOptions::new().create(true).append(true).open(path)?.write_all(line.as_bytes())
-}
-
-/// How big a trace grows before it ROLLS OVER: ~5 KB a run and two runs a turn is megabytes a day, and the file
-/// a machine-wide `STRUCTUREGATE_TRACE` names (`Update-Gate.ps1 -Trace`) was never cut. `STRUCTUREGATE_TRACE_MAX_BYTES`
-/// moves the limit.
-const ROLL_AT: u64 = 20 * 1024 * 1024;
-
-/// A trace past its limit becomes `<name>.1<ext>` - replacing the one before - and the run starts the file again, so
-/// at most twice the limit is ever on disk. Two runs rolling at once: the second finds nothing to move, and writes on.
-fn roll(path: &str) {
-    let limit = std::env::var("STRUCTUREGATE_TRACE_MAX_BYTES").ok().and_then(|n| n.parse::<u64>().ok()).unwrap_or(ROLL_AT);
-    if std::fs::metadata(path).map_or(0, |m| m.len()) < limit {
-        return;
-    }
-    let _ = std::fs::rename(path, rolled(path));
-}
-
-/// `trace.jsonl` -> `trace.1.jsonl`; a name with no extension gets `.1`.
-pub(crate) fn rolled(path: &str) -> std::path::PathBuf {
-    let at = std::path::Path::new(path);
-    let stem = at.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let name = match at.extension() {
-        Some(ext) => format!("{stem}.1.{}", ext.to_string_lossy()),
-        None => format!("{stem}.1"),
-    };
-    at.with_file_name(name)
 }
 
 fn with<T>(work: impl FnOnce(&mut Run) -> T) -> Option<T> {

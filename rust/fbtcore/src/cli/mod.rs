@@ -75,7 +75,12 @@ pub unsafe extern "C" fn fbt_main(input_json: *const c_char, cs_file: CsFile, cs
     }));
     out_string(match outcome {
         Ok(answer) => answer.to_string(),
-        Err(_) => json!({ "out": [["e", "structuregate: the run panicked"]], "exit": 2, "utf8": false }).to_string(),
+        // A PANIC STILL ENDS THE TRACE: its sinks get the run, a telemetry spool its crash record.
+        Err(_) => {
+            let mut out = vec![json!(["e", "structuregate: the run panicked"])];
+            out.extend(crate::trace::finish_panicked().map(|note| json!(["e", note])));
+            json!({ "out": out, "exit": 2, "utf8": false }).to_string()
+        }
     })
 }
 

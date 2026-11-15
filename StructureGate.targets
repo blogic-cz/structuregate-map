@@ -21,6 +21,9 @@
       StructureGateTrace       a file each run appends where its time went to, one OTLP/JSON line per run
                                (read back with the gate's trace-report flag, see rust/fbtcore/src/trace/CLAUDE.md). The environment's own
                                STRUCTUREGATE_TRACE does the same and is what is used when this is empty.
+      StructureGateTelemetry   a telemetry-agent root each run spools its records into (1 = the agent's own root
+                               under local app data), see rust/fbtcore/src/trace/CLAUDE.md. STRUCTUREGATE_TELEMETRY
+                               does the same and is what is used when this is empty.
   -->
 
   <PropertyGroup>
@@ -35,6 +38,7 @@
     <StructureGateRoot Condition="'$(StructureGateRoot)' == ''">$(MSBuildProjectDirectory)</StructureGateRoot>
     <!-- Only when it is set: an empty STRUCTUREGATE_TRACE= here would switch off the one the environment holds. -->
     <_StructureGateEnv Condition="'$(StructureGateTrace)' != ''">STRUCTUREGATE_TRACE=$(StructureGateTrace)</_StructureGateEnv>
+    <_StructureGateEnv Condition="'$(StructureGateTelemetry)' != ''">$(_StructureGateEnv);STRUCTUREGATE_TELEMETRY=$(StructureGateTelemetry)</_StructureGateEnv>
   </PropertyGroup>
 
   <!--

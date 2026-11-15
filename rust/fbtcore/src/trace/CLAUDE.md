@@ -1,7 +1,16 @@
 # trace: where a run's time went
 
-`mod.rs` records spans, `otlp.rs` writes one run as OTLP/JSON, `report.rs` is `--trace-report`. Cases are
-`tests/trace/Trace.Tests.ps1`.
+`mod.rs` records spans, `sink.rs` is the PROVIDER INTERFACE every finished run is handed to, `otlp.rs` writes one
+run as OTLP/JSON, `telemetry.rs` as telemetry-agent records, `report.rs` is `--trace-report`. Cases are
+`tests/trace/Trace.Tests.ps1` and `Telemetry.Tests.ps1`; the record shapes also `telemetry_tests.rs` (`cargo test`).
+
+## Sinks: where a finished run goes
+
+Spans are recorded once; `finish` hands the run to every sink the run switched on - `Append` (the OTLP line
+appended to `STRUCTUREGATE_TRACE`), `Replace` (a deep map's `<db>.last-run.jsonl`), `telemetry::Agent`. A sink's
+`Err` is the `NOTE:` the run prints; it never changes the exit. A new backend is one more `Sink` and its switch in
+`finish`, plus what turns the recording on in `begin`. A run that PANICS still finishes (`finish_panicked` from
+`fbt_main`'s catch), so its trace and its crash record are written.
 
 ## When a run is traced
 
@@ -98,9 +107,34 @@ same-named siblings folded (`csharp batch x40`), then the 15 slowest single file
 older has no `breakdown` mark; its compile phases and projects are recognized by name. A line that is not a
 run (a torn write, another tool's line) is counted and passed over.
 
+## Telemetry: telemetry-agent's spool
+
+`STRUCTUREGATE_TELEMETRY=<root>` (`1`/`on` = `%LOCALAPPDATA%\structuregate\telemetry`, `$XDG_DATA_HOME/structuregate/telemetry`
+or `~/.local/share/..` - the agent's own convention; MSBuild `StructureGateTelemetry`) makes every run write ONE file at
+EXIT into `<root>/spool/`, in telemetry-agent's record shapes:
+`session` start (`pid`), `machine` (os, arch, cpus), `event run` (mode, exit code, build), `metric run`
+(`{stats: [{name, kind: timing, n, sum, min, max, mean}]}` in ms: `run` and `stage.<span name>`, one series per name),
+`crash` (`panic` with message, location, thread, backtrace; `exit_2` for an exit 2 without one), `session` end
+(exit code, uptime). Then it starts `STRUCTUREGATE_TELEMETRY_AGENT` (a path; `off`/`0`/`none` = none) or
+`telemetry-agent` on PATH, DETACHED, with `TELEMETRY_ROOT=<root>`; the agent ships to whatever that root configures.
+
+- **The sweep eats every `*.ndjson` with no lock**: written as `<name>.ndjson.part`, renamed whole. Named
+  `<epoch ms, 13 digits>-<pid>-<seq>.ndjson` so name order is time order.
+- **One file at exit**: a killed run leaves nothing - never a `died` session, never a heartbeat to keep.
+- **Plain `telemetry-agent`, never `--once`**: the plain one exits at once when `<root>/agent.lock` is held, so a
+  burst of runs costs one agent; `--once` skips the lock and two runs would ship a batch twice.
+- **`<root>/install_id`**: a random v4 UUID made once (written `.part`, renamed), never from the host or the user.
+- **Nothing of the tree leaves**: no path, file name, command line, host name or root. `public_name` drops single
+  files and metric spans and folds the spans that carry a tree's name (`csharp project: <csproj>`, `deep: hash
+  <root>`) into their prefix - **a new span named after something of the tree goes into `NAMED_AFTER_THE_TREE`**,
+  or it leaves the machine. A panic's message keeps its words with every path replaced (`scrub`); the backtrace
+  is this exe's frames, the hook's own cut off (`OWN_FRAMES`) so panics group by where they happened.
+- Only the panic the run ENDED in is its crash: a parser's panic caught and answered (`sqlpg`, `cssmap`) is not.
+
 ## No socket, ever
 
-The exe runs inside every consumer's build and the paths are theirs, so it sends nothing. A machine that
+The exe runs inside every consumer's build and the paths are theirs, so it sends nothing: telemetry is a file
+and a process started, and the agent - configured by the person who set its root up - is what sends. A machine that
 wants traces centrally runs an OpenTelemetry Collector whose `otlpjsonfile` receiver reads this file as is:
 
 ```yaml

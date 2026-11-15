@@ -299,6 +299,11 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         ExportTraceServiceRequest, so an OpenTelemetry Collector's `otlpjsonfile`
                         receiver ships the same file to any tracing backend. OTEL_RESOURCE_ATTRIBUTES
                         and OTEL_SERVICE_NAME are honoured as the OpenTelemetry SDKs read them.
+                        STRUCTUREGATE_TELEMETRY=<root> (1 = telemetry-agent's own root under local
+                        app data) also SPOOLS each run for telemetry-agent: one NDJSON file into
+                        <root>/spool at exit - stage timings, mode, exit code, a crash - with nothing
+                        of the tree in it, then starts STRUCTUREGATE_TELEMETRY_AGENT (or
+                        telemetry-agent on PATH; off = none) to ship it.
   --map-view <db>       DRAW THE DEEP MAP: one self-contained HTML page (data and scripts inside it,
                         nothing fetched) beside the database as <db>.html, or at --map-view-out <file>.
                         Four views of one graph of files, functions and the edges the halves
