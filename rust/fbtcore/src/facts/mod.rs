@@ -20,6 +20,7 @@ pub mod config;
 mod docx;
 mod links;
 pub mod pull;
+mod rank;
 pub mod review;
 #[path = "snapshot/reader.rs"]
 mod reader;

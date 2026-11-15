@@ -324,6 +324,8 @@ internal sealed partial class CsRows : CSharpSyntaxWalker
             // The type as the COMPILER names it. Two `Program` classes in one solution are one string in
             // the source and two symbols here, and a base list resolved the same way says which `Controller`.
             ("symbol", CsSemantics.DeclaredName(model, node)),
+            // WHAT CAN BE INSTANTIATED: an abstract controller serves no route itself, each class deriving from it does.
+            ("abstract", node.Modifiers.Any(m => m.IsKind(SyntaxKind.AbstractKeyword)) ? 1 : 0),
             ("doc", CsFacts.Doc(node)));
         Attributes(node.AttributeLists, name, kind);
         stack.Add(("class", name));

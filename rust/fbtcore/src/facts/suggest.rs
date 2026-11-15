@@ -7,6 +7,7 @@
 
 use super::config::{Config, Link};
 use super::links::{self, Code};
+use super::rank::{self, Score, Table};
 use super::{apis, reader, words};
 use crate::rows::dups::{has_columns, items_sql, text};
 use rusqlite::Connection;
@@ -24,12 +25,16 @@ struct Group {
     shown: String,
     fact: Value,
     values: Vec<String>,
+    /// A table column's rows, so the rest of a row can be asked whether it agrees (`rank.rs`).
+    table: Option<Table>,
 }
 
 /// One set of code values: the link that names it, and its values.
 struct Set {
     link: Link,
     codes: Vec<Code>,
+    /// A seed row's every column, by its id: what a document row's other cells may agree with.
+    others: HashMap<String, Vec<(String, String)>>,
 }
 
 /// The candidates as lines to print, after writing them whole to `structuregate.facts.suggest.json` beside the config.
@@ -50,19 +55,29 @@ pub fn run(db: &str, config: &Config) -> Result<Vec<String>, String> {
     let sets = sets(&conn).map_err(|e| format!("the map could not be read - {e}"))?;
     let found = pairs(&groups, &sets);
     let mut entries = Vec::new();
-    for (n, (g, s, hit)) in found.iter().enumerate() {
+    for (n, (g, s, score)) in found.iter().enumerate() {
         let (group, set) = (&groups[*g], &sets[*s]);
+        let hit = score.hits;
         let name = format!("{}-{}", group.source, n + 1);
         let mut fact = group.fact.clone();
         fact["name"] = json!(name);
+        // THE AGREEING COLUMN IS THE LABEL: named as the key is, by its header when that names it alone.
+        if score.agree >= AT_LEAST {
+            fact["label"] = group.fact.get("headers").and_then(|h| h.get(score.doc_column - 1)).filter(|h| h.as_str().is_some_and(|t| !t.is_empty())).cloned().unwrap_or(json!(score.doc_column));
+        }
+        if let Some(object) = fact.as_object_mut() {
+            object.remove("headers");
+        }
         let link = link_entry(&name, &set.link);
         let (matched, unmatched): (Vec<&String>, Vec<&String>) = group.values.iter().partition(|v| set.codes.iter().any(|c| links::matches(&set.link.kind, &c.value, v)));
         let (matched, unmatched): (Vec<&String>, Vec<&String>) = (matched.into_iter().take(10).collect(), unmatched.into_iter().take(10).collect());
         let target = if set.link.target.is_empty() { "every endpoint".to_string() } else { set.link.target.clone() };
         let column = if set.link.column.is_empty() { String::new() } else { format!(".{}", set.link.column) };
         let by = if set.link.by == "name" { " (by name)" } else { "" };
+        let agree = if score.agree >= AT_LEAST { format!(", {} rows agree: column {} = {}", score.agree, score.doc_column, score.code_column) } else { String::new() };
+        let chance = if score.chance >= 1.0 { format!(", ~{:.0} by chance", score.chance) } else { String::new() };
         lines.push(format!(
-            "  {}: {}/{} values = {} {target}{column}{by} ({} code values)",
+            "  {}: {}/{} values = {} {target}{column}{by} ({} code values{agree}{chance})",
             group.shown,
             hit,
             group.values.len(),
@@ -71,6 +86,8 @@ pub fn run(db: &str, config: &Config) -> Result<Vec<String>, String> {
         ));
         entries.push(json!({
             "found": group.shown, "matched": hit, "of": group.values.len(), "code_values": set.codes.len(),
+            "by_chance": (score.chance * 10.0).round() / 10.0, "rows_agree": score.agree,
+            "agree_on": if score.agree >= AT_LEAST { json!({"document_column": score.doc_column, "code": score.code_column}) } else { Value::Null },
             "matched_values": matched, "unmatched": unmatched, "facts": fact, "link": link,
         }));
     }
@@ -127,7 +144,13 @@ fn groups_of(source: &str, blocks: &[reader::Block]) -> Vec<Group> {
             let values = distinct(found.into_iter().map(|w| w.key));
             if values.len() >= AT_LEAST {
                 let what = if from == "code" { "code spans" } else { "routes" };
-                out.push(Group { source: source.into(), shown: format!("{source}: {what} {place}"), fact: json!({"source": source, "section": section, "from": from}), values });
+                out.push(Group {
+                    source: source.into(),
+                    shown: format!("{source}: {what} {place}"),
+                    fact: json!({"source": source, "section": section, "from": from}),
+                    values,
+                    table: None,
+                });
             }
         }
     }
@@ -157,11 +180,17 @@ fn columns_of(source: &str, blocks: &[reader::Block], heading: &str, rows: &[(us
         let key = if named { json!(header) } else { json!(c + 1) };
         let under = if section.is_empty() { "of the document".to_string() } else { format!("under \"{section}\"") };
         let label = if header.is_empty() { String::new() } else { format!(" \"{header}\"") };
+        // THE HEADERS RIDE THE FACT until it is written, so an agreeing column can be named as the key is.
+        let headers: Vec<Value> = first
+            .iter()
+            .map(|h| if !h.is_empty() && first.iter().filter(|x| x.trim().eq_ignore_ascii_case(h.trim())).count() == 1 { json!(h) } else { json!("") })
+            .collect();
         out.push(Group {
             source: source.into(),
             shown: format!("{source}: table {n} {under}, column {}{label}", c + 1),
-            fact: json!({"source": source, "section": section, "table": n, "key": key}),
+            fact: json!({"source": source, "section": section, "table": n, "key": key, "headers": if named { headers } else { vec![] }}),
             values,
+            table: Some(Table { rows: data.iter().map(|(_, r)| r.clone()).collect(), column: c }),
         });
     }
     out
@@ -174,7 +203,7 @@ fn distinct(values: impl Iterator<Item = String>) -> Vec<String> {
 
 /// Which group shares enough values with which set: each set's best group, and each group's best set - once each,
 /// the most values first.
-fn pairs(groups: &[Group], sets: &[Set]) -> Vec<(usize, usize, usize)> {
+fn pairs(groups: &[Group], sets: &[Set]) -> Vec<(usize, usize, Score)> {
     // EVERY VALUE ONCE, as its kind compares it, so a group is counted against every set in one pass of its values.
     let mut index: HashMap<String, Vec<usize>> = HashMap::new();
     let mut routed: Vec<usize> = Vec::new();
@@ -188,7 +217,7 @@ fn pairs(groups: &[Group], sets: &[Set]) -> Vec<(usize, usize, usize)> {
             index.entry(k).or_default().push(s);
         }
     }
-    let mut hits: Vec<(usize, usize, usize)> = Vec::new();
+    let mut hits: Vec<(usize, usize, Score)> = Vec::new();
     for (g, group) in groups.iter().enumerate() {
         let mut counted: HashMap<usize, usize> = HashMap::new();
         for value in &group.values {
@@ -204,22 +233,30 @@ fn pairs(groups: &[Group], sets: &[Set]) -> Vec<(usize, usize, usize)> {
             }
             once.into_iter().for_each(|s| *counted.entry(s).or_default() += 1);
         }
-        hits.extend(counted.into_iter().filter(|(_, n)| *n >= AT_LEAST && n * 5 >= group.values.len()).map(|(s, n)| (g, s, n)));
+        for (s, n) in counted.into_iter().filter(|(_, n)| *n >= AT_LEAST && n * 5 >= group.values.len()) {
+            let set = &sets[s];
+            let (agree, doc_column, code_column) = match &group.table {
+                Some(table) => rank::agreement(table, &set.link.kind, &set.link.column, &set.codes, &set.others),
+                None => Default::default(),
+            };
+            let chance = rank::chance(&group.values, &set.codes);
+            hits.push((g, s, Score { hits: n, chance, agree, doc_column, code_column }));
+        }
     }
-    let best = |of: &dyn Fn(&(usize, usize, usize)) -> usize| {
-        let mut top: HashMap<usize, (usize, usize, usize)> = HashMap::new();
+    let best = |of: &dyn Fn(&(usize, usize, Score)) -> usize| {
+        let mut top: HashMap<usize, &(usize, usize, Score)> = HashMap::new();
         for h in &hits {
-            let slot = top.entry(of(h)).or_insert(*h);
-            if h.2 > slot.2 || (h.2 == slot.2 && groups[h.0].values.len() < groups[slot.0].values.len()) {
-                *slot = *h;
+            let slot = top.entry(of(h)).or_insert(h);
+            if h.2.rank() > slot.2.rank() || (h.2.rank() == slot.2.rank() && groups[h.0].values.len() < groups[slot.0].values.len()) {
+                *slot = h;
             }
         }
-        top.into_values().collect::<Vec<_>>()
+        top.into_values().cloned().collect::<Vec<_>>()
     };
-    let mut kept: Vec<(usize, usize, usize)> = best(&|h| h.0);
+    let mut kept: Vec<(usize, usize, Score)> = best(&|h| h.0);
     kept.extend(best(&|h| h.1));
-    kept.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)));
-    kept.dedup();
+    kept.sort_by(|a, b| b.2.rank().cmp(&a.2.rank()).then(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)));
+    kept.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
     kept
 }
 
@@ -269,7 +306,7 @@ fn sets(conn: &Connection) -> rusqlite::Result<Vec<Set>> {
         asked.push(link("sql-column", target, "value"));
     }
     // A SET THAT CANNOT BE READ (a name two enums share) is no candidate: `links::codes` says why, and here that is no news.
-    out.extend(asked.into_iter().filter_map(|l| links::codes(conn, &l).ok().map(|codes| Set { link: l, codes })));
+    out.extend(asked.into_iter().filter_map(|l| links::codes(conn, &l).ok().map(|codes| Set { link: l, codes, others: HashMap::new() })));
     Ok(out)
 }
 
@@ -296,17 +333,28 @@ fn seeds(conn: &Connection) -> rusqlite::Result<Vec<Set>> {
     ))?;
     let mut by: Vec<Set> = Vec::new();
     let mut at: HashMap<(String, String), usize> = HashMap::new();
+    // EVERY COLUMN OF EVERY SEED ROW, by its id: what a document row's other cells are asked to agree with.
+    let mut rows_of: HashMap<String, Vec<(String, String)>> = HashMap::new();
     let rows = stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0), text(r, 3)?, text(r, 4)?, text(r, 5)?, text(r, 6)?)))?;
     for row in rows {
         let (id, file, line, condition, table, column, value) = row?;
         if value.is_empty() {
             continue;
         }
+        rows_of.entry(id.clone()).or_default().push((column.clone(), value.clone()));
         let slot = *at.entry((table.to_lowercase(), column.to_lowercase())).or_insert_with(|| {
-            by.push(Set { link: Link { facts: String::new(), kind: "seed".into(), target: table.clone(), column: column.clone(), by: "value".into() }, codes: Vec::new() });
+            by.push(Set {
+                link: Link { facts: String::new(), kind: "seed".into(), target: table.clone(), column: column.clone(), by: "value".into() },
+                codes: Vec::new(),
+                others: HashMap::new(),
+            });
             by.len() - 1
         });
         by[slot].codes.push(Code { target: id, file, line, value, name: String::new(), condition });
+    }
+    // Each table's sets share its rows: a set asks only by the ids its own codes carry.
+    for set in &mut by {
+        set.others = set.codes.iter().filter_map(|c| rows_of.get(&c.target).map(|r| (c.target.clone(), r.clone()))).collect();
     }
     Ok(by)
 }

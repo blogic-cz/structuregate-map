@@ -7,6 +7,8 @@
       pwsh -NoProfile -File scripts/Update-Gate.ps1 -DryRun
       pwsh -NoProfile -File scripts/Update-Gate.ps1 -Trace         # and every later one
       pwsh -NoProfile -File scripts/Update-Gate.ps1 -NoTrace       # stop tracing
+      pwsh -NoProfile -File scripts/Update-Gate.ps1 -Telemetry     # every run spools for telemetry-agent
+      pwsh -NoProfile -File scripts/Update-Gate.ps1 -NoTelemetry   # stop it
 
     Windows PowerShell 5.1 (`powershell`) runs it too. The replacement for `dotnet publish` deploying from a
     clone: no clone has to stay on disk. Keep a copy wherever is handy (the release's `scripts/`, or a
@@ -37,6 +39,10 @@
          A value the user set themselves is kept. -NoTrace removes the one this script set (so does -Trace:$false
          where PowerShell parses it - `powershell -File` passes `$false` as a string and 5.1 refuses it); without
          either nothing changes, so a later update keeps tracing on. Off Windows it prints the line for a shell profile.
+      7  -Telemetry, OPT-IN the same way: the user's STRUCTUREGATE_TELEMETRY=1, so every gate run writes one spool file
+         under `structuregate/telemetry` in local app data and starts telemetry-agent when it is on PATH (or where
+         STRUCTUREGATE_TELEMETRY_AGENT says) - nothing is sent without it (rust/fbtcore/src/trace/CLAUDE.md, "Telemetry").
+         A value the user set themselves (their own root) is kept; -NoTelemetry removes only this script's `1`.
 
     A consumer's tree is the nearest folder above its gate folder that holds `.claude`. A skill or agent the
     tree never had is not added: which of them a tree carries was decided when it was wired.
@@ -51,11 +57,14 @@ param(
     [string]$Root = '',
     [switch]$DryRun,
     [switch]$Trace,
-    [switch]$NoTrace
+    [switch]$NoTrace,
+    [switch]$Telemetry,
+    [switch]$NoTelemetry
 )
 $ErrorActionPreference = 'Stop'
 # REFUSED BEFORE ANYTHING IS DOWNLOADED OR LINKED: both switches is no answer to act on.
 if ($Trace.IsPresent -and $NoTrace.IsPresent) { Write-Host 'structuregate: -Trace and -NoTrace together - pick one'; exit 2 }
+if ($Telemetry.IsPresent -and $NoTelemetry.IsPresent) { Write-Host 'structuregate: -Telemetry and -NoTelemetry together - pick one'; exit 2 }
 
 $onWindows = $env:OS -eq 'Windows_NT'
 $exeName = if ($onWindows) { 'structuregate.exe' } else { 'structuregate' }
@@ -70,23 +79,30 @@ $release = Join-Path $Root 'release'
 $consumerList = Join-Path $Root 'consumers.txt'
 $traceFile = Join-Path $Root 'trace.jsonl'
 
-# STEP 6. The USER's variable, not the machine's: no elevation, and another account on the box is not traced. A
-# program started before it - Claude Code, Visual Studio, an open terminal - does not see it until it restarts.
-function Set-GateTrace([bool]$On) {
-    $name = 'STRUCTUREGATE_TRACE'
+# STEPS 6 AND 7. The USER's variable, not the machine's: no elevation, and another account on the box is not affected. A
+# program started before it - Claude Code, Visual Studio, an open terminal - does not see it until it restarts. Only
+# the value THIS script sets is ever changed or removed: a value the user chose is theirs.
+function Set-GateUserVariable([string]$Name, [string]$Value, [string]$Label, [bool]$On, [string]$OnSays) {
     if (-not $onWindows) {
-        if ($On) { Write-Host "structuregate: trace - add to your shell profile: export $name=$traceFile" }
-        else { Write-Host "structuregate: trace - remove $name from your shell profile" }
+        if ($On) { Write-Host "structuregate: $Label - add to your shell profile: export $Name=$Value" }
+        else { Write-Host "structuregate: $Label - remove $Name from your shell profile" }
         return
     }
-    $current = [Environment]::GetEnvironmentVariable($name, 'User')
-    if ($On -and $current -and $current -ne $traceFile) { Write-Host "structuregate: trace - kept your own $name=$current"; return }
-    if (-not $On -and $current -and $current -ne $traceFile) { Write-Host "structuregate: trace - $name=$current was not set by this script, left as it is"; return }
-    $want = if ($On) { $traceFile } else { $null }
-    if ($current -eq $want) { Write-Host "structuregate: trace - already $(if ($On) { "on -> $traceFile" } else { 'off' })"; return }
-    if ($DryRun) { Write-Host "structuregate: trace - would turn $(if ($On) { "on -> $traceFile" } else { 'off' })"; return }
-    [Environment]::SetEnvironmentVariable($name, $want, 'User')
-    Write-Host "structuregate: trace - $(if ($On) { "on -> $traceFile (restart Claude Code, Visual Studio and open terminals to pick it up)" } else { 'off' })"
+    $current = [Environment]::GetEnvironmentVariable($Name, 'User')
+    if ($On -and $current -and $current -ne $Value) { Write-Host "structuregate: $Label - kept your own $Name=$current"; return }
+    if (-not $On -and $current -and $current -ne $Value) { Write-Host "structuregate: $Label - $Name=$current was not set by this script, left as it is"; return }
+    $want = if ($On) { $Value } else { $null }
+    if ($current -eq $want) { Write-Host "structuregate: $Label - already $(if ($On) { "on -> $OnSays" } else { 'off' })"; return }
+    if ($DryRun) { Write-Host "structuregate: $Label - would turn $(if ($On) { "on -> $OnSays" } else { 'off' })"; return }
+    [Environment]::SetEnvironmentVariable($Name, $want, 'User')
+    Write-Host "structuregate: $Label - $(if ($On) { "on -> $OnSays (restart Claude Code, Visual Studio and open terminals to pick it up)" } else { 'off' })"
+}
+
+function Set-GateTrace([bool]$On) { Set-GateUserVariable 'STRUCTUREGATE_TRACE' $traceFile 'trace' $On $traceFile }
+
+# `1` is the exe's own default root, so the folder is the exe's to name; the agent ships nothing it was not set up for.
+function Set-GateTelemetry([bool]$On) {
+    Set-GateUserVariable 'STRUCTUREGATE_TELEMETRY' '1' 'telemetry' $On 'structuregate/telemetry under local app data, shipped by telemetry-agent when it is on PATH'
 }
 
 # curl, not Invoke-WebRequest: an asset download is redirected to storage that refuses a second
@@ -316,6 +332,8 @@ try {
 
 if ($NoTrace.IsPresent) { Set-GateTrace $false }
 elseif ($PSBoundParameters.ContainsKey('Trace')) { Set-GateTrace $Trace.IsPresent }
+if ($NoTelemetry.IsPresent) { Set-GateTelemetry $false }
+elseif ($PSBoundParameters.ContainsKey('Telemetry')) { Set-GateTelemetry $Telemetry.IsPresent }
 
 if (-not (Test-Path $consumerList)) { Write-Host "structuregate: no $consumerList - no consumer linked"; exit 0 }
 $failed = 0

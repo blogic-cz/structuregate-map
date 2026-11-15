@@ -60,3 +60,49 @@ fn each_part_of_a_spec_is_found_against_the_set_sharing_its_values() {
     assert_eq!(codes["facts"]["key"], "Code");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_link_whose_rows_agree_outranks_a_dense_small_integer_set() {
+    let dir = std::env::temp_dir().join(format!("fbt-suggest-rank-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let names = ["Pen", "Cup", "Bag", "Hat", "Mug", "Box", "Kit", "Jar"];
+    let mut doc = String::from("# Goods\n\n| ID | Product |\n|---|---|\n");
+    for (i, n) in names.iter().enumerate() {
+        doc.push_str(&format!("| {} | {n} |\n", i + 1));
+    }
+    std::fs::write(dir.join("p.md"), doc).unwrap();
+    let db = dir.join("map.sqlite");
+    {
+        let conn = Connection::open(&db).unwrap();
+        let put = |table: &str, rows: Vec<Value>| crate::rows::store::insert_rows(&conn, table, &rows).unwrap();
+        // THE TRUE LINK: ids 1..7 (one product the document has is not seeded, one name differs), sparse beside 9000.
+        let mut seeds: Vec<Value> = names.iter().take(7).enumerate().map(|(i, n)| {
+            let name = if i == 3 { "Cap" } else { n };
+            json!({"id": format!("sd:{i}"), "file": "f:1", "line": i, "condition": "", "schema": "", "name": "Goods", "status": "bound",
+                   "columns": ["ItemNo", "Name"], "row_values": [i + 1, name]})
+        }).collect();
+        seeds.push(json!({"id": "sd:99", "file": "f:1", "line": 99, "condition": "", "schema": "", "name": "Goods", "status": "bound",
+                          "columns": ["ItemNo", "Name"], "row_values": [9000, "Far"]}));
+        put("sql_seeds", seeds);
+        // A DENSE SMALL-INT ENUM sharing every id and none of the names.
+        let members: Vec<Value> = (1..=12).map(|n| json!({"name": format!("M{n}"), "value": n})).collect();
+        put("enums", vec![json!({"id": "en:1", "file": "f:2", "line": 1, "name": "Tier", "symbol": "Demo.Tier", "members": members})]);
+    }
+    let config = Config {
+        path: dir.join("structuregate.facts.json"),
+        sources: vec![Source { name: "p".into(), kind: "file".into(), id: String::new(), path: dir.join("p.md"), shown: "p.md".into() }],
+        ..Default::default()
+    };
+    let lines = run(db.to_str().unwrap(), &config).unwrap();
+    let at = |what: &str| lines.iter().position(|l| l.contains(what)).unwrap_or_else(|| panic!("no {what} in {lines:#?}"));
+    let seed = at("values = seed dbo.Goods.ItemNo");
+    assert!(seed < at("values = enum Demo.Tier"), "{lines:#?}");
+    assert!(lines[seed].contains("7/8 values = seed dbo.Goods.ItemNo (8 code values, 6 rows agree: column 2 = Name)"), "{}", lines[seed]);
+    assert!(lines[at("values = enum Demo.Tier (12")].contains("~8 by chance"), "{lines:#?}");
+    let written: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(FILE_NAME)).unwrap()).unwrap();
+    let first = &written["candidates"][0];
+    assert_eq!((first["facts"]["key"].as_str(), first["facts"]["label"].as_str()), (Some("ID"), Some("Product")));
+    assert!(first["facts"].get("headers").is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+}

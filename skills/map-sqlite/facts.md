@@ -81,12 +81,23 @@ EXACT values, never by names: every column of every table (under its nearest hea
 spans and routes, and the whole document's, against every value set the map holds - each seeded table's column,
 each enum's members (by value and by name), each class's constants (both), the endpoints, each type's
 properties, each SQL table's columns. A pair is a candidate when at least 2 values and a fifth of the document's
-group are code values; each group's best set and each set's best group are kept, the most values first:
+group are code values. A count alone misleads, so pairs are RANKED by:
+
+1. **rows that agree** - for a table column: the rows whose key matches a code row AND whose other cell names that
+   same row's other value (a seed row's other column, an enum member's or a constant's name). The true link is the
+   one where the label column agrees too; a pair with agreeing rows outranks every pair without. The agreeing
+   column becomes the candidate's `label`.
+2. **hits beyond chance** - a set as dense as `1..M` holds each document integer up to `M` anyway (a key column
+   `1..50` matches any small-int enum): that many hits are expected and taken off.
+3. then the hits.
+
+Each group's best set and each set's best group are kept, best first:
 
 ```
 facts suggest: 3 candidate(s) -> structuregate.facts.suggest.json
-  spec: table 2 under "Items", column 1 "ItemID": 396/580 values = seed dbo.Items.ItemID (600 code values)
+  spec: table 2 under "Items", column 1 "ItemNo": 45/50 values = seed dbo.Items.ItemNo (200 code values, 40 rows agree: column 2 = Name)
   spec: routes the whole document: 38/41 values = endpoint every endpoint (52 code values)
+  spec: table 2 under "Items", column 1 "ItemNo": 30/50 values = enum Demo.Region (30 code values, ~30 by chance)
 ```
 
 `structuregate.facts.suggest.json` (beside the config) holds each candidate as a ready `facts` entry and `link`

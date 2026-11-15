@@ -1,5 +1,5 @@
 <#
-    `scripts/Update-Gate.ps1 -Trace`: OPT-IN machine-wide tracing. On Windows it sets the user's STRUCTUREGATE_TRACE to
+    `scripts/Update-Gate.ps1 -Trace` and `-Telemetry`: OPT-IN machine-wide tracing and telemetry. On Windows it sets the user's STRUCTUREGATE_TRACE to
     `trace.jsonl` beside the release, keeps a value the user set themselves, and `-NoTrace` removes only its
     own; without the switch nothing changes. Off Windows it prints the line for a shell profile.
 
@@ -30,11 +30,12 @@ function Invoke-UpdateGate($Release, [object[]]$Extra) {
     return [pscustomobject]@{ Exit = $LASTEXITCODE; Text = (@($out) -join "`n"); Lines = @($out | ForEach-Object { "$_" }) }
 }
 
-Test-Case 'update-gate: without -Trace nothing about tracing is said or changed' {
+Test-Case 'update-gate: without -Trace or -Telemetry nothing about either is said or changed' {
     $release = New-UpdateGateRelease
     $run = Invoke-UpdateGate $release @()
     Assert-Exit $run 0
     Assert-NoLine $run 'trace -'
+    Assert-NoLine $run 'telemetry -'
 }
 
 if (-not $script:OnWindows) {
@@ -51,6 +52,16 @@ if (-not $script:OnWindows) {
         Assert-Exit $run 0
         Assert-Line $run 'remove STRUCTUREGATE_TRACE from your shell profile'
         Assert-Exit (Invoke-UpdateGate $release @('-Trace', '-NoTrace')) 2
+    }
+
+    Test-Case 'update-gate: -Telemetry off Windows prints its line, -NoTelemetry the removal, both are refused' {
+        $release = New-UpdateGateRelease
+        $on = Invoke-UpdateGate $release @('-Telemetry')
+        Assert-Exit $on 0
+        Assert-Line $on 'export STRUCTUREGATE_TELEMETRY=1'
+        Assert-NoLine $on 'trace -'
+        Assert-Line (Invoke-UpdateGate $release @('-NoTelemetry')) 'remove STRUCTUREGATE_TELEMETRY from your shell profile'
+        Assert-Exit (Invoke-UpdateGate $release @('-Telemetry', '-NoTelemetry')) 2
     }
 }
 
@@ -71,6 +82,23 @@ Test-WindowsCase 'update-gate: -Trace sets the user variable, keeps the user''s 
         Assert-Equal ([Environment]::GetEnvironmentVariable('STRUCTUREGATE_TRACE', 'User')) 'C:\mine.jsonl' 'the user''s own kept'
     } finally {
         [Environment]::SetEnvironmentVariable('STRUCTUREGATE_TRACE', $saved, 'User')
+    }
+}
+
+Test-WindowsCase 'update-gate: -Telemetry sets the user variable to 1, keeps the user''s own root, and -NoTelemetry removes only its own' {
+    $saved = [Environment]::GetEnvironmentVariable('STRUCTUREGATE_TELEMETRY', 'User')
+    try {
+        [Environment]::SetEnvironmentVariable('STRUCTUREGATE_TELEMETRY', $null, 'User')
+        $release = New-UpdateGateRelease
+        Assert-Exit (Invoke-UpdateGate $release @('-Telemetry')) 0
+        Assert-Equal ([Environment]::GetEnvironmentVariable('STRUCTUREGATE_TELEMETRY', 'User')) '1' 'set'
+        Assert-Exit (Invoke-UpdateGate $release @('-NoTelemetry')) 0
+        Assert-Equal ([Environment]::GetEnvironmentVariable('STRUCTUREGATE_TELEMETRY', 'User')) $null 'removed'
+        [Environment]::SetEnvironmentVariable('STRUCTUREGATE_TELEMETRY', 'D:\spool', 'User')
+        Assert-Line (Invoke-UpdateGate $release @('-NoTelemetry')) 'was not set by this script'
+        Assert-Equal ([Environment]::GetEnvironmentVariable('STRUCTUREGATE_TELEMETRY', 'User')) 'D:\spool' 'the user''s own kept'
+    } finally {
+        [Environment]::SetEnvironmentVariable('STRUCTUREGATE_TELEMETRY', $saved, 'User')
     }
 }
 

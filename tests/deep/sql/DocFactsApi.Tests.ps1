@@ -22,6 +22,9 @@ function Get-DocApiTree {
             "    [HttpGet(`"{id:int}`")] public object One(int id) => id;$nl" +
             "    [HttpPost] public object Add(ItemDto d) => d;$nl" +
             "    [HttpDelete(`"{id}`")] public object Drop(int id) => id;$nl}$nl" +
+            # AN ACTION OF AN ABSTRACT GENERIC BASE is served by each controller deriving from it, under its own route.
+            "public abstract class JobBase<TA, TB> { [HttpPost] [Route(`"run-all`")] public object RunAll(TA item) => item; }$nl" +
+            "[Route(`"api/widgets`")] public class WidgetsController : JobBase<ItemDto, System.Collections.Generic.List<ItemDto>> { }$nl" +
             "public class ItemDto {$nl" +
             "    public int ItemId { get; set; }$nl" +
             "    [JsonPropertyName(`"displayName`")] public string Title { get; set; } = `"`";$nl" +
@@ -31,7 +34,7 @@ function Get-DocApiTree {
         # THE SPEC AS ONE IS WRITTEN: routes in a sentence and in code spans, one the code does not serve, and two
         # tables keyed by names.
         'docs/api.md' = "# Items API$nl${nl}List them with ``GET /api/items``, read one by GET /api/items/{itemId} and add one by$nl" +
-            "``POST /api/items``. Old clients still call /api/legacy (see /docs/history).$nl$nl## Fields$nl$nl" +
+            "``POST /api/items``, run them with ``POST /api/widgets/run-all``. Old clients still call /api/legacy (see /docs/history).$nl$nl## Fields$nl$nl" +
             "| Field | Meaning |$nl|---|---|$nl| itemId | the key |$nl| displayName | what a person reads |$nl| weight | in grams |$nl$nl" +
             "## Columns$nl$nl| Column | Type |$nl|---|---|$nl| ItemID | int |$nl| Title | text |$nl"
         'structuregate.facts.json' = '{ "sources": [ { "name": "api", "kind": "file", "path": "docs/api.md" } ],' +
@@ -69,6 +72,7 @@ Test-Case 'docfactsapi: routes in text, property and column names are checked ag
         'routes|GET /api/items|GET /api/items|bound',
         'routes|GET /api/items/{itemId}|GET /api/items/{id:int}|bound',
         'routes|POST /api/items|POST /api/items|bound',
+        'routes|POST /api/widgets/run-all|POST /api/widgets/run-all|bound',
         'routes|/api/legacy||missing in code',
         'routes||DELETE /api/items/{id}|missing in doc',
         'fields|itemId|ItemId|bound',
@@ -78,6 +82,9 @@ Test-Case 'docfactsapi: routes in text, property and column names are checked ag
         'columns|ItemID|ItemID|bound',
         'columns||Price|missing in doc'
     ) 'each fact against its code value'
+    # THE ABSTRACT BASE ITSELF SERVES NOTHING: its action is no bare `run-all` endpoint of its own.
+    $inherited = Get-DocApiRows $db "SELECT 'v=' || cls || '|' || template FROM http_endpoints WHERE method = 'RunAll'"
+    Assert-Equal ($inherited -join ',') 'WidgetsController|api/widgets/run-all' 'the inherited action''s endpoints'
     # THE PREFIX KEEPS A ROUTE OF ANOTHER KIND OUT: /docs/history is no fact at all.
     $other = Get-DocApiRows $db "SELECT 'v=' || key FROM doc_facts WHERE key LIKE '%docs%'"
     if ($other.Count) { throw "a route outside the prefix became a fact: $($other -join ', ')" }
@@ -88,7 +95,7 @@ Test-Case 'docfactsapi: routes in text, property and column names are checked ag
     Set-Content -LiteralPath $only -Value '{ "sources": [ { "name": "api", "kind": "file", "path": "../docs/api.md" } ] }' -Encoding UTF8
     $s = Invoke-Gate --facts-suggest $db --facts-config $only
     Assert-Exit $s 0
-    Assert-Line $s 'api: routes the whole document: 3/5 values = endpoint every endpoint (4 code values)'
+    Assert-Line $s 'api: routes the whole document: 4/6 values = endpoint every endpoint (5 code values)'
     Assert-Line $s 'api: table 1 under "Fields", column 1 "Field": 2/3 values = property Demo.Api.ItemDto (3 code values)'
     Assert-Line $s 'api: table 1 under "Columns", column 1 "Column": 2/2 values = sql-column dbo.Items (3 code values)'
     $written = Get-Content -Raw -LiteralPath (Join-Path $tree 'suggest/structuregate.facts.suggest.json') | ConvertFrom-Json

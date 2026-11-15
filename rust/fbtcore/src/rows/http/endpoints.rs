@@ -57,6 +57,8 @@ struct Method {
 
 struct Class {
     bases: Vec<String>,
+    /// `abstract`: it serves no route itself, the classes deriving from it do.
+    abstract_: bool,
 }
 
 pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusqlite::Result<Vec<Endpoint>> {
@@ -107,6 +109,7 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
     let paths: HashMap<&String, &String> = decorators.iter().map(|d| (&d.file, &d.path)).collect();
     let actions = actions(conn, csharp)?;
     let mut out = vec![];
+    let derived = derived(&classes, &by_symbol);
     for ((file, cls, method), m) in &methods {
         let verbs: Vec<(&str, Option<String>)> = match (m.verbs.is_empty(), &m.route) {
             (true, Some(_)) => vec![("ANY", None)],
@@ -115,27 +118,29 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
         };
         let func = actions.get(&(file.clone(), cls.clone(), method.clone())).and_then(|spans| spans.iter().find(|(_, from, to)| (*from..=*to).contains(&m.line)));
         let func = func.map(|(id, _, _)| id.clone()).unwrap_or_default();
-        let class_routes = class_route(&(file.clone(), cls.clone()), &routes, &classes, &by_symbol, &mut HashSet::new()).unwrap_or_else(|| vec![String::new()]);
-        for (verb, own) in verbs {
-            let written = own.filter(|t| !t.is_empty()).or_else(|| m.route.clone()).unwrap_or_default();
-            let mut made: Vec<String> = Vec::new();
-            for class_route in &class_routes {
-                let template = combine(class_route, &written, cls, method);
-                // an absolute method template ignores every class route: one endpoint, not one per prefix
-                if made.contains(&template) {
-                    continue;
+        for server in servers(&(file.clone(), cls.clone()), method, &classes, &derived, &methods) {
+            let class_routes = class_route(&server, &routes, &classes, &by_symbol, &mut HashSet::new()).unwrap_or_else(|| vec![String::new()]);
+            for (verb, own) in &verbs {
+                let written = own.clone().filter(|t| !t.is_empty()).or_else(|| m.route.clone()).unwrap_or_default();
+                let mut made: Vec<String> = Vec::new();
+                for class_route in &class_routes {
+                    let template = combine(class_route, &written, &server.1, method);
+                    // an absolute method template ignores every class route: one endpoint, not one per prefix
+                    if made.contains(&template) {
+                        continue;
+                    }
+                    made.push(template.clone());
+                    out.push(Endpoint {
+                        file: paths.get(file).map(|p| p.to_string()).unwrap_or_default(),
+                        cls: server.1.clone(),
+                        method: method.clone(),
+                        line: m.line,
+                        verb: verb.to_string(),
+                        route: endpoint_route(&template),
+                        template,
+                        func: func.clone(),
+                    });
                 }
-                made.push(template.clone());
-                out.push(Endpoint {
-                    file: paths.get(file).map(|p| p.to_string()).unwrap_or_default(),
-                    cls: cls.clone(),
-                    method: method.clone(),
-                    line: m.line,
-                    verb: verb.to_string(),
-                    route: endpoint_route(&template),
-                    template,
-                    func: func.clone(),
-                });
             }
         }
     }
@@ -170,19 +175,24 @@ fn classes(conn: &Connection, csharp: &HashMap<String, String>) -> rusqlite::Res
         return Ok((held, by_symbol));
     }
     let mut list = Column::new(conn, "classes", "bases")?;
-    let sql = format!("SELECT k.file, k.name, k.symbol, {}, {} FROM classes k", owner_sql(conn, "classes", "k"), scalar_sql(conn, "classes", "k", "bases"));
+    let sql = format!(
+        "SELECT k.file, k.name, k.symbol, {}, {}, {} FROM classes k",
+        owner_sql(conn, "classes", "k"),
+        scalar_sql(conn, "classes", "k", "bases"),
+        scalar_sql(conn, "classes", "k", "abstract")
+    );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, r.get::<_, SqlValue>(4)?)))?;
+    let rows = stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, r.get::<_, SqlValue>(4)?, text(r, 5)?)))?;
     for row in rows {
-        let (file, name, symbol, owner, cell) = row?;
+        let (file, name, symbol, owner, cell, abstract_) = row?;
         if !csharp.contains_key(&file) {
             continue;
         }
         let bases = list.strings(&owner, &cell)?;
         if !symbol.is_empty() {
-            by_symbol.entry(symbol.clone()).or_insert((file.clone(), name.clone()));
+            by_symbol.entry(generic_key(&symbol)).or_insert((file.clone(), name.clone()));
         }
-        held.insert((file, name), Class { bases });
+        held.insert((file, name), Class { bases, abstract_: abstract_ == "1" });
     }
     Ok((held, by_symbol))
 }
@@ -203,7 +213,63 @@ fn class_route(
         return None;
     }
     let class = classes.get(key)?;
-    class.bases.iter().filter_map(|b| by_symbol.get(b)).find_map(|base| class_route(base, routes, classes, by_symbol, seen))
+    class.bases.iter().filter_map(|b| by_symbol.get(&generic_key(b))).find_map(|base| class_route(base, routes, classes, by_symbol, seen))
+}
+
+/// A type's symbol as a base list and a declaration both name it: `Demo.Base<Demo.Item>` (the base, constructed) and
+/// `Demo.Base<T>` (the class, declared) are one class, `Demo.Base`1` - its name and how many type arguments it takes.
+fn generic_key(symbol: &str) -> String {
+    let Some(open) = symbol.find('<') else { return symbol.to_string() };
+    let mut nested = 0usize;
+    let mut arity = 1;
+    for c in symbol[open + 1..].chars() {
+        match c {
+            '<' => nested += 1,
+            '>' if nested == 0 => break,
+            '>' => nested -= 1,
+            ',' if nested == 0 => arity += 1,
+            _ => {}
+        }
+    }
+    format!("{}`{arity}", &symbol[..open])
+}
+
+/// Every class, by the classes that list it among their bases.
+fn derived(classes: &Classes, by_symbol: &HashMap<String, (String, String)>) -> HashMap<(String, String), Vec<(String, String)>> {
+    let mut out: HashMap<(String, String), Vec<(String, String)>> = HashMap::new();
+    for (key, class) in classes {
+        for base in class.bases.iter().filter_map(|b| by_symbol.get(&generic_key(b))) {
+            out.entry(base.clone()).or_default().push(key.clone());
+        }
+    }
+    out.values_mut().for_each(|v| v.sort());
+    out
+}
+
+/// WHICH CONTROLLERS SERVE AN ACTION: the class declaring it unless it is abstract, and every class deriving from it,
+/// however far down, that is not abstract and does not declare a routed method of the same name itself. A class the
+/// map has no row of serves its own actions, as before. `seen` ends bases that name each other; no depth cap.
+fn servers(
+    declaring: &(String, String),
+    method: &str,
+    classes: &Classes,
+    derived: &HashMap<(String, String), Vec<(String, String)>>,
+    methods: &BTreeMap<(String, String, String), Method>,
+) -> Vec<(String, String)> {
+    let Some(own) = classes.get(declaring) else { return vec![declaring.clone()] };
+    let mut out = if own.abstract_ { vec![] } else { vec![declaring.clone()] };
+    let mut seen: HashSet<(String, String)> = HashSet::from([declaring.clone()]);
+    let mut todo: Vec<(String, String)> = derived.get(declaring).cloned().unwrap_or_default();
+    while let Some(key) = todo.pop() {
+        if !seen.insert(key.clone()) || methods.contains_key(&(key.0.clone(), key.1.clone(), method.to_string())) {
+            continue;
+        }
+        if classes.get(&key).is_some_and(|c| !c.abstract_) {
+            out.push(key.clone());
+        }
+        todo.extend(derived.get(&key).cloned().unwrap_or_default());
+    }
+    out
 }
 
 /// The class route and the method's, with the tokens a route may carry replaced.
@@ -231,7 +297,7 @@ mod tests {
         for i in 0..n {
             by_symbol.insert(format!("Demo.C{i}"), key(i));
             let next = if i + 1 < n { vec![format!("Demo.C{}", i + 1)] } else if cycle { vec!["Demo.C0".to_string()] } else { vec![] };
-            classes.insert(key(i), Class { bases: next });
+            classes.insert(key(i), Class { bases: next, abstract_: false });
         }
         if !cycle {
             routes.insert(key(n - 1), vec!["api/base".to_string()]);
@@ -264,6 +330,37 @@ mod tests {
         let found = load(&conn, &csharp).unwrap();
         assert_eq!(found.len(), 1);
         assert_eq!((found[0].verb.as_str(), found[0].template.as_str()), ("GET", "api/Orders/list"));
+    }
+
+    #[test]
+    fn an_action_of_an_abstract_generic_base_is_an_endpoint_of_each_controller_deriving_from_it() {
+        let conn = Connection::open_in_memory().unwrap();
+        let rows = |table: &str, rows: Vec<Value>| crate::rows::store::insert_rows(&conn, table, &rows).unwrap();
+        rows("classes", vec![
+            json!({"id": "c:1", "file": "f:1", "name": "JobBase", "symbol": "Demo.JobBase<TA, TB>", "bases": [], "abstract": 1}),
+            json!({"id": "c:2", "file": "f:2", "name": "AlphaController", "symbol": "Demo.AlphaController", "bases": ["Demo.JobBase<Demo.A, Demo.Box<Demo.A>>"], "abstract": 0}),
+            json!({"id": "c:3", "file": "f:2", "name": "BetaController", "symbol": "Demo.BetaController", "bases": ["Demo.JobBase<Demo.B, Demo.Box<Demo.B>>"], "abstract": 0}),
+            json!({"id": "c:4", "file": "f:2", "name": "GammaController", "symbol": "Demo.GammaController", "bases": ["Demo.BetaController"], "abstract": 0}),
+            json!({"id": "c:5", "file": "f:2", "name": "OwnController", "symbol": "Demo.OwnController", "bases": ["Demo.JobBase<Demo.C, Demo.Box<Demo.C>>"], "abstract": 0}),
+        ]);
+        rows("decorators", vec![
+            json!({"id": "d:1", "file": "f:1", "line": 4, "cls": "JobBase", "name": "HttpPost", "target": "RunAll", "target_kind": "method", "arg_values": []}),
+            json!({"id": "d:2", "file": "f:1", "line": 4, "cls": "JobBase", "name": "Route", "target": "RunAll", "target_kind": "method", "arg_values": ["run-all"]}),
+            json!({"id": "d:3", "file": "f:2", "line": 1, "cls": "", "name": "Route", "target": "AlphaController", "target_kind": "class", "arg_values": ["api/alpha"]}),
+            json!({"id": "d:4", "file": "f:2", "line": 5, "cls": "", "name": "Route", "target": "BetaController", "target_kind": "class", "arg_values": ["api/beta"]}),
+            json!({"id": "d:5", "file": "f:2", "line": 9, "cls": "", "name": "Route", "target": "GammaController", "target_kind": "class", "arg_values": ["api/gamma"]}),
+            json!({"id": "d:6", "file": "f:2", "line": 12, "cls": "", "name": "Route", "target": "OwnController", "target_kind": "class", "arg_values": ["api/own"]}),
+            json!({"id": "d:7", "file": "f:2", "line": 14, "cls": "OwnController", "name": "HttpPost", "target": "RunAll", "target_kind": "method", "arg_values": ["all"]}),
+        ]);
+        let csharp = HashMap::from([("f:1".to_string(), "Base.cs".to_string()), ("f:2".to_string(), "Controllers.cs".to_string())]);
+        let found: Vec<(String, String)> = load(&conn, &csharp).unwrap().into_iter().map(|e| (e.cls, e.template)).collect();
+        assert_eq!(found, vec![
+            ("AlphaController".to_string(), "api/alpha/run-all".to_string()),
+            ("BetaController".to_string(), "api/beta/run-all".to_string()),
+            ("GammaController".to_string(), "api/gamma/run-all".to_string()),
+            ("OwnController".to_string(), "api/own/all".to_string()),
+        ]);
+        assert_eq!(generic_key("Demo.Map<Demo.K, Demo.List<Demo.V>>"), "Demo.Map`2");
     }
 
     #[test]
