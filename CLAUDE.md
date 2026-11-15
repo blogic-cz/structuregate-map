@@ -73,7 +73,10 @@ with a `depth`, and fails on any.
 This repo is public; every half was measured on PRIVATE trees. A fixture, comment or doc uses invented names
 (`Demo.*`, `Order`, `Alpha`) and relative figures ("most rows", "a large workspace"), never a consumer's
 identifiers, layout, domain words or counts. `LeakGuard` fails the build on any term of the gitignored
-`leak-deny.txt` at the root - add a term there the moment one leaks, never to a committed file.
+`leak-deny.txt` at the root - add a term there the moment one leaks, never to a committed file. The
+`.githooks/pre-commit` hook (`git config core.hooksPath .githooks`, once per clone) checks the STAGED files
+against that list and has an agent (`.githooks/leak-review.md`) read the staged diff for what no list names yet;
+`SG_LEAK_REVIEW=0` skips the agent, never the list.
 
 ## NativeAOT constraints
 
