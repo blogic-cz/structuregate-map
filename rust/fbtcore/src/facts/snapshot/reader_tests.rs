@@ -118,3 +118,10 @@ fn every_leaf_is_a_text_after_its_block_and_every_code_span_one_more() {
     assert!(docs.contains(&Block::Text { at: 10, text: "GET /api/items".into(), code: true }));
     assert!(docs.contains(&Block::Text { at: 5, text: "Call GET /api/items".into(), code: false }));
 }
+
+#[test]
+fn a_zero_width_space_pasted_into_a_route_is_no_part_of_it() {
+    let read = from_markdown("# API\n\nCall `POST /api\u{200B}/items\u{200B}/run` now.\n");
+    let found = texts(&read, "").unwrap();
+    assert!(found.iter().any(|t| t.code && t.text == "POST /api/items/run"), "{found:?}");
+}

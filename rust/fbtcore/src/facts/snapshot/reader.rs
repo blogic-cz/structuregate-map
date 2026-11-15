@@ -318,8 +318,11 @@ fn paragraph(p: &Value) -> (String, bool) {
     (squeezed(&text), all > 0 && bold == all)
 }
 
+/// Whitespace squeezed to single spaces, and the ZERO-WIDTH characters a pasted text carries (U+200B..U+200D, U+2060,
+/// U+FEFF) dropped: they are invisible in the document and split `/api/x` into two words nobody wrote.
 fn squeezed(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    let visible: String = text.chars().filter(|c| !matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{2060}' | '\u{FEFF}')).collect();
+    visible.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// One table of a section, and the bold paragraph above it inside the section (its subsection), if any.

@@ -49,7 +49,7 @@ fn each_part_of_a_spec_is_found_against_the_set_sharing_its_values() {
     let said = lines.join("\n");
     assert!(said.contains("spec: routes the whole document: 3/4 values = endpoint every endpoint (4 code values)"), "{said}");
     assert!(said.contains("spec: table 1 under \"Fields\", column 1 \"Field\": 3/3 values = property Demo.ItemDto (3 code values)"), "{said}");
-    assert!(said.contains("spec: table 1 under \"Codes\", column 1 \"Code\": 2/3 values = seed dbo.Items.Code (2 code values)"), "{said}");
+    assert!(said.contains("spec: table 1 under \"Codes\", column 1 \"Code\": 2/3 values = seed dbo.Items.Code (2 code values, ~2 by chance)"), "{said}");
     assert!(!said.contains("\"Meaning\""), "{said}");
     let written: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(FILE_NAME)).unwrap()).unwrap();
     let routes = written["candidates"].as_array().unwrap().iter().find(|c| c["link"]["to"]["kind"] == "endpoint").unwrap();
@@ -98,11 +98,11 @@ fn the_link_whose_rows_agree_outranks_a_dense_small_integer_set() {
     let at = |what: &str| lines.iter().position(|l| l.contains(what)).unwrap_or_else(|| panic!("no {what} in {lines:#?}"));
     let seed = at("values = seed dbo.Goods.ItemNo");
     assert!(seed < at("values = enum Demo.Tier"), "{lines:#?}");
-    assert!(lines[seed].contains("7/8 values = seed dbo.Goods.ItemNo (8 code values, 6 rows agree: column 2 = Name)"), "{}", lines[seed]);
+    assert!(lines[seed].contains("7/8 values = seed dbo.Goods.ItemNo (8 code values, 6 rows agree: column 2 = Name, ~7 by chance)"), "{}", lines[seed]);
     assert!(lines[at("values = enum Demo.Tier (12")].contains("~8 by chance"), "{lines:#?}");
     let written: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(FILE_NAME)).unwrap()).unwrap();
-    let first = &written["candidates"][0];
-    assert_eq!((first["facts"]["key"].as_str(), first["facts"]["label"].as_str()), (Some("ID"), Some("Product")));
-    assert!(first["facts"].get("headers").is_none());
+    let keyed = written["candidates"].as_array().unwrap().iter().find(|c| c["link"]["to"]["column"] == "ItemNo").unwrap();
+    assert_eq!((keyed["facts"]["key"].as_str(), keyed["facts"]["label"].as_str()), (Some("ID"), Some("Product")), "{keyed}");
+    assert!(keyed["facts"].get("headers").is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }

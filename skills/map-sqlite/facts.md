@@ -87,8 +87,9 @@ group are code values. A count alone misleads, so pairs are RANKED by:
    same row's other value (a seed row's other column, an enum member's or a constant's name). The true link is the
    one where the label column agrees too; a pair with agreeing rows outranks every pair without. The agreeing
    column becomes the candidate's `label`.
-2. **hits beyond chance** - a set as dense as `1..M` holds each document integer up to `M` anyway (a key column
-   `1..50` matches any small-int enum): that many hits are expected and taken off.
+2. **hits beyond chance** - the document's integers times how densely the code set covers THEIR range (a key
+   column `1..50` matches any small-int enum, and any `1..N` ordinal column whatever else it holds): that many hits
+   are expected and taken off.
 3. then the hits.
 
 Each group's best set and each set's best group are kept, best first:

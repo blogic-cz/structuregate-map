@@ -1,7 +1,8 @@
 //! HOW MUCH A `--facts-suggest` PAIR MEANS, beyond how many values it shares. Two things a count alone gets wrong:
 //!
-//! - CHANCE: a column of `1..50` shares every value with any set of small integers. A set as dense as `1..M` is
-//!   expected to hold each document integer up to `M`, so that many hits say nothing; they are taken off.
+//! - CHANCE: a column of `1..50` shares every value with any set of small integers. How many hits a set gives by chance
+//!   is how densely it covers the DOCUMENT'S OWN RANGE of integers: a set holding every `1..N` matches a `1..50` column
+//!   fully, whatever large values it also holds. That many hits say nothing; they are taken off.
 //! - ROWS THAT AGREE: the true link is the one where the rest of the row agrees too - the document's label column
 //!   names the same seed row's other column, or the enum member's name. A pair with agreeing rows ranks above every
 //!   pair without, whatever the counts.
@@ -33,13 +34,15 @@ pub struct Table {
     pub column: usize,
 }
 
-/// How many document integers a set this dense in `1..max` would hold anyway.
+/// How many document integers a set would hold anyway: the document's integers times how densely the set covers
+/// their range, `lo..=hi`. A value of the set outside that range is no evidence either way.
 pub fn chance(document: &[String], codes: &[Code]) -> f64 {
-    let ints: std::collections::HashSet<u64> = codes.iter().filter_map(|c| c.value.trim().parse::<u64>().ok()).filter(|n| *n >= 1).collect();
-    let Some(&max) = ints.iter().max() else { return 0.0 };
-    let density = ints.len() as f64 / max as f64;
-    let reachable = document.iter().filter_map(|v| v.trim().parse::<u64>().ok()).filter(|n| (1..=max).contains(n)).count();
-    reachable as f64 * density
+    let ints = |values: &mut dyn Iterator<Item = &str>| values.filter_map(|v| v.trim().parse::<i64>().ok()).collect::<std::collections::HashSet<i64>>();
+    let ours = ints(&mut document.iter().map(String::as_str));
+    let (Some(&lo), Some(&hi)) = (ours.iter().min(), ours.iter().max()) else { return 0.0 };
+    let theirs = ints(&mut codes.iter().map(|c| c.value.as_str()));
+    let covered = theirs.iter().filter(|n| (lo..=hi).contains(*n)).count();
+    ours.len() as f64 * covered as f64 / (hi - lo + 1) as f64
 }
 
 /// The rows of a table whose key matches a code value AND whose other cell names that code row's other value: per
@@ -93,7 +96,10 @@ mod tests {
         let dense: Vec<Code> = (1..=30).map(|n| code("e", &n.to_string(), "")).collect();
         assert_eq!(chance(&document, &dense), 30.0);
         let sparse: Vec<Code> = [7, 300, 9000].iter().map(|n| code("s", &n.to_string(), "")).collect();
-        assert!(chance(&document, &sparse) < 0.1);
+        assert_eq!(chance(&document, &sparse), 1.0);
+        // EVERY 1..N AND A FEW LARGE VALUES: the large ones say nothing about the document's range.
+        let ordinal: Vec<Code> = (1..=60).chain([5000, 9000]).map(|n| code("o", &n.to_string(), "")).collect();
+        assert_eq!(chance(&document, &ordinal), 50.0);
         assert_eq!(chance(&["Alpha".to_string()], &dense), 0.0);
     }
 
