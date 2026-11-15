@@ -38,12 +38,12 @@ fn a_stage_named_after_the_tree_counts_under_its_prefix_and_files_are_no_stage()
 #[test]
 fn stages_of_one_name_are_one_series_and_nothing_of_the_tree_is_written() {
     let spans = run_spans();
-    let resource = vec![("service.version".to_string(), json!("v9.9.9")), ("host.name".to_string(), json!("secret-host")),
-        ("structuregate.build".to_string(), json!("/opt/secret-build/structuregate|123|456"))];
+    let resource = vec![("service.version".to_string(), json!("v9.9.9")), ("host.name".to_string(), json!("tree-host")),
+        ("structuregate.build".to_string(), json!("/opt/tree-build/structuregate|123|456"))];
     let run = Finished::new("t1", &resource, &spans, 0, 9_000_000);
     let text = records(&run, "id-1");
-    for secret in ["Demo.Orders", "Demo.cs", "secret-host", "secret-build"] {
-        assert!(!text.contains(secret), "{secret} left the machine: {text}");
+    for word in ["Demo.Orders", "Demo.cs", "tree-host", "tree-build"] {
+        assert!(!text.contains(word), "{word} left the machine");
     }
     let lines = parsed(&text);
     let kinds: Vec<String> = lines.iter().map(|r| format!("{}/{}", r["k"].as_str().unwrap(), r["n"].as_str().unwrap())).collect();
@@ -58,7 +58,7 @@ fn stages_of_one_name_are_one_series_and_nothing_of_the_tree_is_written() {
 fn a_panic_is_a_crash_record_without_this_sinks_frames() {
     let _turn = CRASHES.lock().unwrap_or_else(|p| p.into_inner());
     catch_panics();
-    let caught = std::panic::catch_unwind(|| panic!("cannot open /home/me/secret.cs now"));
+    let caught = std::panic::catch_unwind(|| panic!("cannot open /home/me/orders.cs now"));
     assert!(caught.is_err());
     escaped();
     let spans = run_spans();

@@ -89,8 +89,8 @@ Test-Case 'nothing of the tree leaves: no folder, file name, path or command lin
     Assert-Equal "$((Get-SpoolRecord $spool 'event' 'run')[0].d.mode)" 'deep' 'the deep map run was spooled'
     $text = (Get-Content -LiteralPath $spool.Files[0].FullName -Raw)
     $leaf = Split-Path $tree -Leaf
-    foreach ($secret in @($leaf, 'zebracorn', 'map.sqlite', '--root')) {
-        Assert-Equal ($text.IndexOf($secret, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) $false "the spool carries '$secret'"
+    foreach ($word in @($leaf, 'zebracorn', 'map.sqlite', '--root')) {
+        Assert-Equal ($text.IndexOf($word, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) $false "the spool carries '$word'"
     }
     # NO PATH AT ALL outside a crash's backtrace: the exe's own folder, the host's, a stamp - none is the run's to send.
     foreach ($record in $spool.Records | Where-Object { $_.k -ne 'crash' }) {
