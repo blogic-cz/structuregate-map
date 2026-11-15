@@ -70,3 +70,11 @@ fn a_file_that_is_no_word_zip_says_so() {
     assert!(blocks(b"not a zip").unwrap_err().contains("no zip"));
     assert!(blocks(&zip(&[("a.txt", b"x", false)])).unwrap_err().contains("not a Word document"));
 }
+
+#[test]
+fn a_zero_width_space_inside_a_word_run_is_no_part_of_the_text() {
+    let body = "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>\
+<w:p><w:r><w:t>Call /api\u{200B}/items\u{200B}/run now.</w:t></w:r></w:p></w:body></w:document>";
+    let read = blocks(&zip(&[("word/document.xml", body.as_bytes(), true)])).unwrap();
+    assert!(read.contains(&Block::Text { at: 1, text: "Call /api/items/run now.".into(), code: false }), "{read:?}");
+}

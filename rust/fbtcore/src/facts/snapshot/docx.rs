@@ -8,7 +8,7 @@
 //! calls the id `Nadpis1`), or one with an outline level. A run is bold by `w:b`, code when set in a monospace font.
 //! A block's place is the body element's number from 1 - a `.docx` has no lines.
 
-use super::reader::{Block, MONOSPACE};
+use super::reader::{squeezed, Block, MONOSPACE};
 use roxmltree::{Document, Node};
 use std::collections::HashMap;
 
@@ -91,7 +91,7 @@ fn paragraph(p: &Node) -> (String, bool) {
         }
         text.push_str(&piece);
     }
-    (text.split_whitespace().collect::<Vec<_>>().join(" "), all > 0 && bold == all)
+    (squeezed(&text), all > 0 && bold == all)
 }
 
 fn run_text(run: &Node) -> String {
@@ -111,7 +111,7 @@ fn texts(p: &Node, at: usize, text: String, out: &mut Vec<Block>) {
     out.push(Block::Text { at, text, code: false });
     for run in p.descendants().filter(|n| is(n, "r")) {
         let font = child(&run, "rPr").and_then(|r| child(&r, "rFonts")).and_then(|f| f.attribute((W, "ascii")).or_else(|| f.attribute((W, "hAnsi"))));
-        let code = run_text(&run).split_whitespace().collect::<Vec<_>>().join(" ");
+        let code = squeezed(&run_text(&run));
         if font.is_some_and(|f| MONOSPACE.iter().any(|m| m.eq_ignore_ascii_case(f))) && !code.is_empty() {
             out.push(Block::Text { at, text: code, code: true });
         }

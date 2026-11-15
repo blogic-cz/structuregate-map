@@ -134,6 +134,9 @@ are that program's configuration; the question never goes on a command line. **T
 - **A `.docx`** is a zip read by the gate itself: `word/document.xml` is the body, a paragraph is a heading when its
   style's NAME is `heading N` or `Title` (`word/styles.xml`; the id may be localized) or it has an outline level, a
   run is bold by `w:b` and a code span when set in a monospace font. A row's `line` is the body element's number.
+- **Every form**: whitespace is squeezed to single spaces, and the zero-width characters a pasted text carries
+  (U+200B, U+200C, U+200D, U+2060, U+FEFF) are dropped - invisible in the document, they would split a route or a
+  code into words nobody wrote.
 - **Markdown** is parsed by `pulldown-cmark` with GFM tables. Each cell, heading and paragraph is parsed once
   more as inline Markdown, because an export that escapes its own emphasis (`\*\*7\*\*`) leaves the markup
   in the text; the second parse removes it, so the key is `7`.
