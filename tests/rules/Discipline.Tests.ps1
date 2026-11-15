@@ -44,6 +44,46 @@ class C {
     Assert-Exit (Invoke-Gate --root $tree --async-discipline) 0
 }
 
+# ---------------------------------------------------------------- rust async discipline
+
+Test-Case 'async (rust): a blocking call in async code fails by the path its use gives it, and the line is named' {
+    $tree = Use-Tree @{
+        'src/lib.rs' = @"
+use std::fs;
+use std::thread::sleep as nap;
+
+pub async fn load() -> String {
+    nap(std::time::Duration::from_millis(1));
+    fs::read_to_string("a").unwrap_or_default()
+}
+
+pub fn sync_is_free() { let _ = fs::read("b"); }
+"@
+    }
+    Assert-Exit (Invoke-Gate --root $tree --ext .rs) 0     # opt-in: silent until asked for
+    $result = Invoke-Gate --root $tree --ext .rs --async-discipline
+    Assert-Exit $result 1
+    Assert-Line $result 'src/lib.rs:5: std::thread::sleep inside an async body'
+    Assert-Line $result 'src/lib.rs:6: std::fs inside an async body'
+    Assert-NoLine $result 'src/lib.rs:9'
+}
+
+Test-Case 'async (rust): the async twin, a sync closure and a waived line pass' {
+    $tree = Use-Tree @{
+        'src/lib.rs' = @"
+use tokio::fs;
+
+pub async fn load(mut rx: tokio::sync::mpsc::Receiver<u8>) {
+    let _ = fs::read("a").await;
+    let _ = rx.recv().await;
+    let _ = tokio::task::spawn_blocking(|| std::fs::read("b")).await;
+    let _ = std::fs::read("c"); // async-ok: read once at start, measured
+}
+"@
+    }
+    Assert-Exit (Invoke-Gate --root $tree --ext .rs --async-discipline) 0
+}
+
 Test-Case 'async: async void is allowed for an event handler and refused everywhere else' {
     $tree = Use-Tree @{
         'handler.cs' = @"

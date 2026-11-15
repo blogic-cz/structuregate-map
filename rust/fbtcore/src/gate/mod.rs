@@ -12,6 +12,7 @@ mod counts;
 pub(crate) use counts::projectish;
 pub(crate) mod docs;
 mod ratchet;
+pub(crate) mod rsasync;
 pub(crate) mod run;
 
 use serde::Deserialize;

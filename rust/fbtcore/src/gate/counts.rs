@@ -84,11 +84,16 @@ impl Counts {
 
     /// The kept answer for this C# file, or `count`'s - which is kept for the next run when it succeeded.
     pub(crate) fn csharp(&mut self, rel: &str, count: impl FnOnce() -> Result<Answer, String>) -> Result<Answer, String> {
-        if let Some(found) = self.get(rel, "cs") {
+        self.answer(rel, "cs", count)
+    }
+
+    /// The kept answer - count and problems - of a file under these rules, or `count`'s, kept when it succeeded.
+    pub(crate) fn answer(&mut self, rel: &str, rules: &str, count: impl FnOnce() -> Result<Answer, String>) -> Result<Answer, String> {
+        if let Some(found) = self.get(rel, rules) {
             return Ok(found);
         }
         let answer = count()?;
-        self.put(rel, "cs", &answer);
+        self.put(rel, rules, &answer);
         Ok(answer)
     }
 

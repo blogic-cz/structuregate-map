@@ -187,6 +187,19 @@ fn run(input: &Run, cs: CsFile, free: Free) -> Value {
                 }
                 continue;
             }
+            // RUST UNDER --async-discipline is counted and judged in one read (`rsasync.rs`), its answer kept like C#'s.
+            if source && input.async_discipline && extension == ".rs" {
+                let check = || super::rsasync::measured(&abs, &rel);
+                match known.as_mut().map_or_else(check, |known| known.answer(&rel, "rs-async", check)) {
+                    Err(error) => unreadable.push(format!("{rel} ({error})")),
+                    Ok((lines, found)) => {
+                        problems.extend(found);
+                        counts.insert(rel.clone(), lines);
+                        bump(&mut per_folder);
+                    }
+                }
+                continue;
+            }
             let measure = || count::count(Path::new(&abs), !source, false).map(|n| n as i64).map_err(|e| e.to_string());
             let measured = match known.as_mut() {
                 Some(known) => known.lines(&rel, if source { "lines" } else { "doc" }, measure),

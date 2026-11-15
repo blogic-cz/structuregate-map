@@ -31,12 +31,17 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         project whose code is mapped from several --root trees and whose docs sit
                         above them. Each .md under it is mapped once, keyed by its path from <dir>,
                         and a path a doc names under a code root joins that root's file.
-  --async-discipline    C# only: inside an async body, nothing may block (.Result, .Wait(),
+  --async-discipline    C# and rust. C#: inside an async body, nothing may block (.Result, .Wait(),
                         .GetAwaiter().GetResult(), Task.WaitAll/WaitAny, Thread.Sleep) and no sync API
                         with an awaitable twin may be called (File.ReadAllText, ReadToEnd,
                         WaitForExit(), …); `async void` is allowed only for an (object sender,
-                        EventArgs e) handler. A line carrying `// async-ok` is waived, so the call
-                        that genuinely cannot be awaited keeps its reason beside it.
+                        EventArgs e) handler. Rust (`.rs` in --ext): inside an `async fn` or block,
+                        no std::thread::sleep, std::fs, std::net::TcpStream::connect, std
+                        Command output/status/wait, block_on or `blocking` API - by the path the
+                        file's `use` lines give a call - and no recv()/join()/wait() left
+                        unawaited; a sync closure inside (spawn_blocking) is sync. A line carrying
+                        `// async-ok` is waived, so the call that genuinely cannot be awaited keeps
+                        its reason beside it.
   --ps-discipline       PowerShell, through the REAL parser (`[Parser]::ParseFile` inside
                         --ps-host): `.ps1`/`.psm1`/`.psd1` are added to --ext and counted BY TOKEN
                         like C#, a file that does not PARSE is a violation (which is also the
