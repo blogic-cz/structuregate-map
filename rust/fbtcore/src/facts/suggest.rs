@@ -56,7 +56,8 @@ pub fn run(db: &str, config: &Config) -> Result<Vec<String>, String> {
         let mut fact = group.fact.clone();
         fact["name"] = json!(name);
         let link = link_entry(&name, &set.link);
-        let unmatched: Vec<&String> = group.values.iter().filter(|v| !set.codes.iter().any(|c| links::matches(&set.link.kind, &c.value, v))).take(10).collect();
+        let (matched, unmatched): (Vec<&String>, Vec<&String>) = group.values.iter().partition(|v| set.codes.iter().any(|c| links::matches(&set.link.kind, &c.value, v)));
+        let (matched, unmatched): (Vec<&String>, Vec<&String>) = (matched.into_iter().take(10).collect(), unmatched.into_iter().take(10).collect());
         let target = if set.link.target.is_empty() { "every endpoint".to_string() } else { set.link.target.clone() };
         let column = if set.link.column.is_empty() { String::new() } else { format!(".{}", set.link.column) };
         let by = if set.link.by == "name" { " (by name)" } else { "" };
@@ -70,7 +71,7 @@ pub fn run(db: &str, config: &Config) -> Result<Vec<String>, String> {
         ));
         entries.push(json!({
             "found": group.shown, "matched": hit, "of": group.values.len(), "code_values": set.codes.len(),
-            "unmatched": unmatched, "facts": fact, "link": link,
+            "matched_values": matched, "unmatched": unmatched, "facts": fact, "link": link,
         }));
     }
     let out = config.path.parent().unwrap_or(std::path::Path::new(".")).join(FILE_NAME);

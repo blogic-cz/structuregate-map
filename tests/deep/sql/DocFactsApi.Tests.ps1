@@ -96,6 +96,37 @@ Test-Case 'docfactsapi: routes in text, property and column names are checked ag
     if ($routes.facts.from -ne 'routes' -or @($routes.unmatched) -join ',' -ne '/api/legacy,/docs/history') {
         throw "the route candidate is not the config entry it should be: $($routes | ConvertTo-Json -Depth 6 -Compress)"
     }
+
+    # --facts-review ASKS THE CONFIGURED MODEL - here a fake LLM CLI that keeps the question and accepts the first.
+    $saved = $env:STRUCTUREGATE_LLM
+    try {
+        $env:STRUCTUREGATE_LLM = ''
+        Assert-Exit (Invoke-Gate --facts-suggest $db --facts-config $only --facts-review) 2
+        $folder = Join-Path $tree 'fake-llm'
+        New-Item -ItemType Directory -Force $folder | Out-Null
+        $answer = '{"ok": true, "data": {"verdicts": [{"n": 1, "accept": true, "reason": "the spec lists the routes"}]}}'
+        $request = Join-Path $folder 'request.json'
+        if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+            $fake = Join-Path $folder 'ask-cli.cmd'
+            Set-Content -LiteralPath $fake -Encoding ASCII -Value "@echo off`r`nmore > `"$request`"`r`necho $answer"
+        } else {
+            $fake = Join-Path $folder 'ask-cli'
+            Set-Content -LiteralPath $fake -Encoding ASCII -Value "#!/bin/sh`ncat > '$request'`necho '$answer'"
+            chmod +x $fake
+        }
+        $env:STRUCTUREGATE_LLM = $fake
+        $r = Invoke-Gate --facts-suggest $db --facts-config $only --facts-review
+        Assert-Exit $r 0
+        Assert-Line $r 'api: routes the whole document: ACCEPTED - the spec lists the routes'
+        $asked = Get-Content -Raw -LiteralPath $request | ConvertFrom-Json
+        if (-not $asked.user_message.Contains('/api/legacy')) { throw "the question did not carry the candidates: $($asked.user_message)" }
+        $fragment = Get-Content -Raw -LiteralPath (Join-Path $tree 'suggest/structuregate.facts.reviewed.json') | ConvertFrom-Json
+        if (@($fragment.links).Count -ne 1 -or $fragment.links[0].to.kind -ne 'endpoint' -or $fragment.facts[0].from -ne 'routes') {
+            throw "the fragment is not the one accepted candidate: $($fragment | ConvertTo-Json -Depth 6 -Compress)"
+        }
+    } finally {
+        $env:STRUCTUREGATE_LLM = $saved
+    }
 }
 
 Test-Case 'docfactsapi: an uploaded Word file is a snapshot like any other' {

@@ -44,6 +44,7 @@ mod gate;
 mod gomap;
 mod graph;
 mod hosts;
+mod llm;
 mod mapper;
 mod mdmap;
 mod query;

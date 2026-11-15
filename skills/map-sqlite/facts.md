@@ -94,6 +94,27 @@ entry, its counts and up to 10 of the document's values that matched nothing. No
 agent copies the right ones into the config, so the map run stays what the config says. Only `sources` are needed.
 Exit 0 (no candidate is an answer too), 2 when the config or the map cannot be read.
 
+### `--facts-review`: a model reads the candidates
+
+Sharing values is not meaning the same thing (`1, 2, 3` are in every enum). `--facts-suggest <map> --facts-review`
+asks a model, in one question, whether each candidate's document part lists the same thing as its code set, and
+writes its verdict and reason BESIDE each candidate (`review` in `structuregate.facts.suggest.json`); the accepted
+ones become a ready `{"facts": [...], "links": [...]}` fragment in `structuregate.facts.reviewed.json`. Still
+nothing is written into the config - a person copies the fragment in.
+
+The model is configured, off unless named: `STRUCTUREGATE_LLM` is a program (a path, or a name on PATH) and
+`STRUCTUREGATE_LLM_ARGS` its arguments, split at whitespace. Any model connects through a program that keeps this
+contract: the request `{system_prompt, user_message, schema, want}` as ONE JSON object on stdin, ONE JSON object back
+on stdout - `{"ok": true, "data": ...}` with `data` matching `schema`, or `{"ok": false, "error_type", "message"}` -
+and exit 0, or 2 unavailable, 3 an invalid reply, 4 a timeout, 5 refused. Brand, model, credentials and retries
+are that program's configuration; the question never goes on a command line. **The candidates' values - the document's and the code's - are sent to that model.**
+
+| exit | meaning |
+|---|---|
+| 0 | candidates written and reviewed |
+| 1 | the model gave no answer (the candidates are written, unreviewed) |
+| 2 | no model configured (checked before any work) |
+
 ## How a snapshot is read - nothing is matched as text
 
 - **JSON** is walked as the Docs API structures it: a heading is a `HEADING_n` (or `TITLE`) paragraph style;

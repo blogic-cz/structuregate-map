@@ -50,6 +50,8 @@ pub struct Options {
     pub facts_pull: bool,
     /// `--facts-suggest <map.sqlite>`: which part of each document lists what the map holds, written as candidates.
     pub facts_suggest: Option<String>,
+    /// `--facts-review`: with `--facts-suggest`, the configured model (`STRUCTUREGATE_LLM`) judges each candidate.
+    pub facts_review: bool,
     pub ts_html: Option<String>,
     pub map_row_fts: bool,
     /// `--map-no-text`: THE SAME FLAGS REACH THE GATE RUN AND THE MAP RUN (`-GateArgs`, `StructureGateArgs`), so with no
@@ -200,6 +202,7 @@ pub fn parse(args: &[String]) -> Result<Parsed, String> {
             "--facts-config" => o.facts_config = Some(full(&next()?)),
             "--facts-pull" => o.facts_pull = true,
             "--facts-suggest" => o.facts_suggest = Some(full(&next()?)),
+            "--facts-review" => o.facts_review = true,
             "--ts-html" => o.ts_html = Some(full(&next()?)),
             "--map-row-fts" => o.map_row_fts = true,
             "--map-no-text" => o.map_no_text = true,

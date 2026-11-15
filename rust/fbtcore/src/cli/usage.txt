@@ -118,6 +118,12 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         share enough as candidate facts and links with their counts to
                         structuregate.facts.suggest.json beside the config. Accepts nothing:
                         copy the right ones into the config. Exit 2: no config, or no map.
+  --facts-review        with --facts-suggest: a model judges every candidate (same concept, or a
+                        coincidental overlap) and the accepted ones are written as a facts/links
+                        fragment to structuregate.facts.reviewed.json - never into the config.
+                        The model is STRUCTUREGATE_LLM: a program that reads a JSON request on
+                        stdin and prints one JSON answer (STRUCTUREGATE_LLM_ARGS: its arguments). The candidates' values go to
+                        that model. Exit 1: it gave no answer; 2: none is configured.
   --map-reread <halves> with --map-sqlite: comma list of csharp, sql, typescript - those halves read
                         every file again this run, whatever the database recorded, and replace their
                         rows file by file. For measuring a full re-read without deleting the database.

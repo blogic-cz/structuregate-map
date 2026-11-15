@@ -224,18 +224,40 @@ fn facts_pull(o: &Options, call: &Call, out: &mut Out) -> i64 {
     exit
 }
 
-/// `--facts-suggest <map>`: 0 when the candidates are written (none is an answer too), 2 when the config is wrong or
-/// the map cannot be read.
+/// `--facts-suggest <map>`: 0 when the candidates are written (none is an answer too) - and with `--facts-review`
+/// reviewed -, 1 when the review failed, 2 when the config or the map cannot be read, or no model is configured.
 fn facts_suggest(o: &Options, call: &Call, db: &str, out: &mut Out) -> i64 {
     let Some(config) = facts_config(o, call, "--facts-suggest", out) else { return 2 };
+    // THE MODEL IS ASKED FOR FIRST, so a review that cannot run says so before any work.
+    let llm = match (o.facts_review, crate::llm::connect()) {
+        (false, _) => None,
+        (true, Some(llm)) => Some(llm),
+        (true, None) => {
+            out.error(format!(
+                "structuregate: --facts-review needs a model: {} = a program that answers a JSON request on stdin ({} = its arguments)",
+                crate::llm::ENV,
+                crate::llm::ARGS_ENV
+            ));
+            return 2;
+        }
+    };
     match crate::facts::suggest::run(db, &config) {
+        Ok(lines) => lines.into_iter().for_each(|l| out.line(l)),
+        Err(why) => {
+            out.error(format!("structuregate: --facts-suggest: {why}"));
+            return 2;
+        }
+    }
+    let Some(llm) = llm else { return 0 };
+    let suggested = config.path.parent().unwrap_or(std::path::Path::new(".")).join(crate::facts::suggest::FILE_NAME);
+    match crate::facts::review::run(&llm, &suggested) {
         Ok(lines) => {
             lines.into_iter().for_each(|l| out.line(l));
             0
         }
         Err(why) => {
-            out.error(format!("structuregate: --facts-suggest: {why}"));
-            2
+            out.error(format!("structuregate: --facts-review: {why} (the candidates are written, unreviewed)"));
+            1
         }
     }
 }
