@@ -90,6 +90,11 @@ Test-Case 'nothing of the tree leaves: no folder, file name, path or command lin
     foreach ($secret in @($leaf, 'zebracorn', 'map.sqlite', '--root')) {
         Assert-Equal ($text.IndexOf($secret, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) $false "the spool carries '$secret'"
     }
+    # NO PATH AT ALL outside a crash's backtrace: the exe's own folder, the host's, a stamp - none is the run's to send.
+    foreach ($record in $spool.Records | Where-Object { $_.k -ne 'crash' }) {
+        $json = $record | ConvertTo-Json -Depth 8 -Compress
+        Assert-Equal ($json.Contains('/') -or $json.Contains('\\')) $false "a path in a $($record.k)/$($record.n) record: $json"
+    }
     $stats = @((Get-SpoolRecord $spool 'metric' 'run')[0].d.stats | ForEach-Object { $_.name })
     Assert-Equal ($stats -contains 'stage.deep: hash') $true "the tree's hash stage is counted under its prefix: $($stats -join ', ')"
 }

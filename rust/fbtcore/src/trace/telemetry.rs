@@ -167,8 +167,8 @@ pub(super) fn records(run: &Finished, install: &str) -> String {
         record(run.started_ns(), "session", "start", json!({ "pid": std::process::id() })),
         record(run.started_ns(), "machine", "machine", json!({ "os": std::env::consts::OS, "arch": std::env::consts::ARCH,
             "cpus": std::thread::available_parallelism().map_or(0, |n| n.get()) })),
+        // NOT `structuregate.build`: it is the exe's path and stamp on this machine. The version says which build.
         record(run.end_ns, "event", "run", json!({ "mode": mode, "exit_code": run.exit,
-            "build": run.resource("structuregate.build").cloned().unwrap_or(Value::Null),
             "detail": run.fact("structuregate.trace.detail").cloned().unwrap_or(Value::Bool(false)) })),
         record(run.end_ns, "metric", "run", json!({ "stats": stats(run) })),
     ];
