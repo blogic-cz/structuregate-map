@@ -101,15 +101,23 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         --map, --map-sqlite or --map-query.
   --dialect <name>      the SQL --sql-parse reads: tsql (the default) or postgres. A tree's files
                         are told apart by the SQL config's `dialects`.
-  --facts-config <file> `structuregate.facts.json`: documents outside the tree (a Google Doc, a
-                        Markdown file), the table under a heading of each that lists facts, and
-                        the code each list is checked against - a seeded table's column, an enum,
-                        a class's constants, the classes deriving from a type. The deep map reads
-                        the saved snapshots into doc_facts and doc_links (bound / missing in code /
-                        missing in doc). Found beside the exe when not given; absent is fine.
-  --facts-pull          save each document of the facts config as its Markdown snapshot - only
-                        when its version moved - and do nothing else. The map never fetches.
+  --facts-config <file> `structuregate.facts.json`: documents outside the tree (a Google Doc, an
+                        uploaded .docx, a Markdown file), what of each lists facts (a table under a
+                        heading, its code spans, the routes its text names), and the code each
+                        list is checked against - a seeded table's column, an enum, a class's
+                        constants, the classes deriving from a type, the endpoints, a type's
+                        properties, a SQL table's columns. The deep map reads the saved snapshots
+                        into doc_facts and doc_links (bound / missing in code / missing in doc).
+                        Found beside the exe when not given; absent is fine.
+  --facts-pull          save each document of the facts config as its snapshot - only when its
+                        version moved - and do nothing else. The map never fetches.
                         Exit 1: a document failed (named); 2: the config is wrong.
+  --facts-suggest <map.sqlite>
+                        compare every table column, code span set and route set of each snapshot
+                        with every value set of the map by EXACT values, and write the pairs that
+                        share enough as candidate facts and links with their counts to
+                        structuregate.facts.suggest.json beside the config. Accepts nothing:
+                        copy the right ones into the config. Exit 2: no config, or no map.
   --map-reread <halves> with --map-sqlite: comma list of csharp, sql, typescript - those halves read
                         every file again this run, whatever the database recorded, and replace their
                         rows file by file. For measuring a full re-read without deleting the database.

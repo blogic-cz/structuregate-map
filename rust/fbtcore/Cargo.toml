@@ -79,6 +79,10 @@ mimalloc = { version = "0.1", default-features = false, features = ["local_dynam
 # `--facts-pull` (`src/facts/pull.rs`), the one thing this tool fetches: a document's version and its Markdown export
 # from the Drive API. rustls with `ring` and the webpki roots compiled in, so nothing beside the exe and no system TLS.
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+# AN UPLOADED .docx (`src/facts/docx.rs`) is a zip of XML: `roxmltree` above reads the XML, and this inflates the
+# zip's deflated entries - pure rust, the inflater flate2 is built on, nothing beside the exe. The zip's directory is
+# read by `docx.rs` itself: a facts snapshot needs one entry of it, not an archive library.
+miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
 # THE CARGO MANIFESTS of a rust tree (`src/rsmap/cargo.rs`): which in-tree crates a file can name. READ, never evaluated.
 # Pure rust; `serde` is what exposes `toml::Table`, `display` (the writer) stays off.
 toml = { version = "1.2", default-features = false, features = ["std", "parse", "serde"] }

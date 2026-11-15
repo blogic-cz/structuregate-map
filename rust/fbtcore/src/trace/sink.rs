@@ -35,11 +35,6 @@ impl<'a> Finished<'a> {
         self.spans.first()?.attributes.iter().find(|(k, _)| k == key).map(|(_, v)| v)
     }
 
-    /// A fact of what ran (`service.version`, ..).
-    pub fn resource(&self, key: &str) -> Option<&Value> {
-        self.resource.iter().find(|(k, _)| k == key).map(|(_, v)| v)
-    }
-
     pub fn started_ns(&self) -> u128 {
         self.spans.first().map_or(self.end_ns, |run| run.start_ns)
     }

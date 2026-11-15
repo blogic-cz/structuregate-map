@@ -79,7 +79,7 @@ fn a_docs_api_document_is_read_by_its_styles_and_cells() {
         {"table": {"tableRows": [row(200, &[("20", true), ("Beta suite", false)])]}},
         para("HEADING_2", vec![run("Status\n", false)]),
     ]}});
-    let blocks = blocks(std::path::Path::new("guide.json"), &doc.to_string());
+    let blocks = blocks(std::path::Path::new("guide.json"), doc.to_string().as_bytes()).unwrap();
     assert!(blocks.contains(&Block::Para { text: "plain half bold".into(), bold: false }));
     let found = section(&blocks, "Product codes for order export", 0).unwrap();
     let rows = table::rows(&found, &Column::Name("Product code".into()), &Some(Column::At(2))).unwrap();
@@ -88,4 +88,33 @@ fn a_docs_api_document_is_read_by_its_styles_and_cells() {
         vec![("Hardware line".into(), "7".into(), "Alpha laptop".into()), ("Hardware line".into(), "20".into(), "Beta suite".into())]
     );
     assert_eq!(rows[0].at, 120);
+}
+
+#[test]
+fn every_leaf_is_a_text_after_its_block_and_every_code_span_one_more() {
+    let text = "# API\n\nRead with `GET /api/items`.\n\n- POST /api/items\n- tight `item`\n\n```\nDELETE /api/items/1\n\nend\n```\n\n| Field |\n|---|\n| `itemId` |\n";
+    let read = from_markdown(text);
+    let found = texts(&read, "api").unwrap();
+    let all: Vec<(usize, &str, bool)> = found.iter().map(|t| (t.at, t.text.as_str(), t.code)).collect();
+    assert_eq!(all, vec![
+        (1, "API", false),
+        (3, "Read with GET /api/items.", false),
+        (3, "GET /api/items", true),
+        (5, "POST /api/items", false),
+        (6, "tight item", false),
+        (6, "item", true),
+        (9, "DELETE /api/items/1", false),
+        (11, "end", false),
+        (14, "Field", false),
+        (16, "itemId", false),
+        (16, "itemId", true),
+    ]);
+    assert!(found.iter().all(|t| t.subsection.is_empty() || t.subsection == "API"));
+    assert_eq!(texts(&read, "").unwrap().len(), all.len());
+    let doc = json!({"body": {"content": [{"startIndex": 5, "paragraph": {"paragraphStyle": {"namedStyleType": "NORMAL_TEXT"}, "elements": [
+        {"startIndex": 5, "textRun": {"content": "Call ", "textStyle": {}}},
+        {"startIndex": 10, "textRun": {"content": "GET /api/items", "textStyle": {"weightedFontFamily": {"fontFamily": "Roboto Mono"}}}}]}}]}});
+    let docs = blocks(std::path::Path::new("d.json"), doc.to_string().as_bytes()).unwrap();
+    assert!(docs.contains(&Block::Text { at: 10, text: "GET /api/items".into(), code: true }));
+    assert!(docs.contains(&Block::Text { at: 5, text: "Call GET /api/items".into(), code: false }));
 }

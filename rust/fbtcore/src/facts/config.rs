@@ -13,7 +13,8 @@ pub const FILE_NAME: &str = "structuregate.facts.json";
 #[derive(Clone, Debug)]
 pub struct Source {
     pub name: String,
-    /// `google-doc` (pulled by `--facts-pull`) or `file` (a snapshot the consumer keeps by hand).
+    /// `google-doc` or `drive-file` (an uploaded file, a `.docx`; both pulled by `--facts-pull`), or `file` (a snapshot
+    /// the consumer keeps by hand).
     pub kind: String,
     pub id: String,
     /// The snapshot, absolute.
@@ -29,12 +30,17 @@ pub enum Column {
     At(usize),
 }
 
-/// One list of facts: the tables under a heading of a source.
+/// One list of facts: the tables under a heading of a source - or its code spans, or the routes its text names.
 #[derive(Clone, Debug)]
 pub struct Facts {
     pub name: String,
     pub source: String,
+    /// The heading; "" is the whole document.
     pub section: String,
+    /// `table` (the default), `code` (every code span) or `routes` (every route the text names, `words.rs`).
+    pub from: String,
+    /// `routes`: only the routes starting with it (`/api/`).
+    pub prefix: String,
     /// Which table under the heading, from 1; 0 is every one of them, as one list.
     pub table: usize,
     pub key: Column,
@@ -45,9 +51,9 @@ pub struct Facts {
 #[derive(Clone, Debug)]
 pub struct Link {
     pub facts: String,
-    /// `seed`, `enum`, `consts` or `class`.
+    /// `seed`, `enum`, `consts`, `class`, `endpoint`, `property` or `sql-column`.
     pub kind: String,
-    /// `Schema.Table` for a seed, a type's symbol (or name) otherwise.
+    /// `Schema.Table` for a seed and a sql-column, a type's symbol (or name) otherwise; an endpoint's controller, or "".
     pub target: String,
     pub column: String,
     /// `value` (the default) or `name`: what an enum member or a constant is matched by.
@@ -92,16 +98,19 @@ pub fn read(given: Option<&str>, base_dir: &str) -> Result<Option<Config>, Strin
         let name = string(&entry["name"]);
         let kind = if string(&entry["kind"]).is_empty() { "file".to_string() } else { string(&entry["kind"]) };
         let shown = match kind.as_str() {
-            "google-doc" => string(&entry["save"]),
+            "google-doc" | "drive-file" => string(&entry["save"]),
             "file" => string(&entry["path"]),
-            other => return Err(wrong(format!("source {} has kind `{other}` - `google-doc` or `file`", i + 1))),
+            other => return Err(wrong(format!("source {} has kind `{other}` - `google-doc`, `drive-file` or `file`", i + 1))),
         };
         if name.is_empty() || shown.is_empty() {
-            return Err(wrong(format!("source {} needs a `name`, and a `save` (google-doc) or a `path` (file)", i + 1)));
+            return Err(wrong(format!("source {} needs a `name`, and a `save` (google-doc, drive-file) or a `path` (file)", i + 1)));
         }
         let id = string(&entry["id"]);
-        if kind == "google-doc" && id.is_empty() {
-            return Err(wrong(format!("source `{name}` is a google-doc with no `id`")));
+        if kind != "file" && id.is_empty() {
+            return Err(wrong(format!("source `{name}` is a {kind} with no `id`")));
+        }
+        if kind == "drive-file" && !shown.to_lowercase().ends_with(".docx") {
+            return Err(wrong(format!("source `{name}` is a drive-file: its `save` is the uploaded file as it is, a `.docx`")));
         }
         config.sources.push(Source { name, kind, id, path: folder.join(&shown), shown });
     }
@@ -109,36 +118,46 @@ pub fn read(given: Option<&str>, base_dir: &str) -> Result<Option<Config>, Strin
         let section = string(&entry["section"]);
         let source = string(&entry["source"]);
         let key = column(&entry["key"]);
-        if section.is_empty() || key.is_none() || !config.sources.iter().any(|s| s.name == source) {
+        let from = if string(&entry["from"]).is_empty() { "table".to_string() } else { string(&entry["from"]) };
+        if !matches!(from.as_str(), "table" | "code" | "routes") {
+            return Err(wrong(format!("facts {}: `from` is `table`, `code` or `routes`, not `{from}`", i + 1)));
+        }
+        if (from == "table" && key.is_none()) || !config.sources.iter().any(|s| s.name == source) {
             return Err(wrong(format!(
-                "facts {} needs a `section`, a `key` (a header cell's text, or a column number from 1) and a `source` the config declares",
+                "facts {} needs a `source` the config declares, and from a table a `key` (a header cell's text, or a column number from 1)",
                 i + 1
             )));
         }
         let name = if string(&entry["name"]).is_empty() { section.clone() } else { string(&entry["name"]) };
+        if name.is_empty() {
+            return Err(wrong(format!("facts {} reads the whole document (no `section`), so it needs a `name`", i + 1)));
+        }
         let table = match &entry["table"] {
             Value::Null => 1,
             Value::String(s) if s.eq_ignore_ascii_case("all") => 0,
             Value::Number(n) if n.as_u64().is_some_and(|n| n >= 1) => n.as_u64().unwrap_or(1) as usize,
             other => return Err(wrong(format!("facts {}: `table` is a number from 1 or \"all\", not {other}", i + 1))),
         };
-        config.facts.push(Facts { name, source, section, table, key: key.unwrap_or(Column::At(1)), label: column(&entry["label"]) });
+        let prefix = string(&entry["prefix"]);
+        config.facts.push(Facts { name, source, section, from, prefix, table, key: key.unwrap_or(Column::At(1)), label: column(&entry["label"]) });
     }
     for (i, entry) in list(&root["links"]).iter().enumerate() {
         let facts = string(&entry["facts"]);
         let to = &entry["to"];
         let kind = string(&to["kind"]);
+        let symbol = if string(&to["symbol"]).is_empty() { string(&to["name"]) } else { string(&to["symbol"]) };
         let target = match kind.as_str() {
-            "seed" => string(&to["object"]),
-            "enum" | "consts" | "class" => {
-                if string(&to["symbol"]).is_empty() { string(&to["name"]) } else { string(&to["symbol"]) }
+            "seed" | "sql-column" => string(&to["object"]),
+            "enum" | "consts" | "class" | "property" => symbol,
+            "endpoint" => if string(&to["class"]).is_empty() { symbol } else { string(&to["class"]) },
+            other => {
+                return Err(wrong(format!("link {} goes to `{other}` - `seed`, `enum`, `consts`, `class`, `endpoint`, `property` or `sql-column`", i + 1)))
             }
-            other => return Err(wrong(format!("link {} goes to `{other}` - `seed`, `enum`, `consts` or `class`", i + 1))),
         };
         let column = string(&to["column"]);
-        if !config.facts.iter().any(|f| f.name == facts) || target.is_empty() || (kind == "seed" && column.is_empty()) {
+        if !config.facts.iter().any(|f| f.name == facts) || (target.is_empty() && kind != "endpoint") || (kind == "seed" && column.is_empty()) {
             return Err(wrong(format!(
-                "link {} needs `facts` naming a list the config declares, and its target (a seed's `object` and `column`, a type's `symbol`)",
+                "link {} needs `facts` naming a list the config declares, and its target (a seed's `object` and `column`, a sql-column's `object`, a type's `symbol`)",
                 i + 1
             )));
         }

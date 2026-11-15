@@ -48,6 +48,8 @@ pub struct Options {
     pub facts_config: Option<String>,
     /// `--facts-pull`: save each document of the facts config as its snapshot, and do nothing else.
     pub facts_pull: bool,
+    /// `--facts-suggest <map.sqlite>`: which part of each document lists what the map holds, written as candidates.
+    pub facts_suggest: Option<String>,
     pub ts_html: Option<String>,
     pub map_row_fts: bool,
     /// `--map-no-text`: THE SAME FLAGS REACH THE GATE RUN AND THE MAP RUN (`-GateArgs`, `StructureGateArgs`), so with no
@@ -197,6 +199,7 @@ pub fn parse(args: &[String]) -> Result<Parsed, String> {
             "--dialect" => o.dialect = Some(next()?.to_lowercase()),
             "--facts-config" => o.facts_config = Some(full(&next()?)),
             "--facts-pull" => o.facts_pull = true,
+            "--facts-suggest" => o.facts_suggest = Some(full(&next()?)),
             "--ts-html" => o.ts_html = Some(full(&next()?)),
             "--map-row-fts" => o.map_row_fts = true,
             "--map-no-text" => o.map_no_text = true,

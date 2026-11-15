@@ -169,3 +169,16 @@ fn a_disabled_api_is_named_not_blamed_on_the_documents_sharing() {
     let (url, _) = serve(vec![(200, r#"{"version": "5"}"#), (403, r#"{"error": {"code": 403, "details": [{"reason": "ACCESS_TOKEN_SCOPE_INSUFFICIENT"}]}}"#)]);
     assert!(pull(&quick(), &s, "T", &url, &url).unwrap_err().starts_with(REFUSED));
 }
+
+#[test]
+fn a_drive_file_is_saved_as_it_is_uploaded() {
+    let dir = scratch("media");
+    let mut s = source(&dir.0);
+    s.kind = "drive-file".into();
+    s.path = s.path.with_extension("docx");
+    let (url, asked) = serve(vec![(200, r#"{"version": "2"}"#), (200, "PK-bytes")]);
+    assert!(pull(&quick(), &s, "T", &url, &url).unwrap().starts_with("saved version 2"));
+    assert_eq!(std::fs::read_to_string(&s.path).unwrap(), "PK-bytes");
+    let asked = asked.lock().unwrap().clone();
+    assert!(asked[1].starts_with("GET /drive/v3/files/DOC?alt=media&supportsAllDrives=true "), "{asked:?}");
+}

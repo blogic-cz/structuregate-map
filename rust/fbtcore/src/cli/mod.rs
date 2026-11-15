@@ -139,6 +139,10 @@ fn asked(call: &Call, callbacks: Callbacks) -> Value {
         let exit = facts_pull(&o, call, &mut out);
         return answer(out, exit, true);
     }
+    if let Some(db) = &o.facts_suggest {
+        let exit = facts_suggest(&o, call, db, &mut out);
+        return answer(out, exit, true);
+    }
     if let Some(db) = &o.map_query {
         let exit = lens::run(db, &o.map_query_args, &mut out);
         return answer(out, exit, true);
@@ -210,17 +214,7 @@ fn begin_trace(o: &Options, call: &Call) {
 
 /// `--facts-pull`: 0 when every document is saved and current, 1 when one failed, 2 when the config is wrong.
 fn facts_pull(o: &Options, call: &Call, out: &mut Out) -> i64 {
-    let config = match crate::facts::config::read(o.facts_config.as_deref(), &call.base_dir) {
-        Ok(Some(config)) => config,
-        Ok(None) => {
-            out.error(format!("structuregate: --facts-pull needs a facts config: {} beside the exe, or --facts-config <file>", crate::facts::config::FILE_NAME));
-            return 2;
-        }
-        Err(why) => {
-            out.error(format!("structuregate: the facts config is wrong - {why}"));
-            return 2;
-        }
-    };
+    let Some(config) = facts_config(o, call, "--facts-pull", out) else { return 2 };
     out.line(format!("facts pull: {} source(s) in {}", config.sources.len(), config.path.display()));
     let mut lines = Vec::new();
     let exit = crate::facts::pull::run(&config, &mut lines);
@@ -228,6 +222,37 @@ fn facts_pull(o: &Options, call: &Call, out: &mut Out) -> i64 {
         out.line(line);
     }
     exit
+}
+
+/// `--facts-suggest <map>`: 0 when the candidates are written (none is an answer too), 2 when the config is wrong or
+/// the map cannot be read.
+fn facts_suggest(o: &Options, call: &Call, db: &str, out: &mut Out) -> i64 {
+    let Some(config) = facts_config(o, call, "--facts-suggest", out) else { return 2 };
+    match crate::facts::suggest::run(db, &config) {
+        Ok(lines) => {
+            lines.into_iter().for_each(|l| out.line(l));
+            0
+        }
+        Err(why) => {
+            out.error(format!("structuregate: --facts-suggest: {why}"));
+            2
+        }
+    }
+}
+
+/// The facts config a facts command needs, or None after saying why there is none.
+fn facts_config(o: &Options, call: &Call, flag: &str, out: &mut Out) -> Option<crate::facts::config::Config> {
+    match crate::facts::config::read(o.facts_config.as_deref(), &call.base_dir) {
+        Ok(Some(config)) => Some(config),
+        Ok(None) => {
+            out.error(format!("structuregate: {flag} needs a facts config: {} beside the exe, or --facts-config <file>", crate::facts::config::FILE_NAME));
+            None
+        }
+        Err(why) => {
+            out.error(format!("structuregate: the facts config is wrong - {why}"));
+            None
+        }
+    }
 }
 
 fn answer(out: Out, exit: i64, utf8: bool) -> Value {

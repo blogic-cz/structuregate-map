@@ -3,18 +3,30 @@
 //!
 //! THE TOOL GIVES THE MEANS, THE CONSUMER THE CONFIGURATION (`config.rs`): `--facts-pull` saves each document as
 //! a Markdown snapshot (`pull.rs`, the only part that touches the network), and every map run reads the
-//! snapshots (`reader.rs`) into `doc_facts` and joins each declared list to its code (`links.rs`) in `doc_links`:
+//! snapshots (`reader.rs`; a Word file by `docx.rs`) into `doc_facts` - a table's rows, or the code spans and routes
+//! a text names (`words.rs`) - and joins each declared list to its code (`links.rs`, `apis.rs`) in `doc_links`:
 //! `bound`, `missing in code` (in the document, not in the code) or `missing in doc` (in the code, not in the
 //! document). Which code rows MUST be documented stays the consumer's rule - a query over `doc_links`.
+//!
+//! `--facts-suggest` (`suggest.rs`) finds which part of a document lists what the map holds, by exact values, and
+//! writes candidates - it never writes the config.
 //!
 //! It is one of THE PASSES OVER THE FINISHED ROWS (`mapper/deep/derived.rs`): the config and every snapshot are
 //! in their key, so an unchanged document costs nothing on a run that changed nothing.
 
+mod apis;
 pub mod config;
+#[path = "snapshot/docx.rs"]
+mod docx;
 mod links;
 pub mod pull;
+#[path = "snapshot/reader.rs"]
 mod reader;
+pub mod suggest;
+#[path = "snapshot/table.rs"]
 mod table;
+#[path = "snapshot/words.rs"]
+mod words;
 
 use config::Config;
 use rusqlite::{params, Connection};
@@ -57,10 +69,8 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
             made.notes.push(format!("the facts `{}` were not read: `{}` has no snapshot at {} - run --facts-pull", facts.name, source.name, source.shown));
             continue;
         };
-        let text = String::from_utf8_lossy(text.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&text)).into_owned();
         let version = version(&source.path);
-        let blocks = reader::blocks(&source.path, &text);
-        let read = reader::section(&blocks, &facts.section, facts.table).and_then(|found| table::rows(&found, &facts.key, &facts.label));
+        let read = reader::blocks(&source.path, &text).and_then(|blocks| read_facts(&blocks, facts));
         let found = match read {
             Ok(found) => found,
             Err(why) => {
@@ -96,7 +106,7 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
         };
         let mut matched: HashSet<usize> = HashSet::new();
         for (fact, key, label) in rows {
-            let hits: Vec<usize> = (0..codes.len()).filter(|&i| links::same(&codes[i].value, key)).collect();
+            let hits: Vec<usize> = (0..codes.len()).filter(|&i| links::matches(&link.kind, &codes[i].value, key)).collect();
             if hits.is_empty() {
                 n += 1;
                 made.links[1] += 1;
@@ -118,6 +128,16 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
     }
     conn.execute_batch("CREATE INDEX ix_doc_links_status ON doc_links(status); CREATE INDEX ix_doc_links_target ON doc_links(target);")?;
     Ok(made)
+}
+
+/// The rows of one list: a table's, or each code span or route of the section as a row with only its key.
+fn read_facts(blocks: &[reader::Block], facts: &config::Facts) -> Result<Vec<table::Row>, String> {
+    if facts.from == "table" {
+        return reader::section(blocks, &facts.section, facts.table).and_then(|found| table::rows(&found, &facts.key, &facts.label));
+    }
+    let texts = reader::texts(blocks, &facts.section)?;
+    let words = if facts.from == "code" { words::code_spans(&texts) } else { words::routes(&texts, &facts.prefix) };
+    Ok(words.into_iter().map(|w| table::Row { at: w.at, subsection: w.subsection, key: w.key, label: String::new(), cells: serde_json::Map::new() }).collect())
 }
 
 fn failed(e: anyhow::Error) -> rusqlite::Error {

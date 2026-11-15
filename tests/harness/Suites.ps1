@@ -19,13 +19,13 @@ $script:SuiteRules = @(
                  'rust/fbtcore/src/rows/derive/tsderive', 'rust/fbtcore/src/mapper/deep/ts.rs', 'rust/fbtcore/src/cssmap/')
        Suites = @('Ts', 'HttpLinks', 'Map', 'Magic', 'FullText', 'PyEarly') }
     @{ Paths = @('rust/fbtcore/src/rows/http/')
-       Suites = @('HttpLinks', 'Ts', 'Cs') }
+       Suites = @('HttpLinks', 'Ts', 'Cs', 'DocFactsApi') }
     @{ Paths = @('src/Map/Sql/', 'rust/fbtcore/src/sqlpg/', 'rust/fbtcore/src/rows/sqlshape/', 'rust/fbtcore/src/rows/sqlrun.rs',
                  'rust/fbtcore/src/rows/seeds/', 'rust/fbtcore/src/cli/sqlparse.rs', 'rust/fbtcore/src/mapper/deep/sqlconfig.rs',
                  'rust/fbtcore/vendor/', 'rust/fbtcore/build.rs')
-       Suites = @('Sql', 'DocFacts', 'Magic', 'FullText', 'CsRows') }
+       Suites = @('Sql', 'DocFacts', 'DocFactsApi', 'Magic', 'FullText', 'CsRows') }
     @{ Paths = @('rust/fbtcore/src/facts/')
-       Suites = @('DocFacts') }
+       Suites = @('DocFacts', 'DocFactsApi') }
     @{ Paths = @('src/Map/Py/')
        Suites = @('Py', 'Map', 'Magic', 'FullText') }
     @{ Paths = @('src/Map/CsRows/', 'src/Map/CSharpMap.cs', 'src/Map/MapRows.cs', 'rust/fbtcore/src/csproj/')

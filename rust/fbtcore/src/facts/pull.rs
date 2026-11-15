@@ -69,7 +69,7 @@ pub fn run(config: &Config, out: &mut Vec<String>) -> i64 {
     // this says which.
     let mut holder: Option<Option<Holder>> = None;
     for source in &config.sources {
-        if source.kind != "google-doc" {
+        if source.kind == "file" {
             out.push(format!("  {}: a `{}` source, kept by hand - nothing to pull ({})", source.name, source.kind, source.shown));
             continue;
         }
@@ -118,7 +118,11 @@ fn pull(http: &Http, source: &Source, bearer: &str, drive: &str, docs: &str) -> 
         return Ok(format!("unchanged (version {version}) - {}", source.shown));
     }
     let structured = source.path.extension().is_some_and(|e| e.eq_ignore_ascii_case("json"));
-    let body = if structured {
+    let body = if source.kind == "drive-file" {
+        // AN UPLOADED FILE IS SAVED AS IT IS (`alt=media`, what `drive.readonly` may read): the Docs API and the
+        // Markdown export refuse a .docx, and `docx.rs` reads it whole.
+        get(http, &format!("{drive}/drive/v3/files/{}?alt=media&supportsAllDrives=true", source.id), bearer)?
+    } else if structured {
         // THE DOCS API READS ONLY A GOOGLE DOC: an uploaded .docx or PDF is a 400 that says nothing on its own.
         get(http, &format!("{docs}/v1/documents/{}?includeTabsContent=true", source.id), bearer).map_err(|e| {
             if e == "HTTP 400" { NOT_A_DOC.to_string() } else { e }

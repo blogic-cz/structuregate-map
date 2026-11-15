@@ -19,14 +19,17 @@ commas are allowed, as in `structuregate.sql.json`.
   "auth": { "token_command": "gcloud auth application-default print-access-token" },
   "sources": [
     { "name": "ref", "kind": "google-doc", "id": "<google-doc-id>", "save": "ref.json" },
-    { "name": "local", "kind": "file", "path": "codes.md" }
+    { "name": "local", "kind": "file", "path": "codes.md" },
+    { "name": "spec", "kind": "drive-file", "id": "<drive-file-id>", "save": "spec.docx" }
   ],
   "facts": [
-    { "name": "codes", "source": "ref", "section": "Item codes", "table": "all", "key": "Item code", "label": 2 }
+    { "name": "codes", "source": "ref", "section": "Item codes", "table": "all", "key": "Item code", "label": 2 },
+    { "name": "routes", "source": "spec", "from": "routes", "prefix": "/api/" }
   ],
   "links": [
     { "facts": "codes", "to": { "kind": "seed", "object": "Demo.Items", "column": "ItemID" } },
-    { "facts": "types", "to": { "kind": "enum", "symbol": "Demo.Domain.Models.ItemKind" } }
+    { "facts": "types", "to": { "kind": "enum", "symbol": "Demo.Domain.Models.ItemKind" } },
+    { "facts": "routes", "to": { "kind": "endpoint" } }
   ]
 }
 ```
@@ -35,9 +38,16 @@ commas are allowed, as in `structuregate.sql.json`.
   one. structuregate never stores a token - see [the token](#the-token).
 - **`sources`**: `google-doc` is pulled into `save` - a `.json` save gets the document as Google keeps it (the
   Docs API's `documents.get`, every tab), the form to prefer; any other save gets Google's Markdown export.
-  `file` is a snapshot the consumer keeps itself (`.json` in the Docs API's shape, or Markdown); nothing is pulled.
-- **`facts`**: the tables under the heading named by `section`, up to the next heading of the same level or
-  higher - the heading equal to `section` ignoring case, else the only one containing it.
+  `drive-file` is an UPLOADED file (a `.docx`, which the Docs API and the Markdown export refuse), saved as it
+  is into `save` (which must end in `.docx`). `file` is a snapshot the consumer keeps itself (`.json` in the Docs
+  API's shape, a `.docx`, or Markdown); nothing is pulled.
+- **`facts`**: what lists facts under the heading named by `section`, up to the next heading of the same level or
+  higher - the heading equal to `section` ignoring case, else the only one containing it. No `section` is the
+  whole document (then `name` is required).
+  - `from`: `table` (the default) reads a table, below; `code` takes every code span (each once); `routes` takes
+    every route the text names - in running text, code spans, headings, list items, table cells and code blocks:
+    a word starting with `/` (a full url keeps its path; a query is cut), with its verb when the word before it is
+    `GET`/`POST`/`PUT`/`DELETE`/`PATCH`/`HEAD`/`OPTIONS`. `prefix` keeps only the routes starting with it.
   - `table`: `"all"` reads every table of the section as ONE list; a number reads that table only (default 1).
   - `key` (required) and `label`: a header cell's text, or a column number from 1. A named column is found
     in the first row of a table holding a cell with that text (GFM header row or body row); the rows after
@@ -51,13 +61,46 @@ commas are allowed, as in `structuregate.sql.json`.
 | `enum` | the members of the enum with that `symbol` (C#), or that `name` when exactly one enum has it (TypeScript) | value, or `"by": "name"` |
 | `consts` | the constants the class `symbol` declares (a static class of codes) | value, or `"by": "name"` |
 | `class` | the classes that list `symbol` among their bases | class name |
+| `endpoint` | every `http_endpoints` row, `VERB /template` - of one controller with `"class"` | segments and verb |
+| `property` | the properties of `symbol`: a C# class (named by `[JsonPropertyName]`/`[JsonProperty]` where it has one, `"by": "name"` for the C# name), a TypeScript interface, type alias or class | name, ignoring case |
+| `sql-column` | the columns of the SQL table `object` (`Schema.Table`, `dbo` by default) | name, ignoring case |
 
-Two values match when their text is equal, or both are numbers with the same value (`007` and `7`).
+Two values match when their text is equal, or both are numbers with the same value (`007` and `7`). A route
+matches an endpoint by its segments, ignoring case: a parameter (`{id}`, `{id:int}`, `:id`) there takes any one
+segment here, an optional one (`{id?}`) may be left out, and the verbs must agree when both name one (`[Route]`
+alone answers every verb).
+
+## `--facts-suggest`
+
+```
+structuregate --facts-suggest <map.sqlite> [--facts-config <file>]
+```
+
+Writing the `facts` and `links` by hand means knowing which part of a document lists what. This finds them by
+EXACT values, never by names: every column of every table (under its nearest heading), every section's code
+spans and routes, and the whole document's, against every value set the map holds - each seeded table's column,
+each enum's members (by value and by name), each class's constants (both), the endpoints, each type's
+properties, each SQL table's columns. A pair is a candidate when at least 2 values and a fifth of the document's
+group are code values; each group's best set and each set's best group are kept, the most values first:
+
+```
+facts suggest: 3 candidate(s) -> structuregate.facts.suggest.json
+  spec: table 2 under "Items", column 1 "ItemID": 396/580 values = seed dbo.Items.ItemID (600 code values)
+  spec: routes the whole document: 38/41 values = endpoint every endpoint (52 code values)
+```
+
+`structuregate.facts.suggest.json` (beside the config) holds each candidate as a ready `facts` entry and `link`
+entry, its counts and up to 10 of the document's values that matched nothing. Nothing is accepted: a person or an
+agent copies the right ones into the config, so the map run stays what the config says. Only `sources` are needed.
+Exit 0 (no candidate is an answer too), 2 when the config or the map cannot be read.
 
 ## How a snapshot is read - nothing is matched as text
 
 - **JSON** is walked as the Docs API structures it: a heading is a `HEADING_n` (or `TITLE`) paragraph style;
   a paragraph is bold when every visible character is in a bold run; a table is its rows and cells.
+- **A `.docx`** is a zip read by the gate itself: `word/document.xml` is the body, a paragraph is a heading when its
+  style's NAME is `heading N` or `Title` (`word/styles.xml`; the id may be localized) or it has an outline level, a
+  run is bold by `w:b` and a code span when set in a monospace font. A row's `line` is the body element's number.
 - **Markdown** is parsed by `pulldown-cmark` with GFM tables. Each cell, heading and paragraph is parsed once
   more as inline Markdown, because an export that escapes its own emphasis (`\*\*7\*\*`) leaves the markup
   in the text; the second parse removes it, so the key is `7`.
@@ -68,9 +111,9 @@ Two values match when their text is equal, or both are numbers with the same val
 structuregate --facts-pull [--facts-config <file>]
 ```
 
-For each `google-doc` source: ask Drive for its `version`; skip it when the snapshot exists and
-`<save>.meta.json` records that version; otherwise download it (the Docs API document for a `.json` save,
-else the Markdown export) and write the file and `<save>.meta.json` (`id`, `name`, `version`,
+For each `google-doc` and `drive-file` source: ask Drive for its `version`; skip it when the snapshot exists and
+`<save>.meta.json` records that version; otherwise download it (a drive-file as it is, `alt=media`; for a
+google-doc the Docs API document for a `.json` save, else the Markdown export) and write the file and `<save>.meta.json` (`id`, `name`, `version`,
 `modifiedTime`, `pulled`), each beside its target and renamed over it, so a failed pull leaves the last
 snapshot whole.
 
@@ -106,14 +149,16 @@ A pull only reads, so the token needs only `https://www.googleapis.com/auth/driv
   `"token_command": "gcloud auth application-default print-access-token"`.
 
 When Drive refuses the token (401/403), the pull asks Google which account it belongs to and which scopes it
-carries, and the error line names the cause: no Drive scope, or that account cannot read the document.
+carries, and the error line names the cause: no Drive scope, or that account cannot read the document. A 403 that
+says the API itself is switched off in the token's Cloud project (`SERVICE_DISABLED`) names that API and where
+to enable it instead.
 
 ## What the map writes
 
 | table | one row per |
 |---|---|
-| `doc_facts` | a row of a configured table: `facts`, `source`, `section`, `subsection` (the bold paragraph or lower heading above its table), `key`, `label`, `cells` (node rows `doc_facts__cells`, header -> cell; a column with no header is its number), `file` (the snapshot), `line` (a Markdown line, a JSON `startIndex`), `version` |
-| `doc_links` | a fact against a code value; `status` is `bound`, `missing in code` (in the document, not the code) or `missing in doc` (in the code, not the document); `target` is the code row (`sd:`, `e:`, `k:`, `c:`) with its `file`, `line`, `value`, `name` and a seed's `condition` |
+| `doc_facts` | a row of a configured table, or a code span or route (`key` only, `cells` empty): `facts`, `source`, `section`, `subsection` (the bold paragraph or lower heading above its table), `key`, `label`, `cells` (node rows `doc_facts__cells`, header -> cell; a column with no header is its number), `file` (the snapshot), `line` (a Markdown line, a JSON `startIndex`), `version` |
+| `doc_links` | a fact against a code value; `status` is `bound`, `missing in code` (in the document, not the code) or `missing in doc` (in the code, not the document); `target` is the code row (`sd:`, `e:`, `k:`, `c:`, `he:`, `m:`/`tm:`, a `sql_columns` id) with its `file`, `line`, `value`, `name` and a seed's `condition` |
 
 A fact matching several code rows (a code seeded twice) gets a `bound` row for each.
 

@@ -26,6 +26,9 @@ pub fn codes(conn: &Connection, link: &Link) -> Result<Vec<Code>, String> {
         "enum" => members(conn, link),
         "consts" => consts(conn, link),
         "class" => derived(conn, link),
+        "endpoint" => super::apis::endpoints(conn, link),
+        "property" => super::apis::properties(conn, link),
+        "sql-column" => super::apis::columns(conn, link),
         other => return Err(format!("no link kind `{other}`")),
     }
     .map_err(|e| format!("{} `{}` could not be read - {e}", link.kind, link.target))?;
@@ -33,6 +36,17 @@ pub fn codes(conn: &Connection, link: &Link) -> Result<Vec<Code>, String> {
         return Err(format!("{} `{}` holds no value in this map", link.kind, link.target));
     }
     Ok(found)
+}
+
+/// A code value and a documented one the same, as the link's kind compares them: a route by its segments and verb
+/// (`apis::same_endpoint`), a property or a column name ignoring case (JSON and SQL names are read so), anything else
+/// by `same`.
+pub fn matches(kind: &str, code: &str, fact: &str) -> bool {
+    match kind {
+        "endpoint" => super::apis::same_endpoint(code, fact),
+        "property" | "sql-column" => code.trim().eq_ignore_ascii_case(fact.trim()),
+        _ => same(code, fact),
+    }
 }
 
 /// Two values the same: equal text, or equal numbers (`42` and `42.0`, a doc's `042` and the code's `42`).
