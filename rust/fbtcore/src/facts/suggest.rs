@@ -301,11 +301,20 @@ fn pairs(groups: &[Group], sets: &[Set]) -> Vec<(usize, usize, Score)> {
             hits.push((g, s, Score { hits: n, chance, agree, doc_column, code_column, used }));
         }
     }
+    // A TIE IS BROKEN THE SAME WAY EVERY RUN: the higher rank, then the smaller document group, then the smaller code
+    // set (the more specific one), then the link by its names. `counted` is a hash map, so its order is no order.
+    let order = |a: &(usize, usize, Score), b: &(usize, usize, Score)| {
+        let link = |h: &(usize, usize, Score)| {
+            let l = &sets[h.1].link;
+            (sets[h.1].codes.len(), l.kind.clone(), l.target.clone(), l.column.clone(), l.by.clone())
+        };
+        b.2.rank().cmp(&a.2.rank()).then(groups[a.0].values.len().cmp(&groups[b.0].values.len())).then_with(|| link(a).cmp(&link(b))).then(a.0.cmp(&b.0))
+    };
     let best = |of: &dyn Fn(&(usize, usize, Score)) -> usize| {
         let mut top: HashMap<usize, &(usize, usize, Score)> = HashMap::new();
         for h in &hits {
             let slot = top.entry(of(h)).or_insert(h);
-            if h.2.rank() > slot.2.rank() || (h.2.rank() == slot.2.rank() && groups[h.0].values.len() < groups[slot.0].values.len()) {
+            if order(h, slot).is_lt() {
                 *slot = h;
             }
         }
@@ -313,7 +322,7 @@ fn pairs(groups: &[Group], sets: &[Set]) -> Vec<(usize, usize, Score)> {
     };
     let mut kept: Vec<(usize, usize, Score)> = best(&|h| h.0);
     kept.extend(best(&|h| h.1));
-    kept.sort_by(|a, b| b.2.rank().cmp(&a.2.rank()).then(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)));
+    kept.sort_by(|a, b| b.2.rank().cmp(&a.2.rank()).then(a.0.cmp(&b.0)).then_with(|| order(a, b)));
     kept.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
     kept
 }

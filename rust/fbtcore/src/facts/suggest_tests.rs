@@ -175,3 +175,29 @@ fn a_place_is_under_the_routes_its_headings_name_and_its_own_text_not_an_overvie
     blocks.insert(under + 2, reader::Block::Text { at: 0, text: "Answers GET /api/items/{id}/full.".into(), code: false });
     assert_eq!(routes_at(&blocks, table + 1), ["GET /api/items/{id}/full", "DELETE /api/items/{id}"]);
 }
+
+#[test]
+fn a_tie_goes_to_the_smaller_code_set_then_the_name_whatever_the_order_the_sets_were_read_in() {
+    let group = Group {
+        source: "d".into(),
+        shown: "d: column".into(),
+        fact: json!({}),
+        values: vec!["Yes".into(), "No".into()],
+        table: None,
+        routes: vec![],
+        bound: Bound::default(),
+    };
+    let set = |target: &str, values: &[&str]| Set {
+        link: Link { facts: String::new(), kind: "consts".into(), target: target.into(), column: String::new(), by: "value".into() },
+        codes: values.iter().map(|v| Code { value: v.to_string(), ..Default::default() }).collect(),
+        others: HashMap::new(),
+    };
+    let winner = |sets: Vec<Set>| {
+        let found = pairs(std::slice::from_ref(&group), &sets);
+        found.iter().map(|(_, s, _)| sets[*s].link.target.clone()).collect::<Vec<_>>()
+    };
+    let (big, small, twin) = (|| set("Demo.Big", &["Yes", "No", "Maybe"]), || set("Demo.Small", &["Yes", "No"]), || set("Demo.Also", &["Yes", "No"]));
+    // EACH SET KEEPS ITS BEST GROUP TOO, so every set is listed - the order says who won.
+    assert_eq!(winner(vec![big(), small(), twin()]), ["Demo.Also", "Demo.Small", "Demo.Big"]);
+    assert_eq!(winner(vec![twin(), small(), big()]), ["Demo.Also", "Demo.Small", "Demo.Big"]);
+}
