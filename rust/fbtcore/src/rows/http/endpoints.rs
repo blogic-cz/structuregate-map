@@ -218,7 +218,7 @@ fn class_route(
 
 /// A type's symbol as a base list and a declaration both name it: `Demo.Base<Demo.Item>` (the base, constructed) and
 /// `Demo.Base<T>` (the class, declared) are one class, `Demo.Base`1` - its name and how many type arguments it takes.
-fn generic_key(symbol: &str) -> String {
+pub(crate) fn generic_key(symbol: &str) -> String {
     let Some(open) = symbol.find('<') else { return symbol.to_string() };
     let mut nested = 0usize;
     let mut arity = 1;

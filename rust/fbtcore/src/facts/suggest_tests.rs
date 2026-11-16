@@ -160,6 +160,7 @@ fn a_field_table_under_an_endpoints_heading_ranks_the_type_that_endpoint_returns
     let of = |symbol: &str| written["candidates"].as_array().unwrap().iter().find(|c| c["link"]["to"]["symbol"] == symbol).cloned().unwrap();
     assert_eq!((of("Demo.TokenDto")["endpoint_type"].as_str(), of("Demo.AccountDto")["endpoint_type"].as_str()), (Some("response"), None));
     assert_eq!(of("Demo.TokenDto")["section_endpoints"], json!(["POST /api/token"]));
+    assert_eq!((of("Demo.AccountDto")["endpoints_using"].clone(), of("Demo.AccountDto")["endpoints_using_count"].clone()), (json!(["GET /api/me (response)"]), json!(1)));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

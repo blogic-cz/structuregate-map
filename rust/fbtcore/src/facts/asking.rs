@@ -45,7 +45,7 @@ share values. ACCEPT a candidate when the document's part is a list of the same 
 only one side has is exactly what the check that follows will report, so unmatched values are never a reason to reject - judge \
 whether the two sides NAME THE SAME CONCEPT, not whether they agree. REJECT it only when the overlap is a coincidence: small numbers or common words that \
 any list shares, a column of a different concept that happens to reuse some values, or a pair another candidate covers better. \
-When a candidate carries `section_endpoints`, the document's part sits under a section naming those HTTP endpoints, and `endpoint_type` says whether the code set is a type such an endpoint takes (request) or returns (response), as the compiler resolved it; a type's properties with `endpoint_type` null are another class that only shares the names - prefer the one the endpoint uses. ";
+`endpoints_using` lists the HTTP endpoints that take (request) or return (response) a type, resolved by the compiler - the way to tell apart classes that share a table's names. When a candidate carries `section_endpoints`, the document's part sits under a section naming those HTTP endpoints, and `endpoint_type` says whether the code set is a type such an endpoint takes (request) or returns (response), as the compiler resolved it; a type's properties with `endpoint_type` null are another class that only shares the names - prefer the one the endpoint uses. ";
 
 const WITHOUT_TOOL: &str = "Judge only from what you are given. Answer every candidate by its number, with a reason of one sentence.";
 
@@ -61,6 +61,10 @@ pub fn listed(n: usize, c: &Value) -> Value {
         "n": n, "document": c["found"], "code": c["link"]["to"], "matched": c["matched"], "of": c["of"],
         "code_values": c["code_values"], "matched_values": c["matched_values"], "unmatched_document_values": c["unmatched"],
     });
+    if let Some(users) = c.get("endpoints_using") {
+        one["endpoints_using"] = users.clone();
+        one["endpoints_using_count"] = c["endpoints_using_count"].clone();
+    }
     if let Some(endpoints) = c.get("section_endpoints") {
         one["section_endpoints"] = endpoints.clone();
         one["endpoint_type"] = c["endpoint_type"].clone();

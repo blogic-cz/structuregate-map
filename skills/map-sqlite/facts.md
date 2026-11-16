@@ -89,8 +89,9 @@ group are code values. A count alone misleads, so pairs are RANKED by:
    column becomes the candidate's `label`.
 2. **the section's endpoint** - a routed section (a route in its heading or one above it, or in the text right
    under its own heading - not an overview above it; `/api/x POST` too) binds its endpoints; a type its action takes or returns (resolved return, parameter and
-   `[ProducesResponseType]` types, generic arguments and property types followed) outranks a class that only shares
-   the names: `, the response type of POST /api/x` / `, no type of ...`, and `section_endpoints`/`endpoint_type`.
+   `[ProducesResponseType]` types, generic arguments and property types followed, a generic base's `T` bound by the
+   controller serving it) outranks a class that only shares the names: `, the response type of POST /api/x` /
+   `, no type of ...`, and `section_endpoints`/`endpoint_type`; every property candidate lists `endpoints_using`.
 3. **hits beyond chance** - the document's integers times how densely the code set covers THEIR range (a key
    column `1..50` matches any small-int enum, and any `1..N` ordinal column whatever else it holds): that many hits
    are expected and taken off; then the hits.
@@ -106,8 +107,7 @@ facts suggest: 3 candidate(s) -> structuregate.facts.suggest.json
 
 `structuregate.facts.suggest.json` (beside the config) holds each candidate as a ready `facts` entry and `link`
 entry, its counts and up to 10 of the document's values that matched nothing. Nothing is accepted: a person or an
-agent copies the right ones into the config, so the map run stays what the config says. Only `sources` are needed.
-Exit 0 (no candidate is an answer too), 2 when the config or the map cannot be read.
+agent copies the right ones into the config. Only `sources` are needed. Exit 0 (none is an answer too), 2 no config/map.
 
 ### `--facts-review`: a model reads the candidates
 

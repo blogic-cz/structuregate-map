@@ -19,6 +19,7 @@ mod asking;
 pub mod config;
 #[path = "snapshot/docx.rs"]
 mod docx;
+mod generics;
 mod links;
 pub mod pull;
 mod rank;

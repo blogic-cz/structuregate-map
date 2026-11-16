@@ -10,6 +10,7 @@
 mod calls;
 mod cscalls;
 mod endpoints;
+pub(crate) use endpoints::generic_key;
 pub mod inputs;
 mod matching;
 

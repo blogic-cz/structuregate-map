@@ -4,7 +4,8 @@
 //! resolved it), each PARAMETER's type (`parameters.type`) and each `[ProducesResponseType(typeof(X))]` (the folded
 //! `typeof`, `decorators.arg_values`). Every name in such a type is read - `Task<ActionResult<Response<ItemDto>>>`
 //! names `Response` and `ItemDto` - and kept when it is a class the map holds properties of; a kept class's own
-//! property types are walked the same way (a visited set ends the walk), so a nested object is the endpoint's too.
+//! property types are walked the same way (a visited set ends the walk), so a nested object is the endpoint's too. An
+//! action inherited from a generic base has its type parameters bound by the serving controller (`generics.rs`).
 
 use super::apis::same_endpoint;
 use crate::rows::dups::{has_columns, items_sql, owner_sql, text};
@@ -43,6 +44,17 @@ pub struct Bound {
 }
 
 impl Uses {
+    /// Every class an endpoint uses, with each endpoint using it and how (`GET /api/items (response)`), in endpoint order.
+    pub fn users(&self) -> HashMap<String, Vec<String>> {
+        let mut out: HashMap<String, Vec<String>> = HashMap::new();
+        for (endpoint, classes) in &self.endpoints {
+            for (class, role) in classes {
+                out.entry(class.clone()).or_default().push(format!("{endpoint} ({})", role.word()));
+            }
+        }
+        out
+    }
+
     /// The endpoints the routes name (each route against each endpoint, as a link compares them) and their classes;
     /// a class both takes and returns is a response.
     pub fn of(&self, routes: &[String]) -> Bound {
@@ -97,13 +109,19 @@ pub fn load(conn: &Connection) -> rusqlite::Result<Uses> {
             by_func.entry(func).or_default().push((typed, Role::Response));
         }
     }
-    let mut stmt = conn.prepare("SELECT verb, template, func FROM http_endpoints ORDER BY id")?;
+    // AN INHERITED ACTION'S TYPES are its base's, with the base's type parameters bound by the class serving it.
+    let hierarchy = super::generics::Hierarchy::read(conn)?;
+    let declaring = if has_columns(conn, "functions", &["cls"]) { "coalesce(f.file, ''), coalesce(f.cls, '')" } else { "'', ''" };
+    let mut stmt = conn.prepare(&format!(
+        "SELECT e.verb, e.template, e.func, e.file, e.cls, {declaring} FROM http_endpoints e LEFT JOIN functions f ON f.id = e.func ORDER BY e.id"
+    ))?;
     let mut endpoints = Vec::new();
-    for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?)))? {
-        let (verb, template, func) = row?;
+    for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, text(r, 4)?, text(r, 5)?, text(r, 6)?)))? {
+        let (verb, template, func, path, server, file, owner) = row?;
+        let bound = hierarchy.bindings((&path, &server), (&file, &owner));
         let mut used: BTreeMap<String, Role> = BTreeMap::new();
         for (typed, role) in by_func.get(&func).into_iter().flatten() {
-            for class in classes.reached(typed) {
+            for class in classes.reached(&super::generics::substitute(typed, &bound)) {
                 widen(&mut used, &class, *role);
             }
         }

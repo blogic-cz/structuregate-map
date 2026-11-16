@@ -183,13 +183,19 @@ Test-Case 'docfactsapi: a field table under a routed heading is matched to the t
             "public class AccountDto { $three }$nl" +
             "public class TokenDto { $three }$nl" +
             "public class LoginDto { public string UserName { get; set; } = `"`"; public string Password { get; set; } = `"`"; }$nl" +
+            # AN ACTION OF A GENERIC BASE takes its type parameter, bound by the controller serving it.
+            "public class WidgetDto { public string Colour { get; set; } = `"`"; public int Weight { get; set; } }$nl" +
+            "public class PaintDto { public string Colour { get; set; } = `"`"; public int Weight { get; set; } }$nl" +
+            "public abstract class JobBase<TA> { [HttpPost] [Route(`"run-all`")] public object RunAll(TA item) => item!; }$nl" +
+            "[Route(`"api/widgets`")] public class WidgetsController : JobBase<WidgetDto> { }$nl" +
             "[Route(`"api/auth`")]$nl" +
             "public class AuthController {$nl" +
             "    [HttpPost(`"token`")] public System.Threading.Tasks.Task<Envelope<TokenDto>> Token(LoginDto login) => null!;$nl" +
             "    [HttpGet(`"me`")]$nl    [ProducesResponseType(typeof(AccountDto), 200)]$nl    public object Me() => 1;$nl}$nl"
         'docs/api.md' = "# Auth$nl$nl## 2.1 /api/auth/token POST$nl$nl### Request$nl$nl| Name | Meaning |$nl|---|---|$nl| userName | who |$nl| password | secret |$nl$nl" +
             "### Response$nl$nl| Name | Meaning |$nl|---|---|$nl| accessToken | the token |$nl| expiresIn | seconds |$nl| userName | who |$nl$nl" +
-            "## 2.2 GET /api/auth/me$nl$nl| Name | Meaning |$nl|---|---|$nl| accessToken | the token |$nl| expiresIn | seconds |$nl| userName | who |$nl"
+            "## 2.2 GET /api/auth/me$nl$nl| Name | Meaning |$nl|---|---|$nl| accessToken | the token |$nl| expiresIn | seconds |$nl| userName | who |$nl$nl" +
+            "## 2.3 POST /api/widgets/run-all$nl$nl| Field | Meaning |$nl|---|---|$nl| colour | paint |$nl| weight | grams |$nl"
         'structuregate.facts.json' = '{ "sources": [ { "name": "api", "kind": "file", "path": "docs/api.md" } ] }'
     }
     $db = Join-Path $tree 'api.sqlite'
@@ -199,4 +205,5 @@ Test-Case 'docfactsapi: a field table under a routed heading is matched to the t
     Assert-Line $s 'api: table 1 under "Request", column 1 "Name": 2/2 values = property Demo.Api.LoginDto (2 code values, the request type of POST /api/auth/token)'
     Assert-Line $s 'api: table 1 under "Response", column 1 "Name": 3/3 values = property Demo.Api.TokenDto (3 code values, the response type of POST /api/auth/token)'
     Assert-Line $s 'api: table 1 under "2.2 GET /api/auth/me", column 1 "Name": 3/3 values = property Demo.Api.AccountDto (3 code values, the response type of GET /api/auth/me)'
+    Assert-Line $s 'api: table 1 under "2.3 POST /api/widgets/run-all", column 1 "Field": 2/2 values = property Demo.Api.WidgetDto (2 code values, the request type of POST /api/widgets/run-all)'
 }

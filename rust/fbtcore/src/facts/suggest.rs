@@ -61,6 +61,7 @@ pub fn run(db: &str, config: &Config) -> Result<Vec<String>, String> {
     for group in &mut groups {
         group.bound = used.of(&group.routes);
     }
+    let users = used.users();
     let found = pairs(&groups, &sets);
     let mut entries = Vec::new();
     for (n, (g, s, score)) in found.iter().enumerate() {
@@ -105,6 +106,15 @@ pub fn run(db: &str, config: &Config) -> Result<Vec<String>, String> {
             "agree_on": if score.agree >= AT_LEAST { json!({"document_column": score.doc_column, "code": score.code_column}) } else { Value::Null },
             "matched_values": matched, "unmatched": unmatched, "facts": fact, "link": link,
         }));
+        // EVERY ENDPOINT USING A PROPERTY SET'S CLASS, wherever the document names it: when several classes share a table's
+        // names, which endpoint takes or returns each is what tells them apart.
+        if set.link.kind == "property"
+            && let Some(by) = users.get(&set.link.target)
+        {
+            let entry = entries.last_mut().expect("just pushed");
+            entry["endpoints_using"] = json!(by.iter().take(10).collect::<Vec<_>>());
+            entry["endpoints_using_count"] = json!(by.len());
+        }
         // THE ENDPOINT THE SECTION NAMES, and whether this type is one it takes or returns - resolved symbols, not names.
         if !group.bound.endpoints.is_empty() {
             let entry = entries.last_mut().expect("just pushed");
