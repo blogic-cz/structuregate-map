@@ -279,28 +279,28 @@ mod tests {
                 ("GET /api/items/{id}".into(), roles(&[("Demo.A", Role::Response), ("Demo.B", Role::Response)])),
                 ("GET /api/other".into(), roles(&[("Demo.C", Role::Response)])),
             ],
-            calls: vec![("POST /demo/clients/redacted".into(), roles(&[("Demo.RespA", Role::OutboundResponse), ("Demo.RespB", Role::OutboundResponse)]))],
+            calls: vec![("POST /demo/orders/lookup".into(), roles(&[("Demo.RespA", Role::OutboundResponse), ("Demo.RespB", Role::OutboundResponse)]))],
         };
         let bound = uses.of(&["POST /api/items".into(), "/api/items/7".into()]);
         assert_eq!(bound.endpoints, ["POST /api/items", "GET /api/items/{id}"]);
         assert_eq!(bound.classes, roles(&[("Demo.A", Role::Response), ("Demo.B", Role::Response)]));
         assert_eq!(bound.used_by["Demo.B"], ["GET /api/items/{id}"]);
         // A ROUTE THE TREE CALLS binds by the end of the documented path: the document's `/api` is the caller's base url.
-        let called = uses.of(&["POST /api/demo/clients/redacted".into()]);
-        assert_eq!(called.endpoints, ["POST /demo/clients/redacted"]);
+        let called = uses.of(&["POST /api/demo/orders/lookup".into()]);
+        assert_eq!(called.endpoints, ["POST /demo/orders/lookup"]);
         assert_eq!(called.classes, roles(&[("Demo.RespA", Role::OutboundResponse), ("Demo.RespB", Role::OutboundResponse)]));
-        assert_eq!(uses.users()["Demo.RespB"], ["POST /demo/clients/redacted (outbound response)"]);
+        assert_eq!(uses.users()["Demo.RespB"], ["POST /demo/orders/lookup (outbound response)"]);
     }
 
     #[test]
     fn a_called_url_is_its_path_and_matches_a_documented_route_by_its_end() {
-        assert_eq!(call_route("POST", "https://x.example/api/demo/clients/redacted").as_deref(), Some("POST /api/demo/clients/redacted"));
+        assert_eq!(call_route("POST", "https://x.example/api/demo/orders/lookup").as_deref(), Some("POST /api/demo/orders/lookup"));
         assert_eq!(call_route("GET", "{}/{}/demo/items/{}").as_deref(), Some("GET /demo/items/{}"));
         assert_eq!((call_route("GET", "{}/*/items"), call_route("GET", "https://x.example"), call_route("GET", "{}")), (None, None, None));
-        assert!(same_call("POST /demo/clients/redacted", "POST /api/demo/clients/redacted"));
+        assert!(same_call("POST /demo/orders/lookup", "POST /api/demo/orders/lookup"));
         assert!(same_call("GET /demo/items/{}", "/api/demo/items/7"));
-        assert!(!same_call("POST /demo/clients/redacted", "GET /api/demo/clients/redacted"));
-        assert!(!same_call("POST /demo/clients/redacted", "POST /api/other/clients/redacted"));
+        assert!(!same_call("POST /demo/orders/lookup", "GET /api/demo/orders/lookup"));
+        assert!(!same_call("POST /demo/orders/lookup", "POST /api/other/orders/lookup"));
         assert!(!same_call("GET /items", "GET /api/items"));
         assert!(!same_call("GET /{}/{}", "GET /api/x/y"));
     }

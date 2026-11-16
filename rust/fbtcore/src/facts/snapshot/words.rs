@@ -112,7 +112,7 @@ mod tests {
             "POST /api/items",
             "/api/help"
         ]);
-        assert_eq!(routes_in("3.4.2 /api/items/redacted POST"), vec!["POST /api/items/redacted"]);
+        assert_eq!(routes_in("2.1 /api/items/lookup POST"), vec!["POST /api/items/lookup"]);
         assert_eq!(routes_in("/api/a GET /api/b"), vec!["/api/a", "GET /api/b"]);
         assert_eq!(routes_in("a // comment, //cdn.example/lib, and/or 1/2 and / alone"), Vec::<String>::new());
     }

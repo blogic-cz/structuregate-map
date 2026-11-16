@@ -174,14 +174,14 @@ Test-Case 'docfactsapi: an uploaded Word file is a snapshot like any other' {
 Test-Case 'docfactsapi: a field table under a routed heading is matched to the type that endpoint takes or returns' {
     if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { Write-Host '    (no dotnet - skipped)'; return }
     $nl = $script:DocApiNl
-    $three = 'public string AccessToken { get; set; } = "";' + ' public int ExpiresIn { get; set; }' + ' public string UserName { get; set; } = "";'
+    $three = 'public string TicketCode { get; set; } = "";' + ' public int ExpiresIn { get; set; }' + ' public string UserName { get; set; } = "";'
     # TWO CLASSES WITH THE SAME PROPERTY NAMES: only the resolved return type tells which one an endpoint returns.
     $tree = Use-Tree @{
         'App/App.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
         'App/Auth.cs' = "namespace Demo.Api;$nl" +
             "public class Envelope<T> { public T Data { get; set; } = default!; public int Code { get; set; } }$nl" +
-            "public class AccountDto { $three }$nl" +
-            "public class TokenDto { $three }$nl" +
+            "public class ProfileDto { $three }$nl" +
+            "public class TicketDto { $three }$nl" +
             "public class LoginDto { public string UserName { get; set; } = `"`"; public string Password { get; set; } = `"`"; }$nl" +
             # AN ACTION OF A GENERIC BASE takes its type parameter, bound by the controller serving it.
             "public class WidgetDto { public string Colour { get; set; } = `"`"; public int Weight { get; set; } }$nl" +
@@ -193,31 +193,31 @@ Test-Case 'docfactsapi: a field table under a routed heading is matched to the t
             "    public async System.Threading.Tasks.Task<TResp?> PostAsync<TReq, TResp>(string url, TReq body) {$nl" +
             "        var r = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(http, url, body);$nl" +
             "        return await System.Net.Http.Json.HttpContentJsonExtensions.ReadFromJsonAsync<TResp>(r.Content); } }$nl" +
-            "public class ClientA { public string ClientId { get; set; } = `"`"; public string Status { get; set; } = `"`"; }$nl" +
-            "public class ClientB { public string ClientId { get; set; } = `"`"; public int Score { get; set; } }$nl" +
+            "public class OrderA { public string OrderNo { get; set; } = `"`"; public string Status { get; set; } = `"`"; }$nl" +
+            "public class OrderB { public string OrderNo { get; set; } = `"`"; public int Score { get; set; } }$nl" +
             "public abstract class ServiceBase { protected string Prefix() => System.Environment.GetEnvironmentVariable(`"BASE`") ?? `"`";$nl" +
-            "    protected string DetailUrl() => `$`"{Prefix()}/demo/clients/redacted`"; }$nl" +
-            "public class AService : ServiceBase { private readonly ApiClient c = new(); public object Run(LoginDto q) => c.PostAsync<LoginDto, ClientA>(DetailUrl(), q); }$nl" +
-            "public class BService : ServiceBase { private readonly ApiClient c = new(); public object Run(LoginDto q) => c.PostAsync<LoginDto, ClientB>(DetailUrl(), q); }$nl" +
+            "    protected string DetailUrl() => `$`"{Prefix()}/demo/orders/lookup`"; }$nl" +
+            "public class AService : ServiceBase { private readonly ApiClient c = new(); public object Run(LoginDto q) => c.PostAsync<LoginDto, OrderA>(DetailUrl(), q); }$nl" +
+            "public class BService : ServiceBase { private readonly ApiClient c = new(); public object Run(LoginDto q) => c.PostAsync<LoginDto, OrderB>(DetailUrl(), q); }$nl" +
             "[Route(`"api/auth`")]$nl" +
             "public class AuthController {$nl" +
-            "    [HttpPost(`"token`")] public System.Threading.Tasks.Task<Envelope<TokenDto>> Token(LoginDto login) => null!;$nl" +
-            "    [HttpGet(`"me`")]$nl    [ProducesResponseType(typeof(AccountDto), 200)]$nl    public object Me() => 1;$nl}$nl"
-        'docs/api.md' = "# Auth$nl$nl## 2.1 /api/auth/token POST$nl$nl### Request$nl$nl| Name | Meaning |$nl|---|---|$nl| userName | who |$nl| password | secret |$nl$nl" +
-            "### Response$nl$nl| Name | Meaning |$nl|---|---|$nl| accessToken | the token |$nl| expiresIn | seconds |$nl| userName | who |$nl$nl" +
-            "## 2.2 GET /api/auth/me$nl$nl| Name | Meaning |$nl|---|---|$nl| accessToken | the token |$nl| expiresIn | seconds |$nl| userName | who |$nl$nl" +
+            "    [HttpPost(`"ticket`")] public System.Threading.Tasks.Task<Envelope<TicketDto>> Ticket(LoginDto login) => null!;$nl" +
+            "    [HttpGet(`"me`")]$nl    [ProducesResponseType(typeof(ProfileDto), 200)]$nl    public object Me() => 1;$nl}$nl"
+        'docs/api.md' = "# Auth$nl$nl## 2.1 /api/auth/ticket POST$nl$nl### Request$nl$nl| Name | Meaning |$nl|---|---|$nl| userName | who |$nl| password | secret |$nl$nl" +
+            "### Response$nl$nl| Name | Meaning |$nl|---|---|$nl| ticketCode | the ticket |$nl| expiresIn | seconds |$nl| userName | who |$nl$nl" +
+            "## 2.2 GET /api/auth/me$nl$nl| Name | Meaning |$nl|---|---|$nl| ticketCode | the ticket |$nl| expiresIn | seconds |$nl| userName | who |$nl$nl" +
             "## 2.3 POST /api/widgets/run-all$nl$nl| Field | Meaning |$nl|---|---|$nl| colour | paint |$nl| weight | grams |$nl$nl" +
-            "## 3.1 POST /api/demo/clients/redacted$nl$nl| Item | Meaning |$nl|---|---|$nl| clientId | who |$nl| status | state |$nl| score | rank |$nl"
+            "## 3.1 POST /api/demo/orders/lookup$nl$nl| Item | Meaning |$nl|---|---|$nl| orderNo | which |$nl| status | state |$nl| score | rank |$nl"
         'structuregate.facts.json' = '{ "sources": [ { "name": "api", "kind": "file", "path": "docs/api.md" } ] }'
     }
     $db = Join-Path $tree 'api.sqlite'
     Assert-Exit (Invoke-Gate --root $tree --ext '.cs' --map-sqlite $db) 0
     $s = Invoke-Gate --facts-suggest $db --facts-config (Join-Path $tree 'structuregate.facts.json')
     Assert-Exit $s 0
-    Assert-Line $s 'api: table 1 under "Request", column 1 "Name": 2/2 values = property Demo.Api.LoginDto (2 code values, the request type of POST /api/auth/token)'
-    Assert-Line $s 'api: table 1 under "Response", column 1 "Name": 3/3 values = property Demo.Api.TokenDto (3 code values, the response type of POST /api/auth/token)'
-    Assert-Line $s 'api: table 1 under "2.2 GET /api/auth/me", column 1 "Name": 3/3 values = property Demo.Api.AccountDto (3 code values, the response type of GET /api/auth/me)'
+    Assert-Line $s 'api: table 1 under "Request", column 1 "Name": 2/2 values = property Demo.Api.LoginDto (2 code values, the request type of POST /api/auth/ticket)'
+    Assert-Line $s 'api: table 1 under "Response", column 1 "Name": 3/3 values = property Demo.Api.TicketDto (3 code values, the response type of POST /api/auth/ticket)'
+    Assert-Line $s 'api: table 1 under "2.2 GET /api/auth/me", column 1 "Name": 3/3 values = property Demo.Api.ProfileDto (3 code values, the response type of GET /api/auth/me)'
     Assert-Line $s 'api: table 1 under "2.3 POST /api/widgets/run-all", column 1 "Field": 2/2 values = property Demo.Api.WidgetDto (2 code values, the request type of POST /api/widgets/run-all)'
-    Assert-Line $s 'values = property Demo.Api.ClientA (2 code values, the outbound response type of POST /demo/clients/redacted)'
-    Assert-Line $s 'values = property Demo.Api.ClientB (2 code values, the outbound response type of POST /demo/clients/redacted)'
+    Assert-Line $s 'values = property Demo.Api.OrderA (2 code values, the outbound response type of POST /demo/orders/lookup)'
+    Assert-Line $s 'values = property Demo.Api.OrderB (2 code values, the outbound response type of POST /demo/orders/lookup)'
 }

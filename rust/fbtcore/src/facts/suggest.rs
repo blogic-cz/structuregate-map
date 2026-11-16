@@ -235,7 +235,7 @@ fn columns_of(source: &str, blocks: &[reader::Block], heading: &str, rows: &[(us
 }
 
 /// The routes a place in a document is under: those its own heading and each heading above it name, and those the
-/// text right under its own heading names (up to the next heading). A field table under `3.4.2 POST /api/items`, or
+/// text right under its own heading names (up to the next heading). A field table under `2.1 POST /api/items`, or
 /// under `Response` below it, describes that endpoint's types; an overview above it that lists every route, or a
 /// sibling section's route, is no part of it.
 fn routes_at(blocks: &[reader::Block], at: usize) -> Vec<String> {

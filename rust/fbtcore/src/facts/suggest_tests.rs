@@ -112,7 +112,7 @@ fn a_field_table_under_an_endpoints_heading_ranks_the_type_that_endpoint_returns
     let dir = std::env::temp_dir().join(format!("fbt-suggest-uses-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let doc = "# Auth\n\n## 2.1 /api/token POST\n\nReturns the token.\n\n### Response\n\n| Name | Meaning |\n|---|---|\n| accessToken | the token |\n\
+    let doc = "# Auth\n\n## 2.1 /api/ticket POST\n\nReturns the ticket.\n\n### Response\n\n| Name | Meaning |\n|---|---|\n| ticketCode | the ticket |\n\
                | expiresIn | seconds |\n| userName | who |\n";
     std::fs::write(dir.join("a.md"), doc).unwrap();
     let db = dir.join("map.sqlite");
@@ -121,24 +121,24 @@ fn a_field_table_under_an_endpoints_heading_ranks_the_type_that_endpoint_returns
         let put = |table: &str, rows: Vec<Value>| crate::rows::store::insert_rows(&conn, table, &rows).unwrap();
         conn.execute_batch(
             "CREATE TABLE http_endpoints (id, file, cls, method, line, verb, template, route, func);
-             INSERT INTO http_endpoints VALUES ('he:1', 'f:1', 'AuthController', 'Token', 3, 'POST', 'api/token', 'api/token', 'fn:1'),
+             INSERT INTO http_endpoints VALUES ('he:1', 'f:1', 'AuthController', 'Ticket', 3, 'POST', 'api/ticket', 'api/ticket', 'fn:1'),
                ('he:2', 'f:1', 'AuthController', 'Me', 9, 'GET', 'api/me', 'api/me', 'fn:2');",
         )
         .unwrap();
         put("functions", vec![
-            json!({"id": "fn:1", "file": "f:1", "name": "Token", "qualname": "AuthController.Token", "line": 3, "end_line": 7,
-                   "type": "System.Threading.Tasks.Task<Microsoft.AspNetCore.Mvc.ActionResult<Demo.Envelope<Demo.TokenDto>>>"}),
-            json!({"id": "fn:2", "file": "f:1", "name": "Me", "qualname": "AuthController.Me", "line": 9, "end_line": 10, "type": "Demo.AccountDto"}),
+            json!({"id": "fn:1", "file": "f:1", "name": "Ticket", "qualname": "AuthController.Ticket", "line": 3, "end_line": 7,
+                   "type": "System.Threading.Tasks.Task<Microsoft.AspNetCore.Mvc.ActionResult<Demo.Envelope<Demo.TicketDto>>>"}),
+            json!({"id": "fn:2", "file": "f:1", "name": "Me", "qualname": "AuthController.Me", "line": 9, "end_line": 10, "type": "Demo.ProfileDto"}),
         ]);
-        put("parameters", vec![json!({"id": "p:1", "file": "f:1", "qualname": "AuthController.Token", "line": 4, "type": "Demo.LoginDto"})]);
+        put("parameters", vec![json!({"id": "p:1", "file": "f:1", "qualname": "AuthController.Ticket", "line": 4, "type": "Demo.LoginDto"})]);
         // THE DECOY FIRST: the same three names on a class another endpoint returns.
         let props = |cls: &str, names: &[(&str, &str)]| -> Vec<Value> {
             names.iter().enumerate().map(|(i, (n, t))| json!({"id": format!("m:{cls}:{i}"), "file": "f:2", "line": i, "kind": "property", "name": n,
                                                              "cls": cls, "class_symbol": format!("Demo.{cls}"), "type": t})).collect()
         };
-        let three = [("AccessToken", "string"), ("ExpiresIn", "int"), ("UserName", "string")];
-        let mut members = props("AccountDto", &three);
-        members.extend(props("TokenDto", &three));
+        let three = [("TicketCode", "string"), ("ExpiresIn", "int"), ("UserName", "string")];
+        let mut members = props("ProfileDto", &three);
+        members.extend(props("TicketDto", &three));
         members.extend(props("LoginDto", &[("UserName", "string"), ("Password", "string")]));
         let mut envelope = props("Envelope<T>", &[("Data", "T"), ("Code", "int")]);
         envelope.iter_mut().for_each(|m| m["class_symbol"] = json!("Demo.Envelope<T>"));
@@ -152,15 +152,15 @@ fn a_field_table_under_an_endpoints_heading_ranks_the_type_that_endpoint_returns
     };
     let lines = run(db.to_str().unwrap(), &config).unwrap();
     let at = |what: &str| lines.iter().position(|l| l.contains(what)).unwrap_or_else(|| panic!("no {what} in {lines:#?}"));
-    let (token, account) = (at("= property Demo.TokenDto"), at("= property Demo.AccountDto"));
-    assert!(token < account, "{lines:#?}");
-    assert!(lines[token].contains("3/3 values = property Demo.TokenDto (3 code values, the response type of POST /api/token)"), "{}", lines[token]);
-    assert!(lines[account].contains("(3 code values, no type of POST /api/token)"), "{}", lines[account]);
+    let (ticket, profile) = (at("= property Demo.TicketDto"), at("= property Demo.ProfileDto"));
+    assert!(ticket < profile, "{lines:#?}");
+    assert!(lines[ticket].contains("3/3 values = property Demo.TicketDto (3 code values, the response type of POST /api/ticket)"), "{}", lines[ticket]);
+    assert!(lines[profile].contains("(3 code values, no type of POST /api/ticket)"), "{}", lines[profile]);
     let written: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(FILE_NAME)).unwrap()).unwrap();
     let of = |symbol: &str| written["candidates"].as_array().unwrap().iter().find(|c| c["link"]["to"]["symbol"] == symbol).cloned().unwrap();
-    assert_eq!((of("Demo.TokenDto")["endpoint_type"].as_str(), of("Demo.AccountDto")["endpoint_type"].as_str()), (Some("response"), None));
-    assert_eq!(of("Demo.TokenDto")["section_endpoints"], json!(["POST /api/token"]));
-    assert_eq!((of("Demo.AccountDto")["endpoints_using"].clone(), of("Demo.AccountDto")["endpoints_using_count"].clone()), (json!(["GET /api/me (response)"]), json!(1)));
+    assert_eq!((of("Demo.TicketDto")["endpoint_type"].as_str(), of("Demo.ProfileDto")["endpoint_type"].as_str()), (Some("response"), None));
+    assert_eq!(of("Demo.TicketDto")["section_endpoints"], json!(["POST /api/ticket"]));
+    assert_eq!((of("Demo.ProfileDto")["endpoints_using"].clone(), of("Demo.ProfileDto")["endpoints_using_count"].clone()), (json!(["GET /api/me (response)"]), json!(1)));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
