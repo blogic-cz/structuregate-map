@@ -363,8 +363,20 @@ fn sets(conn: &Connection) -> rusqlite::Result<Vec<Set>> {
     for target in list(conn, sql, &["sql_objects", "sql_columns"])? {
         asked.push(link("sql-column", target, "value"));
     }
-    // A SET THAT CANNOT BE READ (a name two enums share) is no candidate: `links::codes` says why, and here that is no news.
-    out.extend(asked.into_iter().filter_map(|l| links::codes(conn, &l).ok().map(|codes| Set { link: l, codes, others: HashMap::new() })));
+    // EACH KIND READ ONCE for every target: asked per target, thousands of classes scanned `members` thousands of times.
+    let (enums, consts, properties, columns) = (links::Enums::read(conn)?, links::Consts::read(conn)?, apis::Properties::read(conn)?, apis::Columns::read(conn)?);
+    let codes = |l: &Link| -> Option<Vec<Code>> {
+        match l.kind.as_str() {
+            // A SET THAT CANNOT BE READ (a name two enums share) is no candidate, and here that is no news.
+            "enum" => enums.codes(conn, &l.target, &l.by).ok(),
+            "consts" => Some(consts.codes(&l.target, &l.by)),
+            "property" => Some(properties.codes(&l.target, &l.by)),
+            "sql-column" => Some(columns.codes(&l.target)),
+            _ => links::codes(conn, l).ok(),
+        }
+        .filter(|c| !c.is_empty())
+    };
+    out.extend(asked.into_iter().filter_map(|l| codes(&l).map(|codes| Set { link: l, codes, others: HashMap::new() })));
     Ok(out)
 }
 

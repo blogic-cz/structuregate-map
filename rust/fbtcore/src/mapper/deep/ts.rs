@@ -535,7 +535,7 @@ pub(super) fn parse_tree(into: &mut Collector, deep: &Deep, parse: &str, root: &
         return Parsed::Nothing;
     }
     if !ran.stdout.contains("MAP-DONE|") {
-        into.errors.push(format!("HALF      {LANGUAGE}: node died half way (exit {}) — {}", ran.exit, hosts::tail(&(ran.stderr.clone() + &ran.stdout))));
+        into.errors.push(format!("HALF      {LANGUAGE}: node died half way (exit {}) — {}", ran.exit, hosts::node_died(&deep.ts_host, root, &(ran.stderr.clone() + &ran.stdout))));
         return Parsed::Nothing;
     }
     if work.rows.is_file() { Parsed::Rows } else { Parsed::Nothing }

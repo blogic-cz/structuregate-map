@@ -101,5 +101,53 @@ pub fn process(host: &str, args: &[String], cwd: &str, env: &[(String, String)])
 /// The last three non-blank lines of what a host said - enough to see why it stopped.
 pub fn tail(text: &str) -> String {
     let lines: Vec<&str> = text.split('\n').map(str::trim).filter(|l| !l.is_empty()).collect();
-    if lines.is_empty() { "no output".into() } else { lines[lines.len().saturating_sub(3)..].join(" / ") }
+    let last = &lines[lines.len().saturating_sub(3)..];
+    // A STACK TRACE ENDS IN FRAMES: its last lines name the loader, never the error. The error is the line before the
+    // frames, and the frame right after it says where.
+    let frame = |l: &&str| l.starts_with("at ");
+    if !last.is_empty()
+        && last.iter().all(frame)
+        && let Some(error) = lines.iter().rposition(|l| !frame(l))
+    {
+        return lines[error..lines.len().min(error + 2)].join(" / ");
+    }
+    if lines.is_empty() { "no output".into() } else { last.join(" / ") }
+}
+
+/// The oldest node the script halves run on: an older one dies while it LOADS the scripts, with a loader stack that
+/// names nothing a person can act on.
+pub const NODE_AT_LEAST: u64 = 20;
+
+/// Why a node host died: the end of what it said (`tail`), and - asked only once it died - that the node is too old.
+pub fn node_died(host: &str, cwd: &str, said: &str) -> String {
+    let version = process(host, &["--version".to_string()], cwd, &[]).map(|r| r.stdout).unwrap_or_default();
+    match older(&version) {
+        Some(found) => format!("`{host}` is node {found}, and the script needs node {NODE_AT_LEAST} or newer - put one on PATH or pass its path ({})", tail(said)),
+        None => tail(said),
+    }
+}
+
+/// The version `--version` printed, when its major is older than `NODE_AT_LEAST`.
+fn older(said: &str) -> Option<String> {
+    let version = said.trim();
+    let major = version.strip_prefix('v')?.split('.').next()?.parse::<u64>().ok()?;
+    (major < NODE_AT_LEAST).then(|| version.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stack_trace_is_told_by_its_error_and_first_frame_and_an_old_node_by_its_version() {
+        let stack = "file:///s/TsMap.mjs:3\nimport x from 'y' with { type: 'json' };\n                  ^^^^\nSyntaxError: Unexpected identifier\n\
+                     at ESMLoader.moduleStrategy (node:internal/modules/esm/translators:117:18)\n    at async ESMLoader.import (node:internal/modules/esm/loader:530:24)\n\
+                     at async loadESM (node:internal/process/esm_loader:91:5)\n    at async handleMainPromise (node:internal/modules/run_main:65:12)\n";
+        assert_eq!(tail(stack), "SyntaxError: Unexpected identifier / at ESMLoader.moduleStrategy (node:internal/modules/esm/translators:117:18)");
+        assert_eq!(tail("a\nb\nc\nd\n"), "b / c / d");
+        assert_eq!(tail("at x\nat y"), "at x / at y");
+        assert_eq!(tail(""), "no output");
+        assert_eq!(older("v16.20.2\n"), Some("v16.20.2".into()));
+        assert_eq!((older("v20.19.5"), older("v24.1.0"), older("garbage")), (None, None, None));
+    }
 }

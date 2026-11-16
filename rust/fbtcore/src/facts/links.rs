@@ -7,6 +7,7 @@ use crate::rows::dups::{items_sql, owner_sql, scalar_sql, Column};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
 use serde_json::Value;
+use std::collections::HashMap;
 
 /// One value the code holds: the row it is, where, and what it is called there.
 #[derive(Debug, Clone, Default)]
@@ -81,56 +82,114 @@ fn seed(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> {
 
 /// The members of the enum the link names: by its symbol, or by its name when that names exactly one.
 fn members(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> {
-    let symbol = has(conn, "enums", "symbol");
-    // `members` is a list of `{name, value}`: its nodes, by the enum row's owner.
-    let (owner, held) = (owner_sql(conn, "enums", "e"), scalar_sql(conn, "enums", "e", "members"));
-    let pick = |by: &str| -> rusqlite::Result<Vec<(String, String, i64, String, SqlValue)>> {
-        let mut stmt = conn.prepare(&format!("SELECT e.id, e.file, e.line, {owner}, {held} FROM enums e WHERE e.{by} = ?1 ORDER BY e.id"))?;
-        stmt.query_map([&link.target], |r| Ok((text(r, 0)?, text(r, 1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0), text(r, 3)?, r.get(4)?)))?
-            .collect()
-    };
-    let mut found = if symbol { pick("symbol")? } else { Vec::new() };
-    if found.is_empty() {
-        found = pick("name")?;
-    }
-    if found.len() > 1 {
-        return Err(rusqlite::Error::InvalidParameterName(format!(
-            "{} enums are named so - give its symbol (duplicate_types lists them)",
-            found.len()
-        )));
-    }
-    let mut out = Vec::new();
-    let mut list = Column::new(conn, "enums", "members")?;
-    for (id, file, line, owner, held) in found {
-        let Value::Array(members) = list.value(&owner, &held)? else { continue };
-        for member in members {
-            let name = member["name"].as_str().unwrap_or("").to_string();
-            let value = match &member["value"] {
-                Value::String(s) => s.clone(),
-                Value::Null => String::new(),
-                other => other.to_string(),
-            };
-            out.push(Code { target: id.clone(), file: file.clone(), line, value: if link.by == "name" { name.clone() } else { value }, name, condition: String::new() });
+    Enums::read(conn)?.codes(conn, &link.target, &link.by)
+}
+
+/// Every enum row once, found by its symbol and by its name: one link reads it for one enum, `--facts-suggest` for
+/// every enum the map holds - a query per enum scanned the table once per enum.
+pub struct Enums {
+    rows: Vec<(String, String, i64, String, SqlValue)>,
+    by_symbol: HashMap<String, Vec<usize>>,
+    by_name: HashMap<String, Vec<usize>>,
+}
+
+impl Enums {
+    pub fn read(conn: &Connection) -> rusqlite::Result<Enums> {
+        let mut out = Enums { rows: Vec::new(), by_symbol: HashMap::new(), by_name: HashMap::new() };
+        if !has(conn, "enums", "id") {
+            return Ok(out);
         }
+        let symbol = if has(conn, "enums", "symbol") { "e.symbol" } else { "NULL" };
+        // `members` is a list of `{name, value}`: its nodes, by the enum row's owner.
+        let (owner, held) = (owner_sql(conn, "enums", "e"), scalar_sql(conn, "enums", "e", "members"));
+        let mut stmt = conn.prepare(&format!("SELECT e.id, e.file, e.line, {owner}, {held}, e.name, {symbol} FROM enums e ORDER BY e.id"))?;
+        let rows = stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0), text(r, 3)?, r.get(4)?, text(r, 5)?, text(r, 6)?)))?;
+        for row in rows {
+            let (id, file, line, owner, held, name, symbol) = row?;
+            out.by_symbol.entry(symbol).or_default().push(out.rows.len());
+            out.by_name.entry(name).or_default().push(out.rows.len());
+            out.rows.push((id, file, line, owner, held));
+        }
+        Ok(out)
     }
-    Ok(out)
+
+    /// The members of the enum `target` names - by its symbol, else by its name; two enums of that name are an error.
+    pub fn codes(&self, conn: &Connection, target: &str, by: &str) -> rusqlite::Result<Vec<Code>> {
+        let found = self.by_symbol.get(target).filter(|_| !target.is_empty()).or_else(|| self.by_name.get(target)).cloned().unwrap_or_default();
+        if found.len() > 1 {
+            return Err(rusqlite::Error::InvalidParameterName(format!(
+                "{} enums are named so - give its symbol (duplicate_types lists them)",
+                found.len()
+            )));
+        }
+        let mut out = Vec::new();
+        let mut list = Column::new(conn, "enums", "members")?;
+        for (id, file, line, owner, held) in found.into_iter().map(|i| &self.rows[i]) {
+            let Value::Array(members) = list.value(owner, held)? else { continue };
+            for member in members {
+                let name = member["name"].as_str().unwrap_or("").to_string();
+                let value = match &member["value"] {
+                    Value::String(s) => s.clone(),
+                    Value::Null => String::new(),
+                    other => other.to_string(),
+                };
+                out.push(Code { target: id.clone(), file: file.clone(), line: *line, value: if by == "name" { name.clone() } else { value }, name, condition: String::new() });
+            }
+        }
+        Ok(out)
+    }
 }
 
-/// The constants a class declares: the class by its symbol (or name), its constants by that class and its files.
 fn consts(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> {
-    let by = if has(conn, "classes", "symbol") { "(symbol = ?1 OR (symbol = '' AND name = ?1) OR (symbol IS NULL AND name = ?1))" } else { "name = ?1" };
-    let mut stmt = conn.prepare(&format!(
-        "SELECT k.id, k.file, k.line, k.name, k.value FROM consts k \
-         JOIN (SELECT DISTINCT file, name FROM classes WHERE {by}) c ON c.file = k.file AND c.name = k.cls ORDER BY k.id"
-    ))?;
-    let rows = stmt.query_map([&link.target], |r| {
-        let (name, value) = (text(r, 3)?, text(r, 4)?);
-        Ok(Code { target: text(r, 0)?, file: text(r, 1)?, line: r.get::<_, Option<i64>>(2)?.unwrap_or(0), value: if link.by == "name" { name.clone() } else { value }, name, condition: String::new() })
-    })?;
-    rows.collect()
+    Ok(Consts::read(conn)?.codes(&link.target, &link.by))
 }
 
-/// The classes that list the link's type among their bases, by their name.
+/// Every constant once, by the class declaring it, and every class by its symbol (or its name, when it has none):
+/// read once for any number of classes, as `Enums` is.
+pub struct Consts {
+    by_class: HashMap<(String, String), Vec<Code>>,
+    by_symbol: HashMap<String, Vec<(String, String)>>,
+}
+
+impl Consts {
+    pub fn read(conn: &Connection) -> rusqlite::Result<Consts> {
+        let mut out = Consts { by_class: HashMap::new(), by_symbol: HashMap::new() };
+        if !has(conn, "classes", "name") || !has(conn, "consts", "cls") {
+            return Ok(out);
+        }
+        let symbol = if has(conn, "classes", "symbol") { "coalesce(symbol, '')" } else { "''" };
+        let mut stmt = conn.prepare(&format!("SELECT DISTINCT file, name, {symbol} FROM classes"))?;
+        for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?)))? {
+            let (file, name, symbol) = row?;
+            // A CLASS IS NAMED by its symbol, or by its name where the half gave it none.
+            let key = if symbol.is_empty() { name.clone() } else { symbol };
+            let place = out.by_symbol.entry(key).or_default();
+            if !place.contains(&(file.clone(), name.clone())) {
+                place.push((file, name));
+            }
+        }
+        let mut stmt = conn.prepare("SELECT k.id, k.file, k.line, k.name, k.value, k.cls FROM consts k ORDER BY k.id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((Code { target: text(r, 0)?, file: text(r, 1)?, line: r.get::<_, Option<i64>>(2)?.unwrap_or(0), value: text(r, 4)?, name: text(r, 3)?, condition: String::new() }, text(r, 5)?))
+        })?;
+        for row in rows {
+            let (code, cls) = row?;
+            out.by_class.entry((code.file.clone(), cls)).or_default().push(code);
+        }
+        Ok(out)
+    }
+
+    /// The constants of the class `target` names, in id order.
+    pub fn codes(&self, target: &str, by: &str) -> Vec<Code> {
+        let mut out: Vec<Code> = self.by_symbol.get(target).into_iter().flatten().filter_map(|key| self.by_class.get(key)).flatten().cloned().collect();
+        out.sort_by(|a, b| a.target.cmp(&b.target));
+        if by == "name" {
+            out.iter_mut().for_each(|c| c.value = c.name.clone());
+        }
+        out
+    }
+}
+
 fn derived(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> {
     // `bases` is a list: one node per base. A class listing the type twice is one row per listing, as before.
     let bases = items_sql(conn, "classes", "bases", &["value"]);
