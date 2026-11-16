@@ -188,6 +188,17 @@ Test-Case 'docfactsapi: a field table under a routed heading is matched to the t
             "public class PaintDto { public string Colour { get; set; } = `"`"; public int Weight { get; set; } }$nl" +
             "public abstract class JobBase<TA> { [HttpPost] [Route(`"run-all`")] public object RunAll(TA item) => item!; }$nl" +
             "[Route(`"api/widgets`")] public class WidgetsController : JobBase<WidgetDto> { }$nl" +
+            # A ROUTE THE TREE CALLS: a wrapper of HttpClient, its url from a helper the base class has, two response types.
+            "public class ApiClient { private readonly System.Net.Http.HttpClient http = new();$nl" +
+            "    public async System.Threading.Tasks.Task<TResp?> PostAsync<TReq, TResp>(string url, TReq body) {$nl" +
+            "        var r = await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(http, url, body);$nl" +
+            "        return await System.Net.Http.Json.HttpContentJsonExtensions.ReadFromJsonAsync<TResp>(r.Content); } }$nl" +
+            "public class ClientA { public string ClientId { get; set; } = `"`"; public string Status { get; set; } = `"`"; }$nl" +
+            "public class ClientB { public string ClientId { get; set; } = `"`"; public int Score { get; set; } }$nl" +
+            "public abstract class ServiceBase { protected string Prefix() => System.Environment.GetEnvironmentVariable(`"BASE`") ?? `"`";$nl" +
+            "    protected string DetailUrl() => `$`"{Prefix()}/demo/clients/redacted`"; }$nl" +
+            "public class AService : ServiceBase { private readonly ApiClient c = new(); public object Run(LoginDto q) => c.PostAsync<LoginDto, ClientA>(DetailUrl(), q); }$nl" +
+            "public class BService : ServiceBase { private readonly ApiClient c = new(); public object Run(LoginDto q) => c.PostAsync<LoginDto, ClientB>(DetailUrl(), q); }$nl" +
             "[Route(`"api/auth`")]$nl" +
             "public class AuthController {$nl" +
             "    [HttpPost(`"token`")] public System.Threading.Tasks.Task<Envelope<TokenDto>> Token(LoginDto login) => null!;$nl" +
@@ -195,7 +206,8 @@ Test-Case 'docfactsapi: a field table under a routed heading is matched to the t
         'docs/api.md' = "# Auth$nl$nl## 2.1 /api/auth/token POST$nl$nl### Request$nl$nl| Name | Meaning |$nl|---|---|$nl| userName | who |$nl| password | secret |$nl$nl" +
             "### Response$nl$nl| Name | Meaning |$nl|---|---|$nl| accessToken | the token |$nl| expiresIn | seconds |$nl| userName | who |$nl$nl" +
             "## 2.2 GET /api/auth/me$nl$nl| Name | Meaning |$nl|---|---|$nl| accessToken | the token |$nl| expiresIn | seconds |$nl| userName | who |$nl$nl" +
-            "## 2.3 POST /api/widgets/run-all$nl$nl| Field | Meaning |$nl|---|---|$nl| colour | paint |$nl| weight | grams |$nl"
+            "## 2.3 POST /api/widgets/run-all$nl$nl| Field | Meaning |$nl|---|---|$nl| colour | paint |$nl| weight | grams |$nl$nl" +
+            "## 3.1 POST /api/demo/clients/redacted$nl$nl| Item | Meaning |$nl|---|---|$nl| clientId | who |$nl| status | state |$nl| score | rank |$nl"
         'structuregate.facts.json' = '{ "sources": [ { "name": "api", "kind": "file", "path": "docs/api.md" } ] }'
     }
     $db = Join-Path $tree 'api.sqlite'
@@ -206,4 +218,6 @@ Test-Case 'docfactsapi: a field table under a routed heading is matched to the t
     Assert-Line $s 'api: table 1 under "Response", column 1 "Name": 3/3 values = property Demo.Api.TokenDto (3 code values, the response type of POST /api/auth/token)'
     Assert-Line $s 'api: table 1 under "2.2 GET /api/auth/me", column 1 "Name": 3/3 values = property Demo.Api.AccountDto (3 code values, the response type of GET /api/auth/me)'
     Assert-Line $s 'api: table 1 under "2.3 POST /api/widgets/run-all", column 1 "Field": 2/2 values = property Demo.Api.WidgetDto (2 code values, the request type of POST /api/widgets/run-all)'
+    Assert-Line $s 'values = property Demo.Api.ClientA (2 code values, the outbound response type of POST /demo/clients/redacted)'
+    Assert-Line $s 'values = property Demo.Api.ClientB (2 code values, the outbound response type of POST /demo/clients/redacted)'
 }

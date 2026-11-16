@@ -87,11 +87,11 @@ group are code values. A count alone misleads, so pairs are RANKED by:
    same row's other value (a seed row's other column, an enum member's or a constant's name). The true link is the
    one where the label column agrees too; a pair with agreeing rows outranks every pair without. The agreeing
    column becomes the candidate's `label`.
-2. **the section's endpoint** - a routed section (a route in its heading or one above it, or in the text right
-   under its own heading - not an overview above it; `/api/x POST` too) binds its endpoints; a type its action takes or returns (resolved return, parameter and
-   `[ProducesResponseType]` types, generic arguments and property types followed, a generic base's `T` bound by the
-   controller serving it) outranks a class that only shares the names: `, the response type of POST /api/x` /
-   `, no type of ...`, and `section_endpoints`/`endpoint_type`; every property candidate lists `endpoints_using`.
+2. **the section's endpoint** - a routed section (a route in its heading or one above it, or in the text right under
+   its own heading - not an overview above it; `/api/x POST` too) binds the endpoints it SERVES (resolved return, parameter, `[ProducesResponseType]` and
+   property types; a generic base's `T` bound by the serving controller) and the routes it CALLS (`http_calls`, the
+   call's bound type and parameters, matched by the path's end - a base url is ignored). A type of one outranks a class only sharing
+   the names: `, the (outbound) response type of POST /x` / `, no type of ...`; every property candidate lists `endpoints_using`.
 3. **hits beyond chance** - the document's integers times how densely the code set covers THEIR range (a key
    column `1..50` matches any small-int enum, and any `1..N` ordinal column whatever else it holds): that many hits
    are expected and taken off; then the hits.
