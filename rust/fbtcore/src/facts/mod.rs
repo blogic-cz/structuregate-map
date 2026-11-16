@@ -15,6 +15,7 @@
 //! in their key, so an unchanged document costs nothing on a run that changed nothing.
 
 mod apis;
+mod asking;
 pub mod config;
 #[path = "snapshot/docx.rs"]
 mod docx;

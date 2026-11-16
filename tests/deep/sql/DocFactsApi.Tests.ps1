@@ -127,6 +127,11 @@ Test-Case 'docfactsapi: routes in text, property and column names are checked ag
         Assert-Line $r 'api: routes the whole document: ACCEPTED - the spec lists the routes'
         $asked = Get-Content -Raw -LiteralPath $request | ConvertFrom-Json
         if (-not $asked.user_message.Contains('/api/legacy')) { throw "the question did not carry the candidates: $($asked.user_message)" }
+        # THE MAP IS OFFERED AS A TOOL, and the prompt says when to use it.
+        if (@($asked.tools).Count -ne 1 -or $asked.tools[0].type -ne 'sqlite_query' -or $asked.tools[0].path -ne $db -or -not $asked.system_prompt.Contains('map_query')) {
+            throw "the question did not offer the map: $($asked.tools | ConvertTo-Json -Depth 4 -Compress)"
+        }
+        Assert-Line $r 'map_query offered, calls not reported)'
         $fragment = Get-Content -Raw -LiteralPath (Join-Path $tree 'suggest/structuregate.facts.reviewed.json') | ConvertFrom-Json
         if (@($fragment.links).Count -ne 1 -or $fragment.links[0].to.kind -ne 'endpoint' -or $fragment.facts[0].from -ne 'routes') {
             throw "the fragment is not the one accepted candidate: $($fragment | ConvertTo-Json -Depth 6 -Compress)"

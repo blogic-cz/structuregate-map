@@ -5,7 +5,8 @@
 //!
 //! WHO ANSWERS IS CONFIGURED, OFF UNLESS NAMED (`connect`): `STRUCTUREGATE_LLM` is a program, `STRUCTUREGATE_LLM_ARGS`
 //! its arguments - one process per question, JSON over stdin and stdout (`cli.rs`), so the vendor, the model, the
-//! credentials and the retries are that program's configuration, never this exe's. Another backend is one more `Llm`. Nothing is linked in: no SDK, no socket.
+//! credentials and the retries are that program's configuration, never this exe's. A question may offer TOOLS
+//! (`Ask::tools`, read-only, e.g. a SQL query over the map) - the program runs them; the answer says how often. Another backend is one more `Llm`. Nothing is linked in: no SDK, no socket.
 
 mod cli;
 
@@ -23,6 +24,16 @@ pub struct Ask {
     pub message: String,
     /// A JSON schema the answer is checked against (by the program that answers).
     pub schema: Value,
+    /// Read-only tools the model may call while it answers, each a JSON object the program reads
+    /// (`{"type": "sqlite_query", "path", "name", "description", "max_calls"}`); none, and none is sent.
+    pub tools: Vec<Value>,
+}
+
+/// An answer: its data, and how many tool calls the program says the model made (None when it says nothing).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Answer {
+    pub data: Value,
+    pub tool_calls: Option<u64>,
 }
 
 /// Why there is no answer, by what the caller can do about it.
@@ -56,7 +67,7 @@ impl std::fmt::Display for Failed {
 /// Whoever answers a question.
 pub trait Llm {
     /// The answer as JSON, or why there is none. Never panics, never prompts.
-    fn ask_json(&self, ask: &Ask) -> Result<Value, Failed>;
+    fn ask_json(&self, ask: &Ask) -> Result<Answer, Failed>;
 }
 
 /// The configured backend, None when the environment names none, or why the one it names cannot be used.

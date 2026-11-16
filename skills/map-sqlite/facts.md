@@ -112,18 +112,19 @@ Exit 0 (no candidate is an answer too), 2 when the config or the map cannot be r
 ### `--facts-review`: a model reads the candidates
 
 Sharing values is not meaning the same thing (`1, 2, 3` are in every enum). `--facts-suggest <map> --facts-review`
-asks a model, in one question, whether each candidate's document part lists the same thing as its code set, and
-writes its verdict and reason BESIDE each candidate (`review` in `structuregate.facts.suggest.json`); the accepted
-ones become a ready `{"facts": [...], "links": [...]}` fragment in `structuregate.facts.reviewed.json`; one document
-part accepted against several sets is `ACCEPTED, AMBIGUOUS` and listed under `ambiguous`. The endpoint evidence is
-in the question. Still nothing is written into the config - a person copies the fragment in.
+asks a model, in batches of ~60k characters (a document part's candidates together), whether each part lists the same
+thing as its code set, and writes its verdict and reason BESIDE each candidate (`review` in the suggest json); the
+accepted ones become a `{"facts", "links"}` fragment in `structuregate.facts.reviewed.json`, a part accepted against
+several sets `ACCEPTED, AMBIGUOUS` under `ambiguous`. A failed batch is `NOT REVIEWED`, the rest still count. Each
+question offers the MAP AS A TOOL - `{"type": "sqlite_query", "path", "name": "map_query", "description", "max_calls": 8}`
+in `tools`, described by the map's own tables - and asks the model to query it when the text cannot settle a candidate;
+`STRUCTUREGATE_LLM_TOOLS` = `0`/`off` drops it (a program that cannot run tools), a number sets `max_calls`.
 
-The model is configured, off unless named: `STRUCTUREGATE_LLM` is a program (a path, or a name on PATH) and
-`STRUCTUREGATE_LLM_ARGS` its arguments, split at whitespace. Any model connects through a program that keeps this
-contract: the request `{system_prompt, user_message, schema, want}` as ONE JSON object on stdin, ONE JSON object back
-on stdout - `{"ok": true, "data": ...}` with `data` matching `schema`, or `{"ok": false, "error_type", "message"}` -
-and exit 0, or 2 unavailable, 3 an invalid reply, 4 a timeout, 5 refused. Brand, model, credentials and retries
-are that program's configuration; the question never goes on a command line. **The candidates' values - the document's and the code's - are sent to that model.**
+`STRUCTUREGATE_LLM` is a program (a path, or a name on PATH), `STRUCTUREGATE_LLM_ARGS` its arguments split at
+whitespace; off unless named. The contract: `{system_prompt, user_message, schema, want, tools?}` as ONE JSON object
+on stdin, ONE back on stdout - `{"ok": true, "data", "tool_calls"?}` or `{"ok": false, "error_type", "message"}` - exit
+0, or 2 unavailable, 3 invalid reply, 4 timeout, 5 refused. The first line counts the tool calls when it reports them.
+**The candidates' values, and whatever the model reads from the map, are sent to that model.**
 
 | exit | meaning |
 |---|---|

@@ -1,25 +1,17 @@
 //! `--facts-review`: A MODEL READS THE `--facts-suggest` CANDIDATES (`crate::llm`). A candidate is two sets sharing
-//! values, and sharing values is not meaning the same thing - `1, 2, 3` are in every enum. The model is asked, for
-//! every candidate at once, whether the document's part really lists what the code set holds, and answers each with a
-//! verdict and a reason. Its word is written BESIDE the candidates, never into the config: each candidate gets its
+//! values, and sharing values is not meaning the same thing - `1, 2, 3` are in every enum. The model is asked, in
+//! batches with the map as a tool (`asking.rs`), whether each document part really lists what the code set holds, and
+//! answers each with a verdict and a reason; a batch that fails leaves its candidates unreviewed and says so. Its word is written BESIDE the candidates, never into the config: each candidate gets its
 //! `review` in `structuregate.facts.suggest.json`, and the accepted ones are a ready `facts`/`links` fragment in
 //! `structuregate.facts.reviewed.json`. A person copies it in - the map run stays what the config says.
 
-use crate::llm::{Ask, Llm};
+use super::asking;
+use crate::llm::Llm;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 pub const FILE_NAME: &str = "structuregate.facts.reviewed.json";
-
-const SYSTEM: &str = "You review candidate links between a DOCUMENT and a CODE MAP. Each candidate pairs one part of the document \
-(a table column, the code spans or the routes of a section) with one set of values the code holds (a seeded table column, an enum's \
-members, a class's constants, the HTTP endpoints, a type's properties, a SQL table's columns). They were paired only because they \
-share values. ACCEPT a candidate when the document's part is a list of the same thing the code set holds. GAPS ARE EXPECTED: a value \
-only one side has is exactly what the check that follows will report, so unmatched values are never a reason to reject - judge \
-whether the two sides NAME THE SAME CONCEPT, not whether they agree. REJECT it only when the overlap is a coincidence: small numbers or common words that \
-any list shares, a column of a different concept that happens to reuse some values, or a pair another candidate covers better. \
-When a candidate carries `section_endpoints`, the document's part sits under a section naming those HTTP endpoints, and `endpoint_type` says whether the code set is a type such an endpoint takes (request) or returns (response), as the compiler resolved it; a type's properties with `endpoint_type` null are another class that only shares the names - prefer the one the endpoint uses. Judge only from what you are given. Answer every candidate by its number, with a reason of one sentence.";
 
 /// The verdicts written beside the candidates, and the lines that say them; an error when no model answered.
 pub fn run(llm: &dyn Llm, suggested: &Path) -> Result<Vec<String>, String> {
@@ -29,11 +21,40 @@ pub fn run(llm: &dyn Llm, suggested: &Path) -> Result<Vec<String>, String> {
     if candidates.is_empty() {
         return Ok(vec!["facts review: no candidate to review".into()]);
     }
-    let answer = llm.ask_json(&ask(&candidates)).map_err(|e| e.to_string())?;
-    let verdicts = answer["verdicts"].as_array().cloned().unwrap_or_default();
+    let tool = asking::map_tool(doc["map"].as_str().unwrap_or(""), &std::env::var(asking::TOOLS_ENV).unwrap_or_default());
+    let batches = asking::in_batches(&candidates);
+    // EACH BATCH ON ITS OWN: one that fails leaves its candidates unreviewed, the others still count.
+    let mut verdicts: HashMap<u64, Value> = HashMap::new();
+    let mut unreviewed: HashMap<usize, String> = HashMap::new();
+    let (mut failed, mut calls, mut counted) = (Vec::new(), 0u64, true);
+    for (b, batch) in batches.iter().enumerate() {
+        match llm.ask_json(&asking::ask(&candidates, batch, tool.as_ref())) {
+            Ok(answer) => {
+                calls += answer.tool_calls.unwrap_or(0);
+                counted &= answer.tool_calls.is_some();
+                let ours = |n: u64| batch.iter().any(|&i| i as u64 + 1 == n);
+                for v in answer.data["verdicts"].as_array().into_iter().flatten() {
+                    if let Some(n) = v["n"].as_u64().filter(|n| ours(*n)) {
+                        verdicts.entry(n).or_insert_with(|| v.clone());
+                    }
+                }
+            }
+            Err(why) => {
+                let why = why.to_string();
+                batch.iter().for_each(|&i| drop(unreviewed.insert(i, why.clone())));
+                failed.push(format!("  batch {} of {} NOT REVIEWED ({} candidate(s)) - {why}", b + 1, batches.len(), batch.len()));
+            }
+        }
+    }
+    if failed.len() == batches.len() {
+        return Err(unreviewed.into_values().next().unwrap_or_default());
+    }
     let said: Vec<(bool, String)> = (1..=candidates.len())
         .map(|n| {
-            let verdict = verdicts.iter().find(|v| v["n"].as_u64() == Some(n as u64));
+            if let Some(why) = unreviewed.get(&(n - 1)) {
+                return (false, why.clone());
+            }
+            let verdict = verdicts.get(&(n as u64));
             (verdict.is_some_and(|v| v["accept"] == true), verdict.and_then(|v| v["reason"].as_str()).unwrap_or("the model gave no verdict for it").to_string())
         })
         .collect();
@@ -48,13 +69,17 @@ pub fn run(llm: &dyn Llm, suggested: &Path) -> Result<Vec<String>, String> {
     for (i, (candidate, (accept, reason))) in candidates.iter().zip(&said).enumerate() {
         let found = candidate["found"].as_str().unwrap_or("");
         let ambiguous = *accept && targets.contains_key(found);
-        let verdict = match (accept, ambiguous) {
-            (true, true) => "ACCEPTED, AMBIGUOUS",
-            (true, false) => "ACCEPTED",
+        let verdict = match (accept, ambiguous, unreviewed.contains_key(&i)) {
+            (_, _, true) => "NOT REVIEWED",
+            (true, true, _) => "ACCEPTED, AMBIGUOUS",
+            (true, false, _) => "ACCEPTED",
             _ => "rejected",
         };
         lines.push(format!("  {found}: {verdict} - {reason}"));
         doc["candidates"][i]["review"] = json!({ "accept": accept, "reason": reason });
+        if unreviewed.contains_key(&i) {
+            doc["candidates"][i]["review"] = json!({ "reviewed": false, "reason": reason });
+        }
         if ambiguous {
             doc["candidates"][i]["review"]["ambiguous"] = json!(true);
         }
@@ -71,35 +96,14 @@ pub fn run(llm: &dyn Llm, suggested: &Path) -> Result<Vec<String>, String> {
     }
     write(suggested, &doc)?;
     write(&reviewed, &fragment)?;
-    lines.insert(0, format!("facts review: {} of {} accepted -> {}", facts.len(), candidates.len(), reviewed.display()));
+    let used = match (&tool, counted) {
+        (None, _) => "no map tool".to_string(),
+        (Some(_), true) => format!("{} {} call(s)", asking::TOOL_NAME, calls),
+        (Some(_), false) => format!("{} offered, calls not reported", asking::TOOL_NAME),
+    };
+    lines.splice(0..0, failed);
+    lines.insert(0, format!("facts review: {} of {} accepted -> {} ({} batch(es), {used})", facts.len(), candidates.len(), reviewed.display(), batches.len()));
     Ok(lines)
-}
-
-/// One question for every candidate: its number, what it pairs, its counts and a sample of each side.
-fn ask(candidates: &[Value]) -> Ask {
-    let listed: Vec<Value> = candidates
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            let mut one = json!({
-                "n": i + 1, "document": c["found"], "code": c["link"]["to"], "matched": c["matched"], "of": c["of"],
-                "code_values": c["code_values"], "matched_values": c["matched_values"], "unmatched_document_values": c["unmatched"],
-            });
-            if let Some(endpoints) = c.get("section_endpoints") {
-                one["section_endpoints"] = endpoints.clone();
-                one["endpoint_type"] = c["endpoint_type"].clone();
-            }
-            one
-        })
-        .collect();
-    let schema = json!({
-        "type": "object", "required": ["verdicts"],
-        "properties": { "verdicts": { "type": "array", "items": {
-            "type": "object", "required": ["n", "accept", "reason"],
-            "properties": { "n": { "type": "integer" }, "accept": { "type": "boolean" }, "reason": { "type": "string" } }
-        } } }
-    });
-    Ask { system: SYSTEM.into(), message: serde_json::to_string_pretty(&json!({ "candidates": listed })).unwrap_or_default(), schema }
 }
 
 fn write(path: &Path, value: &Value) -> Result<(), String> {
@@ -109,16 +113,23 @@ fn write(path: &Path, value: &Value) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::Failed;
+    use crate::llm::{Answer, Ask, Failed};
     use std::cell::RefCell;
 
-    /// A model that answers what it is given and keeps the question.
-    struct Fake(Result<Value, Failed>, RefCell<Option<Ask>>);
+    /// A model that gives its answers in turn (the last one again after that) and keeps every question.
+    struct Fake(Vec<Result<Answer, Failed>>, RefCell<Vec<Ask>>);
+
+    impl Fake {
+        fn new(answers: Vec<Result<Value, Failed>>, calls: Option<u64>) -> Fake {
+            Fake(answers.into_iter().map(|a| a.map(|data| Answer { data, tool_calls: calls })).collect(), RefCell::new(vec![]))
+        }
+    }
 
     impl Llm for Fake {
-        fn ask_json(&self, ask: &Ask) -> Result<Value, Failed> {
-            *self.1.borrow_mut() = Some(ask.clone());
-            self.0.clone()
+        fn ask_json(&self, ask: &Ask) -> Result<Answer, Failed> {
+            let mut asked = self.1.borrow_mut();
+            asked.push(ask.clone());
+            self.0[(asked.len() - 1).min(self.0.len() - 1)].clone()
         }
     }
 
@@ -141,7 +152,7 @@ mod tests {
         std::fs::write(&suggested, json!({"map": "m", "candidates": all}).to_string()).unwrap();
         let said = json!({"verdicts": [{"n": 1, "accept": true, "reason": "the spec lists the endpoints"}, {"n": 2, "accept": false, "reason": "small numbers"},
                                        {"n": 4, "accept": true, "reason": "the response"}, {"n": 5, "accept": true, "reason": "same names"}]});
-        let fake = Fake(Ok(said), RefCell::new(None));
+        let fake = Fake::new(vec![Ok(said)], None);
         let lines = run(&fake, &suggested).unwrap();
         assert_eq!(lines[1], "  routes: ACCEPTED - the spec lists the endpoints");
         assert_eq!(lines[3], "  rest: rejected - the model gave no verdict for it");
@@ -152,15 +163,48 @@ mod tests {
         assert_eq!(fragment["ambiguous"], json!([{"found": "fields", "to": [{"kind": "property"}, {"kind": "property", "symbol": "Demo.Other"}]}]));
         let kept: Value = serde_json::from_str(&std::fs::read_to_string(&suggested).unwrap()).unwrap();
         assert_eq!(kept["candidates"][1]["review"], json!({"accept": false, "reason": "small numbers"}));
-        let asked = fake.1.borrow().clone().unwrap();
+        assert!(lines[0].ends_with("(1 batch(es), no map tool)"), "{}", lines[0]);
+        let asked = fake.1.borrow()[0].clone();
         let message: Value = serde_json::from_str(&asked.message).unwrap();
         assert_eq!(message["candidates"][2]["n"], 3);
         assert_eq!(message["candidates"][0]["unmatched_document_values"], json!(["b"]));
         assert_eq!((&message["candidates"][3]["section_endpoints"], &message["candidates"][3]["endpoint_type"]), (&json!(["POST /api/items"]), &json!("response")));
         assert!(message["candidates"][0].get("section_endpoints").is_none());
         assert_eq!(kept["candidates"][4]["review"]["ambiguous"], true);
-        let down = Fake(Err(Failed::Unavailable("quota".into())), RefCell::new(None));
+        let down = Fake::new(vec![Err(Failed::Unavailable("quota".into()))], None);
         assert_eq!(run(&down, &suggested).unwrap_err(), "no model could be reached - quota");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn each_batch_is_asked_with_the_map_as_a_tool_and_a_failed_batch_leaves_only_its_candidates_unreviewed() {
+        let dir = std::env::temp_dir().join(format!("fbt-review-batch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let map = dir.join("map.sqlite");
+        rusqlite::Connection::open(&map).unwrap().execute_batch("CREATE TABLE members (id, kind, class_symbol, name);").unwrap();
+        let suggested = dir.join(super::super::suggest::FILE_NAME);
+        // TWO PARTS TOO LARGE FOR ONE BATCH.
+        let big = |found: &str| json!({"found": found, "matched": 1, "of": 1, "code_values": 1, "matched_values": ["v".repeat(40_000)], "unmatched": [],
+                                       "facts": {"name": found}, "link": {"facts": found, "to": {"kind": "enum"}}});
+        std::fs::write(&suggested, json!({"map": map.to_str(), "candidates": [big("a"), big("b")]}).to_string()).unwrap();
+        let yes = |n: u64| Ok(json!({"verdicts": [{"n": n, "accept": true, "reason": "the map shows it"}, {"n": 3 - n, "accept": false, "reason": "not this batch's"}]}));
+        let fake = Fake::new(vec![yes(1), Err(Failed::Timeout("slow".into()))], Some(3));
+        let lines = run(&fake, &suggested).unwrap();
+        assert!(lines[0].starts_with("facts review: 1 of 2 accepted") && lines[0].ends_with("(2 batch(es), map_query 3 call(s))"), "{}", lines[0]);
+        assert_eq!(lines[1], "  batch 2 of 2 NOT REVIEWED (1 candidate(s)) - no answer in time - slow");
+        assert_eq!(lines[3], "  b: NOT REVIEWED - no answer in time - slow");
+        let kept: Value = serde_json::from_str(&std::fs::read_to_string(&suggested).unwrap()).unwrap();
+        assert_eq!(kept["candidates"][1]["review"], json!({"reviewed": false, "reason": "no answer in time - slow"}));
+        let asked = fake.1.borrow();
+        assert_eq!(asked.len(), 2);
+        assert_eq!(asked[0].tools[0]["path"].as_str(), map.to_str());
+        assert!(asked[1].message.contains("\"n\": 2") && !asked[1].message.contains("\"n\": 1"));
+        drop(asked);
+        let silent = Fake::new(vec![yes(1), yes(2)], None);
+        let lines = run(&silent, &suggested).unwrap();
+        assert!(lines[0].ends_with("(2 batch(es), map_query offered, calls not reported)"), "{}", lines[0]);
+        assert_eq!(lines[2], "  b: ACCEPTED - the map shows it");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

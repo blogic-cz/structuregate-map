@@ -128,7 +128,9 @@ structuregate — structure rules, enforced where they cannot be skipped.
                         fragment to structuregate.facts.reviewed.json - never into the config.
                         The model is STRUCTUREGATE_LLM: a program that reads a JSON request on
                         stdin and prints one JSON answer (STRUCTUREGATE_LLM_ARGS: its arguments). The candidates' values go to
-                        that model. Exit 1: it gave no answer; 2: none is configured.
+                        that model. Asked in batches, each offering the map as a read-only SQL
+                        tool (STRUCTUREGATE_LLM_TOOLS=0 drops it; a number sets its max calls).
+                        Exit 1: no batch was answered; 2: none is configured.
   --map-reread <halves> with --map-sqlite: comma list of csharp, sql, typescript - those halves read
                         every file again this run, whatever the database recorded, and replace their
                         rows file by file. For measuring a full re-read without deleting the database.
