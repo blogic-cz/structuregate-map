@@ -243,3 +243,59 @@ public class QuoteApi(HttpClient client)
         '13|POST|/api/redacted/quote|Send|Choose', '15|GET|/same||Same')
     if (($rows -join "`n") -ne ($want -join "`n")) { throw "http_calls:`nexpected:`n$($want -join "`n")`ngot:`n$($rows -join "`n")" }
 }
+
+# A WRAPPER CALLED THROUGH ITS INTERFACE (`IApi.PostAsync` bound, `Api.PostAsync` runs) is a wrapper still, through two of
+# them and a `Lazy<>`; and a url a helper returns from a ternary whose other arm only the run time knows is the arm it knows.
+Test-Case 'httpcscalls: a wrapper called through its interface, and a ternary arm only the run time knows, still give the path' {
+    $tree = Use-Tree @{
+        'App/App.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+        'App/Api.cs' = @'
+using System;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Threading.Tasks;
+namespace Demo;
+
+public interface ITransport { Task<T?> PostAsync<TReq, T>(TReq input, string url, HttpClient client); }
+public class Transport : ITransport
+{
+    public async Task<T?> PostAsync<TReq, T>(TReq input, string url, HttpClient client)
+    {
+        var r = await client.PostAsJsonAsync("/v1" + url, input);
+        return await r.Content.ReadFromJsonAsync<T>();
+    }
+}
+public interface IGateway { Task<T?> SendAsync<TReq, T>(string target, TReq input); }
+public class Gateway : IGateway
+{
+    private readonly Lazy<ITransport> lazy = new(() => new Transport());
+    public Task<T?> SendAsync<TReq, T>(string address, TReq input) => lazy.Value.PostAsync<TReq, T>(input, address, new HttpClient());
+}
+public abstract class ClientBase
+{
+    protected virtual string Custom() => Environment.GetEnvironmentVariable("CUSTOM") ?? "";
+    protected string Prefix() => Environment.GetEnvironmentVariable("BASE") ?? "";
+    protected string OrdersUrl() => string.IsNullOrEmpty(Custom()) ? $"{Prefix()}/demo/orders/lookup" : Custom();
+}
+public class FirstClient : ClientBase
+{
+    private readonly IGateway gateway = new Gateway();
+    public object Run() => gateway.SendAsync<int, string>(OrdersUrl(), 1);
+}
+public class SecondClient : ClientBase
+{
+    private readonly IGateway gateway = new Gateway();
+    public object Run() => gateway.SendAsync<int, long>(OrdersUrl(), 2);
+}
+'@
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    $q = Invoke-Gate --map-query $db --width 0 --limit 0 --sql ("SELECT 'v=' || c.line || '|' || c.verb || '|' || c.url || '|' || " +
+        "coalesce((SELECT f.name FROM functions f WHERE f.id = c.via), '') || '|' || (SELECT f.qualname FROM functions f WHERE f.id = c.member) AS r " +
+        "FROM http_calls c ORDER BY c.line, c.url")
+    Assert-Exit $q 0
+    $rows = @($q.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | ForEach-Object { $_.Trim().Substring(2) })
+    $want = @('31|POST|/v1{}/demo/orders/lookup|SendAsync|Demo.FirstClient.Run', '36|POST|/v1{}/demo/orders/lookup|SendAsync|Demo.SecondClient.Run')
+    if (($rows -join "`n") -ne ($want -join "`n")) { throw "http_calls:`nexpected:`n$($want -join "`n")`ngot:`n$($rows -join "`n")" }
+}

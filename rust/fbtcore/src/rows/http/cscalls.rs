@@ -13,6 +13,11 @@
 //! caller's url is joined to - and a wrapper with a prefix that nothing in the tree calls (an interface's
 //! implementation) is its own row, its url as written (the parameter a hole `{}`), as it was before a caller could be found. A wrapper whose primitives ask with different verbs asks with `ANY`. A call is OF a wrapper by its bound symbol, which is the wrapper's qualname; a qualname two
 //! methods share (an overload) is no wrapper, since the symbol cannot say which of them runs.
+//!
+//! A WRAPPER IS ALSO EACH INTERFACE OR BASE METHOD IT IMPLEMENTS (`classes.bases`, every base above it): a call through
+//! `IClient.Post` - a DI field, a `Lazy<IClient>` - is bound to the interface, and is a call of the wrapper; its url is the
+//! argument of the wrapper's parameter name, else the one at that parameter's place (the interface may name it otherwise).
+//! A url alternative of holes alone (a ternary's arm only the run time knows) is left out while another one says a path.
 
 use super::calls::Site;
 use crate::rows::dups::{scalar_sql, text, Column};
@@ -83,8 +88,10 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
         })
         .collect();
     let args = arguments(conn)?;
-    let params: HashSet<(String, String)> =
-        query(conn, "parameters", &["qualname", "name"])?.into_iter().map(|p| (p[0].clone(), p[1].clone())).collect();
+    let declared = query(conn, "parameters", &["qualname", "name", "position"])?;
+    let params: HashSet<(String, String)> = declared.iter().map(|p| (p[0].clone(), p[1].clone())).collect();
+    let position: HashMap<(&str, &str), i64> = declared.iter().map(|p| ((p[0].as_str(), p[1].as_str()), p[2].parse().unwrap_or(-1))).collect();
+    let bases = bases(conn)?;
     let locals = query(conn, "locals", &["file", "line", "name"])?;
     let none = Vec::new();
     let of = |c: &Call| args.get(&c.id).unwrap_or(&none);
@@ -127,6 +134,15 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
         };
         Some(value_of(a, &c.qualname).or_else(|| value_of(wrapped()?, &c.qualname)).unwrap_or_else(|| Url::Pattern(vec!["*".into()])))
     };
+    // A WRAPPER CALLED THROUGH ITS INTERFACE binds the interface's parameter names: its url is the argument of the
+    // wrapper's parameter name, else the one at its place.
+    let url_for = |c: &Call, p: &str, at: i64| -> Option<Url> {
+        if of(c).iter().any(|a| a.name == p) {
+            return url_of(c, p);
+        }
+        let a = of(c).iter().find(|a| a.position == at)?;
+        Some(value_of(a, &c.qualname).unwrap_or_else(|| Url::Pattern(vec!["*".into()])))
+    };
     // THE REQUEST A `Send` IS HANDED: the `HttpRequestMessage` built in its argument, or with the local it names.
     let message = |c: &Call| -> Option<&Call> {
         let a = pick(c, "request")?;
@@ -166,24 +182,34 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
     // THE WRAPPERS, to a fixed point: a method whose request's url is its own parameter, by qualname -> (id, parameter, verb,
     // whether it formats the url, its prefix).
     let unique = |q: &str| qualnames.get(q).filter(|ids| ids.len() == 1).map(|ids| ids[0].to_string());
-    let mut wrappers: HashMap<String, (String, String, String, bool, String)> = HashMap::new();
+    let mut wrappers: HashMap<String, Wrapper> = HashMap::new();
     let mut primitives: Vec<_> = asked.iter().collect();
     primitives.sort_by_key(|(n, _)| **n);
     for (n, (verb, url)) in primitives {
         if let (Url::Param(p, formats, prefix, _), Some(id)) = (url, unique(&calls[*n].qualname)) {
-            let wrapper = wrappers.entry(calls[*n].qualname.clone()).or_insert((id, p.clone(), verb.clone(), *formats, prefix.clone()));
+            let at = position.get(&(calls[*n].qualname.as_str(), p.as_str())).copied().unwrap_or(-1);
+            let wrapper = wrappers.entry(calls[*n].qualname.clone()).or_insert((id, p.clone(), verb.clone(), *formats, prefix.clone(), at));
             if wrapper.2 != *verb {
                 wrapper.2 = "ANY".into();
             }
         }
     }
+    let mut aliased: HashMap<String, String> = HashMap::new();
     loop {
+        // EACH WRAPPER IS ALSO THE INTERFACE OR BASE METHOD IT IMPLEMENTS: a call through `IClient` is bound to that one.
+        for (alias, of) in aliases(&wrappers, &bases) {
+            if let Some(entry) = wrappers.get(&of).cloned() {
+                aliased.insert(alias.clone(), of);
+                wrappers.entry(alias).or_insert(entry);
+            }
+        }
         let mut found = vec![];
         for c in &calls {
-            let Some((_, p, verb, formats, prefix)) = wrappers.get(c.symbol.split('<').next().unwrap_or("")) else { continue };
-            if let (Some(Url::Param(own, also, before, _)), Some(id)) = (url_of(c, p), unique(&c.qualname)) {
+            let Some((_, p, verb, formats, prefix, at)) = wrappers.get(c.symbol.split('<').next().unwrap_or("")) else { continue };
+            if let (Some(Url::Param(own, also, before, _)), Some(id)) = (url_for(c, p, *at), unique(&c.qualname)) {
                 if !wrappers.contains_key(&c.qualname) {
-                    found.push((c.qualname.clone(), (id, own, verb.clone(), *formats || also, format!("{prefix}{before}"))));
+                    let own_at = position.get(&(c.qualname.as_str(), own.as_str())).copied().unwrap_or(-1);
+                    found.push((c.qualname.clone(), (id, own, verb.clone(), *formats || also, format!("{prefix}{before}"), own_at)));
                 }
             }
         }
@@ -193,7 +219,10 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
         wrappers.extend(found);
     }
     // THE ROWS: a primitive nobody parameterises, and every call of a wrapper that hands it a url of its own.
-    let called: HashSet<&str> = calls.iter().map(|c| c.symbol.split('<').next().unwrap_or("")).collect();
+    let mut called: HashSet<&str> = calls.iter().map(|c| c.symbol.split('<').next().unwrap_or("")).collect();
+    // A WRAPPER CALLED THROUGH ITS INTERFACE is called.
+    let through: Vec<&str> = aliased.iter().filter(|(alias, _)| called.contains(alias.as_str())).map(|(_, of)| of.as_str()).collect();
+    called.extend(through);
     let uncalled = |c: &Call, prefix: &str| !prefix.is_empty() && !called.contains(c.qualname.as_str());
     let paths = super::files_of(conn, "csharp")?;
     let mut sites = vec![];
@@ -201,7 +230,7 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
         let (verb, via, urls): (_, _, Vec<String>) = match (asked.get(&n), wrappers.get(c.symbol.split('<').next().unwrap_or(""))) {
             (Some((verb, Url::Pattern(urls))), _) => (verb.clone(), String::new(), urls.clone()),
             (Some((verb, Url::Param(_, _, prefix, whole))), _) if uncalled(c, prefix) => (verb.clone(), String::new(), whole.clone()),
-            (None, Some((id, p, verb, formats, prefix))) => match url_of(c, p) {
+            (None, Some((id, p, verb, formats, prefix, at))) => match url_for(c, p, *at) {
                 Some(Url::Pattern(urls)) if *formats => (verb.clone(), id.clone(), urls.iter().map(|u| format!("{prefix}{}", formatted(u))).collect()),
                 Some(Url::Pattern(urls)) => (verb.clone(), id.clone(), urls.iter().map(|u| format!("{prefix}{u}")).collect()),
                 Some(Url::Param(_, _, before, whole)) if uncalled(c, &format!("{prefix}{before}")) => (verb.clone(), id.clone(), whole.iter().map(|w| format!("{prefix}{w}")).collect()),
@@ -225,6 +254,50 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
     }
     sites.sort_by(|a, b| (&a.file, a.line, &a.call).cmp(&(&b.file, b.line, &b.call)));
     Ok(sites)
+}
+
+/// A wrapper: its `functions` id, its url parameter, its verb, whether it formats the url, its prefix, and the url
+/// parameter's place.
+type Wrapper = (String, String, String, bool, String, i64);
+
+/// Every class's bases by its symbol, type arguments left out of both: `Demo.Client` -> [`Demo.IClient`].
+fn bases(conn: &Connection) -> rusqlite::Result<HashMap<String, Vec<String>>> {
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    if !crate::rows::dups::has_columns(conn, "classes", &["symbol", "bases"]) {
+        return Ok(out);
+    }
+    let mut list = Column::new(conn, "classes", "bases")?;
+    let sql = format!("SELECT k.symbol, {}, {} FROM classes k", crate::rows::dups::owner_sql(conn, "classes", "k"), scalar_sql(conn, "classes", "k", "bases"));
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, r.get::<_, SqlValue>(2)?)))?;
+    for row in rows {
+        let (symbol, owner, cell) = row?;
+        let bare = |s: &str| s.split('<').next().unwrap_or(s).to_string();
+        out.entry(bare(&symbol)).or_default().extend(list.strings(&owner, &cell)?.iter().map(|b| bare(b)));
+    }
+    Ok(out)
+}
+
+/// The interface and base methods each wrapper implements, as (alias, wrapper): `Demo.Client.Post` is also
+/// `Demo.IClient.Post` - through every base above it (a visited set ends bases that name each other).
+fn aliases(wrappers: &HashMap<String, Wrapper>, bases: &HashMap<String, Vec<String>>) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut names: Vec<&String> = wrappers.keys().collect();
+    names.sort();
+    for qualname in names {
+        let Some((class, method)) = qualname.rsplit_once('.') else { continue };
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut todo: Vec<&str> = vec![class];
+        while let Some(at) = todo.pop() {
+            for base in bases.get(at).into_iter().flatten() {
+                if seen.insert(base.as_str()) {
+                    out.push((format!("{base}.{method}"), qualname.clone()));
+                    todo.push(base.as_str());
+                }
+            }
+        }
+    }
+    out
 }
 
 /// The one parameter every alternative of a template ends in (its hole's `symbol`), whether it is a `string.Format`'s format,
@@ -266,8 +339,15 @@ fn formatted(url: &str) -> String {
     out
 }
 
-/// An interpolation's alternatives as patterns, each path once: each piece's text, a hole `{}`.
+/// An interpolation's alternatives as patterns, each path once: each piece's text, a hole `{}`. An alternative of holes
+/// alone (a ternary's arm only the run time knows) says nothing while another one says a path, and is left out.
 fn folded(alternatives: &[Value]) -> Vec<String> {
+    let all = spelled(alternatives);
+    let said: Vec<String> = all.iter().filter(|p| p.replace("{}", "").chars().any(char::is_alphanumeric)).cloned().collect();
+    if said.is_empty() { all } else { said }
+}
+
+fn spelled(alternatives: &[Value]) -> Vec<String> {
     let spelled: std::collections::BTreeSet<String> = alternatives
         .iter()
         .map(|alt| {

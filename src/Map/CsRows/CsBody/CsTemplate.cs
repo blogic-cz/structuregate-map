@@ -81,10 +81,13 @@ internal static class CsTemplate
                 return [.. (Strings(model, url, path) ?? [[Hole(url, model)]]).Select(s => Joined([.. s, new Piece("?", false), Hole(invocation, model)]))];
             case InvocationExpressionSyntax invocation:
                 return Returned(model, invocation, path);
-            // A TERNARY IS EITHER ARM: `c ? "/api/files" : $"/api/files?basePath={p}"` is the strings of both.
+            // A TERNARY IS EITHER ARM: `c ? "/api/files" : $"/api/files?basePath={p}"` is the strings of both. An arm only the run
+            // time knows (`IsNullOrEmpty(custom) ? $"{prefix}/x" : custom`) is a hole, and the other arm still says what it is.
             case ConditionalExpressionSyntax conditional:
-                return Strings(model, conditional.WhenTrue, path) is { } whenTrue && Strings(model, conditional.WhenFalse, path) is { } whenFalse
-                    ? [.. whenTrue, .. whenFalse] : null;
+                var whenTrue = Strings(model, conditional.WhenTrue, path);
+                var whenFalse = Strings(model, conditional.WhenFalse, path);
+                return whenTrue is null && whenFalse is null ? null
+                    : [.. whenTrue ?? [[Hole(conditional.WhenTrue, model)]], .. whenFalse ?? [[Hole(conditional.WhenFalse, model)]]];
             case IdentifierNameSyntax or MemberAccessExpressionSyntax:
                 return Named(model, expression, path);
             default:
