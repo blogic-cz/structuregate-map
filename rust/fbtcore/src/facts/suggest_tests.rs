@@ -106,3 +106,72 @@ fn the_link_whose_rows_agree_outranks_a_dense_small_integer_set() {
     assert!(keyed["facts"].get("headers").is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_field_table_under_an_endpoints_heading_ranks_the_type_that_endpoint_returns_first() {
+    let dir = std::env::temp_dir().join(format!("fbt-suggest-uses-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let doc = "# Auth\n\n## 2.1 /api/token POST\n\nReturns the token.\n\n### Response\n\n| Name | Meaning |\n|---|---|\n| accessToken | the token |\n\
+               | expiresIn | seconds |\n| userName | who |\n";
+    std::fs::write(dir.join("a.md"), doc).unwrap();
+    let db = dir.join("map.sqlite");
+    {
+        let conn = Connection::open(&db).unwrap();
+        let put = |table: &str, rows: Vec<Value>| crate::rows::store::insert_rows(&conn, table, &rows).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE http_endpoints (id, file, cls, method, line, verb, template, route, func);
+             INSERT INTO http_endpoints VALUES ('he:1', 'f:1', 'AuthController', 'Token', 3, 'POST', 'api/token', 'api/token', 'fn:1'),
+               ('he:2', 'f:1', 'AuthController', 'Me', 9, 'GET', 'api/me', 'api/me', 'fn:2');",
+        )
+        .unwrap();
+        put("functions", vec![
+            json!({"id": "fn:1", "file": "f:1", "name": "Token", "qualname": "AuthController.Token", "line": 3, "end_line": 7,
+                   "type": "System.Threading.Tasks.Task<Microsoft.AspNetCore.Mvc.ActionResult<Demo.Envelope<Demo.TokenDto>>>"}),
+            json!({"id": "fn:2", "file": "f:1", "name": "Me", "qualname": "AuthController.Me", "line": 9, "end_line": 10, "type": "Demo.AccountDto"}),
+        ]);
+        put("parameters", vec![json!({"id": "p:1", "file": "f:1", "qualname": "AuthController.Token", "line": 4, "type": "Demo.LoginDto"})]);
+        // THE DECOY FIRST: the same three names on a class another endpoint returns.
+        let props = |cls: &str, names: &[(&str, &str)]| -> Vec<Value> {
+            names.iter().enumerate().map(|(i, (n, t))| json!({"id": format!("m:{cls}:{i}"), "file": "f:2", "line": i, "kind": "property", "name": n,
+                                                             "cls": cls, "class_symbol": format!("Demo.{cls}"), "type": t})).collect()
+        };
+        let three = [("AccessToken", "string"), ("ExpiresIn", "int"), ("UserName", "string")];
+        let mut members = props("AccountDto", &three);
+        members.extend(props("TokenDto", &three));
+        members.extend(props("LoginDto", &[("UserName", "string"), ("Password", "string")]));
+        let mut envelope = props("Envelope<T>", &[("Data", "T"), ("Code", "int")]);
+        envelope.iter_mut().for_each(|m| m["class_symbol"] = json!("Demo.Envelope<T>"));
+        members.extend(envelope);
+        put("members", members);
+    }
+    let config = Config {
+        path: dir.join("structuregate.facts.json"),
+        sources: vec![Source { name: "a".into(), kind: "file".into(), id: String::new(), path: dir.join("a.md"), shown: "a.md".into() }],
+        ..Default::default()
+    };
+    let lines = run(db.to_str().unwrap(), &config).unwrap();
+    let at = |what: &str| lines.iter().position(|l| l.contains(what)).unwrap_or_else(|| panic!("no {what} in {lines:#?}"));
+    let (token, account) = (at("= property Demo.TokenDto"), at("= property Demo.AccountDto"));
+    assert!(token < account, "{lines:#?}");
+    assert!(lines[token].contains("3/3 values = property Demo.TokenDto (3 code values, the response type of POST /api/token)"), "{}", lines[token]);
+    assert!(lines[account].contains("(3 code values, no type of POST /api/token)"), "{}", lines[account]);
+    let written: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(FILE_NAME)).unwrap()).unwrap();
+    let of = |symbol: &str| written["candidates"].as_array().unwrap().iter().find(|c| c["link"]["to"]["symbol"] == symbol).cloned().unwrap();
+    assert_eq!((of("Demo.TokenDto")["endpoint_type"].as_str(), of("Demo.AccountDto")["endpoint_type"].as_str()), (Some("response"), None));
+    assert_eq!(of("Demo.TokenDto")["section_endpoints"], json!(["POST /api/token"]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_place_is_under_the_routes_its_headings_name_and_its_own_text_not_an_overview_or_a_siblings() {
+    let doc = "# API\n\nAll calls start /api.\n\n## Items\n\nCall GET /api/items.\n\n### Old\n\nNot /api/old.\n\n### 2.1 /api/items/{id} DELETE\n\n\
+               #### Response\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
+    let blocks = reader::from_markdown(doc);
+    let table = blocks.iter().position(|b| matches!(b, reader::Block::Table { .. })).unwrap();
+    assert_eq!(routes_at(&blocks, table), ["DELETE /api/items/{id}"]);
+    let under = blocks.iter().position(|b| matches!(b, reader::Block::Heading { text, .. } if text == "Response")).unwrap();
+    let mut blocks = blocks;
+    blocks.insert(under + 2, reader::Block::Text { at: 0, text: "Answers GET /api/items/{id}/full.".into(), code: false });
+    assert_eq!(routes_at(&blocks, table + 1), ["GET /api/items/{id}/full", "DELETE /api/items/{id}"]);
+}

@@ -6,6 +6,9 @@
 //! - ROWS THAT AGREE: the true link is the one where the rest of the row agrees too - the document's label column
 //!   names the same seed row's other column, or the enum member's name. A pair with agreeing rows ranks above every
 //!   pair without, whatever the counts.
+//! - THE SECTION'S ENDPOINT: under a heading that names an endpoint, a field table lists the properties of a type that
+//!   endpoint takes or returns (`uses.rs`, resolved symbols). Every class sharing the names shares the hits; only
+//!   that one is used, and it ranks next after agreeing rows.
 
 use super::links::{self, Code};
 use std::collections::HashMap;
@@ -19,12 +22,14 @@ pub struct Score {
     pub agree: usize,
     pub doc_column: usize,
     pub code_column: String,
+    /// 1 when the set is a type an endpoint the document's section names takes or returns (`uses.rs`).
+    pub used: usize,
 }
 
 impl Score {
-    /// Higher first: agreeing rows, then hits beyond chance, then hits.
-    pub fn rank(&self) -> (usize, i64, usize) {
-        (self.agree, ((self.hits as f64 - self.chance) * 100.0) as i64, self.hits)
+    /// Higher first: agreeing rows, then a type of the section's endpoint, then hits beyond chance, then hits.
+    pub fn rank(&self) -> (usize, usize, i64, usize) {
+        (self.agree, self.used, ((self.hits as f64 - self.chance) * 100.0) as i64, self.hits)
     }
 }
 

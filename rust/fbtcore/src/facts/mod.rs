@@ -21,6 +21,7 @@ mod docx;
 mod links;
 pub mod pull;
 mod rank;
+mod uses;
 pub mod review;
 #[path = "snapshot/reader.rs"]
 mod reader;

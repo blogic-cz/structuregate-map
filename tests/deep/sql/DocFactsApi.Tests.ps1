@@ -165,3 +165,33 @@ Test-Case 'docfactsapi: an uploaded Word file is a snapshot like any other' {
     Assert-Exit $run 0
     Assert-DocApiRows $db $script:DocApiLinks @('columns|Price|Price|bound', 'columns|Colour||missing in code', 'columns||Title|missing in doc') 'the Word table against the columns'
 }
+
+Test-Case 'docfactsapi: a field table under a routed heading is matched to the type that endpoint takes or returns' {
+    if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { Write-Host '    (no dotnet - skipped)'; return }
+    $nl = $script:DocApiNl
+    $three = 'public string AccessToken { get; set; } = "";' + ' public int ExpiresIn { get; set; }' + ' public string UserName { get; set; } = "";'
+    # TWO CLASSES WITH THE SAME PROPERTY NAMES: only the resolved return type tells which one an endpoint returns.
+    $tree = Use-Tree @{
+        'App/App.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+        'App/Auth.cs' = "namespace Demo.Api;$nl" +
+            "public class Envelope<T> { public T Data { get; set; } = default!; public int Code { get; set; } }$nl" +
+            "public class AccountDto { $three }$nl" +
+            "public class TokenDto { $three }$nl" +
+            "public class LoginDto { public string UserName { get; set; } = `"`"; public string Password { get; set; } = `"`"; }$nl" +
+            "[Route(`"api/auth`")]$nl" +
+            "public class AuthController {$nl" +
+            "    [HttpPost(`"token`")] public System.Threading.Tasks.Task<Envelope<TokenDto>> Token(LoginDto login) => null!;$nl" +
+            "    [HttpGet(`"me`")]$nl    [ProducesResponseType(typeof(AccountDto), 200)]$nl    public object Me() => 1;$nl}$nl"
+        'docs/api.md' = "# Auth$nl$nl## 2.1 /api/auth/token POST$nl$nl### Request$nl$nl| Name | Meaning |$nl|---|---|$nl| userName | who |$nl| password | secret |$nl$nl" +
+            "### Response$nl$nl| Name | Meaning |$nl|---|---|$nl| accessToken | the token |$nl| expiresIn | seconds |$nl| userName | who |$nl$nl" +
+            "## 2.2 GET /api/auth/me$nl$nl| Name | Meaning |$nl|---|---|$nl| accessToken | the token |$nl| expiresIn | seconds |$nl| userName | who |$nl"
+        'structuregate.facts.json' = '{ "sources": [ { "name": "api", "kind": "file", "path": "docs/api.md" } ] }'
+    }
+    $db = Join-Path $tree 'api.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext '.cs' --map-sqlite $db) 0
+    $s = Invoke-Gate --facts-suggest $db --facts-config (Join-Path $tree 'structuregate.facts.json')
+    Assert-Exit $s 0
+    Assert-Line $s 'api: table 1 under "Request", column 1 "Name": 2/2 values = property Demo.Api.LoginDto (2 code values, the request type of POST /api/auth/token)'
+    Assert-Line $s 'api: table 1 under "Response", column 1 "Name": 3/3 values = property Demo.Api.TokenDto (3 code values, the response type of POST /api/auth/token)'
+    Assert-Line $s 'api: table 1 under "2.2 GET /api/auth/me", column 1 "Name": 3/3 values = property Demo.Api.AccountDto (3 code values, the response type of GET /api/auth/me)'
+}

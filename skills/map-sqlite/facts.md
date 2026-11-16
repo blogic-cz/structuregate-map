@@ -87,10 +87,13 @@ group are code values. A count alone misleads, so pairs are RANKED by:
    same row's other value (a seed row's other column, an enum member's or a constant's name). The true link is the
    one where the label column agrees too; a pair with agreeing rows outranks every pair without. The agreeing
    column becomes the candidate's `label`.
-2. **hits beyond chance** - the document's integers times how densely the code set covers THEIR range (a key
+2. **the section's endpoint** - a routed section (a route in its heading or one above it, or in the text right
+   under its own heading - not an overview above it; `/api/x POST` too) binds its endpoints; a type its action takes or returns (resolved return, parameter and
+   `[ProducesResponseType]` types, generic arguments and property types followed) outranks a class that only shares
+   the names: `, the response type of POST /api/x` / `, no type of ...`, and `section_endpoints`/`endpoint_type`.
+3. **hits beyond chance** - the document's integers times how densely the code set covers THEIR range (a key
    column `1..50` matches any small-int enum, and any `1..N` ordinal column whatever else it holds): that many hits
-   are expected and taken off.
-3. then the hits.
+   are expected and taken off; then the hits.
 
 Each group's best set and each set's best group are kept, best first:
 
@@ -111,8 +114,9 @@ Exit 0 (no candidate is an answer too), 2 when the config or the map cannot be r
 Sharing values is not meaning the same thing (`1, 2, 3` are in every enum). `--facts-suggest <map> --facts-review`
 asks a model, in one question, whether each candidate's document part lists the same thing as its code set, and
 writes its verdict and reason BESIDE each candidate (`review` in `structuregate.facts.suggest.json`); the accepted
-ones become a ready `{"facts": [...], "links": [...]}` fragment in `structuregate.facts.reviewed.json`. Still
-nothing is written into the config - a person copies the fragment in.
+ones become a ready `{"facts": [...], "links": [...]}` fragment in `structuregate.facts.reviewed.json`; one document
+part accepted against several sets is `ACCEPTED, AMBIGUOUS` and listed under `ambiguous`. The endpoint evidence is
+in the question. Still nothing is written into the config - a person copies the fragment in.
 
 The model is configured, off unless named: `STRUCTUREGATE_LLM` is a program (a path, or a name on PATH) and
 `STRUCTUREGATE_LLM_ARGS` its arguments, split at whitespace. Any model connects through a program that keeps this

@@ -8,6 +8,7 @@
 use super::config::{Config, Link};
 use super::links::{self, Code};
 use super::rank::{self, Score, Table};
+use super::uses::{self, Bound, Role};
 use super::{apis, reader, words};
 use crate::rows::dups::{has_columns, items_sql, text};
 use rusqlite::Connection;
@@ -27,6 +28,9 @@ struct Group {
     values: Vec<String>,
     /// A table column's rows, so the rest of a row can be asked whether it agrees (`rank.rs`).
     table: Option<Table>,
+    /// The routes its place is under (`routes_at`), and the endpoints they name with the classes those use.
+    routes: Vec<String>,
+    bound: Bound,
 }
 
 /// One set of code values: the link that names it, and its values.
@@ -53,6 +57,10 @@ pub fn run(db: &str, config: &Config) -> Result<Vec<String>, String> {
         }
     }
     let sets = sets(&conn).map_err(|e| format!("the map could not be read - {e}"))?;
+    let used = uses::load(&conn).map_err(|e| format!("the map's endpoints could not be read - {e}"))?;
+    for group in &mut groups {
+        group.bound = used.of(&group.routes);
+    }
     let found = pairs(&groups, &sets);
     let mut entries = Vec::new();
     for (n, (g, s, score)) in found.iter().enumerate() {
@@ -76,8 +84,15 @@ pub fn run(db: &str, config: &Config) -> Result<Vec<String>, String> {
         let by = if set.link.by == "name" { " (by name)" } else { "" };
         let agree = if score.agree >= AT_LEAST { format!(", {} rows agree: column {} = {}", score.agree, score.doc_column, score.code_column) } else { String::new() };
         let chance = if score.chance >= 1.0 { format!(", ~{:.0} by chance", score.chance) } else { String::new() };
+        let endpoints = group.bound.endpoints.join(", ");
+        let typed = typed(group, set);
+        let used = match typed {
+            Some(role) => format!(", the {} type of {}", role.word(), group.bound.used_by.get(&set.link.target).map(|e| e.join(", ")).unwrap_or_default()),
+            None if set.link.kind == "property" && !endpoints.is_empty() => format!(", no type of {endpoints}"),
+            None => String::new(),
+        };
         lines.push(format!(
-            "  {}: {}/{} values = {} {target}{column}{by} ({} code values{agree}{chance})",
+            "  {}: {}/{} values = {} {target}{column}{by} ({} code values{agree}{used}{chance})",
             group.shown,
             hit,
             group.values.len(),
@@ -90,6 +105,12 @@ pub fn run(db: &str, config: &Config) -> Result<Vec<String>, String> {
             "agree_on": if score.agree >= AT_LEAST { json!({"document_column": score.doc_column, "code": score.code_column}) } else { Value::Null },
             "matched_values": matched, "unmatched": unmatched, "facts": fact, "link": link,
         }));
+        // THE ENDPOINT THE SECTION NAMES, and whether this type is one it takes or returns - resolved symbols, not names.
+        if !group.bound.endpoints.is_empty() {
+            let entry = entries.last_mut().expect("just pushed");
+            entry["section_endpoints"] = json!(group.bound.endpoints);
+            entry["endpoint_type"] = json!(typed.map(Role::word));
+        }
     }
     let out = config.path.parent().unwrap_or(std::path::Path::new(".")).join(FILE_NAME);
     let body = json!({ "map": db, "candidates": entries });
@@ -122,22 +143,25 @@ fn link_entry(facts: &str, link: &Link) -> Value {
 fn groups_of(source: &str, blocks: &[reader::Block]) -> Vec<Group> {
     let mut out = Vec::new();
     let mut heading = String::new();
-    for block in blocks {
+    for (i, block) in blocks.iter().enumerate() {
         match block {
             reader::Block::Heading { text, .. } => heading = text.clone(),
-            reader::Block::Table { rows, head } => out.extend(columns_of(source, blocks, &heading, rows, *head)),
+            reader::Block::Table { rows, head } => {
+                let routes = routes_at(blocks, i);
+                out.extend(columns_of(source, blocks, &heading, rows, *head).into_iter().map(|g| Group { routes: routes.clone(), ..g }));
+            }
             _ => {}
         }
     }
-    let mut sections: Vec<String> = vec![String::new()];
-    for block in blocks {
+    let mut sections: Vec<(String, Option<usize>)> = vec![(String::new(), None)];
+    for (i, block) in blocks.iter().enumerate() {
         if let reader::Block::Heading { text, .. } = block
-            && !sections.contains(text)
+            && !sections.iter().any(|(s, _)| s == text)
         {
-            sections.push(text.clone());
+            sections.push((text.clone(), Some(i)));
         }
     }
-    for section in sections {
+    for (section, at) in sections {
         let Ok(texts) = reader::texts(blocks, &section) else { continue };
         let place = if section.is_empty() { "the whole document".to_string() } else { format!("under \"{section}\"") };
         for (from, found) in [("code", words::code_spans(&texts)), ("routes", words::routes(&texts, ""))] {
@@ -150,6 +174,8 @@ fn groups_of(source: &str, blocks: &[reader::Block]) -> Vec<Group> {
                     fact: json!({"source": source, "section": section, "from": from}),
                     values,
                     table: None,
+                    routes: at.map(|i| routes_at(blocks, i)).unwrap_or_default(),
+                    bound: Bound::default(),
                 });
             }
         }
@@ -191,9 +217,40 @@ fn columns_of(source: &str, blocks: &[reader::Block], heading: &str, rows: &[(us
             fact: json!({"source": source, "section": section, "table": n, "key": key, "headers": if named { headers } else { vec![] }}),
             values,
             table: Some(Table { rows: data.iter().map(|(_, r)| r.clone()).collect(), column: c }),
+            routes: Vec::new(),
+            bound: Bound::default(),
         });
     }
     out
+}
+
+/// The routes a place in a document is under: those its own heading and each heading above it name, and those the
+/// text right under its own heading names (up to the next heading). A field table under `3.4.2 POST /api/items`, or
+/// under `Response` below it, describes that endpoint's types; an overview above it that lists every route, or a
+/// sibling section's route, is no part of it.
+fn routes_at(blocks: &[reader::Block], at: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut level = usize::MAX;
+    for h in (0..=at.min(blocks.len().saturating_sub(1))).rev() {
+        let reader::Block::Heading { level: l, text } = &blocks[h] else { continue };
+        if *l >= level {
+            continue;
+        }
+        let own = level == usize::MAX;
+        level = *l;
+        out.extend(words::routes_in(text));
+        for block in blocks[h + 1..].iter().take_while(|b| own && !matches!(b, reader::Block::Heading { .. })) {
+            if let reader::Block::Text { text, .. } = block {
+                out.extend(words::routes_in(text));
+            }
+        }
+    }
+    distinct(out.into_iter())
+}
+
+/// What a property set's class is to the endpoints its group's section names - None for any other set.
+fn typed(group: &Group, set: &Set) -> Option<Role> {
+    (set.link.kind == "property").then(|| group.bound.classes.get(&set.link.target).copied()).flatten()
 }
 
 fn distinct(values: impl Iterator<Item = String>) -> Vec<String> {
@@ -240,7 +297,8 @@ fn pairs(groups: &[Group], sets: &[Set]) -> Vec<(usize, usize, Score)> {
                 None => Default::default(),
             };
             let chance = rank::chance(&group.values, &set.codes);
-            hits.push((g, s, Score { hits: n, chance, agree, doc_column, code_column }));
+            let used = usize::from(typed(group, set).is_some());
+            hits.push((g, s, Score { hits: n, chance, agree, doc_column, code_column, used }));
         }
     }
     let best = |of: &dyn Fn(&(usize, usize, Score)) -> usize| {

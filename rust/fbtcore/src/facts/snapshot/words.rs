@@ -43,13 +43,16 @@ pub fn routes(texts: &[Text], prefix: &str) -> Vec<Word> {
     out
 }
 
-/// The routes of one text, each with its verb when the word before it is one.
+/// The routes of one text, each with its verb when the word before it is one - or, in a heading that writes
+/// `/api/items POST`, the word after it when that one is no verb of a route after it.
 pub fn routes_in(text: &str) -> Vec<String> {
     let words: Vec<&str> = text.split_whitespace().collect();
+    let verb_at = |j: usize| words.get(j).map(|w| trimmed(w).to_uppercase()).filter(|v| VERBS.contains(&v.as_str()));
     let mut out = Vec::new();
     for (i, raw) in words.iter().enumerate() {
         let Some(path) = route(raw) else { continue };
-        let verb = i.checked_sub(1).map(|j| trimmed(words[j]).to_uppercase()).filter(|v| VERBS.contains(&v.as_str()));
+        let after = || verb_at(i + 1).filter(|_| words.get(i + 2).is_none_or(|w| route(w).is_none()));
+        let verb = i.checked_sub(1).and_then(verb_at).or_else(after);
         out.push(match verb {
             Some(verb) => format!("{verb} {path}"),
             None => path,
@@ -109,6 +112,8 @@ mod tests {
             "POST /api/items",
             "/api/help"
         ]);
+        assert_eq!(routes_in("3.4.2 /api/items/redacted POST"), vec!["POST /api/items/redacted"]);
+        assert_eq!(routes_in("/api/a GET /api/b"), vec!["/api/a", "GET /api/b"]);
         assert_eq!(routes_in("a // comment, //cdn.example/lib, and/or 1/2 and / alone"), Vec::<String>::new());
     }
 
