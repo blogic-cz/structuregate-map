@@ -98,6 +98,11 @@ Test-Case 'httplinks: a C# endpoint carries its class route, constants folded an
     Assert-Line $f 'fn=One|OrdersController.One'
     $n = Get-HttpLinksRows $tree "SELECT 'nofunc=' || count(*) AS c FROM http_endpoints WHERE func = ''"
     Assert-Line $n 'nofunc=0'
+    # ONE FILE KEY FOR JOINS: `file_id` is the `files.id` every row table holds - the action's own, each call's own.
+    $k = Get-HttpLinksRows $tree ("SELECT 'keyed=' || ((SELECT count(*) FROM http_endpoints e JOIN functions fn ON fn.id = e.func AND fn.file = e.file_id) = " +
+        "(SELECT count(*) FROM http_endpoints)) || ',' || ((SELECT count(*) FROM http_calls h JOIN calls c ON c.id = h.call AND c.file = h.file_id) = " +
+        "(SELECT count(*) FROM http_calls)) || ',' || ((SELECT count(*) FROM http_calls) > 0) AS k")
+    Assert-Line $k 'keyed=1,1,1'
     $v =Get-HttpLinksRows $tree "SELECT 'av=' || $(Get-NodeRootListSql 'decorators__arg_values' 'decorators.id') AS a FROM decorators WHERE name = 'Route' AND target_kind = 'class' AND target = 'JobController'"
     Assert-Line $v 'av=["api/jobs"]'
 }

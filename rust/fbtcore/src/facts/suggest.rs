@@ -439,7 +439,7 @@ fn seeds(conn: &Connection) -> rusqlite::Result<Vec<Set>> {
             });
             by.len() - 1
         });
-        by[slot].codes.push(Code { target: id, file, line, value, name: String::new(), condition });
+        by[slot].codes.push(Code { target: id, file, line, value, name: String::new(), condition, typed: String::new() });
     }
     // Each table's sets share its rows: a set asks only by the ids its own codes carry.
     for set in &mut by {

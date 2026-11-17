@@ -5,7 +5,8 @@
 //! which endpoint (`matching.rs`). Rewritten whole by each run that does not replay it (`inputs.rs`): it reads nothing
 //! but the rows the halves stored.
 //! `http_calls` holds the C# `HttpClient` calls too (`cscalls.rs`), so a database with no TypeScript still gets its
-//! endpoints, its calls and the links between them.
+//! endpoints, its calls and the links between them. `file` is the PATH a person reads; `file_id` the `files.id` that
+//! `calls.file`, `functions.file` and every other row table hold, so a join needs no detour through `files`.
 
 mod calls;
 mod cscalls;
@@ -48,8 +49,8 @@ pub fn write(conn: &Connection) -> rusqlite::Result<Counts> {
     }
     conn.execute_batch(
         "DROP TABLE IF EXISTS http_endpoints; DROP TABLE IF EXISTS http_calls; DROP TABLE IF EXISTS http_links;
-         CREATE TABLE http_endpoints (id, file, cls, method, line, verb, template, route, func);
-         CREATE TABLE http_calls (id, file, call, member, line, verb, url, via);
+         CREATE TABLE http_endpoints (id, file, cls, method, line, verb, template, route, func, file_id);
+         CREATE TABLE http_calls (id, file, call, member, line, verb, url, via, file_id);
          CREATE TABLE http_links (call, endpoint, how);",
     )?;
     let (csharp, typescript) = (files_of(conn, "csharp")?, files_of(conn, "typescript")?);
@@ -58,19 +59,26 @@ pub fn write(conn: &Connection) -> rusqlite::Result<Counts> {
     let endpoints = endpoints::load(conn, &csharp)?;
     // THE CALLS OF BOTH HALVES (#143): a C# `HttpClient` call asks a url as an Angular one does.
     let mut sites = if typescript.is_empty() { Vec::new() } else { calls::load(conn, &typescript)? };
+    let angular = sites.len();
     if !csharp.is_empty() {
         sites.extend(cscalls::load(conn, &csharp)?);
     }
     let linked = matching::link(&endpoints, &sites);
     let mut counts = Counts { endpoints: endpoints.len(), calls: sites.len(), ..Counts::default() };
+    // EACH PATH'S `files.id`, per half: the two halves spell paths from different roots.
+    let id_of = |files: &std::collections::HashMap<String, String>| -> std::collections::HashMap<String, String> { files.iter().map(|(id, path)| (path.clone(), id.clone())).collect() };
+    let (csharp_ids, typescript_ids) = (id_of(&csharp), id_of(&typescript));
     {
-        let mut add = conn.prepare("INSERT INTO http_endpoints VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)")?;
+        let mut add = conn.prepare("INSERT INTO http_endpoints VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)")?;
         for (n, e) in endpoints.iter().enumerate() {
-            add.execute(params![format!("he:{}", n + 1), e.file, e.cls, e.method, e.line, e.verb, e.template, e.route, e.func])?;
+            let id = csharp_ids.get(&e.file).cloned().unwrap_or_default();
+            add.execute(params![format!("he:{}", n + 1), e.file, e.cls, e.method, e.line, e.verb, e.template, e.route, e.func, id])?;
         }
-        let mut add = conn.prepare("INSERT INTO http_calls VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)")?;
+        let mut add = conn.prepare("INSERT INTO http_calls VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)")?;
         for (n, s) in sites.iter().enumerate() {
-            add.execute(params![format!("hc:{}", n + 1), s.file, s.call, s.member, s.line, s.verb, s.url, s.via])?;
+            let ids = if n < angular { &typescript_ids } else { &csharp_ids };
+            let id = ids.get(&s.file).cloned().unwrap_or_default();
+            add.execute(params![format!("hc:{}", n + 1), s.file, s.call, s.member, s.line, s.verb, s.url, s.via, id])?;
         }
         let mut add = conn.prepare("INSERT INTO http_links VALUES (?1, ?2, ?3)")?;
         for (n, reached) in linked.iter().enumerate() {

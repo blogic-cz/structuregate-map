@@ -18,6 +18,8 @@ pub struct Code {
     pub value: String,
     pub name: String,
     pub condition: String,
+    /// A property's type as the half resolved it (`System.Collections.Generic.List<Demo.Item>`), else "".
+    pub typed: String,
 }
 
 /// The code values of one link, or why there are none to read.
@@ -74,7 +76,7 @@ fn seed(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> {
            AND lower(s.name) = ?2 ORDER BY s.id",
     ))?;
     let rows = stmt.query_map([&schema, &name, &link.column], |r| {
-        Ok(Code { target: text(r, 0)?, file: text(r, 1)?, line: r.get::<_, Option<i64>>(2)?.unwrap_or(0), condition: text(r, 3)?, value: text(r, 4)?, name: String::new() })
+        Ok(Code { target: text(r, 0)?, file: text(r, 1)?, line: r.get::<_, Option<i64>>(2)?.unwrap_or(0), condition: text(r, 3)?, value: text(r, 4)?, name: String::new(), typed: String::new() })
     })?;
     // A ROW THAT DOES NOT SET THE COLUMN has no value to check, and is not a value missing from the doc.
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().filter(|c| !c.value.is_empty()).collect())
@@ -133,7 +135,7 @@ impl Enums {
                     Value::Null => String::new(),
                     other => other.to_string(),
                 };
-                out.push(Code { target: id.clone(), file: file.clone(), line: *line, value: if by == "name" { name.clone() } else { value }, name, condition: String::new() });
+                out.push(Code { target: id.clone(), file: file.clone(), line: *line, value: if by == "name" { name.clone() } else { value }, name, condition: String::new(), typed: String::new() });
             }
         }
         Ok(out)
@@ -170,7 +172,7 @@ impl Consts {
         }
         let mut stmt = conn.prepare("SELECT k.id, k.file, k.line, k.name, k.value, k.cls FROM consts k ORDER BY k.id")?;
         let rows = stmt.query_map([], |r| {
-            Ok((Code { target: text(r, 0)?, file: text(r, 1)?, line: r.get::<_, Option<i64>>(2)?.unwrap_or(0), value: text(r, 4)?, name: text(r, 3)?, condition: String::new() }, text(r, 5)?))
+            Ok((Code { target: text(r, 0)?, file: text(r, 1)?, line: r.get::<_, Option<i64>>(2)?.unwrap_or(0), value: text(r, 4)?, name: text(r, 3)?, condition: String::new(), typed: String::new() }, text(r, 5)?))
         })?;
         for row in rows {
             let (code, cls) = row?;
@@ -201,7 +203,7 @@ fn derived(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> {
     ))?;
     let rows = stmt.query_map([&link.target], |r| {
         let name = text(r, 3)?;
-        Ok(Code { target: text(r, 0)?, file: text(r, 1)?, line: r.get::<_, Option<i64>>(2)?.unwrap_or(0), value: name.clone(), name: text(r, 4)?, condition: String::new() })
+        Ok(Code { target: text(r, 0)?, file: text(r, 1)?, line: r.get::<_, Option<i64>>(2)?.unwrap_or(0), value: name.clone(), name: text(r, 4)?, condition: String::new(), typed: String::new() })
     })?;
     rows.collect()
 }

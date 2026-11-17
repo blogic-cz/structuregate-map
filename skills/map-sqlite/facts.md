@@ -62,7 +62,7 @@ commas are allowed, as in `structuregate.sql.json`.
 | `consts` | the constants the class `symbol` declares (a static class of codes) | value, or `"by": "name"` |
 | `class` | the classes that list `symbol` among their bases | class name |
 | `endpoint` | every `http_endpoints` row, `VERB /template` - of one controller with `"class"` | segments and verb |
-| `property` | the properties of `symbol`: a C# class with what its bases declare (named by `[JsonPropertyName]`, `[JsonProperty]` or `[DataMember(Name)]` where it has one, `"by": "name"` for the C# name), a TypeScript interface, type alias or class | name, ignoring case; a leading `-> ` is dropped |
+| `property` | the properties of `symbol`: a C# class with what its bases declare (named by `[JsonPropertyName]`, `[JsonProperty]` or `[DataMember(Name)]` where it has one, `"by": "name"` for the C# name), a TypeScript interface, type alias or class | name, ignoring case; a child row (`-> Name`, `->`/`–>`/`—>`/`→`, once per level) in its parent row's property type first, linked or not (an array's or a list's element) |
 | `sql-column` | the columns of the SQL table `object` (`Schema.Table`, `dbo` by default) | name, ignoring case |
 
 Two values match when their text is equal, or both are numbers with the same value (`007` and `7`). A route matches an
@@ -199,9 +199,8 @@ to enable it instead.
 | table | one row per |
 |---|---|
 | `doc_facts` | a row of a configured table, or a code span or route (`key` only, `cells` empty): `facts`, `source`, `section`, `subsection` (the bold paragraph or lower heading above its table), `key`, `label`, `cells` (node rows `doc_facts__cells`, header -> cell; a column with no header is its number), `file` (the snapshot), `line` (a Markdown line, a JSON `startIndex`), `version` |
-| `doc_links` | a fact against a code value; `status` is `bound`, `missing in code` (in the document, not the code) or `missing in doc` (in the code, not the document); `target` is the code row (`sd:`, `e:`, `k:`, `c:`, `he:`, `m:`/`tm:`, a `sql_columns` id) with its `file`, `line`, `value`, `name` and a seed's `condition` |
-
-A fact matching several code rows (a code seeded twice) gets a `bound` row for each.
+| `doc_links` | a fact against a code value; `status` is `bound`, `missing in code` (in the document, not the code) or `missing in doc` (in the code, not the document); `target` is the code row (`sd:`, `e:`, `k:`, `c:`, `he:`, `m:`/`tm:`, a `sql_columns` id) with its `file`, `line`, `value`, `name` and a seed's `condition`; a fact matching several code rows gets a `bound` row for each |
+| `doc_sections`, `doc_tables` | EVERY section of every source, configured facts or not: `doc_sections` (`id` `ds:`, `source`, `file`, `n`, `level` - 0 before the first heading -, `heading`, `path` the headings down to it joined ` > `, `line`, `text` every text it holds, a line each); `doc_tables` a cell (`section` its `ds:` id, `tbl` from 1, `row` - 0 a header row -, `col` from 1, `value`, `line`) |
 
 A section missing from the snapshot, a missing snapshot, or a link whose code is not in the map is a NOTE,
 and the other lists are still checked (in the last case every fact of that link is `missing in code`). A

@@ -85,6 +85,13 @@ Test-Case 'docfactsapi: routes in text, property and column names are checked ag
     # THE ABSTRACT BASE ITSELF SERVES NOTHING: its action is no bare `run-all` endpoint of its own.
     $inherited = Get-DocApiRows $db "SELECT 'v=' || cls || '|' || template FROM http_endpoints WHERE method = 'RunAll'"
     Assert-Equal ($inherited -join ',') 'WidgetsController|api/widgets/run-all' 'the inherited action''s endpoints'
+    # EVERY SECTION OF THE SOURCE IS A ROW, facts or not: its path, its text, each table cell by row and column.
+    $sections = Get-DocApiRows $db "SELECT 'v=' || n || '|' || level || '|' || path FROM doc_sections ORDER BY n"
+    Assert-Equal ($sections -join ',') '1|1|Items API,2|2|Items API > Fields,3|2|Items API > Columns' 'the sections'
+    Assert-DocApiRows $db ("SELECT 'v=' || s.path || '|' || t.tbl || '|' || t.row || '|' || t.col || '|' || t.value FROM doc_tables t " +
+        "JOIN doc_sections s ON s.id = t.section") @('Items API > Fields|1|0|1|Field', 'Items API > Fields|1|3|1|weight', 'Items API > Columns|1|2|2|text') 'the cells'
+    $said = Get-DocApiRows $db "SELECT 'v=' || count(*) FROM doc_sections WHERE n = 1 AND text LIKE '%Old clients still call%'"
+    Assert-Equal ($said -join ',') '1' 'the text of the first section'
     # THE PREFIX KEEPS A ROUTE OF ANOTHER KIND OUT: /docs/history is no fact at all.
     $other = Get-DocApiRows $db "SELECT 'v=' || key FROM doc_facts WHERE key LIKE '%docs%'"
     if ($other.Count) { throw "a route outside the prefix became a fact: $($other -join ', ')" }
@@ -228,6 +235,8 @@ Test-Case 'docfactsapi: a field table under a routed heading is matched to the t
 Test-Case 'docfactsapi: a property table matches JSON names, inherited properties and every type its fact is linked to' {
     if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { Write-Host '    (no dotnet - skipped)'; return }
     $nl = $script:DocApiNl
+    # THE ARROWS A DOCUMENT WRITES, built from their code points: a 5.1 host reads a BOM-less script as ANSI.
+    $em, $en, $to = [string][char]0x2014, [string][char]0x2013, [string][char]0x2192
     $tree = Use-Tree @{
         'App/App.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
         'App/Ticket.cs' = "namespace Demo.Api;$nl" + "using System.Runtime.Serialization;$nl" +
@@ -236,10 +245,16 @@ Test-Case 'docfactsapi: a property table matches JSON names, inherited propertie
             "public class TicketDto : RequestBase<string> {$nl" +
             "    [JsonProperty(PropertyName = `"access_code`")] public string AccessCode { get; set; } = `"`";$nl" +
             "    [DataMember(Name = `"valid_for`")] public int ValidFor { get; set; }$nl" +
-            "    public PartDto Part { get; set; } = new();$nl}$nl" +
-            "public class PartDto { public int PartNo { get; set; } }$nl"
+            "    public PartDto Part { get; set; } = new();$nl" +
+            "    public System.Collections.Generic.List<HolderDto> Holders { get; set; } = new();$nl}$nl" +
+            "public class PartDto { public int PartNo { get; set; } }$nl" +
+            "public class HolderDto { public string ClientRef { get; set; } = `"`"; public AddressDto[] Addresses { get; set; } = [];" +
+            " public string Note { get; set; } = `"`"; }$nl" +
+            "public class AddressDto { public string Street { get; set; } = `"`"; }$nl" +
+            "public class OtherDto { public string Note { get; set; } = `"`"; }$nl"
         'docs/ticket.md' = "# Ticket$nl$nl## Fields$nl$nl| Field | Meaning |$nl|---|---|$nl| access_code | a |$nl| valid_for | b |$nl" +
-            "| Request | c |$nl| Key | d |$nl| Part | e |$nl| -> PartNo | f |$nl| colour | g |$nl"
+            "| Request | c |$nl| Key | d |$nl| Part | e |$nl| -> PartNo | f |$nl| colour | g |$nl" +
+            "| Holders | h |$nl| $em>ClientRef | i |$nl| -> Addresses | j |$nl| -> -> Street | k |$nl| $to Note | l |$nl| $en> Street | m |$nl"
         'structuregate.facts.json' = '{ "sources": [ { "name": "api", "kind": "file", "path": "docs/ticket.md" } ],' +
             ' "facts": [ { "name": "fields", "source": "api", "section": "Fields", "key": "Field" } ],' +
             ' "links": [ { "facts": "fields", "to": { "kind": "property", "symbol": "Demo.Api.TicketDto" } },' +
@@ -249,10 +264,14 @@ Test-Case 'docfactsapi: a property table matches JSON names, inherited propertie
     Assert-Exit (Invoke-Gate --root $tree --ext '.cs' --map-sqlite $db --facts-config (Join-Path $tree 'structuregate.facts.json')) 0
     Assert-DocApiRows $db $script:DocApiLinks @(
         'fields|access_code|access_code|bound', 'fields|valid_for|valid_for|bound', 'fields|Request|Request|bound',
-        'fields|Key|Key|bound', 'fields|Part|Part|bound', 'fields|-> PartNo|PartNo|bound', 'fields|colour||missing in code'
-    ) 'each row against both linked types'
-    $missing = Get-DocApiRows $db "SELECT 'v=' || key FROM doc_links WHERE status = 'missing in code'"
-    Assert-Equal ($missing -join ',') 'colour' 'the rows no linked type holds'
+        'fields|Key|Key|bound', 'fields|Part|Part|bound', 'fields|-> PartNo|PartNo|bound', 'fields|colour||missing in code',
+        'fields|Holders|Holders|bound', "fields|$em>ClientRef|ClientRef|bound", 'fields|-> -> Street|Street|bound', "fields|$to Note|Note|bound"
+    ) 'each row against both linked types, a child row against its parent row''s type first'
+    $missing = Get-DocApiRows $db "SELECT 'v=' || key FROM doc_links WHERE status = 'missing in code' ORDER BY rowid"
+    Assert-Equal ($missing -join ',') "colour,$en> Street" 'the rows no linked type holds'
+    # THE PARENT'S TYPE, NOT A NAME ELSEWHERE: an arrowed `Note` under Holders is HolderDto's, never OtherDto's.
+    $note = Get-DocApiRows $db "SELECT 'v=' || m.cls FROM doc_links l JOIN members m ON m.id = l.target WHERE l.key = '$to Note'"
+    Assert-Equal ($note -join ',') 'HolderDto' 'the type a child row is read in'
     $undocumented = Get-DocApiRows $db "SELECT 'v=' || value FROM doc_links WHERE status = 'missing in doc'"
     Assert-Equal ($undocumented -join ',') '' 'the properties no row names'
 }

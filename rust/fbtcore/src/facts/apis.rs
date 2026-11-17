@@ -29,6 +29,7 @@ pub fn endpoints(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> 
             value: format!("{} /{}", text(r, 3)?, template.trim_start_matches(['~', '/'])),
             name: format!("{}.{}", text(r, 5)?, text(r, 6)?),
             condition: String::new(),
+            typed: String::new(),
         })
     })?;
     rows.collect()
@@ -45,6 +46,32 @@ pub fn properties(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>>
 /// (`classes.bases`, type arguments left out) by its symbol, and the symbols a bare name stands for, so a class answers
 /// with what it inherits too.
 pub struct Properties(HashMap<String, Vec<Code>>, HashMap<String, Vec<String>>, HashMap<String, Vec<String>>);
+
+/// The type a property's rows describe: an array's, a list's, a nullable's element, a map's value - `Demo.Item[]`,
+/// `List<Demo.Item>`, `Demo.Item?` and `IDictionary<string, List<Demo.Item>>` are each `Demo.Item`.
+pub fn element(typed: &str) -> String {
+    let mut at = typed.trim().to_string();
+    loop {
+        let before = at.clone();
+        at = at.trim_end_matches('?').trim_end_matches("[]").trim().to_string();
+        if let (Some(open), true) = (at.find('<'), at.ends_with('>')) {
+            let inner = &at[open + 1..at.len() - 1];
+            let (mut nested, mut last) = (0usize, 0usize);
+            for (i, c) in inner.char_indices() {
+                match c {
+                    '<' => nested += 1,
+                    '>' => nested = nested.saturating_sub(1),
+                    ',' if nested == 0 => last = i + 1,
+                    _ => {}
+                }
+            }
+            at = inner[last..].trim().to_string();
+        }
+        if at == before {
+            return at;
+        }
+    }
+}
 
 /// A symbol without its type arguments: `Demo.Base<T>` is `Demo.Base`.
 fn bare(symbol: &str) -> String {
@@ -85,11 +112,14 @@ impl Properties {
                     }
                 }
             }
-            let mut stmt = conn.prepare("SELECT m.id, m.file, m.line, m.name, m.cls, m.class_symbol FROM members m WHERE m.kind = 'property' ORDER BY m.id")?;
-            for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0), text(r, 3)?, text(r, 4)?, text(r, 5)?)))? {
-                let (id, file, line, name, cls, symbol) = row?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT m.id, m.file, m.line, m.name, m.cls, m.class_symbol, {} FROM members m WHERE m.kind = 'property' ORDER BY m.id",
+                scalar_sql(conn, "members", "m", "type")
+            ))?;
+            for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0), text(r, 3)?, text(r, 4)?, text(r, 5)?, text(r, 6)?)))? {
+                let (id, file, line, name, cls, symbol, typed) = row?;
                 let value = json.get(&(file.clone(), cls.clone(), name.clone())).filter(|j| !j.is_empty()).cloned().unwrap_or_else(|| name.clone());
-                let code = Code { target: id, file, line, value, name, condition: String::new() };
+                let code = Code { target: id, file, line, value, name, condition: String::new(), typed };
                 // A C# TYPE IS ASKED FOR by its symbol (with or without its type parameters) or by its bare name.
                 let mut keys = vec![symbol.clone(), bare(&symbol), cls];
                 keys.dedup();
@@ -104,17 +134,20 @@ impl Properties {
             let owners: Vec<&str> = ["interfaces", "type_aliases"].into_iter().filter(|t| has_columns(conn, t, &["id", "name"])).collect();
             if !owners.is_empty() {
                 let named: Vec<String> = owners.iter().map(|t| format!("SELECT id, name FROM {t}")).collect();
-                typescript.push(format!("SELECT t.id, t.file, t.line, t.name, o.name FROM type_members t JOIN ({}) o ON o.id = t.owner", named.join(" UNION ")));
+                typescript.push(format!("SELECT t.id, t.file, t.line, t.name, o.name, {} FROM type_members t JOIN ({}) o ON o.id = t.owner", scalar_sql(conn, "type_members", "t", "type"), named.join(" UNION ")));
             }
         }
         if has_columns(conn, "members", &["class", "kind", "name"]) && has_columns(conn, "classes", &["id", "name"]) {
-            typescript.push("SELECT m.id, m.file, m.line, m.name, c.name FROM members m JOIN (SELECT DISTINCT id, name FROM classes) c ON c.id = m.class WHERE m.kind = 'property'".into());
+            typescript.push(format!(
+                "SELECT m.id, m.file, m.line, m.name, c.name, {} FROM members m JOIN (SELECT DISTINCT id, name FROM classes) c ON c.id = m.class WHERE m.kind = 'property'",
+                scalar_sql(conn, "members", "m", "type")
+            ));
         }
         for sql in typescript {
             let mut stmt = conn.prepare(&format!("{sql} ORDER BY 1"))?;
-            for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0), text(r, 3)?, text(r, 4)?)))? {
-                let (id, file, line, name, owner) = row?;
-                out.entry(owner).or_default().push(Code { target: id, file, line, value: name.clone(), name, condition: String::new() });
+            for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0), text(r, 3)?, text(r, 4)?, text(r, 5)?)))? {
+                let (id, file, line, name, owner, typed) = row?;
+                out.entry(owner).or_default().push(Code { target: id, file, line, value: name.clone(), name, condition: String::new(), typed });
             }
         }
         // EACH C# CLASS'S BASES, and the symbols each bare name stands for.
@@ -183,7 +216,7 @@ impl Columns {
         ))?;
         for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, r.get::<_, Option<i64>>(2)?.unwrap_or(0), text(r, 3)?, text(r, 4)?, text(r, 5)?)))? {
             let (id, file, line, name, schema, table) = row?;
-            out.entry((schema, table)).or_default().push(Code { target: id, file, line, value: name.clone(), name, condition: String::new() });
+            out.entry((schema, table)).or_default().push(Code { target: id, file, line, value: name.clone(), name, condition: String::new(), typed: String::new() });
         }
         Ok(Columns(out))
     }

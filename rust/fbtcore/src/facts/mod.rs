@@ -6,7 +6,7 @@
 //! snapshots (`reader.rs`; a Word file by `docx.rs`) into `doc_facts` - a table's rows, or the code spans and routes
 //! a text names (`words.rs`) - and joins each declared list to its code (`links.rs`, `apis.rs`) in `doc_links`:
 //! `bound`, `missing in code` (in the document, not in the code) or `missing in doc` (in the code, not in the
-//! document). Which code rows MUST be documented stays the consumer's rule - a query over `doc_links`.
+//! document). Every section of every source is a row too (`sections.rs`: `doc_sections`, `doc_tables`). Which code rows MUST be documented stays the consumer's rule - a query over `doc_links`.
 //!
 //! `--facts-suggest` (`suggest.rs`) finds which part of a document lists what the map holds, by exact values, and
 //! writes candidates - it never writes the config.
@@ -28,6 +28,8 @@ pub mod review;
 #[path = "snapshot/reader.rs"]
 mod reader;
 pub mod suggest;
+#[path = "snapshot/sections.rs"]
+mod sections;
 #[path = "snapshot/table.rs"]
 mod table;
 #[path = "snapshot/words.rs"]
@@ -121,10 +123,37 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
             })
             .collect();
         let mut matched: Vec<HashSet<usize>> = vec![HashSet::new(); linked.len()];
+        // EACH ROW'S TYPE, by its depth: a child row (`-> Name`) is first a property of the type its parent row's
+        // property holds - linked or not (an array's, a list's element) - and only then one of the linked types.
+        let typed = linked.iter().any(|(l, _)| l.kind == "property").then(|| apis::Properties::read(conn)).transpose()?;
+        let mut parents: Vec<(usize, String)> = Vec::new();
         for (fact, key, label) in rows {
-            let mut bound = false;
-            for (l, (link, codes)) in linked.iter().enumerate() {
-                for (i, c) in codes.iter().enumerate().filter(|(_, c)| links::matches(&link.kind, &c.value, nested(key))) {
+            let (depth, name) = nested(key);
+            while parents.last().is_some_and(|(d, _)| *d >= depth) {
+                parents.pop();
+            }
+            let (mut bound, mut own) = (false, String::new());
+            if let (true, Some(properties), Some((_, parent))) = (depth > 0, typed.as_ref(), parents.last().filter(|(_, t)| !t.is_empty())) {
+                for c in properties.codes(&apis::element(parent), "").iter().filter(|c| links::matches("property", &c.value, name)) {
+                    if !bound {
+                        own = c.typed.clone();
+                    }
+                    bound = true;
+                    // A LINKED TYPE'S PROPERTY a child row names is documented there too.
+                    for (l, (_, codes)) in linked.iter().enumerate() {
+                        matched[l].extend(codes.iter().enumerate().filter(|(_, x)| x.target == c.target).map(|(i, _)| i));
+                    }
+                    n += 1;
+                    made.links[0] += 1;
+                    insert.execute(params![format!("dl:{n}"), first.facts, "property", fact, key, label, c.target, c.file, c.line, c.value, c.name, c.condition, "bound"])?;
+                }
+            }
+            let under_parent = bound;
+            for (l, (link, codes)) in linked.iter().enumerate().filter(|_| !under_parent) {
+                for (i, c) in codes.iter().enumerate().filter(|(_, c)| links::matches(&link.kind, &c.value, name)) {
+                    if !bound {
+                        own = c.typed.clone();
+                    }
                     bound = true;
                     matched[l].insert(i);
                     n += 1;
@@ -132,6 +161,7 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
                     insert.execute(params![format!("dl:{n}"), link.facts, link.kind, fact, key, label, c.target, c.file, c.line, c.value, c.name, c.condition, "bound"])?;
                 }
             }
+            parents.push((depth, own));
             if !bound {
                 n += 1;
                 made.links[1] += 1;
@@ -147,13 +177,21 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
         }
     }
     conn.execute_batch("CREATE INDEX ix_doc_links_status ON doc_links(status); CREATE INDEX ix_doc_links_target ON doc_links(target);")?;
+    let parts = sections::write(conn, &config.sources)?;
+    made.notes.extend(parts.notes);
+    made.notes.push(format!("the documents: {} section(s) in doc_sections, {} table cell(s) in doc_tables", parts.sections, parts.cells));
     Ok(made)
 }
 
-/// A documented key as it names its value: a row written `-> Name` (or `→ Name`) is a child of the row above it, the
-/// arrow only its indent.
-fn nested(key: &str) -> &str {
-    key.trim_start().trim_start_matches("->").trim_start_matches('→').trim_start()
+/// A documented key's depth and the name it gives: a row written `-> Name` is a child of the nearest row above it one
+/// level up, `-> -> Name` a grandchild - the arrows (`->`, `–>`, `—>`, `→`, spaced or not) only its indent.
+fn nested(key: &str) -> (usize, &str) {
+    let (mut depth, mut rest) = (0, key.trim());
+    while let Some(after) = ["->", "–>", "—>", "→"].iter().find_map(|arrow| rest.strip_prefix(arrow)) {
+        depth += 1;
+        rest = after.trim_start();
+    }
+    (depth, rest)
 }
 
 /// The rows of one list: a table's, or each code span or route of the section as a row with only its key.
