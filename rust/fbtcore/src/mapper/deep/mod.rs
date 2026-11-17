@@ -13,6 +13,7 @@
 mod derived;
 mod driven;
 mod flight;
+mod fresh;
 mod hashes;
 mod inputs;
 mod passes;
@@ -244,6 +245,9 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
         driven::hash(db, &files.sharp, &hashes, &deep.exclude, &deep.include_generated)
     });
     let moving = sharp.as_ref().map_or(0, |h| h.moving(db, forced));
+    // EVERY ROW WRITTEN AGAIN: an empty database (`fresh.rs`), and the halves started early against the old one go again.
+    let fresh = fresh::begin(into, db, files.script.len(), moving, files.sharp.len());
+    let (python_early, plain_early) = if fresh { (None, None) } else { (python_early, plain_early) };
     let mut python_early = python_early;
     let (mut ms, mut beside_ms) = (BTreeMap::new(), BTreeMap::new());
     let mut beside = |into: &mut Collector| {

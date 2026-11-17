@@ -110,7 +110,8 @@ pub(super) fn settle(db: &str, key: &dyn Fn(Option<&str>) -> Option<String>, abs
     if let Some(key) = asked
         && clean
     {
-        super::payload::record(db, LANG, &json!({ "key": key, "absent": absent, "notes": absence, "fe": fe }).to_string());
+        // THE EXTRACTOR that wrote the rows, so a later run knows before node starts that every file is read again (`fresh.rs`).
+        super::payload::record(db, LANG, &json!({ "key": key, "absent": absent, "notes": absence, "fe": fe, "build": crate::embedded::node_rows::extractor() }).to_string());
     }
 }
 

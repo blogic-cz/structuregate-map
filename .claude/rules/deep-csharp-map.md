@@ -24,7 +24,7 @@ row before sending any answered `Out of memory`.
 
 THE STORE IS A CACHE, NEVER A SOURCE (`rust/fbtcore/src/rows/store.rs`): every row belongs to a file whose recorded
 sha matches the tree, rows of a file that is gone are deleted, and `verify` states that as a count - non-zero
-throws the cache away and rebuilds once. `SCHEMA_VERSION` changes what a table means: the next run rebuilds rather
+throws the cache away and rebuilds once. A run that would write EVERY row again (the TypeScript extractor changed and nearly every C# file moved, `mapper/deep/fresh.rs`) starts on an empty database: deleting a large map's rows half by half took longer than a first build. `SCHEMA_VERSION` changes what a table means: the next run rebuilds rather
 than mix vocabularies. Every half shares the tables, scoped by `files.lang`, and a table is WIDENED
 (`rust/fbtcore/src/rows/schema.rs`), never narrowed, when two halves disagree on columns - whichever wrote first
 would otherwise decide its shape. C# answers in the SAME tables and columns as python so one query reads both:
