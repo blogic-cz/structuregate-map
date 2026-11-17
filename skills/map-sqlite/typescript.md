@@ -160,7 +160,7 @@ Beside the shared tables it adds the FRAMEWORK tables:
 
 * **`structuregate.ts.json`** (found at the workspace or an ancestor) names what no compiler can: `i18nCalls` lists the
   methods that take ONE translation key (`translate.get('a.b')`), and `i18nDictionaryCalls` the methods that hand back
-  EVERY key under a prefix (`redacted('demo.sort.options')`, read as `dict[name]` or passed to a
+  EVERY key under a prefix (`getDictionary('demo.sort.options')`, read as `dict[name]` or passed to a
   converter). A dictionary call whose first argument is a string makes each locale key under `<prefix>.` reachable from
   the component the call sits in (route `ts_call`), and from every template reading the field or getter that holds the
   result (`field_binding`); a prefix built at run time is not read. `i18n_refs` carries it as a row with `prefix`

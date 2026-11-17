@@ -21,7 +21,7 @@ $script:TsComputedFiles = @{
         "  get vm() { return this.holder.get<PayloadBox>(); }`n" +
         "}`n"
     'apps/shop/src/clash.models.ts' = @'
-export redacted { Code: string; }
+export interface Tag { Code: string; }
 export class Base<T> { Input: { Id?: number } = {}; Extra?: T; }
 export type AlphaVm<T> = Base<T> & {
   Input: {
@@ -107,8 +107,8 @@ Test-Case 'tsrows: a call of an object literal or type member has the row at the
 # is the method, `top(..)` and `arrow(..)` are their `functions` rows, `new Alpha()` the class, and a call of an OVERLOADED method is its implementation (the last signature), as the checker's first signature names the set.
 Test-Case 'tsrows: a bare call of a local function is the local, not a same-named class member' {
     $tree = New-TsRowsWorkspace @{
-        'apps/shop/src/local.ts' = "export class Alpha {`n  redacted = 1;`n  getRecords(x: number) { return x; }`n  run() {`n" +
-            "    const getRecords = (y: number) => y + 1;`n    const redacted = () => 2;`n    getRecords(1);`n    redacted();`n    this.getRecords(3);`n  }`n" +
+        'apps/shop/src/local.ts' = "export class Alpha {`n  level = 1;`n  getRecords(x: number) { return x; }`n  run() {`n" +
+            "    const getRecords = (y: number) => y + 1;`n    const level = () => 2;`n    getRecords(1);`n    level();`n    this.getRecords(3);`n  }`n" +
             "  over(a: string): void;`n  over(a: string, b: number): void;`n  over(a: string, b?: number) { return; }`n" +
             "  callOver() { this.over('a'); }`n}`n" +
             "export function top(a: number) { return a; }`nexport const arrow = (a: number) => a;`n" +
@@ -119,7 +119,7 @@ Test-Case 'tsrows: a bare call of a local function is the local, not a same-name
     $r = Invoke-TsRowsQ $made.Db ("SELECT 'tg=' || c.line || ':' || c.callee || '|' || coalesce((SELECT 'lo@' || line FROM locals WHERE id = c.target_id), (SELECT 'fn@' || line FROM functions WHERE id = c.target_id), " +
         "(SELECT 'm@' || line FROM members WHERE id = c.target_id), (SELECT 'cl@' || line FROM classes WHERE id = c.target_id), 'none') AS r FROM calls c JOIN files f ON f.id = c.file WHERE f.path LIKE '%local.ts'")
     Assert-Line $r 'tg=7:getRecords|lo@5'
-    Assert-Line $r 'tg=8:redacted|lo@6'
+    Assert-Line $r 'tg=8:level|lo@6'
     # the controls: the method, an overloaded method's implementation, a function, an arrow const and a class
     Assert-Line $r 'tg=9:this.getRecords|m@3'
     Assert-Line $r 'tg=14:this.over|m@13'

@@ -1,6 +1,6 @@
 //! THE PROPERTIES OF A CLASS INSTANCE A LIST HOLDS, for a loop that reads them (`key_loops`).
 //!
-//! `buttons.push(new redacted(this.t))` puts an INSTANCE in the list, and the child's `*ngFor="let b of buttons"` reads
+//! `buttons.push(new GoButton(this.t))` puts an INSTANCE in the list, and the child's `*ngFor="let b of buttons"` reads
 //! `b.text` and `b.tooltip.text(row)`: what those hold is what the CLASS says - the member's own initializer, and every
 //! `this.<member> = ..` its constructors (and its bases') write. The class is the one the `new` names, so no subtype is
 //! guessed (`key_classes` joins a receiver's declared type to the subtypes a `new` builds; here the `new` is the element).

@@ -1,6 +1,6 @@
 //! THE CHAIN, WALKED AS SQLCMD RUNS IT: a file with no `:r` pointing at it is a root, and every `:r` is
 //! spliced in at its line, so a variable `PostDeployment.sql` declares is set when the `Products.sql` it
-//! runs next reads it, and a `SET @currentTierID = 5` holds for the INSERT below it and no further. A
+//! runs next reads it, and a `SET @currentStepID = 5` holds for the INSERT below it and no further. A
 //! `#temp`'s or `@table`'s rows wait until a MERGE or INSERT ... SELECT moves them into a table.
 
 use super::tables::Tables;

@@ -374,7 +374,7 @@ Test-Case 'tsrows: a constant false bound into an input only [disabled] reads ke
             "import { Opener } from './opener';`n" +
             "import { ModalComponent } from './modal.component';`n" +
             "@Component({ selector: 'demo-root',`n" +
-            "  template: '<demo-a *ngIf=`"vm.kind === Kinds.Home`" [isDisabled]=`"locked`"></demo-a><demo-b [isShown]=`"shown`"></demo-b><button (click)=`"open()`">open</button>' })`n" +
+            "  template: '<demo-a *ngIf=`"vm.kind === Kinds.Heath`" [isDisabled]=`"locked`"></demo-a><demo-b [isShown]=`"shown`"></demo-b><button (click)=`"open()`">open</button>' })`n" +
             "export class RootComponent {`n  Kinds = Kind;`n  locked = true;`n  shown = true;`n  vm: { kind: Kind } = { kind: Kind.Lea };`n" +
             "  constructor(private opener: Opener, private at: ViewContainerRef) {}`n" +
             "  open() { this.opener.create(ModalComponent, this.at); }`n}`n"

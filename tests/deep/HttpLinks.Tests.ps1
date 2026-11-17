@@ -31,14 +31,14 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 export class ApiService {
   readonly baseUrl = (globalThis as any).config.url;
   readonly baseApiUrl = `${this.baseUrl}api/`;
-  readonly redacted = `${this.baseApiUrl}calculations`;
+  readonly jobUrl = `${this.baseApiUrl}jobs`;
   constructor(private httpClient: HttpClient) {}
   post<T>(url: string, body: any) { return this.httpClient.post<T>(url, body); }
-  save(d: any) { return this.post(`${this.redacted}/redacted`, d); }
-  load(id: number) { return this.httpClient.get(`${this.redacted}/${id}`); }
+  save(d: any) { return this.post(`${this.jobUrl}/save-job`, d); }
+  load(id: number) { return this.httpClient.get(`${this.jobUrl}/${id}`); }
   ping() { return this.httpClient.get(`${this.baseUrl}absolute/ping`); }
   orders() { return this.httpClient.get(`${this.baseApiUrl}orders/list`); }
-  gone() { return this.httpClient.delete(`${this.redacted}/nothing-here`); }
+  gone() { return this.httpClient.delete(`${this.jobUrl}/nothing-here`); }
   // a header read: `get` on another class of the same package is no request
   header(h: HttpHeaders) { return h.get('content-disposition'); }
 }
@@ -50,9 +50,9 @@ export class ApiService {
             "public class HttpPostAttribute : System.Attribute { public HttpPostAttribute() {} }$nl" +
             "public class HttpDeleteAttribute : System.Attribute { public HttpDeleteAttribute() {} }$nl" +
             "public abstract class ApiControllerBase { protected const string ApiRouteBase = `"api/`"; }$nl" +
-            "[Route(ApiRouteBase + `"calculations`")]$nl" +
-            "public class redacted : ApiControllerBase {$nl" +
-            "    [HttpPost] [Route(`"redacted`")] public object Save(object dto) => dto;$nl" +
+            "[Route(ApiRouteBase + `"jobs`")]$nl" +
+            "public class JobController : ApiControllerBase {$nl" +
+            "    [HttpPost] [Route(`"save-job`")] public object Save(object dto) => dto;$nl" +
             "    [HttpGet(`"{id}`")] public object Get(int id) => id;$nl" +
             "    [HttpGet] [Route(`"/absolute/ping`")] public string Ping() => `"`";$nl}$nl" +
             "[Route(`"api/[controller]`")]$nl" +
@@ -88,27 +88,27 @@ function Get-HttpLinksTree([switch]$Shared) {
 Test-Case 'httplinks: a C# endpoint carries its class route, constants folded and tokens replaced' {
     $tree = Get-HttpLinksTree -Shared
     $r = Get-HttpLinksRows $tree "SELECT 'ep=' || verb || '|' || template || '|' || cls || '.' || method AS e FROM http_endpoints"
-    Assert-Line $r 'ep=POST|api/calculations/redacted|redacted.Save'
-    Assert-Line $r 'ep=GET|api/calculations/{id}|redacted.Get'
-    Assert-Line $r 'ep=GET|absolute/ping|redacted.Ping'
+    Assert-Line $r 'ep=POST|api/jobs/save-job|JobController.Save'
+    Assert-Line $r 'ep=GET|api/jobs/{id}|JobController.Get'
+    Assert-Line $r 'ep=GET|absolute/ping|JobController.Ping'
     Assert-Line $r 'ep=GET|api/Orders/List|OrdersController.List'
     # THE ACTION'S OWN ROW by id: a reader goes on into its calls and parameters without matching names and lines.
     $f = Get-HttpLinksRows $tree "SELECT 'fn=' || e.method || '|' || fn.cls || '.' || fn.name AS f FROM http_endpoints e JOIN functions fn ON fn.id = e.func"
-    Assert-Line $f 'fn=Save|redacted.Save'
+    Assert-Line $f 'fn=Save|JobController.Save'
     Assert-Line $f 'fn=One|OrdersController.One'
     $n = Get-HttpLinksRows $tree "SELECT 'nofunc=' || count(*) AS c FROM http_endpoints WHERE func = ''"
     Assert-Line $n 'nofunc=0'
-    $v =Get-HttpLinksRows $tree "SELECT 'av=' || $(Get-NodeRootListSql 'decorators__arg_values' 'decorators.id') AS a FROM decorators WHERE name = 'Route' AND target_kind = 'class' AND target = 'redacted'"
-    Assert-Line $v 'av=["api/calculations"]'
+    $v =Get-HttpLinksRows $tree "SELECT 'av=' || $(Get-NodeRootListSql 'decorators__arg_values' 'decorators.id') AS a FROM decorators WHERE name = 'Route' AND target_kind = 'class' AND target = 'JobController'"
+    Assert-Line $v 'av=["api/jobs"]'
 }
 
 Test-Case 'httplinks: a call through a wrapper and a direct call each reach their endpoint, and the wrapper itself is no call' {
     $tree = Get-HttpLinksTree -Shared
     $r = Get-HttpLinksRows $tree ("SELECT 'link=' || h.verb || '|' || m.name || '->' || e.cls || '.' || e.method || '|' || l.how AS x " +
         "FROM http_links l JOIN http_calls h ON h.id = l.call JOIN http_endpoints e ON e.id = l.endpoint JOIN members m ON m.id = h.member")
-    Assert-Line $r 'link=POST|save->redacted.Save|exact'
-    Assert-Line $r 'link=GET|load->redacted.Get|exact'
-    Assert-Line $r 'link=GET|ping->redacted.Ping|exact'
+    Assert-Line $r 'link=POST|save->JobController.Save|exact'
+    Assert-Line $r 'link=GET|load->JobController.Get|exact'
+    Assert-Line $r 'link=GET|ping->JobController.Ping|exact'
     # `api/Orders/{code}` takes `list` as a value too, but `List` names it: the endpoint the url names best wins.
     Assert-Line $r 'link=GET|orders->OrdersController.List|exact'
     $n = Get-HttpLinksRows $tree "SELECT 'calls=' || count(*) AS c FROM http_calls"
@@ -204,14 +204,14 @@ export function createQueryUrl<K extends object>(url: string, parameter: K) {
 export function suffixed(url: string, parameter: object) { return url + '/orders' + stringify(parameter); }
 export class CountService {
   constructor(private http: HttpClient) {}
-  count(o: object) { return this.http.get(createQueryUrl('/calculations/count', o)); }
+  count(o: object) { return this.http.get(createQueryUrl('/jobs/count', o)); }
   one(id: number) { return this.http.get(createQueryUrl(`/orders/${id}`, {})); }
   tail(o: object) { return this.http.get(suffixed('/api', o)); }
 }
 '@)
     [void](Invoke-HttpLinksMap $tree)
     $r = Get-HttpLinksRows $tree ("SELECT 'c=' || h.verb || '|' || h.url || '|' || m.name AS r FROM http_calls h JOIN members m ON m.id = h.member WHERE h.file LIKE '%count.service.ts'")
-    Assert-Line $r 'c=GET|/calculations/count|count'
+    Assert-Line $r 'c=GET|/jobs/count|count'
     Assert-Line $r 'c=GET|/orders/{}|one'
     # (rows 88) the control is a BUILDER now: what it returns, its own path text kept and the unknown tail `*` - never the `/api` a forward would give.
     Assert-Line $r 'c=GET|/api/orders*|tail'

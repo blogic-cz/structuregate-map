@@ -322,7 +322,7 @@ export function makeValueRefs({ ts, checker, symbolAt, api }) {
   }
 
   /**
-   * A FEDERATED REMOTE IMPORTED BY A BARE SPECIFIER: `import('redacted').then((m) => m.X)` - the checker finds
+   * A FEDERATED REMOTE IMPORTED BY A BARE SPECIFIER: `import('reports/Module').then((m) => m.X)` - the checker finds
    * no file (webpack's container resolves it at run time), so `lazyTarget` is null. Read off the syntax as
    * `remoteTarget` is, marked `dynamic`: only a host's `remotes` list says the first segment IS a remote
    * (`TsDerive/TsFederation.mjs`), so a package subpath (`lodash/fp`) never gains a name. One import call or none.

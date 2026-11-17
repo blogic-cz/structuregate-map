@@ -49,7 +49,7 @@ const keyOf = (ts, p) => (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) 
 const textOf = literalText;
 
 /**
- * The remotes a HOST's config lists: `redacted']`, `[['reports', url]]` (first item the name) or
+ * The remotes a HOST's config lists: `remotes: ['reports']`, `[['reports', url]]` (first item the name) or
  * `{ reports: url }` (the keys) - the three shapes Nx and the Module Federation plugin read.
  */
 function remoteNames(ts, sf, e, into) {
@@ -138,7 +138,7 @@ export function rollupRemoteRoutes(ts, store, fe) {
     list.push({ ...config, dir: path.dirname(String(f.abs)) });
     configs.set(config.name, list);
   }
-  // A BARE `import('redacted')` IS A REMOTE only when a host's config lists `reports` in `remotes`.
+  // A BARE `import('reports/Module')` IS A REMOTE only when a host's config lists `reports` in `remotes`.
   const hosted = hostRemotes;
   const classAt = new Map();
   const twice = new Set();

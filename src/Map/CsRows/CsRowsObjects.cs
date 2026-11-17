@@ -79,7 +79,7 @@ internal sealed partial class CsRows
     /// </summary>
     private string Stored(SyntaxNode node)
     {
-        // A CONSTRUCT INSIDE A CONSTRUCT IS NOT THE ONE BEING STORED. `redacted = new (…)[] { (a, b) }`
+        // A CONSTRUCT INSIDE A CONSTRUCT IS NOT THE ONE BEING STORED. `_itemsLocal = new (…)[] { (a, b) }`
         // stores the ARRAY; the tuple inside it is an element. Letting the tuple claim the name too made
         // the later row win a name lookup, and the file it held then belonged to nothing.
         if (ParentOf(node).Length > 0) return "";

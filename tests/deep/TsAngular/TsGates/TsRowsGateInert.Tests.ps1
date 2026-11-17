@@ -47,7 +47,7 @@ Test-Case 'tsrows: a structural directive that always renders is no gate of the 
             "  <div *ngIf=`"vm.on`"><span *demoVar=`"vm.item as item`"><translate [text]=`"'demo.inert.var'`"></translate></span></div>`n" +
             "  <span *demoShow=`"vm.on`"><translate [text]=`"'demo.inert.show'`"></translate></span>`n" +
             "  <span *demoOnce=`"vm.on`"><translate [text]=`"'demo.inert.once'`"></translate></span>`n" +
-            "  <span *demoVar=`"vm.kind === KindSet.Heath as home`"><translate [text]=`"home ? 'demo.alias.home' : 'demo.alias.away'`"></translate></span>`n" +
+            "  <span *demoVar=`"vm.kind === KindSet.Heath as heath`"><translate [text]=`"heath ? 'demo.alias.heath' : 'demo.alias.away'`"></translate></span>`n" +
             "`` })`n" +
             "export class ListComponent { KindSet = KindSet; vm: { on: boolean; item: number; kind: KindSet } = { on: true, item: 1, kind: KindSet.Heath }; }`n"
         'apps/shop/src/root.component.ts' = "import { Component, NgModule } from '@angular/core';`n" +
@@ -58,7 +58,7 @@ Test-Case 'tsrows: a structural directive that always renders is no gate of the 
             "export class RootComponent {}`n" +
             "@NgModule({ declarations: [RootComponent, ListComponent, TranslateComponent, demoVarDirective, demoShowDirective, demoOnceDirective], bootstrap: [RootComponent] })`n" +
             "export class DemoModule {}`n"
-        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"inert":{"var":"1","show":"2","once":"3"},"alias":{"home":"4","away":"5"}}}'
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"inert":{"var":"1","show":"2","once":"3"},"alias":{"heath":"4","away":"5"}}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["translate:text"]}'
     }
     $made = New-TsRowsDb $tree
@@ -69,8 +69,8 @@ Test-Case 'tsrows: a structural directive that always renders is no gate of the 
     Assert-Line $r 'demo.inert.show | demoShow | demoShow'
     Assert-Line $r 'demo.inert.once | demoOnce | demoOnce'
     $a = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsInertValuesSql
-    Assert-Line $a 'demo.alias.home | vm.kind in ["Home"]'
-    Assert-Line $a 'demo.alias.away | vm.kind in ["Flat"]'
+    Assert-Line $a 'demo.alias.heath | vm.kind in ["Heath"]'
+    Assert-Line $a 'demo.alias.away | vm.kind in ["Fen"]'
     # The gate row stays: only the chains drop it.
     $g = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT 'gate=' || name || ' ' || gate_kind AS r FROM gates WHERE name = 'demoVar'"
     Assert-Line $g 'gate=demoVar structural'

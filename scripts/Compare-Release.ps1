@@ -71,7 +71,7 @@ function New-Map([string]$Build, [string]$Db) {
 $sep = '|~|'
 function Get-Lines([string]$Build, [string]$Db, [string]$Sql) {
     $text = Invoke-Build $Build @('--map-query', $Db, '--width', '0', '--limit', '0', '--sql', $Sql)
-    # A LIST, not `$rows += ,`: appending to an array copies it, and the calls table made one run of this script take 25 minutes.
+    # A LIST, not `$rows += ,`: appending to an array copies it, and the calls table made one run of this script take most of an hour.
     $rows = [System.Collections.Generic.List[object]]::new()
     $body = $false
     foreach ($line in @($text)) {

@@ -49,7 +49,7 @@ Test-Case 'tsrows gates: a component a private method creates renders under the 
     Assert-Line $r 'demo.modal.title | this.kind === Kind.Heath && !this.flag'
     Assert-Line $r 'demo.other.title | -'
     $v = Invoke-TsRowsQ $made.Db $script:CalledValueQ
-    Assert-Line $v 'demo.modal.title | kind in ["Home"]'
+    Assert-Line $v 'demo.modal.title | kind in ["Heath"]'
     Assert-Line $v 'demo.other.title | -'
 }
 
@@ -68,9 +68,9 @@ Test-Case 'tsrows keys: a key a private method translates is reached under the b
             "  constructor(private translate: TranslateService) {}`n" +
             "  transform(name: string): string {`n" +
             "    if (name === 'heath' && DemoEnv.isHeathStatic()) {`n      return this.heathText();`n    }`n" +
-            "    if (name === 'life') {`n      return this.leaText();`n    }`n" +
+            "    if (name === 'lea') {`n      return this.leaText();`n    }`n" +
             "    if (name === 'tip') {`n      return this.tipText();`n    }`n" +
-            "    if (name === 'flat') {`n      return this.translate.getTranslation('demo.pipe.fen');`n    }`n" +
+            "    if (name === 'fen') {`n      return this.translate.getTranslation('demo.pipe.fen');`n    }`n" +
             "    return name ? '' : this.leaText();`n  }`n" +
             "  private heathText(): string { return this.translate.getTranslation('demo.pipe.heath'); }`n" +
             "  private leaText(): string { return this.translate.getTranslation('demo.pipe.lea'); }`n" +
@@ -79,17 +79,17 @@ Test-Case 'tsrows keys: a key a private method translates is reached under the b
         'apps/shop/src/root.component.ts' = "import { Component } from '@angular/core';`n" +
             "import { DemoPricePipe } from './demo-price.pipe';`n" +
             "@Component({ selector: 'demo-root', standalone: true, imports: [DemoPricePipe], template: '<span>{{ name | demoPrice }}</span>' })`n" +
-            "export class RootComponent { name = 'home'; }`n"
-        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"pipe":{"home":"H","flat":"F","life":"L","tip":"T"}}}'
+            "export class RootComponent { name = 'heath'; }`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"pipe":{"heath":"H","fen":"F","lea":"L","tip":"T"}}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db $script:CalledBranchQ
-    # EVERY CALL AFTER A GUARD THAT RETURNS sits in its `else`: `flat` is reached only when no earlier guard took the call (#129)
-    Assert-Line $r "demo.pipe.fen | name === 'heath' && DemoEnv.isHeathStatic() ; name === "
+    # EVERY CALL AFTER A GUARD THAT RETURNS sits in its `else`: `fen` is reached only when no earlier guard took the call (#129)
+    Assert-Line $r "demo.pipe.fen | name === 'heath' && DemoEnv.isHeathStatic() ; name ==="
     Assert-Line $r "demo.pipe.heath | name === 'heath' && DemoEnv.isHeathStatic()"
-    # both calls of `leaText` follow the `home` guard: its negation holds on every way, the `life` test only on one
+    # both calls of `leaText` follow the `heath` guard: its negation holds on every way, the `lea` test only on one
     Assert-Line $r "demo.pipe.lea | name === 'heath' && DemoEnv.isHeathStatic()"
     # `tipText` is also handed to `setTimeout`, a read that is no call: it runs where the map cannot see
     Assert-Line $r 'demo.pipe.tip | -'
@@ -133,8 +133,8 @@ Test-Case 'tsrows gates: the lift survives a same-named method elsewhere and rea
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $v = Invoke-TsRowsQ $made.Db $script:CalledValueQ
-    Assert-Line $v 'demo.modal.title | kind in ["Home"]'
-    Assert-Line $v 'demo.confirm.title | kind in ["Home"]'
+    Assert-Line $v 'demo.modal.title | kind in ["Heath"]'
+    Assert-Line $v 'demo.confirm.title | kind in ["Heath"]'
     $r = Invoke-TsRowsQ $made.Db $script:CalledBranchQ
     $confirm = @($r.Lines | Where-Object { $_.Contains('demo.confirm.title |') })
     if (-not ($confirm -and $confirm[0].Contains('this.sure') -and $confirm[0].Contains('this.kind === Kind.Heath'))) { throw "the confirm key's branches: $confirm" }
@@ -153,8 +153,8 @@ Test-Case 'tsrows gates: a factory creating what a Map of components looks up re
             "import { HeathDetailComponent, FenDetailComponent } from './detail.component';`n" +
             "export const detailsByKind = new Map<Kind, Type<unknown>>([[Kind.Heath, HeathDetailComponent], [Kind.Fen, FenDetailComponent]]);`n"
         'apps/shop/src/detail.component.ts' = "import { Component } from '@angular/core';`n" +
-            "@Component({ selector: 'demo-heath-detail', template: '<translate [text]=`"\'demo.home\'`"></translate>' })`nexport class HeathDetailComponent {}`n" +
-            "@Component({ selector: 'demo-flat-detail', template: '<translate [text]=`"\'demo.flat\'`"></translate>' })`nexport class FenDetailComponent {}`n"
+            "@Component({ selector: 'demo-heath-detail', template: '<translate [text]=`"\'demo.heath\'`"></translate>' })`nexport class HeathDetailComponent {}`n" +
+            "@Component({ selector: 'demo-fen-detail', template: '<translate [text]=`"\'demo.fen\'`"></translate>' })`nexport class FenDetailComponent {}`n"
         'apps/shop/src/translate.component.ts' = "import { Component, Input } from '@angular/core';`n" +
             "@Component({ selector: 'translate', standalone: true, template: '<span>{{ text }}</span>' })`n" +
             "export class TranslateComponent { @Input() text!: string; }`n"
@@ -164,7 +164,7 @@ Test-Case 'tsrows gates: a factory creating what a Map of components looks up re
             "export class RootComponent {`n  kind: Kind = Kind.Heath;`n" +
             "  constructor(private componentFactory: ComponentFactory, private viewContainerRef: ViewContainerRef) {}`n" +
             "  show() {`n    const detail = detailsByKind.get(this.kind)!;`n    this.componentFactory.create(detail, this.viewContainerRef);`n  }`n}`n"
-        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"home":"H","flat":"F"}}'
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"heath":"H","fen":"F"}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["translate:text"]}'
     }
     $made = New-TsRowsDb $tree
@@ -174,8 +174,8 @@ Test-Case 'tsrows gates: a factory creating what a Map of components looks up re
     Assert-Line $r 'r=RootComponent>FenDetailComponent'
     # (#138) EACH ENTRY RENDERS UNDER ITS OWN KEY, as a `switch` returning the class would: the lookup is a case per entry.
     $v = Invoke-TsRowsQ $made.Db $script:CalledValueQ
-    Assert-Line $v 'demo.home | kind in ["Home"]'
-    Assert-Line $v 'demo.flat | kind in ["Flat"]'
+    Assert-Line $v 'demo.heath | kind in ["Heath"]'
+    Assert-Line $v 'demo.fen | kind in ["Fen"]'
 }
 
 # (rows 124) `untilDestroyed(this)` OF `@ngneat/until-destroy` IS NO HAND-OVER: it reads the destroy method alone, so a component unsubscribing
@@ -209,7 +209,7 @@ Test-Case 'tsrows gates: untilDestroyed(this) does not stop a private method''s 
     $f = Invoke-Gate --map-query $made.Db --width 0 --sql "SELECT 'ix=' || this_indexed AS r FROM files WHERE path LIKE '%root.component.ts'"
     Assert-Line $f 'ix=0'
     $v = Invoke-TsRowsQ $made.Db $script:CalledValueQ
-    Assert-Line $v 'demo.modal.title | kind in ["Home"]'
+    Assert-Line $v 'demo.modal.title | kind in ["Heath"]'
 }
 
 }

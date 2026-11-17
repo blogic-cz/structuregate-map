@@ -322,7 +322,7 @@ Test-Case 'tsrows: the same tree numbers the same way, however often it is rebui
 
 
 # EVERY ROW SAYS WHICH FILE IT CAME OUT OF, which is what lets a rebuild replace one file's rows instead
-# of the whole half. 21 of the 53 tables carry no `file` of their own, and the parent chain that would
+# of the whole half. Many of its tables carry no `file` of their own, and the parent chain that would
 # stand in for one was MEASURED INCOMPLETE: over a thousand `calls` rows are module-scope calls carrying `line`,
 # `col` and `callee` and no id link at all, so nothing could ever attribute them.
 #

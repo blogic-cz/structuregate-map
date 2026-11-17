@@ -58,7 +58,7 @@ Test-Case 'tsrows keys: a callee branch two calls below the getter restricts the
         'apps/shop/src/root.component.ts' = $script:ChainRoot
     }
     # getter -> sections -> heathSection: `isHeath(kind)`, `kind` the accessor's `model.kind`, `model` the getter's `this.model`
-    Assert-Line $r 'demo.a.title | field_binding | 1 | model.kind in ["Home"]'
+    Assert-Line $r 'demo.a.title | field_binding | 1 | model.kind in ["Heath"]'
 }
 
 Test-Case 'tsrows keys: a callee branch two calls below the getter restricts the key through a plain list' {
@@ -66,7 +66,7 @@ Test-Case 'tsrows keys: a callee branch two calls below the getter restricts the
         'apps/shop/src/facade.service.ts' = New-ChainFacade '[this.heathSection(model)]'
         'apps/shop/src/root.component.ts' = $script:ChainRoot
     }
-    Assert-Line $r 'demo.a.title | field_binding | 1 | model.kind in ["Home"]'
+    Assert-Line $r 'demo.a.title | field_binding | 1 | model.kind in ["Heath"]'
 }
 
 Test-Case 'tsrows keys: a call inside the list a getter returns carries its callee branch' {
@@ -80,7 +80,7 @@ Test-Case 'tsrows keys: a call inside the list a getter returns carries its call
             "export class RootComponent {`n  model = { kind: Kind.Lea };`n  constructor(private facade: FacadeService) {}`n" +
             "  get sections() { return [this.facade.heathSection(this.model.kind)]; }`n}`n"
     }
-    Assert-Line $r 'demo.a.title | field_binding | 1 | model.kind in ["Home"]'
+    Assert-Line $r 'demo.a.title | field_binding | 1 | model.kind in ["Heath"]'
 }
 
 Test-Case 'tsrows keys: a callee branch six calls below the getter restricts the key by the getter argument' {
@@ -100,7 +100,7 @@ Test-Case 'tsrows keys: a callee branch six calls below the getter restricts the
             "  get label() { return this.deep.one(this.model); }`n}`n"
         'apps/shop/src/assets/locales/en.json' = '{"demo":{"deep":{"a":"A"}}}'
     }
-    Assert-Line $r 'demo.deep.a | field_binding | 1 | model.kind in ["Flat"]'
+    Assert-Line $r 'demo.deep.a | field_binding | 1 | model.kind in ["Fen"]'
 }
 
 Test-Case 'tsrows keys: a callee branch in a recursive pair restricts nothing' {

@@ -126,8 +126,8 @@ Test-Case 'tsrows keys: a hole a template call fills with a literal argument mak
             "@Injectable({ providedIn: 'root' })`nexport class I18nService { getTranslation(k: string) { return k; } }`n" +
             "@Component({ selector: 'demo-item', standalone: true, template: '<i>{{ title }}</i>' })`nexport class ItemComponent { @Input() title = ''; }`n" +
             "@Component({ selector: 'app-trips', standalone: true, imports: [ItemComponent], template: '<demo-item [title]=`"label(\'time\')`"></demo-item><demo-item [title]=`"label(\'number\')`"></demo-item>' })`n" +
-            "export class FlightsComponent {`n  label(name: string) { return this.i18n.getTranslation('demo.trip.' + name); }`n  constructor(private i18n: I18nService) {}`n}`n"
-        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"flight":{"time":"T","number":"N","title":"X"}}}'
+            "export class TripsComponent {`n  label(name: string) { return this.i18n.getTranslation('demo.trip.' + name); }`n  constructor(private i18n: I18nService) {}`n}`n"
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"trip":{"time":"T","number":"N","title":"X"}}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
     }) -Shared
     Assert-Exit $made.Result 0
@@ -176,7 +176,7 @@ Test-Case 'tsrows keys: a key reaching a node through a child input or a pushed 
     if ($whole.Count) { throw "ways with no literal:`n$($whole -join "`n")" }
 }
 
-# (#135) A HOLE FILLED THROUGH TWO CALLS: the template calls `messageOf('demo.pid.redacted')`, which hands `message` on to an exported
+# (#135) A HOLE FILLED THROUGH TWO CALLS: the template calls `messageOf('demo.pid.longWarning')`, which hands `message` on to an exported
 # helper building `${message}2`. The way of `demo.pid.longWarning2` at the `[warning]` binding names that literal, spelled whole by the call.
 # A literal of `.` alone between two holes (`round`, reached from the same method) spells no key.
 Test-Case 'tsrows keys: a template call literal handed on to a helper whose literal it fills names that literal (#135)' {
@@ -185,19 +185,19 @@ Test-Case 'tsrows keys: a template call literal handed on to a helper whose lite
             "export const variantMessage = (message: string, alt: boolean, i18n: I18nService): string =>`n  i18n.getTranslation(alt ? ``$`{message}2`` : message);`n"
         'apps/shop/src/host.component.ts' = "import { Component, Input } from '@angular/core';`nimport { I18nService, variantMessage } from './variant.functions';`n" +
             "@Component({ selector: 'app-pid', standalone: true, template: '<span>{{ warning | money }}</span>' })`n" +
-            "export class PidComponent { @Input() warning = 'demo.pid.redacted'; }`n" +
-            "@Component({ selector: 'app-host', standalone: true, imports: [PidComponent], template: '<app-pid [warning]=`"messageOf(\'demo.pid.redacted\')`"></app-pid>' })`n" +
+            "export class PidComponent { @Input() warning = 'demo.pid.longWarning'; }`n" +
+            "@Component({ selector: 'app-host', standalone: true, imports: [PidComponent], template: '<app-pid [warning]=`"messageOf(\'demo.pid.longWarning\')`"></app-pid>' })`n" +
             "export class HostComponent {`n  alt = false;`n  constructor(private i18n: I18nService) {}`n" +
             "  messageOf(message: string): string {`n    this.round(['1', '2']);`n    return this.alt ? variantMessage(message, true, this.i18n) : message;`n  }`n" +
             "  private round(num: string[]) {`n    return Number(``$`{num[0]}.$`{num[1]}``);`n  }`n}`n"
-        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"pid":{"redacted":"A","longWarning2":"B"}}}'
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"pid":{"longWarning":"A","longWarning2":"B"}}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
     }) -Shared
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT 'w=' || w.key || '|' || w.route || '|' || coalesce(w.input, '-') || '|' || coalesce(t.line, '-') || '|' || coalesce(w.typed, '-') AS r " +
         "FROM key_node_ways w LEFT JOIN template_literals t ON t.id = w.literal WHERE w.key LIKE 'demo.pid.%'")
     Assert-Line $r 'w=demo.pid.longWarning2|field_binding|warning|3|0'
-    # ...BUT A LITERAL WHOSE TEXT IS ONLY A SEPARATOR spells nothing: `round` builds no key, and `demo.pid.redacted`, written whole, keeps no literal.
-    Assert-Line $r 'w=demo.pid.redacted|field_binding|warning|-|-'
+    # ...BUT A LITERAL WHOSE TEXT IS ONLY A SEPARATOR spells nothing: `round` builds no key, and `demo.pid.longWarning`, written whole, keeps no literal.
+    Assert-Line $r 'w=demo.pid.longWarning|field_binding|warning|-|-'
     Assert-NoLine $r '|14|'
 }

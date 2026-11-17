@@ -86,7 +86,7 @@ Test-Case 'tsrows keys: a list of instances a parent pushes and a child loops ov
         'apps/shop/src/row-button.ts' = "import { TranslateService } from './translate.service';`n" +
             "export interface Row { paid: boolean; }`n" +
             "export abstract class RowButton<T> {`n  text = '';`n  tooltip!: { text: (row: T) => string };`n  abstract onClick(row: T): void;`n}`n" +
-            "export class redacted extends RowButton<Row> {`n" +
+            "export class GoButton extends RowButton<Row> {`n" +
             "  constructor(private t: TranslateService) { super(); this.text = 'icon.svg'; this.tooltip = { text: this.tipText }; }`n" +
             "  private tipText = (row: Row): string => { if (row.paid) { return this.t.getTranslation('demo.pay.yes'); } return this.t.getTranslation('demo.pay.no'); };`n" +
             "  onClick(row: Row): void {}`n}`n" +
@@ -105,12 +105,12 @@ Test-Case 'tsrows keys: a list of instances a parent pushes and a child loops ov
             "export class DemoTableComponent {`n  @Input() buttons!: RowButton<any>[];`n  row: any;`n}`n"
         'apps/shop/src/page.component.ts' = "import { Component, OnInit } from '@angular/core';`n" +
             "import { DemoTableComponent } from './demo-table.component';`n" +
-            "import { redacted, Row, RowButton, SendButton } from './row-button';`n" +
+            "import { GoButton, Row, RowButton, SendButton } from './row-button';`n" +
             "import { TranslateService } from './translate.service';`n" +
             "@Component({ selector: 'demo-page', standalone: true, imports: [DemoTableComponent], template: '<demo-table [buttons]=`"tableButtons`"></demo-table>' })`n" +
             "export class PageComponent implements OnInit {`n  tableButtons: RowButton<Row>[] = [];`n" +
             "  constructor(private t: TranslateService) {}`n" +
-            "  ngOnInit() {`n    const buttons: RowButton<Row>[] = [];`n    buttons.push(new redacted(this.t));`n" +
+            "  ngOnInit() {`n    const buttons: RowButton<Row>[] = [];`n    buttons.push(new GoButton(this.t));`n" +
             "    Promise.resolve(1).then(() => {`n      this.tableButtons = buttons;`n      this.tableButtons.push(new SendButton(this.t));`n    });`n  }`n}`n"
         'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"pay":{"yes":"a","no":"b"},"send":{"label":"c","tip":"d"},"spare":{"label":"e","tip":"f"}}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
@@ -143,7 +143,7 @@ Test-Case 'tsrows keys: a method an instance holds hands back every return it sp
             "  constructor() { super(); this.tooltip = { text: this.tipText, position: 'left' }; }`n" +
             "  private tipText(row: Row): string {`n    const gone = row.state === 1;`n" +
             "    if (gone) {`n      return 'demo.void.yes';`n    } else {`n      return 'demo.void.no';`n    }`n  }`n}`n" +
-            "export class redacted extends RowButton<Row> {`n" +
+            "export class GoButton extends RowButton<Row> {`n" +
             "  constructor(private t: TranslateService) {`n    super();`n" +
             "    Promise.resolve(true).then((on) => {`n      if (on) {`n        this.tooltip = { text: this.stateTip, position: 'left' };`n      }`n    });`n  }`n" +
             "  private stateTip = (row: Row): string => {`n    let text = '';`n    switch (row.state) {`n" +
@@ -157,13 +157,13 @@ Test-Case 'tsrows keys: a method an instance holds hands back every return it sp
             "export class DemoTableComponent {`n  @Input() buttons!: RowButton<any>[];`n  row: any;`n}`n"
         'apps/shop/src/page.component.ts' = "import { Component, OnInit } from '@angular/core';`n" +
             "import { DemoTableComponent } from './demo-table.component';`n" +
-            "import { redacted, Row, RowButton, VoidButton } from './row-button';`n" +
+            "import { GoButton, Row, RowButton, VoidButton } from './row-button';`n" +
             "import { TranslateService } from './translate.service';`n" +
             "@Component({ selector: 'demo-page', standalone: true, imports: [DemoTableComponent], template: '<demo-table [buttons]=`"tableButtons`"></demo-table>' })`n" +
             "export class PageComponent implements OnInit {`n  tableButtons: RowButton<Row>[] = [];`n" +
             "  constructor(private t: TranslateService) {}`n" +
             "  ngOnInit() {`n    const buttons: RowButton<Row>[] = [];`n    buttons.push(new VoidButton());`n" +
-            "    buttons.push(new redacted(this.t));`n    this.tableButtons = buttons;`n  }`n}`n"
+            "    buttons.push(new GoButton(this.t));`n    this.tableButtons = buttons;`n  }`n}`n"
         'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"void":{"yes":"a","no":"b"},"pay":{"active":"c","gone":"d","done":"e"}}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
     }

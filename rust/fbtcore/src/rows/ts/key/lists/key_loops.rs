@@ -48,7 +48,7 @@ pub(super) fn element_keys(items: &[Element], keys: &KeySet, i18n: &[String], re
     let mut out: Elements = IndexMap::default();
     for (i, item) in items.iter().enumerate() {
         let Some(object) = item.value.as_object() else { continue };
-        // AN INSTANCE (`new redacted(..)`) HOLDS WHAT ITS CLASS SAYS, by dotted path (`key_instances`).
+        // AN INSTANCE (`new GoButton(..)`) HOLDS WHAT ITS CLASS SAYS, by dotted path (`key_instances`).
         if object.contains_key("$new") {
             for (prop, found) in super::key_instances::properties(&item.value, reader) {
                 for (key, tail) in found {

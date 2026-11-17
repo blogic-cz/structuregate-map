@@ -10,7 +10,7 @@ argument-hint: "[the workspace, and what to debug or measure]"
 **A skill for working on THIS repository**, kept in its own `.claude/skills/`; never shared with a consumer.
 
 A large real workspace costs minutes per full map and gigabytes of memory, and a fix to the store or the closure
-took two hours when every try ran over the whole of one (about 6 min a cycle). The same work on a slice holding a
+took two hours when every try ran over the whole of one (minutes a cycle). The same work on a slice holding a
 third of the rows runs the expensive phase in seconds. So:
 
 1. **Find where the bulk is**, then **cut a sample**, outside the repo (it is private code):
@@ -75,7 +75,7 @@ each release's new sample map as the next `-OldDb`.
 
 ## The machine's limits
 
-- **One full map of a large tree at a time.** One peaked near 7 GB; two at once ran a 14 GB machine out of memory
+- **One full map of a large tree at a time.** One takes gigabytes; two at once ran a workstation out of memory
   and the OOM killer took the session with them. Tell every agent, and serialise benchmarks, compares and repros.
 - **Never `/tmp`**: its per-user quota is small and a run's payload and kept test trees fill it (`EDQUOT`, `disk I/O
   error`, a node `UNKNOWN: unknown error, write`). Give every run its own `TMPDIR` on the home disk - `memprof.sh`

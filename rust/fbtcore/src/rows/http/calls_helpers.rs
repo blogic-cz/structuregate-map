@@ -2,7 +2,7 @@
 //!
 //! `createQueryUrl(url, params)` returns `` `${url}${query}` ``: its result IS the url its caller handed in, with an unknown
 //! tail the url never carries (`finished` cuts a query), so a wrapper's url reads through it and a caller's url folds to its
-//! first argument. `this.getBase(redacted)` does not: the parameter is an id the helper turns into a url, and reading
+//! first argument. `this.getBase(kindCode)` does not: the parameter is an id the helper turns into a url, and reading
 //! the call as the parameter made the url `*` and lost the literal suffix written after it - such a BUILDER is folded as what it
 //! returns instead (`built`, rows 88). WHICH it is comes from the
 //! callee's OWN `returns`, found by the call's `$target` (file and name) - never from the name: EVERY return of the one

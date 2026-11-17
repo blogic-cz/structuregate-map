@@ -27,7 +27,7 @@ Test-Case 'tsrows: a twin enum, a getter alias field and a number each read as t
         'apps/shop/src/a/member.ts' = "import { Tier } from './tier.enum';`nimport { Level } from './level.enum';`n" +
             "export class Member { Tier: Tier; Level: Level; }`n"
         'apps/shop/src/b/guest.ts' = "import { Member } from '../a/member';`nexport class Guest extends Member { Name: string; }`n"
-        'apps/shop/src/shapes.ts' = "export enum Shape {`n  Round = 1,`n  Square = 2,`n  Flat = 3,`n}`n" +
+        'apps/shop/src/shapes.ts' = "export enum Shape {`n  Round = 1,`n  Square = 2,`n  Fen = 3,`n}`n" +
             "export enum Sev {`n  Low = 0,`n  Mid = 1,`n  High = 2,`n  Max = 3,`n}`n" +
             "export class Card { Shape: Shape; }`nexport class Note { Sev: Sev; }`n"
         'apps/shop/src/host.component.ts' = "import { Component, Input } from '@angular/core';`n" +
@@ -95,29 +95,29 @@ Test-Case 'tsrows: a guarded method a field holds and a ternary of two predicate
         'apps/shop/src/a.component.ts' = "import { Component, Input, OnInit } from '@angular/core';`n" +
             "import { Kind, isHeath, isFen, isLocalEnv } from './kinds';`n" +
             "@Component({ selector: 'demo-a', template: '<i *ngIf=`"either`">a</i><b *ngIf=`"heathOnly`">b</b>" +
-            "<u *ngIf=`"arms`">c</u><s *ngIf=`"twice`">d</s><p *ngIf=`"isFenGift`">e</p>' })`n" +
+            "<u *ngIf=`"arms`">c</u><s *ngIf=`"twice`">d</s><p *ngIf=`"isFenGlen`">e</p>' })`n" +
             "export class AComponent implements OnInit {`n  @Input() modelKinds: Kind[] = [];`n  @Input() detail!: { Glen?: boolean };`n" +
             "  either = false;`n  heathOnly = false;`n  arms = false;`n  twice = false;`n" +
             "  ngOnInit() {`n" +
-            "    this.either = isLocalEnv() ? this.isHeathGift() : this.isFenGift();`n" +
-            "    this.heathOnly = this.isHeathGift();`n" +
+            "    this.either = isLocalEnv() ? this.isHeathGlen() : this.isFenGlen();`n" +
+            "    this.heathOnly = this.isHeathGlen();`n" +
             "    this.arms = isLocalEnv() ? isHeath(...this.modelKinds) : isFen(...this.modelKinds);`n" +
             "    this.twice = this.isTwice();`n  }`n" +
-            "  private isHeathGift(): boolean {`n    const isHeathSelected = isHeath(...this.modelKinds);`n" +
+            "  private isHeathGlen(): boolean {`n    const isHeathSelected = isHeath(...this.modelKinds);`n" +
             "    if (isHeathSelected) {`n      return !!this.detail?.Glen;`n    }`n    return false;`n  }`n" +
-            "  private isFenGift(): boolean {`n    if (isFen(...this.modelKinds)) {`n      return !!this.detail?.Glen;`n    }`n    return false;`n  }`n" +
+            "  private isFenGlen(): boolean {`n    if (isFen(...this.modelKinds)) {`n      return !!this.detail?.Glen;`n    }`n    return false;`n  }`n" +
             "  private isTwice(): boolean {`n    if (isFen(...this.modelKinds)) {`n      return true;`n    }`n    return !!this.detail?.Glen;`n  }`n}`n"
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db $script:TsEnumFormsSql
     # each guarded method is `C && E`; the ternary's arms union while its condition restricts nothing
-    Assert-Line $r 'either => Kind modelKinds in ["Flat","Home"]'
-    Assert-Line $r 'heathOnly => Kind modelKinds in ["Home"]'
-    Assert-Line $r 'arms => Kind modelKinds in ["Flat","Home"]'
+    Assert-Line $r 'either => Kind modelKinds in ["Fen","Heath"]'
+    Assert-Line $r 'heathOnly => Kind modelKinds in ["Heath"]'
+    Assert-Line $r 'arms => Kind modelKinds in ["Fen","Heath"]'
     # a second return that is not `false`, and a method READ rather than called (a function is truthy): no row
     Assert-NoLine $r 'twice =>'
-    Assert-NoLine $r 'isFenGift =>'
+    Assert-NoLine $r 'isFenGlen =>'
 }
 
 # #66: the guard returns the bare optional read `this.detail?.Glen` (not `!!`) and the key sits under a carrier,
@@ -126,7 +126,7 @@ Test-Case 'tsrows: a key under a guarded method returning a bare optional read i
     $tpl = '<div *ngIf="heathOnly"><translate [text]="\''demo.gm.field\''"></translate></div>' +
         '<div *ngIf="viaLocal"><translate [text]="\''demo.gm.local\''"></translate></div>' +
         '<div *ngIf="either"><translate [text]="\''demo.gm.either\''"></translate></div>' +
-        '<div *ngIf="isHeathGift()"><translate [text]="\''demo.gm.called\''"></translate></div>' +
+        '<div *ngIf="isHeathGlen()"><translate [text]="\''demo.gm.called\''"></translate></div>' +
         '<div *ngIf="control"><translate [text]="\''demo.gm.control\''"></translate></div>'
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/kinds.ts' = "export enum Kind { Heath = 1, Fen = 2, Lea = 3 }`n" +
@@ -142,14 +142,14 @@ Test-Case 'tsrows: a key under a guarded method returning a bare optional read i
             "export class AComponent implements OnInit {`n  @Input() modelKinds: Kind[] = [];`n  @Input() detail!: { Glen?: boolean };`n" +
             "  heathOnly = false;`n  viaLocal = false;`n  either = false;`n  control = false;`n" +
             "  ngOnInit() {`n" +
-            "    this.heathOnly = this.isHeathGift();`n" +
+            "    this.heathOnly = this.isHeathGlen();`n" +
             "    this.viaLocal = this.isHeathLocal();`n" +
-            "    this.either = isLocalEnv() ? this.isHeathGift() : this.isFenGift();`n" +
+            "    this.either = isLocalEnv() ? this.isHeathGlen() : this.isFenGlen();`n" +
             "    this.control = isHeath(...this.modelKinds);`n  }`n" +
-            "  isHeathGift(): boolean {`n    if (isHeath(...this.modelKinds)) {`n      return this.detail?.Glen;`n    }`n    return false;`n  }`n" +
+            "  isHeathGlen(): boolean {`n    if (isHeath(...this.modelKinds)) {`n      return this.detail?.Glen;`n    }`n    return false;`n  }`n" +
             "  private isHeathLocal(): boolean {`n    const sel = isHeath(...this.modelKinds);`n" +
             "    if (sel) {`n      return this.detail?.Glen;`n    }`n    return false;`n  }`n" +
-            "  private isFenGift(): boolean {`n    if (isFen(...this.modelKinds)) {`n      return this.detail?.Glen;`n    }`n    return false;`n  }`n}`n"
+            "  private isFenGlen(): boolean {`n    if (isFen(...this.modelKinds)) {`n      return this.detail?.Glen;`n    }`n    return false;`n  }`n}`n"
         'apps/shop/src/root.component.ts' = "import { Component } from '@angular/core';`n" +
             "import { Kind } from './kinds';`n" +
             "@Component({ selector: 'demo-root', template: '<demo-a [modelKinds]=`"kinds`" [detail]=`"detail`"></demo-a>' })`n" +
@@ -164,15 +164,15 @@ Test-Case 'tsrows: a key under a guarded method returning a bare optional read i
         "FROM key_reach k WHERE k.key LIKE 'demo.gm.%'"
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $sql
     Assert-Exit $r 0
-    Assert-Line $r 'demo.gm.control | modelKinds in ["Home"]'
-    Assert-Line $r 'demo.gm.field | modelKinds in ["Home"]'
-    Assert-Line $r 'demo.gm.local | modelKinds in ["Home"]'
-    Assert-Line $r 'demo.gm.called | modelKinds in ["Home"]'
+    Assert-Line $r 'demo.gm.control | modelKinds in ["Heath"]'
+    Assert-Line $r 'demo.gm.field | modelKinds in ["Heath"]'
+    Assert-Line $r 'demo.gm.local | modelKinds in ["Heath"]'
+    Assert-Line $r 'demo.gm.called | modelKinds in ["Heath"]'
     # `modelKinds` is a SET: "holds some of Fen, Heath" is not "holds no Lea", so the `in` side is kept
-    Assert-Line $r 'demo.gm.either | modelKinds in ["Flat","Home"]'
+    Assert-Line $r 'demo.gm.either | modelKinds in ["Fen","Heath"]'
     $g = Invoke-TsRowsQ $made.Db $script:TsEnumFormsSql
-    Assert-Line $g 'either => Kind modelKinds in ["Flat","Home"]'
-    Assert-Line $g 'isHeathGift() => Kind modelKinds in ["Home"]'
+    Assert-Line $g 'either => Kind modelKinds in ["Fen","Heath"]'
+    Assert-Line $g 'isHeathGlen() => Kind modelKinds in ["Heath"]'
 }
 
 }

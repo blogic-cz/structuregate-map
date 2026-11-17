@@ -55,7 +55,7 @@ declare const api: any;
 export class Alpha {
   run() {
     return api.get('/x')
-      // redacted - POST Sign
+      // Check code - POST Send
       .pipe((r: number) => r);
   }
   tick = /`/; // regex with a quote
@@ -70,7 +70,7 @@ Test-Case 'tsrows: a comment in a call chain, after the last member and after a 
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db ("SELECT 'c=' || c.line || ':' || c.text AS r FROM comments c JOIN files f ON f.id = c.file WHERE f.path LIKE '%note.ts' ORDER BY c.line")
     Assert-Line $r 'c=1:// HEAD note'
-    Assert-Line $r 'c=6:// redacted - POST Sign'
+    Assert-Line $r 'c=6:// Check code - POST Send'
     Assert-Line $r 'c=9:// regex with a quote'
     Assert-Line $r 'c=10:// ARCHITECTURE END'
     Assert-Line $r 'c=12:// after template'

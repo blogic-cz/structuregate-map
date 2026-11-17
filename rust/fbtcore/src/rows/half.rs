@@ -103,7 +103,7 @@ pub fn delete_half_rows(db: &Connection, table: &str, half: &str) -> Result<usiz
 /// IT DECIDES WHETHER THE IDS RESTART. A half that replaces its rows whole gains nothing
 /// by continuing the counters and loses reproducibility: the same tree mapped twice
 /// produced `renders` 1..N and then a fresh range above it, and `key_reach` sorts its gate
-/// lists by id STRING, so they reordered and a 53-table gate reported thousands of changed rows
+/// lists by id STRING, so they reordered and a whole-map gate reported thousands of changed rows
 /// with no fact different. Restarting makes the numbering a function of the TREE.
 ///
 /// IT IS NOT SAFE UNCONDITIONALLY. Nine id prefixes are shared with the C# half (`f`,

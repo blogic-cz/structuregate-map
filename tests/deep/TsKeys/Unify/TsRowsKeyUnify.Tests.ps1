@@ -80,7 +80,7 @@ export class RootComponent {
 Test-Case 'tsrows keys: a parent gate and a bind on the bound variable keep one restriction across ways (#33)' {
     $parent = { param($Name, $Init, $Gate, $Flag)
         "import { Component } from '@angular/core';`nimport { NgIf } from '@angular/common';`nimport { DemoIDs } from './shapes';`nimport { CardComponent } from './card.component';`n" +
-        "@Component({ selector: 'demo-p-$Name', standalone: true, imports: [NgIf, CardComponent], template: '<div *ngIf=`"$Gate`"><demo-shape-card [redacted]=`"model`" [showLoader]=`"$Flag`"></demo-shape-card></div>' })`n" +
+        "@Component({ selector: 'demo-p-$Name', standalone: true, imports: [NgIf, CardComponent], template: '<div *ngIf=`"$Gate`"><demo-shape-card [previewInput]=`"model`" [showLoader]=`"$Flag`"></demo-shape-card></div>' })`n" +
         "export class Parent${Name}Component {`n  $Init`n  DemoIDs = DemoIDs;`n}`n" }
     $tree = New-TsRowsWorkspace (New-UnifyFiles @{
         'apps/shop/src/card.component.ts' = @'
@@ -89,7 +89,7 @@ import { NgIf } from '@angular/common';
 import { DemoIDs } from './shapes';
 @Component({ selector: 'demo-shape-card', standalone: true, imports: [NgIf], template: `<b *ngIf="showLoader">{{ 'demo.multi.card' | translate }}</b>` })
 export class CardComponent {
-  @Input() redacted!: { kind: DemoIDs };
+  @Input() previewInput!: { kind: DemoIDs };
   @Input() showLoader = false;
 }
 '@

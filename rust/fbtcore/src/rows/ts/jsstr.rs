@@ -52,13 +52,13 @@ pub fn trim(text: &str) -> &str {
 // COLLATION — `String.prototype.localeCompare`, for the strings the closure sorts by.
 //
 // TWO OF THE FOLDS SORT WITH IT (`fold_values` and `unreadable_values` order their rows
-// by `enum_name + dimension`), and those rows land in `key_reach` columns the 53-table
+// by `enum_name + dimension`), and those rows land in `key_reach` columns the whole-table
 // gate compares IN ORDER. Get the comparator wrong and every row of both columns reads
 // as changed while carrying no changed fact.
 //
 // IT IS NOT CODE-POINT ORDER, and that was measured. On the distinct
 // `enum_name + dimension` strings a large workspace produces, the two orders
-// diverge near the top: `redacted...` sorts BEFORE
+// diverge near the top: `Wavedetail...` sorts BEFORE
 // `WaveTypedetail...`, because collation compares base letters first
 // and ignores case until the tertiary level, while `T` (0x54) precedes `d` (0x64) by
 // code point.
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn collation_is_not_code_point_order() {
         // THE MEASURED DIVERGENCE, near the top of a large workspace's strings.
-        let a = "redacted";
+        let a = "Wavedetail";
         let b = "WaveTypedetail";
         assert!(sort_key(a) < sort_key(b), "collation compares base letters first");
         // By code point the order is the other way round: `T` (0x54) precedes `d` (0x64).

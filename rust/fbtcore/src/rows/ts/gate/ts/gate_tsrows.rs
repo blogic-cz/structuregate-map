@@ -193,7 +193,7 @@ impl TsRows {
     /// The row a `{name, file, line}` target declares, or nothing.
     /// The row a target names - ANY of its declarations, tried in path and line order. A union's property
     /// has one per member type, and which one the checker lists first follows the order it was asked in: a
-    /// full and a partial run of the same tree put `Unit.model.ts` and `UnitDto.model.ts` first in turn,
+    /// full and a partial run of the same tree put `Part.model.ts` and `PartDto.model.ts` first in turn,
     /// and a gate resolved through the first alone had a row in one map and none in the other.
     fn row_of(&self, target: &Map<String, Value>) -> Option<String> {
         let place = |t: &Map<String, Value>| match (t.get("file"), t.get("line")) {

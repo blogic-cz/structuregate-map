@@ -54,8 +54,8 @@ const MUTATORS = new Set(['push', 'pop', 'shift', 'unshift', 'splice', 'sort', '
  * and a method call on the way (`s.items.find(..)`) is the element it hands back. A LOCAL initialised from such a path
  * (`const t = s.response.find(..)`) IS that path: `t.active = 1` writes `response.active`. Keys only, as `writtenPaths`.
  *
- * THROUGH THE HELPERS IT CALLS (rows 99): `setValue((g) => (g.fees = x), id, s.response)` hands the draft's `response` to a helper that finds an
- * element under it and calls the callback with that element - so the handler writes `response.contracts.fees`. A call whose callee is a function
+ * THROUGH THE HELPERS IT CALLS (rows 99): `setValue((g) => (g.totals = x), id, s.response)` hands the draft's `response` to a helper that finds an
+ * element under it and calls the callback with that element - so the handler writes `response.lines.totals`. A call whose callee is a function
  * the tree declares with a body (`declOf`, the checker's declaration) is walked with each parameter bound to its argument - a draft path, or a
  * function written inline or bound already - and a call of a parameter bound to a function walks that function the same way. A function already
  * walked with the same bindings is not walked again, which ends recursion; no depth is counted.

@@ -38,10 +38,10 @@ $script:KeyOptionsFiles = @{
         "}`n"
     # THE WORKSPACE'S OWN CONFIG, with the dictionary call this tree's service is.
     'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["money"],"gateInputs":["disabled"],' +
-        '"featureChecks":["FlagService.isOn"],"featureEnum":"FlagCodes","i18nDictionaryCalls":["redacted"],"i18nCalls":["getTranslation"]}'
+        '"featureChecks":["FlagService.isOn"],"featureEnum":"FlagCodes","i18nDictionaryCalls":["getDictionary"],"i18nCalls":["getTranslation"]}'
     'apps/shop/src/grade.ts' = "export enum Grade { Gold = 1, Silver = 2 }`n"
     'apps/shop/src/dictionary.service.ts' = "import { Injectable } from '@angular/core';`n@Injectable({ providedIn: 'root' })`n" +
-        "export class DictionaryService { redacted(prefix: string): { [key: string]: string } { return { [prefix]: prefix }; }`n" +
+        "export class DictionaryService { getDictionary(prefix: string): { [key: string]: string } { return { [prefix]: prefix }; }`n" +
         "  getTranslation(key: string): string { return key; } }`n"
     'apps/shop/src/enum-items.ts' = "export function enumToArray(e: object) { return Object.entries(e).map(([name, value]) => ({ name, value })); }`n" +
         "export function convertToItems(enumObject: object, translations?: { [key: string]: string }, empty?: boolean) {`n" +
@@ -59,7 +59,7 @@ $script:KeyOptionsFiles = @{
         "  bare: { label: string; value: unknown }[] = [];`n" +
         "  constructor(private dictionary: DictionaryService) {}`n" +
         "  ngOnInit() {`n" +
-        "    this.grades = convertToItems(Grade, this.dictionary.redacted('grade'));`n" +
+        "    this.grades = convertToItems(Grade, this.dictionary.getDictionary('grade'));`n" +
         "    this.bare = convertToItems(Grade);`n" +
         "  }`n}`n"
     'apps/shop/src/view.component.ts' = "import { Component } from '@angular/core';`n" +
@@ -84,8 +84,8 @@ $script:KeyOptionsFiles = @{
         "  template: '<pick-list [(value)]=`"state.rank`" [model]=`"ranks`"></pick-list><pick-list [(value)]=`"state.pair`" [model]=`"pairs`"></pick-list><pick-list [(value)]=`"state.bare`" [model]=`"bare`"></pick-list>' })`n" +
         "export class RankedComponent {`n" +
         "  state = { rank: Grade.Gold, pair: Grade.Gold, bare: Grade.Gold };`n" +
-        "  ranks = this.enums.toItems(Grade, this.dictionary.redacted('rank'));`n" +
-        "  pairs = this.enums.pairs(Grade, this.dictionary.redacted('rank'));`n" +
+        "  ranks = this.enums.toItems(Grade, this.dictionary.getDictionary('rank'));`n" +
+        "  pairs = this.enums.pairs(Grade, this.dictionary.getDictionary('rank'));`n" +
         "  bare = this.enums.toItems(Grade, {});`n" +
         "  constructor(private enums: EnumService, private dictionary: DictionaryService) {}`n}`n"
     # AN ENUM HELPER CHAINED (#117 follow-up): a library's `for..in` list (`enumToList`), a helper spreading its `.map(..)`, a second
@@ -110,21 +110,21 @@ $script:KeyOptionsFiles = @{
         "    '<pick-list [(value)]=`"pick.answer`" [model]=`"criteria.answers`"></pick-list><radio-list [items]=`"rated`" [(value)]=`"pick.rated`"></radio-list>' })`n" +
         "export class ToneComponent implements OnInit {`n" +
         "  pick = { tone: '', kind: '', month: '', plain: '', rate: '', step: '', answer: '', rated: '' };`n" +
-        "  tones = toSelect(Tone, this.dictionary.redacted('tone')).filter((x) => x.value !== Tone.Cool);`n" +
+        "  tones = toSelect(Tone, this.dictionary.getDictionary('tone')).filter((x) => x.value !== Tone.Cool);`n" +
         "  plain = toSelect(Tone).filter((x) => x.value !== Tone.Cool);`n" +
         "  kinds: { ItemID: unknown; Label: string }[] = [];`n" +
         "  months: { label: string; value: string }[] = [];`n" +
         "  rates = this.rateOptions();`n" +
-        "  rated = toSelect(Tone, this.dictionary.redacted('rate')).map((x) => ({ ...x, label: ```${x.label} %`` }));`n" +
+        "  rated = toSelect(Tone, this.dictionary.getDictionary('rate')).map((x) => ({ ...x, label: ```${x.label} %`` }));`n" +
         "  steps = this.stepOptions();`n" +
         "  criteria!: { answers: { ItemID: unknown; Label: string }[] };`n" +
         "  constructor(private dictionary: DictionaryService) {}`n" +
-        "  private rateOptions() {`n    return toSelect(Tone, this.dictionary.redacted('rate'));`n  }`n" +
-        "  private stepOptions() {`n    return [{ label: 'step.none', value: '' as unknown }].concat(toSelect(Tone, this.dictionary.redacted('step')).map((x) => ({ ...x, value: x.value })));`n  }`n" +
+        "  private rateOptions() {`n    return toSelect(Tone, this.dictionary.getDictionary('rate'));`n  }`n" +
+        "  private stepOptions() {`n    return [{ label: 'step.none', value: '' as unknown }].concat(toSelect(Tone, this.dictionary.getDictionary('step')).map((x) => ({ ...x, value: x.value })));`n  }`n" +
         "  ngOnInit() {`n" +
-        "    this.criteria = { answers: toRadio(Tone, this.dictionary.redacted('answer')) };`n" +
+        "    this.criteria = { answers: toRadio(Tone, this.dictionary.getDictionary('answer')) };`n" +
         "    this.kinds = toRadio(Tone).filter((x) => x.ItemID !== Tone.Cool).map((x) => ({ ItemID: x.ItemID, Label: ``kind.`${x.Label}`` }));`n" +
-        "    this.months = enumToList(this.dictionary.redacted('month')).map((x, i) => ({ label: x.name, value: String(i + 1) }));`n" +
+        "    this.months = enumToList(this.dictionary.getDictionary('month')).map((x, i) => ({ label: x.name, value: String(i + 1) }));`n" +
         "  }`n}`n"
     # A LABELS TABLE THE CLASS READS THROUGH `this` (#117 follow-up): template literals over the class's own fields, up to a base's.
     'apps/shop/src/fee-base.ts' = "export abstract class FeeBase {`n  rootKey = 'fee';`n}`n"
@@ -150,7 +150,7 @@ $script:KeyOptionsFiles = @{
         "  constructor(private dictionary: DictionaryService) {}`n" +
         "  transform(items: { label: string; value: unknown }[], path: string): { label: string; value: unknown }[] {`n" +
         "    if (items.length === 0) {`n      return [];`n    }`n" +
-        "    const dict = this.dictionary.redacted(path);`n" +
+        "    const dict = this.dictionary.getDictionary(path);`n" +
         "    return items.map((item) => ({ ...item, label: dict[item.label] ?? '' }));`n  }`n}`n"
     'apps/shop/src/shade.component.ts' = "import { Component, Input } from '@angular/core';`nimport { Tone } from './tone.component';`nimport { toSelect } from './select-items';`n" +
         "import { LabelledPipe } from './labelled.pipe';`nimport { RadioListComponent } from './radio.component';`n" +
@@ -183,12 +183,12 @@ $script:KeyOptionsFiles = @{
         "    return options.map((option) => ({ ...option, label: this.dictionary.getTranslation(``fee.`${option.value}``) }));`n  }`n}`n"
     # THE LAST #117 SHAPES: a dictionary named through `this`, a method's labels through `this`, a self-concat, an rxjs map, pipes over
     # a filter and over a list the map cannot read.
-    'apps/shop/src/rate-base.ts' = "export abstract class StepBase {`n  rootKey = 'rank';`n}`n"
+    'apps/shop/src/step-base.ts' = "export abstract class StepBase {`n  rootKey = 'rank';`n}`n"
     'apps/shop/src/keep.pipe.ts' = "import { Pipe, PipeTransform } from '@angular/core';`n@Pipe({ name: 'keep', standalone: true })`n" +
         "export class KeepPipe implements PipeTransform {`n  transform(items: { label: string; value: unknown }[], flag: boolean) {`n" +
         "    if (flag) {`n      return items.filter((i) => i.value !== null);`n    }`n    return items;`n  }`n}`n"
     'apps/shop/src/last.component.ts' = "import { Component, Input, OnInit } from '@angular/core';`nimport { Observable, of } from 'rxjs';`nimport { map } from 'rxjs/operators';`n" +
-        "import { DictionaryService } from './dictionary.service';`nimport { StepBase } from './rate-base';`nimport { Tone } from './tone.component';`n" +
+        "import { DictionaryService } from './dictionary.service';`nimport { StepBase } from './step-base';`nimport { Tone } from './tone.component';`n" +
         "import { toSelect } from './select-items';`nimport { KeepPipe } from './keep.pipe';`nimport { LabelledPipe } from './labelled.pipe';`n" +
         "import { RadioListComponent } from './radio.component';`n" +
         "@Component({ selector: 'app-last', standalone: true, imports: [RadioListComponent, KeepPipe, LabelledPipe],`n" +
@@ -199,13 +199,13 @@ $script:KeyOptionsFiles = @{
         "export class LastComponent extends StepBase implements OnInit {`n" +
         "  @Input() remote: { label: string; value: unknown }[] = [];`n" +
         "  last = { ranked: '', own: '', cases: '', related: '', kept: '', remote: '', durations: '' };`n" +
-        "  ranked = toSelect(Tone, this.dictionary.redacted(```${this.rootKey}``));`n" +
+        "  ranked = toSelect(Tone, this.dictionary.getDictionary(```${this.rootKey}``));`n" +
         "  own = this.ownOptions();`n  flag = true;`n  durations = this.durationOptions();`n" +
         "  cases: { label: string; value: unknown }[] = [];`n" +
         "  related`$: Observable<{ label: string; value: unknown }[]> = of([1]).pipe(map((x) => [{ label: this.dictionary.getTranslation('pick.none'), value: null }]));`n" +
         "  constructor(private dictionary: DictionaryService) {`n    super();`n  }`n" +
         "  ngOnInit() {`n    this.cases = this.cases.concat({ label: 'case.a', value: 'a' });`n    this.cases = this.cases.concat({ label: 'case.b', value: 'b' });`n  }`n" +
-        "  private durationOptions() {`n    return toSelect(Tone, this.dictionary.redacted('kind'));`n  }`n" +
+        "  private durationOptions() {`n    return toSelect(Tone, this.dictionary.getDictionary('kind'));`n  }`n" +
         "  private ownOptions() {`n    return [{ label: this.dictionary.getTranslation(```${this.rootKey}.Gold``), value: 1 }];`n  }`n}`n"
     # (#133) A LIST OF VALIDATION RULES beside a control's value: not its choices.
     'apps/shop/src/email-box.component.ts' = "import { Component, EventEmitter, Input, Output } from '@angular/core';`n" +
@@ -234,7 +234,7 @@ Test-Case 'tsrows: a form control names the option keys it is offered, with the 
     # A REACTIVE FORM'S CONTROL: `formControlName` names the value, written as a plain attribute.
     Assert-Line $r 'opt=WidgetComponent|tier|items.label|tier.gold|tiers|-|formControlName|items'
     # AN ENUM A HELPER LABELS FROM A DICTIONARY THE CALLER HANDS IN (rows 110): `label: translations?.[x.name] ?? x.name` over the caller's
-    # `redacted('grade')` is every key under `grade.`. THE CONTROL: the same helper handed no dictionary labels nothing.
+    # `getDictionary('grade')` is every key under `grade.`. THE CONTROL: the same helper handed no dictionary labels nothing.
     $g = Invoke-Gate --map-query $made.Db --width 0 --limit 0 --sql ("SELECT 'grade=' || o.value || '|' || o.property || '|' || o.key || '|' || coalesce(f.name, '-') AS g " +
         "FROM control_options o LEFT JOIN functions f ON f.id = o.callee WHERE o.value LIKE 'model.grade' OR o.value LIKE 'model.bare'")
     Assert-Line $g 'grade=model.grade|label|grade.Gold|convertToItems'
@@ -313,7 +313,7 @@ Test-Case 'tsrows: a control offers the keys a labels table spells through the c
 }
 
 # A PIPE REBUILDING THE BOUND LIST (#117 follow-up): `items | labelled : path` over `transform(items, path)` returning `items.map((item) => ({ ...item,
-# label: dict[item.label] ?? '' }))`, `dict` a `const` of `redacted(path)` - the template's `path` a literal or an object literal's
+# label: dict[item.label] ?? '' }))`, `dict` a `const` of `getDictionary(path)` - the template's `path` a literal or an object literal's
 # property - labels every element with every key under it. THE CONTROL: a path the template reads from an input spells nothing.
 Test-Case 'tsrows: a control offers the keys a pipe relabels its list with (#117)' {
     $made = New-TsRowsDb (New-TsRowsWorkspace $script:KeyOptionsFiles) -Shared
@@ -341,7 +341,7 @@ Test-Case 'tsrows: a control offers the keys of a list its parent translates and
     Assert-Line $r 'fee=FeeListComponent|pickMapped|feeKind.rate'
 }
 
-# THE LAST #117 SHAPES: a dictionary call naming its prefix through a base class's field (`redacted(`${this.rootKey}`)`), a method
+# THE LAST #117 SHAPES: a dictionary call naming its prefix through a base class's field (`getDictionary(`${this.rootKey}`)`), a method
 # of the class whose labels read it too, a field adding to itself (`this.cases = this.cases.concat({ .. })`), an observable built by an rxjs
 # `map` read through `| async`, a pipe filtering its list, and a relabelling pipe over a list the map cannot read (an input).
 Test-Case 'tsrows: a control offers the keys of this-named dictionaries, self-concats, rxjs maps and pipes (#117)' {

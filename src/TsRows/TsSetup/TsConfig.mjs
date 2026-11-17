@@ -9,7 +9,7 @@
  * `i18nCalls` list `i18n_index` loses a large share of its keys.
  *
  * `i18nCalls` names the methods that take ONE key; `i18nDictionaryCalls` names the methods that return EVERY key
- * under their first argument as a prefix (`redacted('a.b')`), so a call of one references all of
+ * under their first argument as a prefix (`getDictionary('a.b')`), so a call of one references all of
  * them - see `TsI18nCalls.mjs`.
  *
  * WHERE IT IS FOUND. `--config` names it; otherwise every ancestor of the workspace root is tried. The

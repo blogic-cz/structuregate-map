@@ -205,10 +205,10 @@ export function useArgs({ one = 1, two: dos = new Cell(), plain }: { one?: numbe
   const [, r = 2] = [1, 2] as number[];
   return one + p + third + r + dos.name.length + qq.length + plain.length + (zz ? 1 : 0);
 }
-export interface Holder { Input: { Params: { redacted: number; Rate?: number } }; list: number[] }
+export interface Holder { Input: { Params: { Level: number; Rate?: number } }; list: number[] }
 export function pickLevel(x: Holder): number {
-  const { Input: { Params: { redacted: redacted, Rate = 2 } }, Input: preview, list: [, first] } = x;
-  return redacted + Rate + preview.Params.redacted + first;
+  const { Input: { Params: { Level: level, Rate = 2 } }, Input: preview, list: [, first] } = x;
+  return level + Rate + preview.Params.Level + first;
 }
 '@
     'node_modules/demo-lib/package.json' = '{"name":"demo-lib","version":"1.0.0","types":"index.d.ts"}'
@@ -427,8 +427,8 @@ Test-Case 'tsrows: the per-name consts rows of a top-level destructuring have th
     Assert-Line $d 'default nodes=1'
 }
 
-# (rows 78) A NESTED LOCAL DESTRUCTURING BINDS EVERY NAME, one `bindings` item per name at any depth (`TsBody.mjs::emitLocal`): `property` is the PATH to it (`Input.Params.redacted`), as a parameter's or a
-# top-level const's nested names are each their own. The outer `Input` listed once for the whole pattern, with the pattern's text for its `local`, hid `redacted`. Control: a plain top-level name keeps its key.
+# (rows 78) A NESTED LOCAL DESTRUCTURING BINDS EVERY NAME, one `bindings` item per name at any depth (`TsBody.mjs::emitLocal`): `property` is the PATH to it (`Input.Params.Level`), as a parameter's or a
+# top-level const's nested names are each their own. The outer `Input` listed once for the whole pattern, with the pattern's text for its `local`, hid `level`. Control: a plain top-level name keeps its key.
 Test-Case 'tsrows: a nested local destructuring has one binding per bound name, with the path to it' {
     $r = Invoke-TsRowsQ (Get-TsBindDb) ("SELECT nm.value || '|property=' || ifnull(pr.value, 'none') || '|default=' || ifnull(df.value, 'none') || '|index=' || ifnull(ix.value, 'none') AS r " +
         "FROM locals o JOIN files f ON f.id = o.file JOIN locals__bindings it ON it.owner = o.id AND it.parent = 0 " +
@@ -436,7 +436,7 @@ Test-Case 'tsrows: a nested local destructuring has one binding per bound name, 
         "LEFT JOIN locals__bindings df ON df.owner = it.owner AND df.parent = it.n AND df.role = 'default' " +
         "LEFT JOIN locals__bindings ix ON ix.owner = it.owner AND ix.parent = it.n AND ix.role = 'index' " +
         "WHERE f.path LIKE '%bind.defaults.ts' AND o.destructured = 1 AND o.line = 11")
-    Assert-Line $r 'redacted|property=Input.Params.redacted|default=none|index=none'
+    Assert-Line $r 'level|property=Input.Params.Level|default=none|index=none'
     Assert-Line $r 'Rate|property=Input.Params.Rate|default=2|index=none'
     Assert-Line $r 'preview|property=Input|default=none|index=none'
     Assert-Line $r 'first|property=list|default=none|index=1'

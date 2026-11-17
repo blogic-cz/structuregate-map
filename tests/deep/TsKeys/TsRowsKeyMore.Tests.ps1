@@ -164,7 +164,7 @@ Test-Case 'tsrows keys: a list a component builds and only hands to a child inpu
         "|| ' ' || $(Get-TsItemFieldSql 'key_reach__always_values' 'k.rowid' 0 'op') || ' ' || $(Get-NodeItemListSql 'key_reach__always_values' 'k.rowid' 0 'values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
     # built by a translate call (A) or a literal (E) and displayed only through the radio under the *ngIf: the parent
     # is no site of its own, and the ungated radio path through B binds another list
-    Assert-Line $r 'demo.choice.yes | 1 | RadioComponent | vm.kind in ["Home"]'
+    Assert-Line $r 'demo.choice.yes | 1 | RadioComponent | vm.kind in ["Heath"]'
     Assert-Line $r 'demo.lit.yes | 1 | RadioComponent | vm.kind in ["Lea"]'
     # a parent that displays the key itself (its own *ngFor) keeps its own, ungated path
     Assert-Line $r 'demo.both.yes | 2 | DComponent,RadioComponent | -'
@@ -282,7 +282,7 @@ Test-Case 'tsrows keys: a component field nothing reads is no site of the key it
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.n_paths || ' | ' || (SELECT group_concat(c.name, ',') FROM key_reach__components j " +
         "JOIN components c ON c.id = j.value AND j.owner = '#' || k.rowid AND j.parent = 0) || ' | ' || coalesce($(Get-NodeItemListSql 'key_reach__always_values' 'k.rowid' 0 'values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
     # B's field is never read, so A's `*ngIf` is the only way to the key
-    Assert-Line $r 'demo.label | 1 | AComponent | ["Home"]'
+    Assert-Line $r 'demo.label | 1 | AComponent | ["Heath"]'
     # read in C's own TypeScript, or reachable through D's `this[k]`: each keeps its ungated literal site
     Assert-Line $r 'demo.kept | 2 | AComponent,CComponent | -'
     Assert-Line $r 'demo.self | 2 | AComponent,DComponent | -'
@@ -303,11 +303,11 @@ Test-Case 'tsrows keys: a field only written in a method and a getter nothing re
         # B only WRITES `labelCode` (in a method ngOnInit calls) and never reads its getter `title`
         'apps/shop/src/b.component.ts' = "import { Component, Input, OnInit } from '@angular/core';`n" +
             "@Component({ selector: 'demo-b', template: '<translate [text]=`"otherCode`"></translate>' })`n" +
-            "export class BComponent implements OnInit {`n  @Input() flat = false;`n" +
+            "export class BComponent implements OnInit {`n  @Input() fen = false;`n" +
             "  labelCode = 'demo.label';`n  otherCode = 'demo.other';`n" +
             "  ngOnInit(): void { this.changeCodes(); }`n" +
             "  get title(): string { return 'demo.title'; }`n" +
-            "  private changeCodes(): void {`n    if (this.flat) {`n      this.labelCode = 'demo.label';`n" +
+            "  private changeCodes(): void {`n    if (this.fen) {`n      this.labelCode = 'demo.label';`n" +
             "    } else {`n      this.labelCode = 'demo.labelAlt';`n    }`n  }`n}`n"
         # C reads its getter through another getter and its written field in a method: both keep their sites
         'apps/shop/src/c.component.ts' = "import { Component, OnInit } from '@angular/core';`n" +
@@ -329,8 +329,8 @@ Test-Case 'tsrows keys: a field only written in a method and a getter nothing re
     $r = Invoke-TsRowsQ $made.Db ("SELECT k.key || ' | ' || k.n_paths || ' | ' || coalesce((SELECT group_concat(c.name, ',') FROM key_reach__components j " +
         "JOIN components c ON c.id = j.value AND j.owner = '#' || k.rowid AND j.parent = 0), '-') || ' | ' || coalesce($(Get-NodeItemListSql 'key_reach__always_values' 'k.rowid' 0 'values'), '-') AS reach FROM key_reach k WHERE k.key LIKE 'demo.%'")
     # B neither reads `labelCode` nor `title`: A's `*ngIf` is the only way to either key
-    Assert-Line $r 'demo.label | 1 | AComponent | ["Home"]'
-    Assert-Line $r 'demo.title | 1 | AComponent | ["Home"]'
+    Assert-Line $r 'demo.label | 1 | AComponent | ["Heath"]'
+    Assert-Line $r 'demo.title | 1 | AComponent | ["Heath"]'
     # and the key B only writes into its unread field has no way at all
     Assert-Line $r 'demo.labelAlt | 0 | - | -'
     # a getter read through a getter the template reads, and a field a template-called method reads
@@ -349,10 +349,10 @@ Test-Case 'tsrows keys: a field another file only writes and a getter returning 
         "import { Kind } from './kinds';`n" +
         "@Component({ selector: 'demo-$($name.ToLower())', templateUrl: './$($name.ToLower()).component.html' })`n" +
         "export class $($name)Component {`n  @Input() model!: { kind: Kind };`n" +
-        "  @Input() a = false;`n  @Input() b = false;`n  @Input() flat = false;`n" +
+        "  @Input() a = false;`n  @Input() b = false;`n  @Input() fen = false;`n" +
         "  get showRange(): boolean {`n    this.changeCodes();`n    return this.a || this.b;`n  }`n" +
         "  rangeCode = 'demo.range';`n" +
-        "  get floorTitle(): string { return this.flat ? 'demo.floors' : 'demo.hallFloors'; }`n" +
+        "  get floorTitle(): string { return this.fen ? 'demo.floors' : 'demo.hallFloors'; }`n" +
         "  private changeCodes(): void {`n    if (this.model.kind === Kind.Fen) {`n      this.rangeCode = 'demo.range';`n" +
         "    } else if (this.model.kind === Kind.Heath) {`n      this.rangeCode = 'demo.hallRange';`n    }`n  }`n}`n"
     }

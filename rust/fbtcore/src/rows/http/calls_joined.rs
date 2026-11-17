@@ -1,4 +1,4 @@
-//! A URL BUILT AS AN ARRAY: `const parts = ['redacted']; parts.push(`?id=${id}`); get(parts.join(''))`.
+//! A URL BUILT AS AN ARRAY: `const parts = ['get-record']; parts.push(`?id=${id}`); get(parts.join(''))`.
 //!
 //! The evaluator hands `parts.join('')` over as a `$call` of `Array.join` whose `$receiver` is already the local's initializer, its
 //! elements. What the callable PUSHES onto that local between its declaration and the call follows them, in source order, each argument

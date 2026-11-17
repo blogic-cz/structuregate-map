@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn routes_combine_and_tokens_are_replaced() {
-        assert_eq!(combine("api/calculations", "save", "C", "Save"), "api/calculations/save");
+        assert_eq!(combine("api/jobs", "save", "C", "Save"), "api/jobs/save");
         assert_eq!(combine("api/", "/x/", "C", "Save"), "x");
         assert_eq!(combine("api/[controller]", "[action]", "OrdersController", "ListAsync"), "api/Orders/List");
         assert_eq!(combine("[area]/x", "", "C", "M"), "*/x");

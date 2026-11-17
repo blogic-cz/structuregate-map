@@ -33,7 +33,7 @@ fn a_helper_returning_its_first_argument_is_read_through_and_a_url_builder_is_wh
     let url = json!({"$expr": "url"});
     // `createQueryUrl(url)`: the base is the parameter, and a caller's own url folds to the argument.
     assert_eq!(w.base(&call("createQueryUrl", url.clone()), &at()).as_deref(), Some("url"));
-    assert_eq!(w.url(&call("createQueryUrl", json!("/calculations/count")), &at()), "/calculations/count");
+    assert_eq!(w.url(&call("createQueryUrl", json!("/jobs/count")), &at()), "/jobs/count");
     // `getBase(id)` returns something else: the parameter handed to it is no base, and (rows 88) the call is what the builder returns, the suffix kept.
     let id = json!({"$expr": "url"});
     let suffixed = json!({"$template": ["", "/get-lookups"], "$hole_values": [call("getBase", id.clone())]});
@@ -81,7 +81,7 @@ fn a_call_site_reads_the_helper_from_the_rows() {
     ]);
     rows("returns", vec![json!({"id": "rv:2", "member": "m:3", "value": {"$template": ["", "vale"], "$hole_values": [{"$expr": "this.root"}]}})]);
     rows("locals", vec![json!({"id": "l:1", "file": "f:1", "member": "m:2", "name": "url", "line": 8,
-        "value": call("createQueryUrl", json!({"$template": ["", "/calculations/count"], "$hole_values": [{"$expr": "this.base"}]}))})]);
+        "value": call("createQueryUrl", json!({"$template": ["", "/jobs/count"], "$hole_values": [{"$expr": "this.base"}]}))})]);
     let primitive = json!({"file": "node_modules/@angular/common/http/index.d.ts", "owner": "HttpClient", "name": "get"});
     rows("calls", vec![
         json!({"id": "call:1", "file": "f:1", "line": 4, "member": "m:1", "callee_id": "", "target": primitive, "args": [{"$expr": "url"}], "arg_params": []}),
@@ -92,7 +92,7 @@ fn a_call_site_reads_the_helper_from_the_rows() {
     let sites = load(&conn, &files_of(&conn, "typescript").unwrap()).unwrap();
     let urls: Vec<(&str, &str)> = sites.iter().map(|s| (s.call.as_str(), s.url.as_str())).collect();
     // `count` is no wrapper (its url is a local the helper made, a base nobody hands in): its call reads the argument of the helper, query cut.
-    assert!(urls.contains(&("call:2", "*/calculations/count")), "{urls:?}");
+    assert!(urls.contains(&("call:2", "*/jobs/count")), "{urls:?}");
     // `lookups` hands an id to a url builder: not a wrapper either, and its own call is what the builder returns, the suffix kept (rows 88).
     assert!(urls.contains(&("call:3", "*/vale/get-lookups")), "{urls:?}");
 }

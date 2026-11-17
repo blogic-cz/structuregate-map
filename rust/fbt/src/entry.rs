@@ -70,7 +70,7 @@ pub fn key_of(path: &str) -> String {
 }
 
 /// A path's case as the platform compares it: lowercased on Windows, whose paths are case insensitive, and kept as
-/// it is elsewhere - where `redacted` and `redacted` are two folders, and one key for both failed every snapshot's store.
+/// it is elsewhere - where `Abc/` and `ABC/` are two folders, and one key for both failed every snapshot's store.
 pub fn fold(text: &str) -> String {
     if cfg!(windows) { text.to_lowercase() } else { text.to_string() }
 }

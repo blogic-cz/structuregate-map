@@ -71,7 +71,7 @@ Test-Case 'tsrows: a key in an ng-template only outlets render takes the gates o
     Assert-Exit $made.Result 0
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsOutletsSql
     Assert-Exit $r 0
-    Assert-Line $r 'demo.list.selectAll | vm.kind === KindSet.Heath | vm.kind === KindSet.Heath | vm.kind in ["Home"]'
+    Assert-Line $r 'demo.list.selectAll | vm.kind === KindSet.Heath | vm.kind === KindSet.Heath | vm.kind in ["Heath"]'
     Assert-Line $r 'demo.list.title | - | - | -'
     Assert-Line $r 'demo.list.a | - | - | -'
     Assert-Line $r 'demo.list.b | - | vm.kind === KindSet.Fen | -'
@@ -110,7 +110,7 @@ Test-Case 'tsrows: a component in an ng-template only outlets render takes the g
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql ($script:TsOutletsSql.Replace("LIKE 'demo.list.%'", "LIKE 'demo.child.%'"))
-    Assert-Line $r 'demo.child.title | vm.kind === KindSet.Heath | vm.kind === KindSet.Heath | vm.kind in ["Home"]'
+    Assert-Line $r 'demo.child.title | vm.kind === KindSet.Heath | vm.kind === KindSet.Heath | vm.kind in ["Heath"]'
 }
 
 # A QUERY BY A COMPONENT'S TYPE HANDS NO TEMPLATE OVER (#114): a component never sits on an `ng-template`, so `@ViewChild(BoxComponent)` leaves the outlet
@@ -144,7 +144,7 @@ Test-Case 'tsrows: a query by a component type keeps the outlet gates of an ng-t
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql ($script:TsOutletsSql.Replace("k.key LIKE 'demo.list.%'", "(k.key LIKE 'demo.child.%' OR k.key LIKE 'demo.other.%')"))
-    Assert-Line $r 'demo.child.title | vm.kind === KindSet.Heath | vm.kind === KindSet.Heath | vm.kind in ["Home"]'
+    Assert-Line $r 'demo.child.title | vm.kind === KindSet.Heath | vm.kind === KindSet.Heath | vm.kind in ["Heath"]'
     Assert-Line $r 'demo.other.title | - | - | -'
 }
 
@@ -171,15 +171,15 @@ Test-Case 'tsrows: a key and a component in an else template take the negated co
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:TsOutletsSql
-    Assert-Line $r 'demo.list.then | vm.kind === KindSet.Heath & elseTpl | vm.kind === KindSet.Heath & elseTpl | vm.kind in ["Home"]'
-    Assert-Line $r 'demo.list.else | !(vm.kind === KindSet.Heath) | !(vm.kind === KindSet.Heath) | vm.kind not_in ["Home"]'
-    Assert-Line $r 'demo.list.child | !(vm.kind === KindSet.Heath) | !(vm.kind === KindSet.Heath) | vm.kind not_in ["Home"]'
+    Assert-Line $r 'demo.list.then | vm.kind === KindSet.Heath & elseTpl | vm.kind === KindSet.Heath & elseTpl | vm.kind in ["Heath"]'
+    Assert-Line $r 'demo.list.else | !(vm.kind === KindSet.Heath) | !(vm.kind === KindSet.Heath) | vm.kind not_in ["Heath"]'
+    Assert-Line $r 'demo.list.child | !(vm.kind === KindSet.Heath) | !(vm.kind === KindSet.Heath) | vm.kind not_in ["Heath"]'
 }
 
 # ONE VARIABLE UNDER TWO SPELLINGS OF ONE CLASS (#117): `this.vale` (a setter written once in the constructor, its getter returning
 # the field it copies into) and `get model()` (one plain return) both read `this.ctx.input` - so on the `else` way `vale.kind not_in
-# [Heath, Fen]` and `model.vale.kind in [Lea]` are one dimension and intersect, the `ngIf` way (Home or Flat, and Lea) is no way at
-# all, and `demo.list.life` renders for Lea alone. Unioned as two variables, the ways permitted every member and the key nothing.
+# [Heath, Fen]` and `model.vale.kind in [Lea]` are one dimension and intersect, the `ngIf` way (Heath or Fen, and Lea) is no way at
+# all, and `demo.list.lea` renders for Lea alone. Unioned as two variables, the ways permitted every member and the key nothing.
 Test-Case 'tsrows: two spellings a class proves one chain are one dimension on a way' {
     $tree = New-TsRowsWorkspace @{
         'apps/shop/src/kinds.ts' = "export enum KindSet { Heath = 1, Fen = 2, Lea = 3, Bay = 4 }`nexport interface Vale { kind: KindSet }`n"
@@ -192,23 +192,23 @@ Test-Case 'tsrows: two spellings a class proves one chain are one dimension on a
             "  get model(): { vale: Vale } { return this.ctx.input; }`n}`n"
         'apps/shop/src/host.component.ts' = "import { Component, OnInit } from '@angular/core';`nimport { KindSet } from './kinds';`nimport { DemoBase } from './base';`n" +
             "@Component({ selector: 'demo-host', template: ``n" +
-            "  <div *ngIf=`"canShow; else elseTpl`"><translate [text]=`"isLea ? 'demo.list.life' : 'demo.list.other'`"></translate></div>`n" +
-            "  <ng-template #elseTpl><translate [text]=`"isLea ? 'demo.list.life' : 'demo.list.other'`"></translate></ng-template>`n`` })`n" +
+            "  <div *ngIf=`"canShow; else elseTpl`"><translate [text]=`"isLea ? 'demo.list.lea' : 'demo.list.other'`"></translate></div>`n" +
+            "  <ng-template #elseTpl><translate [text]=`"isLea ? 'demo.list.lea' : 'demo.list.other'`"></translate></ng-template>`n`` })`n" +
             "export class HostComponent extends DemoBase implements OnInit {`n  isLea = false;`n  ngOnInit(): void { this.isLea = this.model.vale.kind === KindSet.Lea; }`n}`n"
         # A THIRD WAY spelling the enum otherwise: no one dimension is restricted on every way, so the fold reads each way's union.
         'apps/shop/src/other.component.ts' = "import { Component } from '@angular/core';`nimport { KindSet } from './kinds';`n" +
-            "@Component({ selector: 'demo-other', template: '<translate *ngIf=`"kind === KindSet.Lea`" [text]=`"\'demo.list.life\'`"></translate>' })`n" +
+            "@Component({ selector: 'demo-other', template: '<translate *ngIf=`"kind === KindSet.Lea`" [text]=`"\'demo.list.lea\'`"></translate>' })`n" +
             "export class OtherComponent {`n  KindSet = KindSet;`n  kind: KindSet = KindSet.Heath;`n}`n"
         'apps/shop/src/app.module.ts' = "import { NgModule } from '@angular/core';`nimport { CommonModule } from '@angular/common';`n" +
             "import { TranslateComponent } from './translate.component';`nimport { HostComponent } from './host.component';`nimport { OtherComponent } from './other.component';`n" +
             "@NgModule({ declarations: [TranslateComponent, HostComponent, OtherComponent], imports: [CommonModule], bootstrap: [HostComponent, OtherComponent] })`nexport class AppModule {}`n"
-        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"list":{"life":"L","other":"O"}}}'
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop"},"demo":{"list":{"lea":"L","other":"O"}}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["translate:text"]}'
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
-    $r = Invoke-Gate --map-query $made.Db --width 0 --sql ($script:TsOutletsSql.Replace("k.key LIKE 'demo.list.%'", "k.key = 'demo.list.life'"))
-    Assert-Line $r 'demo.list.life | - | canShow & elseTpl & !(canShow) & kind === KindSet.Lea | kind | model.vale.kind | vale.kind in ["Lea"]'
+    $r = Invoke-Gate --map-query $made.Db --width 0 --sql ($script:TsOutletsSql.Replace("k.key LIKE 'demo.list.%'", "k.key = 'demo.list.lea'"))
+    Assert-Line $r 'demo.list.lea | - | canShow & elseTpl & !(canShow) & kind === KindSet.Lea | kind | model.vale.kind | vale.kind in ["Lea"]'
 }
 
 }

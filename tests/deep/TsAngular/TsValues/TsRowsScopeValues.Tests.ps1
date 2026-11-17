@@ -12,7 +12,7 @@ if ($script:TsRowsModules -and $script:TsRowsPython) {
 $script:TsScopeFiles = @{
     'apps/shop/src/scope.models.ts' = @'
 export class Item { Name = ''; }
-export class Base { redacted = ''; }
+export class Base { Level = ''; }
 export class Slot<A = Base, B = Base> { Result!: B; Other!: A; }
 export type Picked = Pick<Slot<unknown>, 'Result'>;
 '@
@@ -42,8 +42,8 @@ export class MarkDirective {
 <p demoMark #o="demoOther">{{ o.marked }}</p>
 <div #e>{{ e.prop }}</div>
 <app-child #ghost>{{ ghost }}{{ ghost.focused }}</app-child>
-<div *ngFor="let s of slots">{{ s.Result.redacted }}</div>
-<p>{{ lone.Result.redacted }}</p>
+<div *ngFor="let s of slots">{{ s.Result.Level }}</div>
+<p>{{ lone.Result.Level }}</p>
 <p *ngIf="opts$ | async as o">{{ o?.[0]?.value }}</p>
 <p>{{ options?.[1]?.label }}</p>
 `,
@@ -93,17 +93,17 @@ Test-Case 'tsrows scope: a reference on a plain element types nothing, and a ref
 }
 
 # N3 (a regression of the first rows 73 build): A TYPE PARAMETER'S DEFAULT STILL APPLIES THROUGH A LOOP VARIABLE. `Pick<Slot<unknown>, 'Result'>` binds `A` alone, so `B`
-# is the default `Base` - `s.Result.redacted` reaches `redacted`; the loop took the whole ref of its element, a mapped type with no bindings, and ended at `Result`.
+# is the default `Base` - `s.Result.Level` reaches `Level`; the loop took the whole ref of its element, a mapped type with no bindings, and ended at `Result`.
 Test-Case 'tsrows scope: a loop variable typed by a Pick of a generic keeps the default of the parameter nobody passed' {
-    $t = Get-TsScopeTargets '{{ s.Result.redacted }}'
-    Assert-Line $t 'read={{ s.Result.redacted }}|Result=tm@apps/shop/src/scope.models.ts:3'
-    Assert-Line $t 'read={{ s.Result.redacted }}|redacted=m@apps/shop/src/scope.models.ts:2'
+    $t = Get-TsScopeTargets '{{ s.Result.Level }}'
+    Assert-Line $t 'read={{ s.Result.Level }}|Result=tm@apps/shop/src/scope.models.ts:3'
+    Assert-Line $t 'read={{ s.Result.Level }}|Level=m@apps/shop/src/scope.models.ts:2'
 }
 
 Test-Case 'tsrows scope: a member typed by a Pick of a generic keeps the default of the parameter nobody passed' {
-    $t = Get-TsScopeTargets '{{ lone.Result.redacted }}'
-    Assert-Line $t 'read={{ lone.Result.redacted }}|Result=tm@apps/shop/src/scope.models.ts:3'
-    Assert-Line $t 'read={{ lone.Result.redacted }}|redacted=m@apps/shop/src/scope.models.ts:2'
+    $t = Get-TsScopeTargets '{{ lone.Result.Level }}'
+    Assert-Line $t 'read={{ lone.Result.Level }}|Result=tm@apps/shop/src/scope.models.ts:3'
+    Assert-Line $t 'read={{ lone.Result.Level }}|Level=m@apps/shop/src/scope.models.ts:2'
 }
 
 # N4: A KEYED READ OVER AN `async` ALIAS takes the element of the list the observable emits (`Observable<{..}[]>`), not of its innermost type.

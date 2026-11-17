@@ -180,7 +180,7 @@ impl ListSource<'_, '_> {
     }
 
     /// A DICTIONARY THE CALLER HANDS IN, INDEXED BY THE ELEMENTS (rows 110, #117): `convertToItems(Hue,
-    /// t.redacted('enums.hue'))` over a callee that pushes `...convertEnumToArray(e).map((x) => ({ label:
+    /// t.getDictionary('enums.hue'))` over a callee that pushes `...convertEnumToArray(e).map((x) => ({ label:
     /// translations?.[x.name] ?? x.name }))` - a property reading the parameter by any index (`$param_index`, alone or
     /// as a side of `??`/`||`) is a key under the prefix the caller's dictionary call spells (`key_follow::dictionary`).
     /// A spread of a `.map(cb)` whose one returned object holds such a property is that object: the elements the

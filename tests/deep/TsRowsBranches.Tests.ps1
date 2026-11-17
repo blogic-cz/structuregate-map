@@ -189,7 +189,7 @@ Test-Case 'tsrows: a valueless switch default is not_in its cases, and a valuele
             "  ngOnInit() {`n    if (this.env.isAlpha()) {`n      this.v.clear();`n    } else {`n      this.v.createEmbeddedView(this.t);`n    }`n  }`n}`n" +
             "@Component({ selector: 'app-plans', templateUrl: './plans.component.html', standalone: true, imports: [NgSwitch, NgSwitchCase, NgSwitchDefault, DemoShowDirective, DemoHideDirective, DemoHeathDirective] })`n" +
             "export class PlansComponent {`n  plan: Plan = Plan.Solo;`n  Plan = Plan;`n}`n"
-        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},"sw":{"duo":"a","team":"b","other":"c","shown":"d","hidden":"f","home":"g","always":"e"}}'
+        'apps/shop/src/assets/locales/en.json' = '{"shop":{"title":"Shop","cart":{"empty":"Empty"}},"sw":{"duo":"a","team":"b","other":"c","shown":"d","hidden":"f","heath":"g","always":"e"}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCarriers":["money"],"gateInputs":["ngSwitch"]}'
     }
     $made = New-TsRowsDb $tree

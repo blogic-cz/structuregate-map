@@ -1,6 +1,6 @@
 //! A LIST A PIPE REBUILDS BEFORE A CONTROL GETS IT (#117 follow-up): `[options]="vm.hues | labelled : vm.huePath"` over a pipe
 //! whose `transform(items, path)` returns `items.map((item) => ({ ...item, label: dict[item.label] ?? '' }))` with
-//! `const dict = this.t.redacted(path)` - every element of the bound list, its `label` every key under the
+//! `const dict = this.t.getDictionary(path)` - every element of the bound list, its `label` every key under the
 //! prefix the template hands as `path` (a string literal, or a read of a property an object literal writes with one,
 //! `shape_values`).
 //!

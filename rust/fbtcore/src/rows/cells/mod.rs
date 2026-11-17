@@ -17,8 +17,8 @@
 //! `bool`, `null`, and `value` a scalar's own (a boolean 0/1). `last` is the `n` of the last node of its SUBTREE and
 //! `depth` its distance from the root: `n` is a gapless preorder, so a subtree is the RANGE `n BETWEEN s.n AND s.last`
 //! of one owner and a node's ancestors are `x.n BETWEEN a.n AND a.last` - a range of the `(owner, n)` key, never a
-//! `WITH RECURSIVE` over `parent` (measured on a large workspace's `expressions__ast`: every `expr` subtree 0.2 s
-//! against 23 s recursive, a node holding a `Read` anywhere below it 4 s against 262 s). THE COLUMNS ARE FIXED: a member's NAME is a `role`,
+//! `WITH RECURSIVE` over `parent` (measured on a large workspace's `expressions__ast`: every `expr` subtree two orders of magnitude faster
+//! than recursive, a node holding a `Read` anywhere below it likewise). THE COLUMNS ARE FIXED: a member's NAME is a `role`,
 //! never a column - names are data as often as they are fields (an object literal's keys, a property map, a
 //! document's headers), and a column per name was a table past SQLite's column limit, `Home` and `home` one
 //! column. The root of every cell is one node, so `[]` and `{}` are rows too and an absent cell is no row at all.

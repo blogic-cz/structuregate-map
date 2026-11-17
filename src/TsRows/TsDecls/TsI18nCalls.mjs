@@ -113,7 +113,7 @@ function keyTakingDecls(store, methods, known) {
 
 /**
  * A CALL THAT HANDS BACK EVERY TRANSLATION UNDER A PREFIX (`i18nDictionaryCalls`) REFERENCES THEM ALL.
- * `redacted('demo.sort.options')` is read as `dict[name]` or handed to a converter, so no
+ * `getDictionary('demo.sort.options')` is read as `dict[name]` or handed to a converter, so no
  * single key is ever spelled at the site; without this every key under the prefix read as unreferenced. The
  * row carries the PREFIX and no `key` - a key it does not name could not be a key of any locale - and the
  * rust side expands it against the locale keys, so a key added to the locale later is reached with no

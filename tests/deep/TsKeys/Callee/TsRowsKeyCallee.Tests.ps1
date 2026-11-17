@@ -26,10 +26,10 @@ Test-Case 'tsrows keys: a callee branch on an enum parameter restricts the key b
             "@Injectable({ providedIn: 'root' })`n" +
             "export class DescService {`n  constructor(private translate: TranslateService) {}`n" +
             "  description(kind: HueIDs, name: string): string {`n" +
-            "    if (warmHues.indexOf(kind) !== -1) {`n      return this.home(name);`n" +
+            "    if (warmHues.indexOf(kind) !== -1) {`n      return this.heath(name);`n" +
             "    } else if (coolHues.some((e) => e === kind)) {`n      return this.translate.getTranslation(``demo.hue.cool.`${name}``);`n    }`n" +
             "    return '-';`n  }`n" +
-            "  private home(name: string): string { return this.translate.getTranslation(``demo.hue.warm.`${name}``); }`n}`n"
+            "  private heath(name: string): string { return this.translate.getTranslation(``demo.hue.warm.`${name}``); }`n}`n"
         'apps/shop/src/tip.component.ts' = "import { Component, Input } from '@angular/core';`n" +
             "import { HueIDs } from './hues';`n" +
             "import { DescService } from './desc.service';`n" +
@@ -93,10 +93,10 @@ Test-Case 'tsrows keys: a method the template calls with the loop item restricts
             "@Injectable({ providedIn: 'root' })`n" +
             "export class DescService {`n  constructor(private translate: TranslateService) {}`n" +
             "  description(shape: ShapeIDs, name: string): string {`n" +
-            "    if (roundShapes.indexOf(shape) !== -1) {`n      return this.home(name);`n" +
+            "    if (roundShapes.indexOf(shape) !== -1) {`n      return this.heath(name);`n" +
             "    } else if (ovalShapes.some((e) => e === shape)) {`n      return this.translate.getTranslation(``demo.shape.oval.`${name}``);`n    }`n" +
             "    return '-';`n  }`n" +
-            "  private home(name: string): string { return this.translate.getTranslation(``demo.shape.round.`${name}``); }`n}`n"
+            "  private heath(name: string): string { return this.translate.getTranslation(``demo.shape.round.`${name}``); }`n}`n"
         'apps/shop/src/table.component.ts' = "import { Component, Input } from '@angular/core';`n" +
             "import { ShapeIDs } from './shapes';`n" +
             "import { DescService } from './desc.service';`n" +
@@ -129,10 +129,10 @@ Test-Case 'tsrows keys: a template-called method''s own parameters read as the t
             "@Injectable({ providedIn: 'root' })`n" +
             "export class DescService {`n  constructor(private translate: TranslateService) {}`n" +
             "  description(shape: ShapeIDs, name: string): string {`n" +
-            "    if (roundShapes.indexOf(shape) !== -1) {`n      return this.home(name);`n" +
+            "    if (roundShapes.indexOf(shape) !== -1) {`n      return this.heath(name);`n" +
             "    } else if (ovalShapes.some((e) => e === shape)) {`n      return this.translate.getTranslation(``demo.shape.oval.`${name}``);`n    }`n" +
             "    return '-';`n  }`n" +
-            "  private home(name: string): string { return this.translate.getTranslation(``demo.shape.round.`${name}``); }`n}`n"
+            "  private heath(name: string): string { return this.translate.getTranslation(``demo.shape.round.`${name}``); }`n}`n"
         'apps/shop/src/table.component.ts' = "import { Component, Input } from '@angular/core';`n" +
             "import { ShapeIDs } from './shapes';`n" +
             "import { DescService } from './desc.service';`n" +
@@ -239,13 +239,13 @@ export class DescService {
   constructor(private translate: TranslateService) {}
   description(kind: DemoIDs, name: string): string {
     if (heathKinds.indexOf(kind) !== -1) {
-      return this.home(name);
+      return this.heath(name);
     } else if (leaKinds.some((e) => e === kind)) {
-      return this.translate.getTranslation(`demo.kind.life.${name}`);
+      return this.translate.getTranslation(`demo.kind.lea.${name}`);
     }
     return '-';
   }
-  private home(name: string): string { return this.translate.getTranslation(`demo.kind.home.${name}`); }
+  private heath(name: string): string { return this.translate.getTranslation(`demo.kind.heath.${name}`); }
 }
 @Injectable({ providedIn: 'root' })
 export class CtxService { context: { kind: DemoIDs; name: string } = { kind: DemoIDs.Heath, name: 'a' }; }
@@ -275,7 +275,7 @@ export class RootComponent {
   vm: { kind: DemoIDs; name: string } = { kind: DemoIDs.Heath, name: 'a' };
 }
 '@
-        'apps/shop/src/assets/locales/en.json' = '{"demo":{"kind":{"home":{"a":"1"},"life":{"a":"2"}}}}'
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"kind":{"heath":{"a":"1"},"lea":{"a":"2"}}}}'
         'structuregate.ts.json' = '{"locales":["apps/shop/src/assets/locales"],"i18nCalls":["getTranslation"]}'
     }
 }
@@ -285,9 +285,9 @@ Test-Case 'tsrows keys: a child input bound to a parent read chain is that paren
     Assert-Exit $made.Result 0
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:BoundQ
     Assert-Exit $r 0
-    # `[item]="vm"` makes the child's `item.kind` the parent's `vm.kind`: {Home,Flat,Lea} meets {Home,Flat}, never a union that leaves only Cove out
-    Assert-Line $r 'demo.kind.home.a | ctx.context.kind | vm.kind in ["Flat","Home"]'
-    Assert-Line $r 'demo.kind.life.a | ctx.context.kind | vm.kind in ["Lea"]'
+    # `[item]="vm"` makes the child's `item.kind` the parent's `vm.kind`: {Heath,Fen,Lea} meets {Heath,Fen}, never a union that leaves only Cove out
+    Assert-Line $r 'demo.kind.heath.a | ctx.context.kind | vm.kind in ["Fen","Heath"]'
+    Assert-Line $r 'demo.kind.lea.a | ctx.context.kind | vm.kind in ["Lea"]'
     Assert-NoLine $r 'item.kind'
 }
 
@@ -299,7 +299,7 @@ Test-Case 'tsrows keys: a child that writes its own input is not renamed to the 
     # the child's `item` is no longer what the parent bound, so the dimension keeps its own text
     Assert-NoLine $r '| vm.kind in'
     # the callee's parameter is one dimension on every way (#48), read as the caller spells it: the child's own `item.kind`
-    Assert-Line $r 'demo.kind.home.a | ctx.context.kind | item.kind in ["Flat","Home"]'
+    Assert-Line $r 'demo.kind.heath.a | ctx.context.kind | item.kind in ["Fen","Heath"]'
 }
 
 $script:ArgQ = "SELECT k.key || ' | ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'dimension') || ' ' || $(Get-TsFieldSql 'key_reach__always_values' 'v' 'op') || ' ' || $(Get-NodeListSql 'key_reach__always_values' 'v' 'values') AS r " +
@@ -342,15 +342,15 @@ export class PriceKeyPipe implements PipeTransform {
   }
 }
 '@
-        'apps/shop/src/assets/locales/en.json' = '{"demo":{"price":{"heathOnly":"Home","other":"Other"}}}'
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"price":{"heathOnly":"Heath","other":"Other"}}}'
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:ArgQ
     Assert-Exit $r 0
     # `[kind]="DemoIDs.Heath"` renamed into the child read `DemoIDs.Heath in [Heath]` on one way and `DemoIDs.Fen` on the other: no common spelling, the fold widened to nothing
-    Assert-Line $r 'demo.price.heathOnly | kind in ["Home"]'
-    Assert-Line $r 'demo.price.other | kind not_in ["Home"]'
+    Assert-Line $r 'demo.price.heathOnly | kind in ["Heath"]'
+    Assert-Line $r 'demo.price.other | kind not_in ["Heath"]'
     Assert-NoLine $r 'DemoIDs.'
 }
 
@@ -411,9 +411,9 @@ export class DescService {
   constructor(private translate: TranslateService) {}
   description(kind: DemoIDs, name: string): string {
     if (heathKinds.indexOf(kind) !== -1) {
-      return this.translate.getTranslation(`demo.kind.home.${name}`);
+      return this.translate.getTranslation(`demo.kind.heath.${name}`);
     } else if (leaKinds.some((e) => e === kind)) {
-      return this.translate.getTranslation(`demo.kind.life.${name}`);
+      return this.translate.getTranslation(`demo.kind.lea.${name}`);
     }
     return '-';
   }
@@ -429,15 +429,15 @@ export class TipComponent {
   get text(): string { return this.desc.description(this.item.kind, this.item.name); }
 }
 '@
-        'apps/shop/src/assets/locales/en.json' = '{"demo":{"kind":{"home":{"a":"A"},"life":{"a":"B"}}}}'
+        'apps/shop/src/assets/locales/en.json' = '{"demo":{"kind":{"heath":{"a":"A"},"lea":{"a":"B"}}}}'
     }
     $made = New-TsRowsDb $tree
     Assert-Exit $made.Result 0
     $r = Invoke-Gate --map-query $made.Db --width 0 --sql $script:ArgQ
     Assert-Exit $r 0
     # the callee's branch restricts its PARAMETER on every way, so the caller spellings are one dimension and the gate's `vm.kind not_in` does not leak in
-    Assert-Line $r 'demo.kind.home.a | ctx.context.kind | vm.kind in ["Flat","Home"]'
-    Assert-Line $r 'demo.kind.life.a | ctx.context.kind | vm.kind in ["Lea"]'
+    Assert-Line $r 'demo.kind.heath.a | ctx.context.kind | vm.kind in ["Fen","Heath"]'
+    Assert-Line $r 'demo.kind.lea.a | ctx.context.kind | vm.kind in ["Lea"]'
     Assert-NoLine $r 'not_in ["Other"]'
 }
 }

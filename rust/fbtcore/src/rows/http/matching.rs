@@ -89,7 +89,7 @@ pub(super) fn link(endpoints: &[Endpoint], calls: &[Site]) -> Vec<Vec<usize>> {
             if segments.iter().all(|s| s == "*") {
                 return vec![];
             }
-            // THE ENDPOINTS THE URL NAMES BEST: `*/redacted` matched every route ending in a parameter, and a
+            // THE ENDPOINTS THE URL NAMES BEST: `*/active-flags` matched every route ending in a parameter, and a
             // parameter proves nothing. Only the endpoints with the most literal segments in common are kept, and a
             // match with none in common is none at all.
             let scored: Vec<(usize, (usize, usize))> = (0..endpoints.len())
@@ -119,9 +119,9 @@ mod tests {
 
     #[test]
     fn an_unknown_base_stands_for_leading_segments() {
-        assert!(reaches("*api/calculations/save", "api/Jobs/Save"));
-        assert!(reaches("*/save", "api/calculations/save"));
-        assert!(!reaches("*/other", "api/calculations/save"));
+        assert!(reaches("*api/jobs/save", "api/Jobs/Save"));
+        assert!(reaches("*/save", "api/jobs/save"));
+        assert!(!reaches("*/other", "api/jobs/save"));
         assert!(reaches("*save", "save"));
     }
 
@@ -147,10 +147,10 @@ mod tests {
 
     #[test]
     fn the_endpoints_the_url_names_best_win_and_a_parameter_alone_proves_nothing() {
-        // `{id}` takes `redacted` as a value, but `features/redacted` names it.
-        assert_eq!(linked("*/redacted", &["api/features/redacted", "api/orders/{id}", "api/x/{id}"]), vec![0]);
+        // `{id}` takes `active-flags` as a value, but `flags/active-flags` names it.
+        assert_eq!(linked("*/active-flags", &["api/flags/active-flags", "api/orders/{id}", "api/x/{id}"]), vec![0]);
         // only parameters in common: no link at all.
-        assert_eq!(linked("*/redacted", &["api/orders/{id}"]), Vec::<usize>::new());
+        assert_eq!(linked("*/active-flags", &["api/orders/{id}"]), Vec::<usize>::new());
         // two routes that both name every literal stay ambiguous.
         assert_eq!(linked("*/calc/save", &["api/calc/save", "v2/calc/save"]), vec![0, 1]);
     }

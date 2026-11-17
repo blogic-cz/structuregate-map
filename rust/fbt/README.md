@@ -145,7 +145,7 @@ target_dep(target_id, depends_on)
 ```
 
 `path_key` carries every comparison: the path lowercased on Windows, whose paths
-are case insensitive, and as spelled elsewhere, where `redacted` and `redacted` are two
+are case insensitive, and as spelled elsewhere, where `Abc/` and `ABC/` are two
 folders (`entry::fold`); `path` keeps the real spelling. Paths are stored flat
 rather than as an adjacency list, so a diff is one join instead of a recursive
 query, while `parent_key` still serves the merkle rollup and subtree deletes.

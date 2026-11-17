@@ -580,7 +580,7 @@ export function makeBodyRows({ ts, store, evalNode, evalCell, describe, declFile
       if (ts.isTryStatement(node)) collectTry(node, ownerId, classId);
       // The condition is walked where it stands; each arm under its side of it. Same roles as the evaluator's.
       // EVERY CONDITIONAL HAS ITS `expressions` ROW (rows 71), minted here by the same cached `describe` the arms' `choices` and the
-      // evaluator's `$cond_expr` use: one minted only when a row sat under an arm left 516 of 19220 with none.
+      // evaluator's `$cond_expr` use: one minted only when a row sat under an arm left some with none.
       if (ts.isConditionalExpression(node)) {
         if (describe) describe(node.condition, 'ternary');
         walk(node.condition);

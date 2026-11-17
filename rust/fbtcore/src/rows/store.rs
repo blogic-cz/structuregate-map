@@ -433,7 +433,7 @@ pub struct WriteRequest<'a> {
     /// A PARTIAL RUN HAS ALREADY MADE ITS OWN ROOM, and must not have this one make more. A
     /// whole-replacement half normally drops every row it owns before inserting; a partial one
     /// removed exactly the affected files' rows first and is about to put those back. Letting the
-    /// drop run anyway emptied the map: 53 tables of rows deleted to insert the few that moved.
+    /// drop run anyway emptied the map: every table's rows deleted to insert the few that moved.
     pub keep_existing: bool,
     /// Only the batch that says it is the last one counts the tables. A count is a scan
     /// of the whole table, and a hundred batches into a database of millions of rows
