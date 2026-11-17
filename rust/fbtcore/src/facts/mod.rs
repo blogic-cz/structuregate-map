@@ -164,6 +164,8 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
                 insert.execute(params![format!("dl:{n}"), first.facts, "property", fact, key, label, c.target, c.file, c.line, c.value, c.name, c.condition, status, fixed.map(|d| d as i64)])?;
             }
             let read_already = bound;
+            // A CHILD ROW ITS TYPED PARENT DOES NOT HOLD, bound only in a linked type, is a top-level row its arrows misplaced.
+            let top = depth > 0 && parent.is_some_and(|(_, t)| !t.is_empty());
             for (l, (link, codes)) in linked.iter().enumerate().filter(|_| !read_already) {
                 for (i, c) in codes.iter().enumerate().filter(|(_, c)| links::matches(&link.kind, &c.value, name)) {
                     if !bound {
@@ -173,8 +175,12 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
                     matched[l].insert(i);
                     n += 1;
                     made.links[0] += 1;
-                    insert.execute(params![format!("dl:{n}"), link.facts, link.kind, fact, key, label, c.target, c.file, c.line, c.value, c.name, c.condition, "bound", None::<i64>])?;
+                    let status = if top { "bound, nesting fixed" } else { "bound" };
+                    insert.execute(params![format!("dl:{n}"), link.facts, link.kind, fact, key, label, c.target, c.file, c.line, c.value, c.name, c.condition, status, top.then_some(0i64)])?;
                 }
+            }
+            if top && bound && !read_already {
+                fixed = Some(0);
             }
             // THE ROW STANDS WHERE IT WAS READ: the rows after it nest under it at that depth.
             let at = fixed.unwrap_or(depth);

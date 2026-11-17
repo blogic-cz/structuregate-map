@@ -259,7 +259,7 @@ Test-Case 'docfactsapi: a property table matches JSON names, inherited propertie
         'docs/ticket.md' = "# Ticket$nl$nl## Fields$nl$nl| Field | Meaning |$nl|---|---|$nl| access_code | a |$nl| valid_for | b |$nl" +
             "| Request | c |$nl| Key | d |$nl| Part | e |$nl| -> PartNo | f |$nl| colour | g |$nl" +
             "| Holders | h |$nl| $em>ClientRef | i |$nl| -> Addresses | j |$nl| -> -> Street | k |$nl| $to Note | l |$nl| $en> Street | m |$nl" +
-            "| Batch | n |$nl| -> Origin | o |$nl| -> Maker | p |$nl| -> Amount | q |$nl| Region | r |$nl| -> Total | s |$nl"
+            "| Batch | n |$nl| -> Origin | o |$nl| -> Maker | p |$nl| -> Amount | q |$nl| Region | r |$nl| -> Total | s |$nl| -> Key | t |$nl"
         'structuregate.facts.json' = '{ "sources": [ { "name": "api", "kind": "file", "path": "docs/ticket.md" } ],' +
             ' "facts": [ { "name": "fields", "source": "api", "section": "Fields", "key": "Field" } ],' +
             ' "links": [ { "facts": "fields", "to": { "kind": "property", "symbol": "Demo.Api.TicketDto" } },' +
@@ -275,9 +275,10 @@ Test-Case 'docfactsapi: a property table matches JSON names, inherited propertie
     $missing = Get-DocApiRows $db "SELECT 'v=' || key FROM doc_links WHERE status = 'missing in code' ORDER BY rowid"
     Assert-Equal ($missing -join ',') "colour,$en> Street" 'the rows no linked type holds'
     # A ROW NESTED WRONG IS READ WHERE IT BELONGS AND SAID SO: `-> Maker` is the Origin row's (an arrow short), `Region`
-    # the Batch row's (no arrow between its children), and the rows after each stand where it was read.
-    $fixed = Get-DocApiRows $db "SELECT 'v=' || key || '|' || status || '|' || coalesce(nesting, '-') FROM doc_links WHERE key IN ('-> Maker', 'Region', '-> Amount', '-> Total') ORDER BY rowid"
-    Assert-Equal ($fixed -join ',') '-> Maker|bound, nesting fixed|2,-> Amount|bound|-,Region|bound, nesting fixed|1,-> Total|bound|-' 'the rows nested wrong'
+    # the Batch row's (no arrow between its children), `-> Key` a top-level row (only the linked type holds it), and the
+    # rows after each stand where it was read.
+    $fixed = Get-DocApiRows $db "SELECT 'v=' || key || '|' || status || '|' || coalesce(nesting, '-') FROM doc_links WHERE key IN ('-> Maker', 'Region', '-> Amount', '-> Total', '-> Key') ORDER BY rowid"
+    Assert-Equal ($fixed -join ',') '-> Maker|bound, nesting fixed|2,-> Amount|bound|-,Region|bound, nesting fixed|1,-> Total|bound|-,-> Key|bound, nesting fixed|0' 'the rows nested wrong'
     # THE PARENT'S TYPE, NOT A NAME ELSEWHERE: an arrowed `Note` under Holders is HolderDto's, never OtherDto's.
     $note = Get-DocApiRows $db "SELECT 'v=' || m.cls FROM doc_links l JOIN members m ON m.id = l.target WHERE l.key = '$to Note'"
     Assert-Equal ($note -join ',') 'HolderDto' 'the type a child row is read in'
