@@ -308,6 +308,32 @@ internal static class CsFolding
 
     private static readonly ConditionalWeakTable<Compilation, Dictionary<ISymbol, bool>> WrittenCache = new();
 
+    /// <summary>
+    /// Whether anything writes `symbol` OTHER THAN TRIMMING IT IN PLACE (`m = m.TrimStart('/')`): a url joiner that cuts the
+    /// edges of its parameters still hands back what its caller gave it, edges aside (`CsTemplate.Returned`).
+    /// </summary>
+    internal static bool WrittenOtherThanTrimmed(ISymbol symbol, Compilation compilation)
+    {
+        if (!Written(symbol, compilation)) return false;
+        foreach (var scope in Scopes(symbol))
+        {
+            if (!compilation.ContainsSyntaxTree(scope.SyntaxTree)) return true;
+            var model = compilation.GetSemanticModel(scope.SyntaxTree);
+            foreach (var target in Targets(scope))
+            {
+                if (Last(target) != symbol.Name || !SymbolEqualityComparer.Default.Equals(CsSemantics.Bound(model, target), symbol)) continue;
+                var trimmed = target.Parent is AssignmentExpressionSyntax assignment && assignment.IsKind(SyntaxKind.SimpleAssignmentExpression)
+                    && assignment.Left == target
+                    && assignment.Right is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax access }
+                    && access.Name.Identifier.ValueText is "Trim" or "TrimStart" or "TrimEnd"
+                    && model.GetSymbolInfo(assignment.Right).Symbol is IMethodSymbol { ContainingType.SpecialType: SpecialType.System_String }
+                    && SymbolEqualityComparer.Default.Equals(CsSemantics.Bound(model, access.Expression), symbol);
+                if (!trimmed) return true;
+            }
+        }
+        return false;
+    }
+
     /// <summary>Where a write to `symbol` could be: the member holding a local, every part of the type
     /// holding a field or property.</summary>
     private static IEnumerable<SyntaxNode> Scopes(ISymbol symbol)

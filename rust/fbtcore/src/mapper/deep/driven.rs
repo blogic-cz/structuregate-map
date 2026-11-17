@@ -46,7 +46,7 @@ use std::path::Path;
 // 37: a call to a method of the tree is the strings it returns, its parameters the caller's arguments; `AddQueryString` its url.
 // 38: `calls.dropped`, `functions.awaits`/`body`/`inherited` - what the deep-map rules (`rules/`) read.
 // 39: `classes.abstract` - an action of an abstract base controller is an endpoint of each class deriving from it.
-pub(super) const CS_ROWS_VERSION: &str = "40";
+pub(super) const CS_ROWS_VERSION: &str = "42";
 /// The same for the SQL extractor. 7: `sql_dynamic`, an object created by dynamic SQL.
 // 8: a CTE name is the statement's own - never a `sql_refs` row, and never hiding a table in a later statement.
 // 9: `sql_statements` (a row per statement, `fingerprint` filled by `rows/sqlshape/`), its tree `sql_nodes`, and

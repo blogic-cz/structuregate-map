@@ -322,7 +322,7 @@ internal static class CsTemplate
             || (method.IsOverride && !method.IsSealed && !method.ContainingType.IsSealed)) return null;
         if (method.DeclaringSyntaxReferences is not [var reference] || reference.GetSyntax() is not MethodDeclarationSyntax declaration) return null;
         if (Owner(model, declaration) is not { } owner) return null;
-        if (method.Parameters.Any(p => p.RefKind != RefKind.None || p.IsParams || CsFolding.Written(p, model.Compilation))) return null;
+        if (method.Parameters.Any(p => p.RefKind != RefKind.None || p.IsParams || CsFolding.WrittenOtherThanTrimmed(p, model.Compilation))) return null;
         List<ExpressionSyntax?> returns = declaration.ExpressionBody is { } arrow ? [arrow.Expression]
             : [.. declaration.Body?.DescendantNodes(n => n is not (LocalFunctionStatementSyntax or AnonymousFunctionExpressionSyntax))
                 .OfType<ReturnStatementSyntax>().Select(r => r.Expression) ?? []];
@@ -369,13 +369,23 @@ internal static class CsTemplate
     private static List<List<Piece>> Product(List<List<Piece>> left, List<List<Piece>> right) =>
         [.. left.SelectMany(l => right.Select(r => Joined([.. l, .. r])))];
 
-    private static Piece Hole(ExpressionSyntax expression, SemanticModel model) => CsSemantics.Bound(model, expression) switch
+    private static Piece Hole(ExpressionSyntax expression, SemanticModel model) => Trimmed(model, expression) is { } inner
+        // A TRIM OF A STRING (`m.TrimStart('/')` in a url joiner) is that string with its edge cut: a hole of the parameter it
+        // trims is still that parameter, so a caller's url goes through a helper joining a base and a path (`rows/http/cscalls.rs`).
+        ? Hole(inner, model)
+        : CsSemantics.Bound(model, expression) switch
     {
         IFieldSymbol field => new(CsFacts.Text(expression), true, CsSemantics.Name(field)),
         // A PARAMETER by its name, as `parameters.name` spells it - one the method writes is no longer what its caller handed it.
-        IParameterSymbol parameter when !CsFolding.Written(parameter, model.Compilation) => new(CsFacts.Text(expression), true, parameter.Name, true, Of: parameter),
+        IParameterSymbol parameter when !CsFolding.WrittenOtherThanTrimmed(parameter, model.Compilation) => new(CsFacts.Text(expression), true, parameter.Name, true, Of: parameter),
         _ => new(CsFacts.Text(expression), true),
     };
+
+    /// <summary>The string a `Trim`, `TrimStart` or `TrimEnd` of `string` is called on, or null for any other expression.</summary>
+    private static ExpressionSyntax? Trimmed(SemanticModel model, ExpressionSyntax expression) =>
+        expression is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax access }
+        && model.GetSymbolInfo(expression).Symbol is IMethodSymbol { Name: "Trim" or "TrimStart" or "TrimEnd", ContainingType.SpecialType: SpecialType.System_String }
+            ? access.Expression : null;
 
     /// <summary>Adjacent literal text as one piece, and no empty text.</summary>
     private static List<Piece> Joined(List<Piece> pieces)

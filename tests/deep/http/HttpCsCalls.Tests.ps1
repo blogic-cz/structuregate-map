@@ -189,7 +189,7 @@ namespace Demo
         public Task<HttpResponseMessage> Six(int id) => client.GetAsync($"{client.BaseAddress}lines/{id}");
         public Task<HttpResponseMessage> Seven(string v)
         {
-            v = v.Trim();
+            v = v.ToUpperInvariant();
             return client.GetAsync($"/api/v2/release/{v}");
         }
         public Task<HttpResponseMessage> Eight() => Seven("x");
@@ -218,17 +218,19 @@ using System.Net.Http;
 using System.Threading.Tasks;
 namespace Demo;
 
-public class QuoteApi(HttpClient client)
+public class ItemApi(HttpClient client)
 {
     private const string Root = "/api/";
-    public Task<HttpResponseMessage> Pick(bool preview) => client.GetAsync(preview ? "/quotes/preview" : "/quotes/final");
+    public Task<HttpResponseMessage> Pick(bool preview) => client.GetAsync(preview ? "/items/preview" : "/items/final");
     public Task<HttpResponseMessage> Send(string url) => client.PostAsync(Root + url, null);
     public Task<HttpResponseMessage> Choose(bool preview)
     {
-        var url = preview ? "redacted/quotation" : "redacted/quote";
+        var url = preview ? "demo/draft" : "demo/final";
         return Send(url);
     }
     public Task<HttpResponseMessage> Same(bool all) => client.GetAsync(all ? "/same" : "/same?all=1");
+    public Task<HttpResponseMessage> Mixed(bool fixedOne, string url) => client.GetAsync(fixedOne ? "/fixed" : Root + url);
+    public Task<HttpResponseMessage> MixedUse() => Mixed(true, "x");
 }
 '@
     }
@@ -239,8 +241,8 @@ public class QuoteApi(HttpClient client)
         "FROM http_calls c ORDER BY c.line, c.url")
     Assert-Exit $q 0
     $rows = @($q.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | ForEach-Object { $_.Trim().Substring(2) })
-    $want = @('8|GET|/quotes/final||Pick', '8|GET|/quotes/preview||Pick', '13|POST|/api/redacted/quotation|Send|Choose',
-        '13|POST|/api/redacted/quote|Send|Choose', '15|GET|/same||Same')
+    $want = @('8|GET|/items/final||Pick', '8|GET|/items/preview||Pick', '13|POST|/api/demo/draft|Send|Choose',
+        '13|POST|/api/demo/final|Send|Choose', '15|GET|/same||Same', '16|GET|/api/{}||Mixed', '16|GET|/fixed||Mixed')
     if (($rows -join "`n") -ne ($want -join "`n")) { throw "http_calls:`nexpected:`n$($want -join "`n")`ngot:`n$($rows -join "`n")" }
 }
 
@@ -297,5 +299,72 @@ public class SecondClient : ClientBase
     Assert-Exit $q 0
     $rows = @($q.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | ForEach-Object { $_.Trim().Substring(2) })
     $want = @('31|POST|/v1{}/demo/orders/lookup|SendAsync|Demo.FirstClient.Run', '36|POST|/v1{}/demo/orders/lookup|SendAsync|Demo.SecondClient.Run')
+    if (($rows -join "`n") -ne ($want -join "`n")) { throw "http_calls:`nexpected:`n$($want -join "`n")`ngot:`n$($rows -join "`n")" }
+}
+
+# A LEAF WRAPPER AS ONE IS WRITTEN: the request built in either arm of an `if` into a local declared without its value, the url a
+# joiner of a run-time base and the parameter that trims both edges - early returns of either one alone, the parameters trimmed in
+# place, or `+` - and a ternary passing an absolute url through: the caller's path, one `/` between.
+Test-Case 'httpcscalls: a request built in if/else arms and a url joiner that trims the parameter still make a wrapper' {
+    $tree = Use-Tree @{
+        'App/App.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+        'App/Api.cs' = @'
+using System;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Threading.Tasks;
+namespace Demo;
+
+public interface IWire { Task<T?> PostAsync<TIn, T>(TIn input, string path, HttpClient client, string? overrideRoot = null); Task<T?> GetAsync<T>(string path, HttpClient client); }
+public class Transport : IWire
+{
+    private readonly string baseUrl = Environment.GetEnvironmentVariable("BASE") ?? "";
+    public async Task<T?> PostAsync<TIn, T>(TIn input, string path, HttpClient client, string? overrideRoot = null)
+    {
+        HttpRequestMessage request;
+        if (input is null) request = new HttpRequestMessage(HttpMethod.Post, MergeUrl(overrideRoot ?? baseUrl, path));
+        else request = new HttpRequestMessage(HttpMethod.Post, MergeUrl(overrideRoot ?? baseUrl, path)) { Content = JsonContent.Create(input) };
+        var response = await client.SendAsync(request);
+        return await response.Content.ReadFromJsonAsync<T>();
+    }
+    public async Task<T?> GetAsync<T>(string path, HttpClient client)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, Join(baseUrl, path));
+        var response = await client.SendAsync(request);
+        return await response.Content.ReadFromJsonAsync<T>();
+    }
+    private string MergeUrl(string root, string rest)
+    {
+        if (string.IsNullOrEmpty(root)) return rest;
+        if (string.IsNullOrEmpty(rest)) return root;
+        root = root.TrimEnd('/');
+        rest = rest.TrimStart('/');
+        return $"{root}/{rest}";
+    }
+    private string Resolve(string m) => m.StartsWith($"{Uri.UriSchemeHttps}://") ? m : MergeUrl(baseUrl, m);
+    public async Task<T?> PutAsync<T>(string path, HttpClient client)
+    {
+        var response = await client.SendAsync(new HttpRequestMessage(HttpMethod.Put, Resolve(path)));
+        return await response.Content.ReadFromJsonAsync<T>();
+    }
+    private static string Join(string b, string m) => b.TrimEnd('/') + "/" + m.TrimStart('/');
+}
+public class Caller
+{
+    private readonly IWire wire = new Transport();
+    public object Find() => wire.PostAsync<int, string>(1, "/demo/orders/lookup", new HttpClient());
+    public object List() => wire.GetAsync<string>("/demo/orders/list", new HttpClient());
+    public object Save() => new Transport().PutAsync<string>("/demo/orders/save", new HttpClient());
+}
+'@
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    $q = Invoke-Gate --map-query $db --width 0 --limit 0 --sql ("SELECT 'v=' || c.line || '|' || c.verb || '|' || c.url || '|' || " +
+        "coalesce((SELECT f.name FROM functions f WHERE f.id = c.via), '') || '|' || (SELECT f.name FROM functions f WHERE f.id = c.member) AS r " +
+        "FROM http_calls c ORDER BY c.line, c.url")
+    Assert-Exit $q 0
+    $rows = @($q.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | ForEach-Object { $_.Trim().Substring(2) })
+    $want = @('44|POST|/demo/orders/lookup|PostAsync|Find', '45|GET|/demo/orders/list|GetAsync|List', '46|PUT|/demo/orders/save|PutAsync|Save')
     if (($rows -join "`n") -ne ($want -join "`n")) { throw "http_calls:`nexpected:`n$($want -join "`n")`ngot:`n$($rows -join "`n")" }
 }

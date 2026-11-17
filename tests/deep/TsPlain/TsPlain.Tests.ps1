@@ -178,14 +178,14 @@ Test-Case 'tsplain: a RegExp construction over a literal has its pattern, and th
 # (rows 80) A CLASS EXPRESSION IS NO DECLARATION OF A TYPE in the plain half either: its `classes` row says `expression`, and `duplicate_types` skips it - `Pair` is declared twice and held a third time (2 places).
 Test-Case 'tsplain: duplicate_types skips a class expression' {
     $tree = Use-Tree @{
-        'a.ts' = "export class Household {}`nexport class Pair {}`n"
-        'b.ts' = "export class Registry {`n  static Household = class { code = 1; };`n  static Pair = class { code = 2; };`n}`n"
+        'a.ts' = "export class Lone {}`nexport class Pair {}`n"
+        'b.ts' = "export class Registry {`n  static Lone = class { code = 1; };`n  static Pair = class { code = 2; };`n}`n"
         'c.ts' = "export class Pair {}`n"
     }
     Invoke-TsPlainMap $tree | Out-Null
     $r = Get-TsPlainRows $tree "SELECT 'dt=' || name || '|' || kinds || '|' || places FROM duplicate_types"
     Assert-Line $r 'dt=Pair|class|2'
-    Assert-NoLine $r 'dt=Household'
+    Assert-NoLine $r 'dt=Lone'
     Assert-Equal (Get-TsPlainScalar $tree "SELECT count(*) FROM classes WHERE expression = 1") '2' 'the expressions are rows, marked'
 }
 

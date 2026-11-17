@@ -181,21 +181,21 @@ Test-Case 'tsrows: an unresolved import notes when only the casing differs' {
 }
 
 
-# (rows 80) A CLASS EXPRESSION IS NO DECLARATION OF A TYPE: `static Household = class { .. }` is a `classes` row named by its holder (`expression` set), and `duplicate_types` skips it (`rows/dups.rs`) - a holder named
-# like a class elsewhere read as a duplicate of it. `Household` is declared once (no row); `Pair` is declared twice and held a third time by an expression (2 places, not 3).
+# (rows 80) A CLASS EXPRESSION IS NO DECLARATION OF A TYPE: `static Lone = class { .. }` is a `classes` row named by its holder (`expression` set), and `duplicate_types` skips it (`rows/dups.rs`) - a holder named
+# like a class elsewhere read as a duplicate of it. `Lone` is declared once (no row); `Pair` is declared twice and held a third time by an expression (2 places, not 3).
 Test-Case 'tsrows: duplicate_types skips a class expression held in a static property' {
     $tree = New-TsRowsWorkspace @{
-        'apps/shop/src/own-a.ts' = "export class Household {}`nexport class Pair {}`n"
-        'apps/shop/src/own-b.ts' = "export class Registry {`n  static Household = class { code = 1; };`n  static Pair = class { code = 2; };`n}`n"
+        'apps/shop/src/own-a.ts' = "export class Lone {}`nexport class Pair {}`n"
+        'apps/shop/src/own-b.ts' = "export class Registry {`n  static Lone = class { code = 1; };`n  static Pair = class { code = 2; };`n}`n"
         'apps/shop/src/own-c.ts' = "export class Pair {}`n"
     }
     $made = New-TsRowsDb $tree -Shared
     Assert-Exit $made.Result 0
     $r = Invoke-TsRowsQ $made.Db "SELECT 'dt=' || name || '|' || kinds || '|' || places AS r FROM duplicate_types"
     Assert-Line $r 'dt=Pair|class|2'
-    Assert-NoLine $r 'dt=Household'
+    Assert-NoLine $r 'dt=Lone'
     # The expression is still a `classes` row, marked.
-    Assert-Line (Invoke-TsRowsQ $made.Db "SELECT 'expr=' || count(*) AS r FROM classes WHERE name IN ('Household', 'Pair') AND expression = 1") 'expr=2'
+    Assert-Line (Invoke-TsRowsQ $made.Db "SELECT 'expr=' || count(*) AS r FROM classes WHERE name IN ('Lone', 'Pair') AND expression = 1") 'expr=2'
 }
 
 # (rows 80) AN ALIAS IMPORT THAT RESOLVES ONLY WITH CASE IGNORED says so too: `@lib/money` through `paths` finds `Money.ts` on Windows and macOS, not on Linux (`TsSetup/TsProgram.mjs::aliasMatch`, the compiler's own resolution

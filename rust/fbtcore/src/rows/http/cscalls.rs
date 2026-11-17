@@ -18,6 +18,8 @@
 //! `IClient.Post` - a DI field, a `Lazy<IClient>` - is bound to the interface, and is a call of the wrapper; its url is the
 //! argument of the wrapper's parameter name, else the one at that parameter's place (the interface may name it otherwise).
 //! A url alternative of holes alone (a ternary's arm only the run time knows) is left out while another one says a path.
+//! A request local declared without its value is the last request built after it and before the send (one per `if` arm);
+//! a prefix ending in `/` joins a url starting with one by a single `/` (a joiner trimming both edges, `CsTemplate.Trimmed`).
 
 use super::calls::Site;
 use crate::rows::dups::{scalar_sql, text, Column};
@@ -116,8 +118,8 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
             (Value::String(s), "const" | "folded") => Some(Url::Pattern(vec![s.clone()])),
             // A BASE THE RUN TIME KNOWS AND THE CALLER'S URL (`_cfg.Url + url`, `string.Concat(_base, endpoint)`): holes alone, each
             // string ending in this method's parameter - the method is a wrapper of it, as a bare parameter makes it.
-            (Value::Array(alternatives), _) if handed(alternatives).is_some_and(|(p, _, _)| params.contains(&(qualname.to_string(), p.clone()))) =>
-                handed(alternatives).map(|(p, formats, prefix)| Url::Param(p, formats, prefix, folded(alternatives))),
+            (Value::Array(alternatives), _) if handed(alternatives, &|p| params.contains(&(qualname.to_string(), p.to_string()))).is_some() =>
+                handed(alternatives, &|p| params.contains(&(qualname.to_string(), p.to_string()))).map(|(p, formats, prefix)| Url::Param(p, formats, prefix, folded(alternatives))),
             (Value::Array(alternatives), _) => Some(Url::Pattern(folded(alternatives))),
             // `string.Empty`: the base address alone, as `""` is.
             (_, "symbol") if a.symbol == "System.String.Empty" => Some(Url::Pattern(vec![String::new()])),
@@ -153,14 +155,13 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
             .filter_map(|l| l[1].parse::<i64>().ok())
             .filter(|line| c.start <= *line && *line <= c.line)
             .max();
-        calls.iter().find(|m| {
-            MESSAGE.contains(&m.symbol.as_str())
-                && m.member == c.member
-                && match declared {
-                    Some(line) => m.line == line,
-                    None => c.line <= m.line && m.line <= c.end,
-                }
-        })
+        let built = |m: &&Call| MESSAGE.contains(&m.symbol.as_str()) && m.member == c.member;
+        match declared {
+            // A LOCAL DECLARED WITHOUT ITS VALUE (`HttpRequestMessage request; if (..) request = new(..); else request = new(..);`)
+            // is the last request built after its declaration and before the send.
+            Some(line) => calls.iter().find(|m| built(m) && m.line == line).or_else(|| calls.iter().filter(|m| built(m) && line < m.line && m.line <= c.line).max_by_key(|m| m.line)),
+            None => calls.iter().find(|m| built(m) && c.line <= m.line && m.line <= c.end),
+        }
     };
     // THE PRIMITIVES: each call's verb and the url it asks for.
     let mut asked: HashMap<usize, (String, Url)> = HashMap::new();
@@ -231,8 +232,8 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
             (Some((verb, Url::Pattern(urls))), _) => (verb.clone(), String::new(), urls.clone()),
             (Some((verb, Url::Param(_, _, prefix, whole))), _) if uncalled(c, prefix) => (verb.clone(), String::new(), whole.clone()),
             (None, Some((id, p, verb, formats, prefix, at))) => match url_for(c, p, *at) {
-                Some(Url::Pattern(urls)) if *formats => (verb.clone(), id.clone(), urls.iter().map(|u| format!("{prefix}{}", formatted(u))).collect()),
-                Some(Url::Pattern(urls)) => (verb.clone(), id.clone(), urls.iter().map(|u| format!("{prefix}{u}")).collect()),
+                Some(Url::Pattern(urls)) if *formats => (verb.clone(), id.clone(), urls.iter().map(|u| joined(prefix, &formatted(u))).collect()),
+                Some(Url::Pattern(urls)) => (verb.clone(), id.clone(), urls.iter().map(|u| joined(prefix, u)).collect()),
                 Some(Url::Param(_, _, before, whole)) if uncalled(c, &format!("{prefix}{before}")) => (verb.clone(), id.clone(), whole.iter().map(|w| format!("{prefix}{w}")).collect()),
                 _ => continue,
             },
@@ -254,6 +255,15 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
     }
     sites.sort_by(|a, b| (&a.file, a.line, &a.call).cmp(&(&b.file, b.line, &b.call)));
     Ok(sites)
+}
+
+/// A wrapper's prefix and its caller's url: one `/` where the prefix ends in one and the url starts with one (a joiner that
+/// trims both edges and puts a `/` between).
+fn joined(prefix: &str, url: &str) -> String {
+    match (prefix.ends_with('/'), url.strip_prefix('/')) {
+        (true, Some(rest)) => format!("{prefix}{rest}"),
+        _ => format!("{prefix}{url}"),
+    }
 }
 
 /// A wrapper: its `functions` id, its url parameter, its verb, whether it formats the url, its prefix, and the url
@@ -300,20 +310,30 @@ fn aliases(wrappers: &HashMap<String, Wrapper>, bases: &HashMap<String, Vec<Stri
     out
 }
 
-/// The one parameter every alternative of a template ends in (its hole's `symbol`), whether it is a `string.Format`'s format,
-/// and the text before it - the holes it starts with left out, each later hole `{}` - all alike in every alternative; or None.
-fn handed(alternatives: &[Value]) -> Option<(String, bool, String)> {
+/// The one parameter (`is_param`) the alternatives of a template end in (its hole's `symbol`), whether it is a `string.Format`'s
+/// format, and the text before it - the holes it starts with left out, each later hole `{}` - alike in each such alternative; or
+/// None. An alternative of holes alone (`return baseUrl;` of a joiner whose url is empty) hands no url and is left out;
+/// texts before it that differ only by a closing `/` (`return url;` beside `$"{base}/{url}"`) are one, the one with the `/`.
+fn handed(alternatives: &[Value], is_param: &dyn Fn(&str) -> bool) -> Option<(String, bool, String)> {
     let mut named: Option<(String, bool, String)> = None;
     for alt in alternatives {
         let (hole, before) = alt.as_array()?.split_last()?;
+        let Some(symbol) = hole.get("symbol").and_then(Value::as_str).filter(|s| is_param(s)) else {
+            // HOLES ALONE (a base the run time knows) hand no url; literal text names a path the caller does not choose.
+            if alt.as_array()?.iter().all(Value::is_object) { continue }
+            return None;
+        };
         let prefix: String = before
             .iter()
             .skip_while(|p| p.is_object())
             .map(|p| p.as_str().map(str::to_string).unwrap_or_else(|| "{}".into()))
             .collect();
-        let last = (hole.get("symbol")?.as_str()?.to_string(), hole.get("format").is_some(), prefix);
-        if named.as_ref().is_some_and(|n| *n != last) { return None; }
-        named = Some(last);
+        let last = (symbol.to_string(), hole.get("format").is_some(), prefix);
+        match &named {
+            Some(n) if (&n.0, n.1, n.2.trim_end_matches('/')) != (&last.0, last.1, last.2.trim_end_matches('/')) => return None,
+            Some(n) if n.2.len() >= last.2.len() => {}
+            _ => named = Some(last),
+        }
     }
     named
 }
