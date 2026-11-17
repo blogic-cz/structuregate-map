@@ -100,39 +100,60 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
 
     let mut insert = conn.prepare("INSERT INTO doc_links VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)")?;
     let mut n = 0;
-    for link in &config.links {
-        let Some((_, rows)) = lists.iter().find(|(name, _)| *name == link.facts) else { continue };
-        let codes = match links::codes(conn, link) {
-            Ok(codes) => codes,
-            Err(why) => {
-                made.notes.push(format!("the link from `{}`: {why}, so every fact in it is `missing in code`", link.facts));
-                Vec::new()
-            }
-        };
-        let mut matched: HashSet<usize> = HashSet::new();
+    // EVERY LINK OF ONE LIST TOGETHER: a table describing a response and the types nested in it is linked to each of
+    // them, and a row only one of them holds is in the code - it is `missing in code` only when no link binds it.
+    let mut done: HashSet<&str> = HashSet::new();
+    for first in &config.links {
+        if !done.insert(first.facts.as_str()) {
+            continue;
+        }
+        let Some((_, rows)) = lists.iter().find(|(name, _)| *name == first.facts) else { continue };
+        let linked: Vec<(&config::Link, Vec<links::Code>)> = config
+            .links
+            .iter()
+            .filter(|l| l.facts == first.facts)
+            .map(|link| {
+                let codes = links::codes(conn, link).unwrap_or_else(|why| {
+                    made.notes.push(format!("the link from `{}`: {why}, so none of its facts is bound by it", link.facts));
+                    Vec::new()
+                });
+                (link, codes)
+            })
+            .collect();
+        let mut matched: Vec<HashSet<usize>> = vec![HashSet::new(); linked.len()];
         for (fact, key, label) in rows {
-            let hits: Vec<usize> = (0..codes.len()).filter(|&i| links::matches(&link.kind, &codes[i].value, key)).collect();
-            if hits.is_empty() {
+            let mut bound = false;
+            for (l, (link, codes)) in linked.iter().enumerate() {
+                for (i, c) in codes.iter().enumerate().filter(|(_, c)| links::matches(&link.kind, &c.value, nested(key))) {
+                    bound = true;
+                    matched[l].insert(i);
+                    n += 1;
+                    made.links[0] += 1;
+                    insert.execute(params![format!("dl:{n}"), link.facts, link.kind, fact, key, label, c.target, c.file, c.line, c.value, c.name, c.condition, "bound"])?;
+                }
+            }
+            if !bound {
                 n += 1;
                 made.links[1] += 1;
-                insert.execute(params![format!("dl:{n}"), link.facts, link.kind, fact, key, label, "", "", 0, "", "", "", "missing in code"])?;
-            }
-            for i in hits {
-                matched.insert(i);
-                let c = &codes[i];
-                n += 1;
-                made.links[0] += 1;
-                insert.execute(params![format!("dl:{n}"), link.facts, link.kind, fact, key, label, c.target, c.file, c.line, c.value, c.name, c.condition, "bound"])?;
+                insert.execute(params![format!("dl:{n}"), first.facts, first.kind, fact, key, label, "", "", 0, "", "", "", "missing in code"])?;
             }
         }
-        for c in codes.iter().enumerate().filter(|(i, _)| !matched.contains(i)).map(|(_, c)| c) {
-            n += 1;
-            made.links[2] += 1;
-            insert.execute(params![format!("dl:{n}"), link.facts, link.kind, "", "", "", c.target, c.file, c.line, c.value, c.name, c.condition, "missing in doc"])?;
+        for (l, (link, codes)) in linked.iter().enumerate() {
+            for c in codes.iter().enumerate().filter(|(i, _)| !matched[l].contains(i)).map(|(_, c)| c) {
+                n += 1;
+                made.links[2] += 1;
+                insert.execute(params![format!("dl:{n}"), link.facts, link.kind, "", "", "", c.target, c.file, c.line, c.value, c.name, c.condition, "missing in doc"])?;
+            }
         }
     }
     conn.execute_batch("CREATE INDEX ix_doc_links_status ON doc_links(status); CREATE INDEX ix_doc_links_target ON doc_links(target);")?;
     Ok(made)
+}
+
+/// A documented key as it names its value: a row written `-> Name` (or `→ Name`) is a child of the row above it, the
+/// arrow only its indent.
+fn nested(key: &str) -> &str {
+    key.trim_start().trim_start_matches("->").trim_start_matches('→').trim_start()
 }
 
 /// The rows of one list: a table's, or each code span or route of the section as a row with only its key.

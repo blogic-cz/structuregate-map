@@ -1,14 +1,15 @@
 //! THE LINK KINDS OF AN API SPEC: a route against the endpoints the C# half routes (`http_endpoints`), a property name
-//! against a DTO's properties (C# `members`, the name its `[JsonPropertyName]`/`[JsonProperty]` gives it when it has
-//! one; a TypeScript interface's or class's members), a column name against a SQL table's columns (`sql_columns`).
+//! against a DTO's properties (C# `members` - its own and every base class's - named by its `[JsonPropertyName]`,
+//! `[JsonProperty]` or `[DataMember(Name = ..)]` when it has one; a TypeScript interface's or class's members), a column name against a SQL table's columns (`sql_columns`).
 //! Read from rows the halves already stored - nothing here parses code.
 
 use super::config::Link;
 use super::links::Code;
 use super::words::VERBS;
-use crate::rows::dups::{has_columns, items_sql, text};
+use crate::rows::dups::{has_columns, owner_sql, scalar_sql, text, Column};
+use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Every endpoint, `VERB /route` as its template spells it - of one controller when the link names one.
 pub fn endpoints(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>> {
@@ -40,8 +41,27 @@ pub fn properties(conn: &Connection, link: &Link) -> rusqlite::Result<Vec<Code>>
 }
 
 /// Every type's properties in one read of each table, by every name a link may give the type: one link reads it for
-/// one type, `--facts-suggest` for thousands - a query per type scanned `members` once per type.
-pub struct Properties(HashMap<String, Vec<Code>>);
+/// one type, `--facts-suggest` for thousands - a query per type scanned `members` once per type. A C# class's bases
+/// (`classes.bases`, type arguments left out) by its symbol, and the symbols a bare name stands for, so a class answers
+/// with what it inherits too.
+pub struct Properties(HashMap<String, Vec<Code>>, HashMap<String, Vec<String>>, HashMap<String, Vec<String>>);
+
+/// A symbol without its type arguments: `Demo.Base<T>` is `Demo.Base`.
+fn bare(symbol: &str) -> String {
+    symbol.split('<').next().unwrap_or(symbol).to_string()
+}
+
+/// The JSON name an attribute's folded arguments give a property: `PropertyName=x` or `Name=x` wherever it stands,
+/// else the first argument when it is positional (`[JsonPropertyName("x")]`, `[JsonProperty("x")]`); `DataMember`
+/// names one only by `Name=`.
+fn json_name(attribute: &str, arguments: &[String]) -> Option<String> {
+    let named = |a: &String| a.split_once('=').filter(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_')).map(|(n, v)| (n.to_string(), v.to_string()));
+    if let Some((_, v)) = arguments.iter().filter_map(named).find(|(n, _)| n == "PropertyName" || n == "Name") {
+        return Some(v).filter(|v| !v.is_empty());
+    }
+    let first = arguments.first().filter(|a| named(a).is_none())?;
+    (!attribute.contains("DataMember") && !first.is_empty()).then(|| first.clone())
+}
 
 impl Properties {
     pub fn read(conn: &Connection) -> rusqlite::Result<Properties> {
@@ -50,15 +70,19 @@ impl Properties {
             // THE JSON NAME of each (file, class, member), the first an attribute gives it.
             let mut json: HashMap<(String, String, String), String> = HashMap::new();
             if has_columns(conn, "decorators", &["file", "cls", "target", "name", "arg_values"]) {
-                let args = items_sql(conn, "decorators", "arg_values", &["value"]);
-                let owner = crate::rows::dups::owner_sql(conn, "decorators", "d");
+                let mut args = Column::new(conn, "decorators", "arg_values")?;
                 let mut stmt = conn.prepare(&format!(
-                    "SELECT d.file, d.cls, d.target, a.value FROM decorators d JOIN {args} a ON a.owner = {owner} AND a.ord = 0 \
-                     WHERE d.name LIKE '%JsonPropertyName%' OR d.name LIKE '%JsonProperty' OR d.name LIKE '%JsonPropertyAttribute' ORDER BY d.rowid"
+                    "SELECT d.file, d.cls, d.target, d.name, {}, {} FROM decorators d \
+                     WHERE d.name LIKE '%JsonPropertyName%' OR d.name LIKE '%JsonProperty' OR d.name LIKE '%JsonPropertyAttribute' \
+                     OR d.name LIKE '%DataMember' OR d.name LIKE '%DataMemberAttribute' ORDER BY d.rowid",
+                    owner_sql(conn, "decorators", "d"),
+                    scalar_sql(conn, "decorators", "d", "arg_values")
                 ))?;
-                for row in stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?)))? {
-                    let (file, cls, target, value) = row?;
-                    json.entry((file, cls, target)).or_insert(value);
+                let rows: Vec<_> = stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, text(r, 3)?, text(r, 4)?, r.get::<_, SqlValue>(5)?)))?.collect::<rusqlite::Result<_>>()?;
+                for (file, cls, target, name, owner, cell) in rows {
+                    if let Some(value) = json_name(&name, &args.strings(&owner, &cell)?) {
+                        json.entry((file, cls, target)).or_insert(value);
+                    }
                 }
             }
             let mut stmt = conn.prepare("SELECT m.id, m.file, m.line, m.name, m.cls, m.class_symbol FROM members m WHERE m.kind = 'property' ORDER BY m.id")?;
@@ -66,8 +90,9 @@ impl Properties {
                 let (id, file, line, name, cls, symbol) = row?;
                 let value = json.get(&(file.clone(), cls.clone(), name.clone())).filter(|j| !j.is_empty()).cloned().unwrap_or_else(|| name.clone());
                 let code = Code { target: id, file, line, value, name, condition: String::new() };
-                // A C# TYPE IS ASKED FOR by its symbol or by its bare name.
-                let keys = if cls == symbol { vec![symbol] } else { vec![symbol, cls] };
+                // A C# TYPE IS ASKED FOR by its symbol (with or without its type parameters) or by its bare name.
+                let mut keys = vec![symbol.clone(), bare(&symbol), cls];
+                keys.dedup();
                 for key in keys.into_iter().filter(|k| !k.is_empty()) {
                     out.entry(key).or_default().push(code.clone());
                 }
@@ -92,12 +117,44 @@ impl Properties {
                 out.entry(owner).or_default().push(Code { target: id, file, line, value: name.clone(), name, condition: String::new() });
             }
         }
-        Ok(Properties(out))
+        // EACH C# CLASS'S BASES, and the symbols each bare name stands for.
+        let (mut bases, mut symbols): (HashMap<String, Vec<String>>, HashMap<String, Vec<String>>) = (HashMap::new(), HashMap::new());
+        if has_columns(conn, "classes", &["name", "symbol", "bases"]) {
+            let mut list = Column::new(conn, "classes", "bases")?;
+            let sql = format!("SELECT k.name, k.symbol, {}, {} FROM classes k", owner_sql(conn, "classes", "k"), scalar_sql(conn, "classes", "k", "bases"));
+            let mut stmt = conn.prepare(&sql)?;
+            let rows: Vec<_> = stmt.query_map([], |r| Ok((text(r, 0)?, text(r, 1)?, text(r, 2)?, r.get::<_, SqlValue>(3)?)))?.collect::<rusqlite::Result<_>>()?;
+            for (name, symbol, owner, cell) in rows {
+                if symbol.is_empty() {
+                    continue;
+                }
+                bases.entry(bare(&symbol)).or_default().extend(list.strings(&owner, &cell)?.iter().map(|b| bare(b)));
+                symbols.entry(name).or_default().push(bare(&symbol));
+            }
+        }
+        Ok(Properties(out, bases, symbols))
     }
 
-    /// The properties of the type `target` names; `"name"` names each by its C# name, not its JSON one.
+    /// The properties of the type `target` names, then those it inherits that it does not declare again, base by base
+    /// (a visited set ends bases that name each other); `"name"` names each by its C# name, not its JSON one.
     pub fn codes(&self, target: &str, by: &str) -> Vec<Code> {
         let mut out = self.0.get(target).cloned().unwrap_or_default();
+        let mut named: HashSet<String> = out.iter().map(|c| c.name.clone()).collect();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut todo: Vec<String> = self.2.get(target).cloned().unwrap_or_else(|| vec![bare(target)]);
+        while let Some(at) = todo.pop() {
+            if !seen.insert(at.clone()) {
+                continue;
+            }
+            for base in self.1.get(&at).into_iter().flatten() {
+                for code in self.0.get(base).into_iter().flatten() {
+                    if named.insert(code.name.clone()) {
+                        out.push(code.clone());
+                    }
+                }
+                todo.push(base.clone());
+            }
+        }
         if by == "name" {
             out.iter_mut().for_each(|c| c.value = c.name.clone());
         }

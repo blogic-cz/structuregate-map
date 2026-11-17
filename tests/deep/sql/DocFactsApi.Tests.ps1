@@ -221,3 +221,38 @@ Test-Case 'docfactsapi: a field table under a routed heading is matched to the t
     Assert-Line $s 'values = property Demo.Api.OrderA (2 code values, the outbound response type of POST /demo/orders/lookup)'
     Assert-Line $s 'values = property Demo.Api.OrderB (2 code values, the outbound response type of POST /demo/orders/lookup)'
 }
+
+# A PROPERTY TABLE AS ONE IS WRITTEN for a type and the type nested in it: a name a named attribute argument gives
+# (`PropertyName =`, `[DataMember(Name =)]`), a property a base class declares, a child row written `-> Name`, and the
+# table linked to both types - a row either type holds is bound, and missing in code only when neither does.
+Test-Case 'docfactsapi: a property table matches JSON names, inherited properties and every type its fact is linked to' {
+    if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { Write-Host '    (no dotnet - skipped)'; return }
+    $nl = $script:DocApiNl
+    $tree = Use-Tree @{
+        'App/App.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+        'App/Ticket.cs' = "namespace Demo.Api;$nl" + "using System.Runtime.Serialization;$nl" +
+            "public class JsonPropertyAttribute : System.Attribute { public string PropertyName { get; set; } = `"`"; }$nl" +
+            "public abstract class RequestBase<T> { public T Request { get; set; } = default!; public string Key { get; set; } = `"`"; }$nl" +
+            "public class TicketDto : RequestBase<string> {$nl" +
+            "    [JsonProperty(PropertyName = `"access_code`")] public string AccessCode { get; set; } = `"`";$nl" +
+            "    [DataMember(Name = `"valid_for`")] public int ValidFor { get; set; }$nl" +
+            "    public PartDto Part { get; set; } = new();$nl}$nl" +
+            "public class PartDto { public int PartNo { get; set; } }$nl"
+        'docs/ticket.md' = "# Ticket$nl$nl## Fields$nl$nl| Field | Meaning |$nl|---|---|$nl| access_code | a |$nl| valid_for | b |$nl" +
+            "| Request | c |$nl| Key | d |$nl| Part | e |$nl| -> PartNo | f |$nl| colour | g |$nl"
+        'structuregate.facts.json' = '{ "sources": [ { "name": "api", "kind": "file", "path": "docs/ticket.md" } ],' +
+            ' "facts": [ { "name": "fields", "source": "api", "section": "Fields", "key": "Field" } ],' +
+            ' "links": [ { "facts": "fields", "to": { "kind": "property", "symbol": "Demo.Api.TicketDto" } },' +
+            ' { "facts": "fields", "to": { "kind": "property", "symbol": "Demo.Api.PartDto" } } ] }'
+    }
+    $db = Join-Path $tree 'api.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext '.cs' --map-sqlite $db --facts-config (Join-Path $tree 'structuregate.facts.json')) 0
+    Assert-DocApiRows $db $script:DocApiLinks @(
+        'fields|access_code|access_code|bound', 'fields|valid_for|valid_for|bound', 'fields|Request|Request|bound',
+        'fields|Key|Key|bound', 'fields|Part|Part|bound', 'fields|-> PartNo|PartNo|bound', 'fields|colour||missing in code'
+    ) 'each row against both linked types'
+    $missing = Get-DocApiRows $db "SELECT 'v=' || key FROM doc_links WHERE status = 'missing in code'"
+    Assert-Equal ($missing -join ',') 'colour' 'the rows no linked type holds'
+    $undocumented = Get-DocApiRows $db "SELECT 'v=' || value FROM doc_links WHERE status = 'missing in doc'"
+    Assert-Equal ($undocumented -join ',') '' 'the properties no row names'
+}

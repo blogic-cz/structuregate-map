@@ -20,8 +20,12 @@ const BATCH_CHARS: usize = 60_000;
 /// The tool calls one batch may make unless `STRUCTUREGATE_LLM_TOOLS` says another number.
 const CALLS: u64 = 8;
 /// The tables a review question may need, described by the columns this map holds for them.
-const TABLES: [&str; 15] = [
+const TABLES: [&str; 19] = [
     "http_endpoints",
+    "http_calls",
+    "calls",
+    "files",
+    "file_text",
     "functions",
     "parameters",
     "members",
@@ -124,7 +128,10 @@ pub fn map_tool(map: &str, setting: &str) -> Option<Value> {
         "Read-only SQLite over the code map the candidates were found in. Tables: {}. A list or object cell is a child table \
          <table>__<column> of nodes: owner (the row's id), n, parent (0 = the root), ord, role, value. Joins that answer most questions: \
          an endpoint's return type - http_endpoints e JOIN functions f ON f.id = e.func (f.type); its parameters - parameters p ON \
-         p.file = f.file AND p.qualname = f.qualname; a class's properties - members WHERE kind = 'property' AND class_symbol = ?.",
+         p.file = f.file AND p.qualname = f.qualname; a class's properties - members WHERE kind = 'property' AND class_symbol = ?; \
+         a url the code calls - http_calls h JOIN calls c ON c.id = h.call (c.symbol: the method bound, with its type arguments, \
+         `Api.PostAsync<ReqDto, RespDto>`; h.file is a path, c.file a files.id - files.path names it); a text in any file - \
+         SELECT path FROM file_text WHERE file_text MATCH '\"words\"'.",
         tables.join("; ")
     );
     Some(json!({ "type": "sqlite_query", "path": path.to_string_lossy(), "name": TOOL_NAME, "description": description, "max_calls": calls }))
@@ -178,6 +185,7 @@ mod tests {
         let said = tool["description"].as_str().unwrap();
         assert!(said.contains("Tables: http_endpoints(id, verb, template, func)."), "{said}");
         assert!(!said.contains("functions("), "{said}");
+        assert!(said.contains("http_calls h JOIN calls c ON c.id = h.call") && said.contains("file_text MATCH"), "{said}");
         assert_eq!(map_tool(map.to_str().unwrap(), "3").unwrap()["max_calls"], 3);
         assert!(map_tool(map.to_str().unwrap(), " Off ").is_none());
         assert!(map_tool(dir.join("none.sqlite").to_str().unwrap(), "").is_none());

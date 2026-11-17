@@ -62,13 +62,13 @@ commas are allowed, as in `structuregate.sql.json`.
 | `consts` | the constants the class `symbol` declares (a static class of codes) | value, or `"by": "name"` |
 | `class` | the classes that list `symbol` among their bases | class name |
 | `endpoint` | every `http_endpoints` row, `VERB /template` - of one controller with `"class"` | segments and verb |
-| `property` | the properties of `symbol`: a C# class (named by `[JsonPropertyName]`/`[JsonProperty]` where it has one, `"by": "name"` for the C# name), a TypeScript interface, type alias or class | name, ignoring case |
+| `property` | the properties of `symbol`: a C# class with what its bases declare (named by `[JsonPropertyName]`, `[JsonProperty]` or `[DataMember(Name)]` where it has one, `"by": "name"` for the C# name), a TypeScript interface, type alias or class | name, ignoring case; a leading `-> ` is dropped |
 | `sql-column` | the columns of the SQL table `object` (`Schema.Table`, `dbo` by default) | name, ignoring case |
 
-Two values match when their text is equal, or both are numbers with the same value (`007` and `7`). A route
-matches an endpoint by its segments, ignoring case: a parameter (`{id}`, `{id:int}`, `:id`) there takes any one
-segment here, an optional one (`{id?}`) may be left out, and the verbs must agree when both name one (`[Route]`
-alone answers every verb).
+Two values match when their text is equal, or both are numbers with the same value (`007` and `7`). A route matches an
+endpoint by its segments, ignoring case: a parameter (`{id}`, `{id:int}`, `:id`) there takes any one segment here, an
+optional one (`{id?}`) may be left out, and the verbs must agree when both name one (`[Route]` alone answers every
+verb). A list linked to several types (a response and those nested in it) is one check: `missing in code` when none has it.
 
 ## `--facts-suggest`
 
