@@ -304,7 +304,7 @@ public class SecondClient : ClientBase
 
 # A LEAF WRAPPER AS ONE IS WRITTEN: the request built in either arm of an `if` into a local declared without its value, the url a
 # joiner of a run-time base and the parameter that trims both edges - early returns of either one alone, the parameters trimmed in
-# place, or `+` - and a ternary passing an absolute url through: the caller's path, one `/` between.
+# place, or `+` - and a ternary passing an absolute url through: the caller's path, one `/` between - beside an overload of the same name with another parameter count.
 Test-Case 'httpcscalls: a request built in if/else arms and a url joiner that trims the parameter still make a wrapper' {
     $tree = Use-Tree @{
         'App/App.csproj' = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
@@ -315,7 +315,7 @@ using System.Net.Http.Json;
 using System.Threading.Tasks;
 namespace Demo;
 
-public interface IWire { Task<T?> PostAsync<TIn, T>(TIn input, string path, HttpClient client, string? overrideRoot = null); Task<T?> GetAsync<T>(string path, HttpClient client); }
+public interface IWire { Task<T?> PostAsync<TIn, T>(TIn input, string path, HttpClient client, string? overrideRoot = null); Task<T?> GetAsync<T>(string path, HttpClient client); Task<T?> PostAsync<T>(string path, HttpClient client); }
 public class Transport : IWire
 {
     private readonly string baseUrl = Environment.GetEnvironmentVariable("BASE") ?? "";
@@ -331,6 +331,11 @@ public class Transport : IWire
     {
         var request = new HttpRequestMessage(HttpMethod.Get, Join(baseUrl, path));
         var response = await client.SendAsync(request);
+        return await response.Content.ReadFromJsonAsync<T>();
+    }
+    public async Task<T?> PostAsync<T>(string path, HttpClient client)
+    {
+        var response = await client.SendAsync(new HttpRequestMessage(HttpMethod.Post, Resolve(path)));
         return await response.Content.ReadFromJsonAsync<T>();
     }
     private string MergeUrl(string root, string rest)
@@ -355,6 +360,7 @@ public class Caller
     public object Find() => wire.PostAsync<int, string>(1, "/demo/orders/lookup", new HttpClient());
     public object List() => wire.GetAsync<string>("/demo/orders/list", new HttpClient());
     public object Save() => new Transport().PutAsync<string>("/demo/orders/save", new HttpClient());
+    public object Short() => wire.PostAsync<string>("/demo/orders/short", new HttpClient());
 }
 '@
     }
@@ -365,6 +371,6 @@ public class Caller
         "FROM http_calls c ORDER BY c.line, c.url")
     Assert-Exit $q 0
     $rows = @($q.Lines | Where-Object { $_.TrimStart().StartsWith('v=') } | ForEach-Object { $_.Trim().Substring(2) })
-    $want = @('44|POST|/demo/orders/lookup|PostAsync|Find', '45|GET|/demo/orders/list|GetAsync|List', '46|PUT|/demo/orders/save|PutAsync|Save')
+    $want = @('49|POST|/demo/orders/lookup|PostAsync|Find', '50|GET|/demo/orders/list|GetAsync|List', '51|PUT|/demo/orders/save|PutAsync|Save', '52|POST|/demo/orders/short|PostAsync|Short')
     if (($rows -join "`n") -ne ($want -join "`n")) { throw "http_calls:`nexpected:`n$($want -join "`n")`ngot:`n$($rows -join "`n")" }
 }

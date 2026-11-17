@@ -11,8 +11,9 @@
 //! wrapper is followed too. A wrapper whose url is a `string.Format` of its parameter FORMATS the caller's url: each `{n}`
 //! in it is a hole `{}`. Text BEFORE the parameter (`Prefix + uri`, past any hole the run time fills first) is a PREFIX each
 //! caller's url is joined to - and a wrapper with a prefix that nothing in the tree calls (an interface's
-//! implementation) is its own row, its url as written (the parameter a hole `{}`), as it was before a caller could be found. A wrapper whose primitives ask with different verbs asks with `ANY`. A call is OF a wrapper by its bound symbol, which is the wrapper's qualname; a qualname two
-//! methods share (an overload) is no wrapper, since the symbol cannot say which of them runs.
+//! implementation) is its own row, its url as written (the parameter a hole `{}`), as it was before a caller could be found. A wrapper whose primitives ask with different verbs asks with `ANY`. A call is OF a wrapper by its bound symbol, which is the wrapper's qualname, and by how many
+//! parameters the method it binds declares (its `signature`): overloads are told apart by that count, and only a qualname
+//! two methods share with one count is no wrapper, since nothing the call holds says which of them runs.
 //!
 //! A WRAPPER IS ALSO EACH INTERFACE OR BASE METHOD IT IMPLEMENTS (`classes.bases`, every base above it): a call through
 //! `IClient.Post` - a DI field, a `Lazy<IClient>` - is bound to the interface, and is a call of the wrapper; its url is the
@@ -22,6 +23,7 @@
 //! a prefix ending in `/` joins a url starting with one by a single `/` (a joiner trimming both edges, `CsTemplate.Trimmed`).
 
 use super::calls::Site;
+use super::cstext::{arity, folded, formatted, joined, overload};
 use crate::rows::dups::{scalar_sql, text, Column};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
@@ -41,9 +43,10 @@ struct Call {
     line: i64,
     end: i64,
     symbol: String,
-    /// The innermost `functions` row holding the call: its id, qualname and first line.
+    /// The method it is bound to, as `functions` are keyed (`overload`): its qualname and parameter count.
+    target: String,
+    /// The innermost `functions` row holding the call: its id and first line.
     member: String,
-    qualname: String,
     start: i64,
 }
 
@@ -70,11 +73,26 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
     for f in &functions {
         holding.entry(f[1].as_str()).or_default().push(f);
     }
+    // EACH METHOD'S PARAMETERS, by its id: a `parameters` row is the method of its qualname whose lines hold it.
+    let declared = query(conn, "parameters", &["qualname", "name", "position", "file", "line"])?;
+    let mut owned: HashMap<&str, Vec<(&str, i64)>> = HashMap::new();
+    for p in &declared {
+        let line: i64 = p[4].parse().unwrap_or(0);
+        let owner = holding.get(p[3].as_str()).and_then(|fs| {
+            fs.iter().filter(|f| f[4] == p[0] && f[2].parse::<i64>().unwrap_or(0) <= line && line <= f[3].parse::<i64>().unwrap_or(0)).min_by_key(|f| f[2].parse::<i64>().unwrap_or(0))
+        });
+        if let Some(f) = owner {
+            owned.entry(f[0].as_str()).or_default().push((p[1].as_str(), p[2].parse().unwrap_or(-1)));
+        }
+    }
+    let key_of: HashMap<&str, String> = functions.iter().map(|f| (f[0].as_str(), overload(&f[4], owned.get(f[0].as_str()).map_or(0, Vec::len)))).collect();
+    let mut keyed: HashMap<&str, Vec<&str>> = HashMap::new();
     let mut qualnames: HashMap<&str, Vec<&str>> = HashMap::new();
     for f in &functions {
+        keyed.entry(key_of[f[0].as_str()].as_str()).or_default().push(f[0].as_str());
         qualnames.entry(f[4].as_str()).or_default().push(f[0].as_str());
     }
-    let calls: Vec<Call> = query(conn, "calls", &["id", "file", "line", "end_line", "symbol"])?
+    let calls: Vec<Call> = query(conn, "calls", &["id", "file", "line", "end_line", "symbol", "signature"])?
         .into_iter()
         .filter(|c| csharp.contains_key(&c[1]))
         .map(|c| {
@@ -84,15 +102,19 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
                     .filter(|f| f[2].parse::<i64>().unwrap_or(0) <= line && line <= f[3].parse::<i64>().unwrap_or(0))
                     .max_by_key(|f| f[2].parse::<i64>().unwrap_or(0))
             });
-            let (member, qualname, start) =
-                inner.map(|f| (f[0].clone(), f[4].clone(), f[2].parse().unwrap_or(0))).unwrap_or_default();
-            Call { id: c[0].clone(), file: c[1].clone(), line, end, symbol: c[4].clone(), member, qualname, start }
+            let (member, start) = inner.map(|f| (f[0].clone(), f[2].parse().unwrap_or(0))).unwrap_or_default();
+            // ONE METHOD OF THAT QUALNAME is the one bound whatever the count says (an extension called reduced counts one less).
+            let bare = c[4].split('<').next().unwrap_or("");
+            let target = match qualnames.get(bare).map(Vec::as_slice) {
+                Some([only]) => key_of[only].clone(),
+                _ => overload(bare, arity(&c[5])),
+            };
+            Call { id: c[0].clone(), file: c[1].clone(), line, end, symbol: c[4].clone(), target, member, start }
         })
         .collect();
     let args = arguments(conn)?;
-    let declared = query(conn, "parameters", &["qualname", "name", "position"])?;
-    let params: HashSet<(String, String)> = declared.iter().map(|p| (p[0].clone(), p[1].clone())).collect();
-    let position: HashMap<(&str, &str), i64> = declared.iter().map(|p| ((p[0].as_str(), p[1].as_str()), p[2].parse().unwrap_or(-1))).collect();
+    let position = |member: &str, p: &str| -> Option<i64> { owned.get(member)?.iter().find(|(n, _)| *n == p).map(|(_, at)| *at) };
+    let key = |member: &str| key_of.get(member).cloned().unwrap_or_default();
     let bases = bases(conn)?;
     let locals = query(conn, "locals", &["file", "line", "name"])?;
     let none = Vec::new();
@@ -113,17 +135,18 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
                 })
         })
     };
-    let value_of = |a: &Arg, qualname: &str| -> Option<Url> {
+    let value_of = |a: &Arg, member: &str| -> Option<Url> {
+        let is_param = |p: &str| position(member, p).is_some();
         match (&a.value, a.kind.as_str()) {
             (Value::String(s), "const" | "folded") => Some(Url::Pattern(vec![s.clone()])),
             // A BASE THE RUN TIME KNOWS AND THE CALLER'S URL (`_cfg.Url + url`, `string.Concat(_base, endpoint)`): holes alone, each
             // string ending in this method's parameter - the method is a wrapper of it, as a bare parameter makes it.
-            (Value::Array(alternatives), _) if handed(alternatives, &|p| params.contains(&(qualname.to_string(), p.to_string()))).is_some() =>
-                handed(alternatives, &|p| params.contains(&(qualname.to_string(), p.to_string()))).map(|(p, formats, prefix)| Url::Param(p, formats, prefix, folded(alternatives))),
+            (Value::Array(alternatives), _) if handed(alternatives, &is_param).is_some() =>
+                handed(alternatives, &is_param).map(|(p, formats, prefix)| Url::Param(p, formats, prefix, folded(alternatives))),
             (Value::Array(alternatives), _) => Some(Url::Pattern(folded(alternatives))),
             // `string.Empty`: the base address alone, as `""` is.
             (_, "symbol") if a.symbol == "System.String.Empty" => Some(Url::Pattern(vec![String::new()])),
-            (_, "symbol") if params.contains(&(qualname.to_string(), a.symbol.clone())) => Some(Url::Param(a.symbol.clone(), false, String::new(), vec!["{}".into()])),
+            (_, "symbol") if is_param(&a.symbol) => Some(Url::Param(a.symbol.clone(), false, String::new(), vec!["{}".into()])),
             _ => None,
         }
     };
@@ -134,7 +157,7 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
             let uri = calls.iter().find(|u| u.symbol == URI && u.file == a.file && u.line == a.line && u.member == c.member)?;
             of(uri).iter().find(|u| u.name == "uriString" || (u.name.is_empty() && u.position == 0))
         };
-        Some(value_of(a, &c.qualname).or_else(|| value_of(wrapped()?, &c.qualname)).unwrap_or_else(|| Url::Pattern(vec!["*".into()])))
+        Some(value_of(a, &c.member).or_else(|| value_of(wrapped()?, &c.member)).unwrap_or_else(|| Url::Pattern(vec!["*".into()])))
     };
     // A WRAPPER CALLED THROUGH ITS INTERFACE binds the interface's parameter names: its url is the argument of the
     // wrapper's parameter name, else the one at its place.
@@ -143,7 +166,7 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
             return url_of(c, p);
         }
         let a = of(c).iter().find(|a| a.position == at)?;
-        Some(value_of(a, &c.qualname).unwrap_or_else(|| Url::Pattern(vec!["*".into()])))
+        Some(value_of(a, &c.member).unwrap_or_else(|| Url::Pattern(vec!["*".into()])))
     };
     // THE REQUEST A `Send` IS HANDED: the `HttpRequestMessage` built in its argument, or with the local it names.
     let message = |c: &Call| -> Option<&Call> {
@@ -180,16 +203,16 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
             }
         }
     }
-    // THE WRAPPERS, to a fixed point: a method whose request's url is its own parameter, by qualname -> (id, parameter, verb,
-    // whether it formats the url, its prefix).
-    let unique = |q: &str| qualnames.get(q).filter(|ids| ids.len() == 1).map(|ids| ids[0].to_string());
+    // THE WRAPPERS, to a fixed point: a method whose request's url is its own parameter, by its key (`overload`) -> (id,
+    // parameter, verb, whether it formats the url, its prefix).
+    let unique = |member: &str| keyed.get(key(member).as_str()).filter(|ids| ids.len() == 1).map(|ids| ids[0].to_string());
     let mut wrappers: HashMap<String, Wrapper> = HashMap::new();
     let mut primitives: Vec<_> = asked.iter().collect();
     primitives.sort_by_key(|(n, _)| **n);
     for (n, (verb, url)) in primitives {
-        if let (Url::Param(p, formats, prefix, _), Some(id)) = (url, unique(&calls[*n].qualname)) {
-            let at = position.get(&(calls[*n].qualname.as_str(), p.as_str())).copied().unwrap_or(-1);
-            let wrapper = wrappers.entry(calls[*n].qualname.clone()).or_insert((id, p.clone(), verb.clone(), *formats, prefix.clone(), at));
+        if let (Url::Param(p, formats, prefix, _), Some(id)) = (url, unique(&calls[*n].member)) {
+            let at = position(&calls[*n].member, p).unwrap_or(-1);
+            let wrapper = wrappers.entry(key(&calls[*n].member)).or_insert((id, p.clone(), verb.clone(), *formats, prefix.clone(), at));
             if wrapper.2 != *verb {
                 wrapper.2 = "ANY".into();
             }
@@ -206,11 +229,11 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
         }
         let mut found = vec![];
         for c in &calls {
-            let Some((_, p, verb, formats, prefix, at)) = wrappers.get(c.symbol.split('<').next().unwrap_or("")) else { continue };
-            if let (Some(Url::Param(own, also, before, _)), Some(id)) = (url_for(c, p, *at), unique(&c.qualname)) {
-                if !wrappers.contains_key(&c.qualname) {
-                    let own_at = position.get(&(c.qualname.as_str(), own.as_str())).copied().unwrap_or(-1);
-                    found.push((c.qualname.clone(), (id, own, verb.clone(), *formats || also, format!("{prefix}{before}"), own_at)));
+            let Some((_, p, verb, formats, prefix, at)) = wrappers.get(&c.target) else { continue };
+            if let (Some(Url::Param(own, also, before, _)), Some(id)) = (url_for(c, p, *at), unique(&c.member)) {
+                if !wrappers.contains_key(&key(&c.member)) {
+                    let own_at = position(&c.member, &own).unwrap_or(-1);
+                    found.push((key(&c.member), (id, own, verb.clone(), *formats || also, format!("{prefix}{before}"), own_at)));
                 }
             }
         }
@@ -220,15 +243,15 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
         wrappers.extend(found);
     }
     // THE ROWS: a primitive nobody parameterises, and every call of a wrapper that hands it a url of its own.
-    let mut called: HashSet<&str> = calls.iter().map(|c| c.symbol.split('<').next().unwrap_or("")).collect();
+    let mut called: HashSet<&str> = calls.iter().map(|c| c.target.as_str()).collect();
     // A WRAPPER CALLED THROUGH ITS INTERFACE is called.
     let through: Vec<&str> = aliased.iter().filter(|(alias, _)| called.contains(alias.as_str())).map(|(_, of)| of.as_str()).collect();
     called.extend(through);
-    let uncalled = |c: &Call, prefix: &str| !prefix.is_empty() && !called.contains(c.qualname.as_str());
+    let uncalled = |c: &Call, prefix: &str| !prefix.is_empty() && !called.contains(key(&c.member).as_str());
     let paths = super::files_of(conn, "csharp")?;
     let mut sites = vec![];
     for (n, c) in calls.iter().enumerate() {
-        let (verb, via, urls): (_, _, Vec<String>) = match (asked.get(&n), wrappers.get(c.symbol.split('<').next().unwrap_or(""))) {
+        let (verb, via, urls): (_, _, Vec<String>) = match (asked.get(&n), wrappers.get(&c.target)) {
             (Some((verb, Url::Pattern(urls))), _) => (verb.clone(), String::new(), urls.clone()),
             (Some((verb, Url::Param(_, _, prefix, whole))), _) if uncalled(c, prefix) => (verb.clone(), String::new(), whole.clone()),
             (None, Some((id, p, verb, formats, prefix, at))) => match url_for(c, p, *at) {
@@ -255,15 +278,6 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
     }
     sites.sort_by(|a, b| (&a.file, a.line, &a.call).cmp(&(&b.file, b.line, &b.call)));
     Ok(sites)
-}
-
-/// A wrapper's prefix and its caller's url: one `/` where the prefix ends in one and the url starts with one (a joiner that
-/// trims both edges and puts a `/` between).
-fn joined(prefix: &str, url: &str) -> String {
-    match (prefix.ends_with('/'), url.strip_prefix('/')) {
-        (true, Some(rest)) => format!("{prefix}{rest}"),
-        _ => format!("{prefix}{url}"),
-    }
 }
 
 /// A wrapper: its `functions` id, its url parameter, its verb, whether it formats the url, its prefix, and the url
@@ -336,48 +350,6 @@ fn handed(alternatives: &[Value], is_param: &dyn Fn(&str) -> bool) -> Option<(St
         }
     }
     named
-}
-
-/// A url a `string.Format` fills: each `{n}`, `{n,w}` or `{n:f}` is a hole `{}`, `{{` and `}}` the brace itself.
-fn formatted(url: &str) -> String {
-    let mut out = String::new();
-    let mut rest = url;
-    while let Some(c) = rest.chars().next() {
-        let item = rest.strip_prefix('{').and_then(|r| r.find('}').map(|end| &r[..end]));
-        let digits = item.map(|i| i.len() - i.trim_start_matches(|d: char| d.is_ascii_digit()).len()).unwrap_or(0);
-        if rest.starts_with("{{") || rest.starts_with("}}") {
-            out.push(c);
-            rest = &rest[2..];
-        } else if let (Some(item), true) = (item, digits > 0) {
-            out.push_str("{}");
-            rest = &rest[item.len() + 2..];
-        } else {
-            out.push(c);
-            rest = &rest[c.len_utf8()..];
-        }
-    }
-    out
-}
-
-/// An interpolation's alternatives as patterns, each path once: each piece's text, a hole `{}`. An alternative of holes
-/// alone (a ternary's arm only the run time knows) says nothing while another one says a path, and is left out.
-fn folded(alternatives: &[Value]) -> Vec<String> {
-    let all = spelled(alternatives);
-    let said: Vec<String> = all.iter().filter(|p| p.replace("{}", "").chars().any(char::is_alphanumeric)).cloned().collect();
-    if said.is_empty() { all } else { said }
-}
-
-fn spelled(alternatives: &[Value]) -> Vec<String> {
-    let spelled: std::collections::BTreeSet<String> = alternatives
-        .iter()
-        .map(|alt| {
-            alt.as_array()
-                .map(|pieces| pieces.iter().map(|p| p.as_str().map(str::to_string).unwrap_or_else(|| "{}".into())).collect())
-                .unwrap_or_default()
-        })
-        .map(|s: String| s.split('?').next().unwrap_or("").to_string())
-        .collect();
-    spelled.into_iter().collect()
 }
 
 /// Every argument of a call, by call id: the parameter it binds, its folded value or template, and the symbol it reads.

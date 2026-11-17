@@ -9,6 +9,7 @@
 
 mod calls;
 mod cscalls;
+mod cstext;
 mod endpoints;
 pub(crate) use endpoints::generic_key;
 pub mod inputs;
