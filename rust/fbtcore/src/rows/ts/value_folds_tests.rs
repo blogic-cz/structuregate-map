@@ -190,11 +190,11 @@ fn a_dimension_absent_from_one_way_is_not_narrowed_on_every_way() {
 fn the_rows_are_ordered_by_collation_and_not_by_code_point() {
     let mut idx = idx_of(FOUR);
     idx.by_id.insert("e:2".to_string(), EnumInfo {
-        name: Some("Shape".to_string()),
+        name: Some("Wave".to_string()),
         domain: ["A", "B"].iter().map(|s| s.to_string()).collect(),
     });
     idx.by_id.insert("e:3".to_string(), EnumInfo {
-        name: Some("ShapeType".to_string()),
+        name: Some("WaveType".to_string()),
         domain: ["A", "B"].iter().map(|s| s.to_string()).collect(),
     });
     let gates = map(&[
@@ -206,7 +206,7 @@ fn the_rows_are_ordered_by_collation_and_not_by_code_point() {
     let ways = [way(&["g:a", "g:b"])];
     let out = fold_values(&ways, &gates, &idx, None);
     let names: Vec<&str> = out.iter().map(|r| r["enum_name"].as_str().unwrap()).collect();
-    assert_eq!(names, vec!["Shape", "ShapeType"],
+    assert_eq!(names, vec!["Wave", "WaveType"],
                "collation compares base letters before case");
 }
 

@@ -57,12 +57,12 @@ $script:TsAndFiles = @{
         "}`n" +
         "export type Pace = {`n  month: number;`n};`n" +
         "export type Inner = {`n  pace: Pace;`n};`n" +
-        "export type Item = {`n  id: number;`n  instrument: Inner;`n};`n" +
-        "export type InnerDto = {`n  instrument: Inner;`n  minimal?: number;`n};`n" +
+        "export type Item = {`n  id: number;`n  attachment: Inner;`n};`n" +
+        "export type InnerDto = {`n  attachment: Inner;`n  minimal?: number;`n};`n" +
         "export type ViewDto = InnerDto & {`n  extra?: number;`n};`n"
     'apps/shop/src/and.component.ts' = "import { Component } from '@angular/core';`n" +
         "import { Alpha, Gamma, InB, Item, ViewDto } from './and.models';`n" +
-        "@Component({ selector: 'app-and', standalone: true, template: '<p>{{ x.id }}</p><p>{{ y.id }}</p><p>{{ z.inner.deep }}</p><p>{{ z.inner.shallow }}</p><p>{{ u.id }}</p><p>{{ w.extra }}</p><p>{{ w.id }}</p><p>{{ q.instrument?.pace?.month }}</p><p>{{ q.minimal }}</p><p>{{ q.extra }}</p>' })`n" +
+        "@Component({ selector: 'app-and', standalone: true, template: '<p>{{ x.id }}</p><p>{{ y.id }}</p><p>{{ z.inner.deep }}</p><p>{{ z.inner.shallow }}</p><p>{{ u.id }}</p><p>{{ w.extra }}</p><p>{{ w.id }}</p><p>{{ q.attachment?.pace?.month }}</p><p>{{ q.minimal }}</p><p>{{ q.extra }}</p>' })`n" +
         "export class AndComponent {`n" +
         "  x!: Alpha & { id: number };`n" +
         "  y!: { id: number } & Alpha;`n" +
@@ -100,9 +100,9 @@ Test-Case 'tsrows: a member both parts of an intersection declare is the first p
     Assert-Line (Get-TsAndTargets $made.Db '{{ w.extra }}') "read=extra=sm@${c}:9"
     Assert-Line (Get-TsAndTargets $made.Db '{{ w.id }}') "read=id=m@${m}:8"
     # AN ALIAS OF AN INTERSECTION IN ONE (`Item & ViewDto`, `ViewDto = InnerDto & { .. }`): the name both aliases declare is the first's, and the chain goes on.
-    Assert-Line (Get-TsAndTargets $made.Db '{{ q.instrument?.pace?.month }}') "read=instrument=tm@${m}:18"
-    Assert-Line (Get-TsAndTargets $made.Db '{{ q.instrument?.pace?.month }}') "read=pace=tm@${m}:14"
-    Assert-Line (Get-TsAndTargets $made.Db '{{ q.instrument?.pace?.month }}') "read=month=tm@${m}:11"
+    Assert-Line (Get-TsAndTargets $made.Db '{{ q.attachment?.pace?.month }}') "read=attachment=tm@${m}:18"
+    Assert-Line (Get-TsAndTargets $made.Db '{{ q.attachment?.pace?.month }}') "read=pace=tm@${m}:14"
+    Assert-Line (Get-TsAndTargets $made.Db '{{ q.attachment?.pace?.month }}') "read=month=tm@${m}:11"
     Assert-Line (Get-TsAndTargets $made.Db '{{ q.minimal }}') "read=minimal=tm@${m}:22"
     Assert-Line (Get-TsAndTargets $made.Db '{{ q.extra }}') "read=extra=sm@${m}:25"
     # The control that was always right: a UNION both arms declare has no one answer.
