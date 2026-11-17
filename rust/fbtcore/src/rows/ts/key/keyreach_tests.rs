@@ -204,3 +204,23 @@ fn a_file_whose_path_escapes_the_root_is_not_this_applications_source() {
     assert!(!texts.contains_key("gone.ts"));
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_text_the_map_holds_is_read_from_the_map_and_only_the_rest_from_disk() {
+    // A run that re-read a few files opened every file of the workspace again: on a fresh checkout, most of the closure.
+    let dir = std::env::temp_dir().join(format!("fbt_stored_texts_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("kept.ts"), "on disk").unwrap();
+    std::fs::write(dir.join("new.ts"), "only on disk").unwrap();
+    let db = rusqlite::Connection::open_in_memory().unwrap();
+    db.execute_batch(
+        "CREATE TABLE files (id, path, ext, half); INSERT INTO files VALUES ('f:1', 'kept.ts', 'ts', 'typescript'), ('f:2', 'new.ts', 'ts', 'typescript');
+         CREATE VIRTUAL TABLE file_text USING fts5(path, content); INSERT INTO file_text VALUES ('kept.ts', 'in the map');",
+    )
+    .unwrap();
+    let store = Store::from_db(&db, "typescript").unwrap();
+    let texts = read_texts(&store, &dir);
+    assert_eq!(texts.get("kept.ts").map(String::as_str), Some("in the map"));
+    assert_eq!(texts.get("new.ts").map(String::as_str), Some("only on disk"));
+    std::fs::remove_dir_all(&dir).ok();
+}

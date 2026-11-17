@@ -64,7 +64,7 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
     conn.execute_batch(
         "DROP TABLE IF EXISTS doc_facts; DROP TABLE IF EXISTS doc_links;
          CREATE TABLE doc_facts (id, facts, source, section, subsection, key, label, file, line, version);
-         CREATE TABLE doc_links (id, facts, kind, fact, key, label, target, file, line, value, name, condition, status);",
+         CREATE TABLE doc_links (id, facts, kind, fact, key, label, target, file, line, value, name, condition, status, nesting);",
     )?;
     let mut made = Made { facts: 0, links: [0; 3], notes: Vec::new() };
     // EACH LIST'S ROWS, kept for its links: (fact id, key, label).
@@ -100,7 +100,7 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
     }
     crate::rows::store::insert_rows(conn, "doc_facts", &written).map_err(failed)?;
 
-    let mut insert = conn.prepare("INSERT INTO doc_links VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)")?;
+    let mut insert = conn.prepare("INSERT INTO doc_links VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)")?;
     let mut n = 0;
     // EVERY LINK OF ONE LIST TOGETHER: a table describing a response and the types nested in it is linked to each of
     // them, and a row only one of them holds is in the code - it is `missing in code` only when no link binds it.
@@ -126,30 +126,45 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
         // EACH ROW'S TYPE, by its depth: a child row (`-> Name`) is first a property of the type its parent row's
         // property holds - linked or not (an array's, a list's element) - and only then one of the linked types.
         let typed = linked.iter().any(|(l, _)| l.kind == "property").then(|| apis::Properties::read(conn)).transpose()?;
+        let in_type = |t: &str, name: &str| -> Vec<links::Code> {
+            typed.as_ref().map(|p| p.codes(&apis::element(t), "").into_iter().filter(|c| links::matches("property", &c.value, name)).collect()).unwrap_or_default()
+        };
         let mut parents: Vec<(usize, String)> = Vec::new();
         for (fact, key, label) in rows {
             let (depth, name) = nested(key);
-            while parents.last().is_some_and(|(d, _)| *d >= depth) {
-                parents.pop();
-            }
-            let (mut bound, mut own) = (false, String::new());
-            if let (true, Some(properties), Some((_, parent))) = (depth > 0, typed.as_ref(), parents.last().filter(|(_, t)| !t.is_empty())) {
-                for c in properties.codes(&apis::element(parent), "").iter().filter(|c| links::matches("property", &c.value, name)) {
-                    if !bound {
-                        own = c.typed.clone();
+            let open = parents.clone();
+            let parent = open.iter().rev().find(|(d, _)| *d < depth).filter(|_| depth > 0);
+            let mut hits = parent.filter(|(_, t)| !t.is_empty()).map(|(_, t)| in_type(t, name)).unwrap_or_default();
+            // A ROW THE DOCUMENT NESTED WRONG - an arrow too few, one too many, none between child rows - is read in
+            // another open row's type, nearest first, and said so (`nesting`: the depth its arrows should have shown).
+            let linked_has = linked.iter().any(|(link, codes)| codes.iter().any(|c| links::matches(&link.kind, &c.value, name)));
+            let mut fixed: Option<usize> = None;
+            if hits.is_empty() && (depth > 0 || !linked_has) {
+                for (d, t) in open.iter().rev().filter(|(d, t)| !t.is_empty() && *d + 1 != depth) {
+                    hits = in_type(t, name);
+                    if !hits.is_empty() {
+                        fixed = Some(d + 1);
+                        break;
                     }
-                    bound = true;
-                    // A LINKED TYPE'S PROPERTY a child row names is documented there too.
-                    for (l, (_, codes)) in linked.iter().enumerate() {
-                        matched[l].extend(codes.iter().enumerate().filter(|(_, x)| x.target == c.target).map(|(i, _)| i));
-                    }
-                    n += 1;
-                    made.links[0] += 1;
-                    insert.execute(params![format!("dl:{n}"), first.facts, "property", fact, key, label, c.target, c.file, c.line, c.value, c.name, c.condition, "bound"])?;
                 }
             }
-            let under_parent = bound;
-            for (l, (link, codes)) in linked.iter().enumerate().filter(|_| !under_parent) {
+            let (mut bound, mut own) = (false, String::new());
+            let status = if fixed.is_some() { "bound, nesting fixed" } else { "bound" };
+            for c in &hits {
+                if !bound {
+                    own = c.typed.clone();
+                }
+                bound = true;
+                // A LINKED TYPE'S PROPERTY a child row names is documented there too.
+                for (l, (_, codes)) in linked.iter().enumerate() {
+                    matched[l].extend(codes.iter().enumerate().filter(|(_, x)| x.target == c.target).map(|(i, _)| i));
+                }
+                n += 1;
+                made.links[0] += 1;
+                insert.execute(params![format!("dl:{n}"), first.facts, "property", fact, key, label, c.target, c.file, c.line, c.value, c.name, c.condition, status, fixed.map(|d| d as i64)])?;
+            }
+            let read_already = bound;
+            for (l, (link, codes)) in linked.iter().enumerate().filter(|_| !read_already) {
                 for (i, c) in codes.iter().enumerate().filter(|(_, c)| links::matches(&link.kind, &c.value, name)) {
                     if !bound {
                         own = c.typed.clone();
@@ -158,21 +173,24 @@ fn write(conn: &Connection, config: &Config) -> rusqlite::Result<Made> {
                     matched[l].insert(i);
                     n += 1;
                     made.links[0] += 1;
-                    insert.execute(params![format!("dl:{n}"), link.facts, link.kind, fact, key, label, c.target, c.file, c.line, c.value, c.name, c.condition, "bound"])?;
+                    insert.execute(params![format!("dl:{n}"), link.facts, link.kind, fact, key, label, c.target, c.file, c.line, c.value, c.name, c.condition, "bound", None::<i64>])?;
                 }
             }
-            parents.push((depth, own));
+            // THE ROW STANDS WHERE IT WAS READ: the rows after it nest under it at that depth.
+            let at = fixed.unwrap_or(depth);
+            parents = open.into_iter().filter(|(d, _)| *d < at).collect();
+            parents.push((at, own));
             if !bound {
                 n += 1;
                 made.links[1] += 1;
-                insert.execute(params![format!("dl:{n}"), first.facts, first.kind, fact, key, label, "", "", 0, "", "", "", "missing in code"])?;
+                insert.execute(params![format!("dl:{n}"), first.facts, first.kind, fact, key, label, "", "", 0, "", "", "", "missing in code", None::<i64>])?;
             }
         }
         for (l, (link, codes)) in linked.iter().enumerate() {
             for c in codes.iter().enumerate().filter(|(i, _)| !matched[l].contains(i)).map(|(_, c)| c) {
                 n += 1;
                 made.links[2] += 1;
-                insert.execute(params![format!("dl:{n}"), link.facts, link.kind, "", "", "", c.target, c.file, c.line, c.value, c.name, c.condition, "missing in doc"])?;
+                insert.execute(params![format!("dl:{n}"), link.facts, link.kind, "", "", "", c.target, c.file, c.line, c.value, c.name, c.condition, "missing in doc", None::<i64>])?;
             }
         }
     }

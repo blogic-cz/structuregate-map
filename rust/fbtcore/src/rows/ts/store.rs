@@ -95,6 +95,21 @@ impl<'a> Store<'a> {
         })
     }
 
+    /// EVERY TEXT THE MAP HOLDS (`file_text`), by path - none when the rows came in a payload or the map keeps no text
+    /// (`--map-no-text`). The rows are written before the closure runs, so a file read again is here as it now is.
+    pub fn stored_texts(&self) -> FastMap<String, String> {
+        let mut out = FastMap::default();
+        // `names` leaves the text tables out (they are no rows), so the table is asked for here.
+        let Some(db) = self.db else { return out };
+        if !db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'file_text'").and_then(|mut s| s.exists([])).unwrap_or(false) {
+            return out;
+        }
+        let Ok(mut stmt) = db.prepare("SELECT path, content FROM file_text") else { return out };
+        let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) else { return out };
+        out.extend(rows.flatten());
+        out
+    }
+
     /// A list the half's extraction was configured with (`_meta` `options:<half>`, e.g. `i18n_calls`), empty
     /// when the database holds none - a store handed its rows has no `_meta` to read.
     pub fn option_list(&self, name: &str) -> Vec<String> {

@@ -82,6 +82,8 @@ pub(crate) const TEXT_EXTS: &[&str] = &[
 /// ported from does.
 pub fn read_texts(store: &Store<'_>, root: &Path) -> IndexMap<String, String> {
     let mut out = IndexMap::default();
+    // THE MAP'S OWN COPY FIRST: opening every file again was most of a partial run's closure on a fresh (CI) checkout.
+    let mut stored = store.stored_texts();
     for f in store.table("files").iter() {
         let ext = match f.get("ext") {
             Some(Value::String(s)) => s.to_lowercase(),
@@ -100,12 +102,10 @@ pub fn read_texts(store: &Store<'_>, root: &Path) -> IndexMap<String, String> {
         if path.starts_with("..") {
             continue;
         }
-        let full = root.join(path.replace('/', std::path::MAIN_SEPARATOR_STR));
         // A file that cannot be read contributes NOTHING rather than an empty string: "" is
         // a real answer for an empty file and must not also mean "unreadable".
-        if let Ok(bytes) = std::fs::read(&full) {
-            out.insert(path.clone(), String::from_utf8_lossy(&bytes).into_owned());
-        }
+        let Some(text) = stored.remove(path.as_str()).or_else(|| std::fs::read(root.join(path.replace('/', std::path::MAIN_SEPARATOR_STR))).ok().map(|b| String::from_utf8_lossy(&b).into_owned())) else { continue };
+        out.insert(path.clone(), text);
     }
     out
 }

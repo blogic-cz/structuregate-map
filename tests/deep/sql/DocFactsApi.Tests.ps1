@@ -246,7 +246,11 @@ Test-Case 'docfactsapi: a property table matches JSON names, inherited propertie
             "    [JsonProperty(PropertyName = `"access_code`")] public string AccessCode { get; set; } = `"`";$nl" +
             "    [DataMember(Name = `"valid_for`")] public int ValidFor { get; set; }$nl" +
             "    public PartDto Part { get; set; } = new();$nl" +
-            "    public System.Collections.Generic.List<HolderDto> Holders { get; set; } = new();$nl}$nl" +
+            "    public System.Collections.Generic.List<HolderDto> Holders { get; set; } = new();$nl" +
+            "    public BatchDto Batch { get; set; } = new();$nl}$nl" +
+            "public class BatchDto { public OriginDto Origin { get; set; } = new(); public int Amount { get; set; } public string Region { get; set; } = `"`";" +
+            " public int Total { get; set; } }$nl" +
+            "public class OriginDto { public string Maker { get; set; } = `"`"; }$nl" +
             "public class PartDto { public int PartNo { get; set; } }$nl" +
             "public class HolderDto { public string ClientRef { get; set; } = `"`"; public AddressDto[] Addresses { get; set; } = [];" +
             " public string Note { get; set; } = `"`"; }$nl" +
@@ -254,7 +258,8 @@ Test-Case 'docfactsapi: a property table matches JSON names, inherited propertie
             "public class OtherDto { public string Note { get; set; } = `"`"; }$nl"
         'docs/ticket.md' = "# Ticket$nl$nl## Fields$nl$nl| Field | Meaning |$nl|---|---|$nl| access_code | a |$nl| valid_for | b |$nl" +
             "| Request | c |$nl| Key | d |$nl| Part | e |$nl| -> PartNo | f |$nl| colour | g |$nl" +
-            "| Holders | h |$nl| $em>ClientRef | i |$nl| -> Addresses | j |$nl| -> -> Street | k |$nl| $to Note | l |$nl| $en> Street | m |$nl"
+            "| Holders | h |$nl| $em>ClientRef | i |$nl| -> Addresses | j |$nl| -> -> Street | k |$nl| $to Note | l |$nl| $en> Street | m |$nl" +
+            "| Batch | n |$nl| -> Origin | o |$nl| -> Maker | p |$nl| -> Amount | q |$nl| Region | r |$nl| -> Total | s |$nl"
         'structuregate.facts.json' = '{ "sources": [ { "name": "api", "kind": "file", "path": "docs/ticket.md" } ],' +
             ' "facts": [ { "name": "fields", "source": "api", "section": "Fields", "key": "Field" } ],' +
             ' "links": [ { "facts": "fields", "to": { "kind": "property", "symbol": "Demo.Api.TicketDto" } },' +
@@ -269,6 +274,10 @@ Test-Case 'docfactsapi: a property table matches JSON names, inherited propertie
     ) 'each row against both linked types, a child row against its parent row''s type first'
     $missing = Get-DocApiRows $db "SELECT 'v=' || key FROM doc_links WHERE status = 'missing in code' ORDER BY rowid"
     Assert-Equal ($missing -join ',') "colour,$en> Street" 'the rows no linked type holds'
+    # A ROW NESTED WRONG IS READ WHERE IT BELONGS AND SAID SO: `-> Maker` is the Origin row's (an arrow short), `Region`
+    # the Batch row's (no arrow between its children), and the rows after each stand where it was read.
+    $fixed = Get-DocApiRows $db "SELECT 'v=' || key || '|' || status || '|' || coalesce(nesting, '-') FROM doc_links WHERE key IN ('-> Maker', 'Region', '-> Amount', '-> Total') ORDER BY rowid"
+    Assert-Equal ($fixed -join ',') '-> Maker|bound, nesting fixed|2,-> Amount|bound|-,Region|bound, nesting fixed|1,-> Total|bound|-' 'the rows nested wrong'
     # THE PARENT'S TYPE, NOT A NAME ELSEWHERE: an arrowed `Note` under Holders is HolderDto's, never OtherDto's.
     $note = Get-DocApiRows $db "SELECT 'v=' || m.cls FROM doc_links l JOIN members m ON m.id = l.target WHERE l.key = '$to Note'"
     Assert-Equal ($note -join ',') 'HolderDto' 'the type a child row is read in'
