@@ -12,8 +12,9 @@
 //! in it is a hole `{}`. Text BEFORE the parameter (`Prefix + uri`, past any hole the run time fills first) is a PREFIX each
 //! caller's url is joined to - and a wrapper with a prefix that nothing in the tree calls (an interface's
 //! implementation) is its own row, its url as written (the parameter a hole `{}`), as it was before a caller could be found. A wrapper whose primitives ask with different verbs asks with `ANY`. A call is OF a wrapper by its bound symbol, which is the wrapper's qualname, and by how many
-//! parameters the method it binds declares (its `signature`): overloads are told apart by that count, and only a qualname
-//! two methods share with one count is no wrapper, since nothing the call holds says which of them runs.
+//! type parameters (its symbol's `<..>`) and parameters (its `signature`) the method it binds declares: overloads are told
+//! apart by those counts, and only a qualname two methods share with both alike is no wrapper, since nothing the call
+//! holds says which of them runs.
 //!
 //! A WRAPPER IS ALSO EACH INTERFACE OR BASE METHOD IT IMPLEMENTS (`classes.bases`, every base above it): a call through
 //! `IClient.Post` - a DI field, a `Lazy<IClient>` - is bound to the interface, and is a call of the wrapper; its url is the
@@ -23,7 +24,7 @@
 //! a prefix ending in `/` joins a url starting with one by a single `/` (a joiner trimming both edges, `CsTemplate.Trimmed`).
 
 use super::calls::Site;
-use super::cstext::{arity, folded, formatted, joined, overload};
+use super::cstext::{arity, folded, formatted, generics, joined, overload};
 use crate::rows::dups::{scalar_sql, text, Column};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::Connection;
@@ -68,7 +69,7 @@ enum Url {
 }
 
 pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusqlite::Result<Vec<Site>> {
-    let functions = query(conn, "functions", &["id", "file", "line", "end_line", "qualname"])?;
+    let functions = query(conn, "functions", &["id", "file", "line", "end_line", "qualname", "symbol"])?;
     let mut holding: HashMap<&str, Vec<&Vec<String>>> = HashMap::new();
     for f in &functions {
         holding.entry(f[1].as_str()).or_default().push(f);
@@ -85,7 +86,7 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
             owned.entry(f[0].as_str()).or_default().push((p[1].as_str(), p[2].parse().unwrap_or(-1)));
         }
     }
-    let key_of: HashMap<&str, String> = functions.iter().map(|f| (f[0].as_str(), overload(&f[4], owned.get(f[0].as_str()).map_or(0, Vec::len)))).collect();
+    let key_of: HashMap<&str, String> = functions.iter().map(|f| (f[0].as_str(), overload(&f[4], generics(&f[5]), owned.get(f[0].as_str()).map_or(0, Vec::len)))).collect();
     let mut keyed: HashMap<&str, Vec<&str>> = HashMap::new();
     let mut qualnames: HashMap<&str, Vec<&str>> = HashMap::new();
     for f in &functions {
@@ -107,7 +108,7 @@ pub(super) fn load(conn: &Connection, csharp: &HashMap<String, String>) -> rusql
             let bare = c[4].split('<').next().unwrap_or("");
             let target = match qualnames.get(bare).map(Vec::as_slice) {
                 Some([only]) => key_of[only].clone(),
-                _ => overload(bare, arity(&c[5])),
+                _ => overload(bare, generics(&c[4]), arity(&c[5])),
             };
             Call { id: c[0].clone(), file: c[1].clone(), line, end, symbol: c[4].clone(), target, member, start }
         })

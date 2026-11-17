@@ -77,6 +77,10 @@ added. Report \`<path>:<line>\` with the line number printed before the text (fo
 \`vocab <word> <the path:line it lists>\`). In the vocabulary, flag a word that is a private name or one private domain's
 business word; ordinary English and programming words are not leaks.
 
+A NEAR VARIANT (rule 6) CONTAINS THE DENY TERM ITSELF - a compound, a plural, another casing or spelling of it. A word that
+only shares a pattern with one (a \`<Noun>IDs\` enum, a \`get-*\` route, a \`Feature*\` name), a suffix or a common English
+stem is NOT one: this repository renamed its private names to invented placeholders, and those are the fix, not a leak.
+
 $(cat "$root/.githooks/leak-review.md")"
 [ -s "$deny" ] && prompt="$prompt
 

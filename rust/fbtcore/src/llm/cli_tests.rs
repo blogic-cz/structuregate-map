@@ -11,6 +11,8 @@ fn an_answer_is_its_data_and_a_failure_says_which_by_its_exit_code() {
     assert_eq!(counted(br#"{"ok": true, "data": {}, "usage": {"tool_calls": 2}}"#), Some(2));
     let invalid = answer(Some(3), br#"{"ok": false, "error_type": "BadReply", "message": "not json", "errors": ["at /accept"]}"#, b"");
     assert_eq!(invalid, Err(Failed::Invalid("BadReply: not json (at /accept)".into())));
+    let after = answer(Some(3), br#"{"ok": false, "error_type": "BadReply", "message": "not json", "tool_calls": 8}"#, b"");
+    assert_eq!(after, Err(Failed::Invalid("BadReply: not json [after 8 tool call(s)]".into())));
     assert!(matches!(answer(Some(2), br#"{"ok": false, "error_type": "NoModel", "message": "quota"}"#, b""), Err(Failed::Unavailable(_))));
     assert!(matches!(answer(Some(4), b"{\"ok\": false}", b""), Err(Failed::Timeout(_))));
     assert!(matches!(answer(Some(5), b"{\"ok\": false}", b""), Err(Failed::Rejected(_))));

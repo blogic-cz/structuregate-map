@@ -58,6 +58,10 @@ pub(super) fn answer(code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> Result<
             if let Some(errors) = s["errors"].as_array().filter(|e| !e.is_empty()) {
                 why.push_str(&format!(" ({})", errors.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("; ")));
             }
+            // A FAILURE AFTER TOOL CALLS says how many: an answer refused after eight queries is not one never asked.
+            if let Some(n) = s["tool_calls"].as_u64().or_else(|| s["usage"]["tool_calls"].as_u64()) {
+                why.push_str(&format!(" [after {n} tool call(s)]"));
+            }
             why
         }
         None => {

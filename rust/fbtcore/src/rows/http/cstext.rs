@@ -25,11 +25,12 @@ pub(super) fn formatted(url: &str) -> String {
 }
 
 /// An interpolation's alternatives as patterns, each path once: each piece's text, a hole `{}`. An alternative of holes
-/// alone (a ternary's arm only the run time knows) says nothing while another one says a path, and is left out.
+/// alone (a ternary's arm only the run time knows) says nothing while another one says a path, and is left out; when
+/// none says one (`{}` and `{}/{}`, a joiner's arms over two run-time values), they are one unknown url, the shortest.
 pub(super) fn folded(alternatives: &[Value]) -> Vec<String> {
     let all = spelled(alternatives);
     let said: Vec<String> = all.iter().filter(|p| p.replace("{}", "").chars().any(char::is_alphanumeric)).cloned().collect();
-    if said.is_empty() { all } else { said }
+    if said.is_empty() { all.into_iter().min_by_key(String::len).into_iter().collect() } else { said }
 }
 
 pub(super) fn spelled(alternatives: &[Value]) -> Vec<String> {
@@ -45,9 +46,29 @@ pub(super) fn spelled(alternatives: &[Value]) -> Vec<String> {
     spelled.into_iter().collect()
 }
 
-/// A method as wrappers are keyed: its qualname and how many parameters it declares (`Demo.Api.Post/2`).
-pub(super) fn overload(qualname: &str, parameters: usize) -> String {
-    format!("{qualname}/{parameters}")
+/// A method as wrappers are keyed: its qualname, how many type parameters and how many parameters it declares
+/// (`Demo.Api.Post/1/2`) - overloads differing in either are two keys.
+pub(super) fn overload(qualname: &str, generics: usize, parameters: usize) -> String {
+    format!("{qualname}/{generics}/{parameters}")
+}
+
+/// How many type arguments a symbol gives its method - the `<..>` it ends in: `A.B<T>.C<D, E<F>>` gives two,
+/// `A.B<T>.C` none.
+pub(super) fn generics(symbol: &str) -> usize {
+    if !symbol.ends_with('>') {
+        return 0;
+    }
+    let (mut nested, mut count) = (0usize, 1usize);
+    for c in symbol.chars().rev() {
+        match c {
+            '>' => nested += 1,
+            '<' if nested == 1 => return count,
+            '<' => nested -= 1,
+            ',' if nested == 1 => count += 1,
+            _ => {}
+        }
+    }
+    0
 }
 
 /// How many parameters a call's `signature` lists: `A.B<T, U>(T, (int, string), D<E, F>)` lists three.
@@ -85,6 +106,13 @@ mod tests {
         assert_eq!(arity("A.B<T, U>(T, (int, string), D<E, F>, int[,])"), 4);
         assert_eq!(arity("A.B()"), 0);
         assert_eq!(arity("A.B<T>(string)"), 1);
-        assert_eq!(overload("Demo.Api.Post", 2), "Demo.Api.Post/2");
+        assert_eq!(overload("Demo.Api.Post", 1, 2), "Demo.Api.Post/1/2");
+        assert_eq!(generics("A.B<T>.C<D, E<F, G>>"), 2);
+        assert_eq!(generics("A.B<T>.C"), 0);
+        assert_eq!(generics("A.C<System.String>"), 1);
+        let alternatives = serde_json::json!([[{"symbol": "a"}, "/", {"symbol": "b"}], [{"symbol": "b"}]]);
+        assert_eq!(folded(alternatives.as_array().unwrap()), ["{}"]);
+        let said = serde_json::json!([[{"symbol": "a"}], ["/x/", {"symbol": "b"}]]);
+        assert_eq!(folded(said.as_array().unwrap()), ["/x/{}"]);
     }
 }
