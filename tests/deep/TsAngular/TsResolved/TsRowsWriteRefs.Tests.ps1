@@ -34,6 +34,11 @@ Test-Case 'tsrows: a template write carries the target of the member it writes (
     # `f.On = $event` writes Flags.On (line 2); `done = $event` the component's own member (line 8).
     Assert-Line $w 'write=On@2'
     Assert-Line $w 'write=done@8'
+    # WHO LISTENS TO AN OUTPUT (rows 135): each `(valueChange)` binding is an `output_usage` row naming the `io` output it binds.
+    $o = Invoke-TsRowsQ $made.Db ("SELECT 'ou=' || u.output || '|' || i.member || '|' || i.kind || '|' || i.bound_count || '|' || u.source AS r " +
+        "FROM output_usage u JOIN io i ON i.id = u.io ORDER BY r")
+    Assert-Line $o 'ou=valueChange|valueChange|output|2|done = $event'
+    Assert-Line $o 'ou=valueChange|valueChange|output|2|f.On = $event'
 }
 
 $script:TsPlaceFiles = @{

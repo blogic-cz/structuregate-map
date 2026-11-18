@@ -105,8 +105,8 @@ export function rollupInputUsage(store) {
     // A STATIC ATTRIBUTE SETS AN INPUT TOO: `<demo-beta title="x" plain>` fills `title` and `plain` as `[title]="'x'"`
     // would, so skipping `attribute` bindings read every input set only that way as never bound. It has no
     // expression, so its `source` is the literal text (empty for a bare attribute) and `expression` stays null.
-    // AN `(event)` BINDING IS AN OUTPUT'S USE: it counts in `io.bound_count` of the output it names (no `input_usage` row,
-    // that table is the inputs'), so `bound_count` reads the same for both kinds instead of 0 for every output.
+    // AN `(event)` BINDING IS AN OUTPUT'S USE: it counts in `io.bound_count` of the output it names and is an `output_usage` row
+    // (rows 135) - who listens to an output is a join, as who fills an input is.
     const isOutput = b.kind === 'output';
     if (!isOutput && b.kind !== 'input' && b.kind !== 'template_attr' && b.kind !== 'attribute') continue;
     const name = str(b.name);
@@ -127,6 +127,11 @@ export function rollupInputUsage(store) {
         .find((row) => row !== undefined);
       if (io === undefined) continue;
       if (isOutput) {
+        store.add('output_usage', 'ou', {
+          io: io.id, output: name, to_class: targetClass, component: io.component,
+          from_component: b.component, template: b.template, node: b.node, binding: b.id,
+          source: b.source ?? null, expression: expressionOfBinding.get(b.id) ?? null, line: b.line ?? null,
+        });
         boundCount.set(io.id, (boundCount.get(io.id) ?? 0) + 1);
         continue;
       }

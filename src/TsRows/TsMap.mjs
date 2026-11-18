@@ -359,6 +359,7 @@ async function main() {
   // 126: #138 - a `Map#get` call keeps `$key_expr`/`$entry_exprs` (`TsExpr/TsValue.mjs::lookupKeys`), and a class created from an entry holds
   //     `lookup:<key>@<argument>` on its `renders.return_ways` (`TsDerive/TsDynRender.mjs`).
   // 127: #53 - a key's ways are `key_reach_ways` rows naming a `key_reach_chains` row, no longer `key_reach.paths` nodes (`rust .../key/key_ways.rs`).
+  // 135: an `(event)` binding is an `output_usage` row - the output it names, as `input_usage` is an input's (`TsDerive/TsInputs/TsInputUsage.mjs`).
   // 134: a code read with a `target` and every template read or write carry the NAME's `line` and `col` in the file (`TsExprNorm.mjs`, `TsTpl/TsTplExpr.mjs`).
   // 132: every path a row's structure holds is relative to the workspace root, as `files.path` is (`TsPaths.mjs::relativeCells`, divergence #120).
   // 131: a `.d.ts` in the tree is walked (`TsSetup/TsProgram.mjs::projectSourceFiles`): a member a global augmentation declares is a `type_members` row, a call to it names its `target_id`.
@@ -398,7 +399,7 @@ async function main() {
   // 99: an immer handler's `writes` follow the helpers it hands its draft to, and the callbacks they call (`TsExpr/TsExprDescribe.mjs::draftWrites`).
   const setup = createHash('sha256').update(JSON.stringify({
     typescript: tsVersion, angular: ngVersion, node: process.version, tier: found.tier,
-    config: config.file, data: config.data, rows: 134, build: args.build,
+    config: config.file, data: config.data, rows: 135, build: args.build,
   })).digest('hex');
   // THE DATABASE BEING WRITTEN IS NOT SOURCE. Its `-wal` and `-journal` siblings are not either, nor the
   // last run's trace beside it; all change because of the run, so a tree holding them could never read as unchanged.

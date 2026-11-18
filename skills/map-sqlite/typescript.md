@@ -37,7 +37,7 @@ Beside the shared tables it adds the FRAMEWORK tables:
 | area | tables |
 |---|---|
 | declarations | `components` `directives` `pipes` `injectables` `ng_modules` `class_decorators` `members` `locals` `enums` `interfaces` `type_aliases` `type_members` `switch_cases` `template_literals` `template_strings` `projects` |
-| injection and I/O | `di` `io` `input_usage` |
+| injection and I/O | `di` `io` `input_usage` `output_usage` |
 | templates | `templates` `template_nodes` `bindings` `renders` `renders_out_of_scope` `render_graph` `component_reach` `selector_index` |
 | routing and gates | `routes` `route_keys` `gates` `gate_values` `gate_index` |
 | NgRx | `state_actions` `state_handlers` `state_selectors` `state_effects` |
