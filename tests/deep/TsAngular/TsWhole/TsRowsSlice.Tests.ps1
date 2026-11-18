@@ -92,7 +92,8 @@ Test-Case 'tsrows: a slice is marked on every query, refused as a map database, 
 Test-Case 'tsrows: a slim map keeps the tables, rows and derived reads its config picks' {
     $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsSliceFiles) -Shared
     Assert-Exit $made.Result 0
-    $at = New-Tree @{ 'slim.json' = '{ "tables": ["files", "file_text", "calls", "expressions"], "where": { "calls": "callee = ''total''" }, "derived": ["ts_reads"] }'
+    $at = New-Tree @{ 'slim.json' = ('{ "tables": ["files", "file_text", "calls", "expressions"], "where": { "calls": "callee = ''total''" },' +
+        ' "nodes": { "calls": ["target"], "expressions": [] }, "derived": ["ts_reads"] }')
         'bad.json' = '{ "tables": ["files", "no_such_table"] }' }
     $slim = Join-Path $at 'slim.sqlite'
     Assert-Exit (Invoke-Gate --map-slim $made.Db --slim-config (Join-Path $at 'slim.json') --map-sqlite $slim) 0
@@ -105,6 +106,9 @@ Test-Case 'tsrows: a slim map keeps the tables, rows and derived reads its confi
     Assert-Line $calls 'call=total'
     Assert-NoLine $calls 'call=twice'
     Assert-Equal (& $count $slim "SELECT count(*) FROM calls__target WHERE owner NOT IN (SELECT id FROM calls)") '0' 'no node row of a row left out'
+    # THE NODE TABLES `nodes` LISTS, and only those: `calls__target` stays, `calls__args` and every `expressions__*` go - `ts_reads` is read off the base's trees.
+    Assert-Equal (& $count $made.Db "SELECT count(*) FROM sqlite_master WHERE name = 'calls__args'") '1' 'the base map holds the node table'
+    Assert-Equal (& $count $slim "SELECT count(*) FROM sqlite_master WHERE name = 'calls__args' OR name LIKE 'expressions\_\_%' ESCAPE '\'") '0' 'a node table not listed is left out'
     # A READ AND ITS DECLARATION: `total` in caller.ts (declared in total.ts line 1), `this.http` in loner.ts (the constructor parameter, line 3).
     $reads = Invoke-TsRowsQ $slim ("SELECT 'read=' || r.name || '|' || f.path || ':' || r.line || ':' || r.col || '|' || d.path || ':' || r.decl_line AS r " +
         "FROM ts_reads r JOIN files f ON f.id = r.file JOIN files d ON d.id = r.decl_file")
@@ -116,6 +120,13 @@ Test-Case 'tsrows: a slim map keeps the tables, rows and derived reads its confi
     $bad = Invoke-Gate --map-slim $made.Db --slim-config (Join-Path $at 'bad.json') --map-sqlite (Join-Path $at 'bad.sqlite')
     Assert-Exit $bad 2
     Assert-Line $bad 'the base map holds no table no_such_table'
+    # A BASE OF ANOTHER SCHEMA is refused before anything is copied.
+    $old = Join-Path $at 'old.sqlite'
+    Copy-Item -LiteralPath $slim -Destination $old
+    & $script:Python -c "import sqlite3, sys; c = sqlite3.connect(sys.argv[1]); c.execute(`"UPDATE _meta SET value = '1' WHERE key = 'schema'`"); c.commit()" $old
+    $stale = Invoke-Gate --map-slim $old --slim-config (Join-Path $at 'slim.json') --map-sqlite (Join-Path $at 'stale.sqlite')
+    Assert-Exit $stale 2
+    Assert-Line $stale 'the base map is of schema 1'
 }
 
 }

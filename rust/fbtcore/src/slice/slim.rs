@@ -11,6 +11,7 @@
 //!   shadow tables, copied as stored. `_meta` is always kept. A view of the base is kept when every table it reads was.
 //! - `where`: `{ table: condition }` - a kept table holds only the rows the SQL condition holds of (read in the BASE's schema); its node
 //!   tables follow the rows kept.
+//! - `nodes`: `{ table: [column, ...] }` - the node tables of a kept table that stay (`[]` none); a table with no entry keeps them all.
 //! - `derived`: tables made from the base that it does not hold as such - `ts_reads` (`slimreads.rs`).
 //!
 //! THE MARK: `_meta` `partial` = 1 (the deep map refuses to write into it, as into a slice), `slim:of` (the base, absolute), `slim:at`
@@ -34,6 +35,8 @@ struct Config {
     filters: BTreeMap<String, String>,
     #[serde(default)]
     derived: Vec<String>,
+    #[serde(default)]
+    nodes: BTreeMap<String, Vec<String>>,
 }
 
 /// The tables a config can derive: name, and what makes it.
@@ -60,6 +63,11 @@ fn slim(base: &str, config: &str, out_db: &str) -> Result<String> {
     if Path::new(out_db) == Path::new(base) {
         bail!("the slim map cannot be written over its base map");
     }
+    // A BASE OF ANOTHER SCHEMA is refused before anything is copied: its node tables have other columns than the ones this build writes `_meta` with.
+    if !crate::rows::store::usable(Path::new(base)) {
+        let at = Connection::open_with_flags(base, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok().and_then(|c| crate::rows::meta::get(&c, "schema"));
+        bail!("the base map is of schema {}, this build writes {} - map it again with this build first", at.as_deref().unwrap_or("(none)"), crate::rows::store::SCHEMA_VERSION);
+    }
     let text = std::fs::read_to_string(config).with_context(|| format!("read {config}"))?;
     let config: Config = serde_json::from_str(&text).with_context(|| format!("{config} is no slim config"))?;
     for suffix in ["", "-wal", "-shm", "-journal"] {
@@ -83,12 +91,24 @@ fn slim(base: &str, config: &str, out_db: &str) -> Result<String> {
     if let Some(t) = config.filters.keys().find(|t| !asked.contains(t.as_str())) {
         bail!("`where` names {t}, which `tables` does not keep");
     }
+    if let Some(t) = config.nodes.keys().find(|t| !asked.contains(t.as_str())) {
+        bail!("`nodes` names {t}, which `tables` does not keep");
+    }
+    let missing: Vec<String> = config.nodes.iter().flat_map(|(t, cols)| cols.iter().map(move |c| format!("{t}__{c}"))).filter(|n| !tables.contains_key(n.as_str())).collect();
+    if !missing.is_empty() {
+        bail!("the base map holds no node table {}", missing.join(", "));
+    }
     if let Some(d) = config.derived.iter().find(|d| !DERIVED.iter().any(|(n, _)| n == d)) {
         bail!("no derived table {d} (one of: {})", DERIVED.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", "));
     }
     // EVERY TABLE MADE: the kept ones, their node tables, and a full-text table's shadows (`<name>_data`, ...).
     let owned = |name: &str, by: &str| name.strip_prefix(by).is_some_and(|rest| rest.starts_with("__") || (virtual_table(by) && rest.starts_with('_')));
-    let made: Vec<&str> = tables.keys().copied().filter(|n| asked.contains(n) || asked.iter().any(|a| owned(n, a))).collect();
+    // A NODE TABLE a `nodes` entry does not list is left out; a table with no entry keeps them all, `_meta` always.
+    let picked = |n: &str| match n.split_once("__") {
+        Some((t, col)) => t == "_meta" || config.nodes.get(t).is_none_or(|cols| cols.iter().any(|c| c == col)),
+        None => true,
+    };
+    let made: Vec<&str> = tables.keys().copied().filter(|n| (asked.contains(n) || asked.iter().any(|a| owned(n, a))) && picked(n)).collect();
     db.execute_batch("BEGIN;")?;
     let mut rows = 0usize;
     for name in made.iter().filter(|n| !n.contains("__") && !asked.iter().any(|a| owned(n, a))) {
