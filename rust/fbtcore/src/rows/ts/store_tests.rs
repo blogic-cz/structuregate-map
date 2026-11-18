@@ -379,3 +379,11 @@ fn a_cloned_row_shares_its_cells_and_answers_what_its_original_does() {
     assert_eq!(clone.into_map(), rows[1].to_map(), "a clone given back for a write is the row");
     });
 }
+
+#[test]
+fn a_reads_own_place_is_left_out_of_the_tree_a_pass_reads_and_a_targets_line_is_kept() {
+    let tree = json!({"k": "Write", "name": "x", "line": 4, "col": 9, "value": {"k": "Read", "name": "$event", "line": 4, "col": 13},
+        "receiver": {"k": "Read", "name": "m", "line": 4, "col": 7, "target": {"name": "m", "file": "a.ts", "line": 2}}});
+    assert_eq!(super::row::unplaced(tree), json!({"k": "Write", "name": "x", "value": {"k": "Read", "name": "$event"},
+        "receiver": {"k": "Read", "name": "m", "target": {"name": "m", "file": "a.ts", "line": 2}}}));
+}

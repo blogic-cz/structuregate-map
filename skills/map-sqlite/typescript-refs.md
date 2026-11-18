@@ -111,6 +111,9 @@ of the class hands one type. A directive that declares no context takes its BASE
 A CODE expression's tree (`returns`/`locals`/`assignments`/`calls` through their `expressions` row, `branches.condition_expr`, `switch_cases`) is read the same way: EVERY link of a property chain carries its own `target`
 (`{name, file, line}`, the declaration that name lands on, rows 73), not only the outermost - `this.holder.Inner.Id` targets `holder`, `Inner` and `Id` each, `SafeRead` links too. A link whose
 type the checker cannot follow (an `any`) has none.
+**WHERE THE READ IS (rows 134):** a node with a `target` in a code tree, and every `Read`, `SafeRead` and `Write` in a template tree, also has `line` and `col` (one-based) - its NAME's
+place in the file (a template's in its `.html`, an inline one's in the `.ts`), since the row's own line is only where the expression or binding starts. Who reads a declaration:
+the `target` node's `file`/`line` children, the read's place its sibling `line`/`col` (`coalesce` with the row's line for a map before rows 134).
 
 A bare NAME in a code tree is bound by what it is (rows 74), one of three - `target`, `local` or `param`, never two - and a name none of them applies to (`undefined`, a type parameter)
 has none. A `target` is a top-level `const`, function, enum or CLASS (`JsonSerializer.parse(x)`, `new Foo()`, `Foo.Member`, an import alias followed); a class target also has `kind: 'class'` and its line is the

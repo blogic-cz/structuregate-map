@@ -24,11 +24,15 @@ import { ELSE_GATE } from './TsGateChain.mjs';
 /** Angular's own container tags, asked of ANGULAR. They are compiler constructs and not components, so "no
  *  directive matched" is the correct outcome for them and must not be reported as a gap - it was, nearly all
  *  of the notes. */
+/** The characters Angular's whitespace removal collapses (`ml_parser/html_whitespaces.ts`, `WS_CHARS`). */
+const WHITESPACE = new Set([' ', '\f', '\n', '\r', '\t', '\v', '\u1680', '\u180e', '\u2028', '\u2029', '\u202f', '\u205f', '\u3000', '\ufeff',
+  ...Array.from({ length: 11 }, (_, i) => String.fromCharCode(0x2000 + i))]);
+
 const isBuiltinTag = (ng, tag) => ng.isNgContainer(tag) || ng.isNgTemplate(tag) || ng.isNgContent(tag);
 
 
 export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carriers, gateInputs }) {
-  const { normalizeExpr } = makeExprNormalizer(ng);
+  const { normalizeExpr, placing } = makeExprNormalizer(ng);
   const { classType, styleType, propertyType, attributeType } = probeBindingTypes(ng);
   const { emitRender, emitExpr, emitBound } = makeEmitters({
     store, normalizeExpr, carriers, gateInputs, classType, styleType, propertyType, attributeType,
@@ -223,6 +227,7 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
       return out;
     };
 
+    let inText = (_node, make) => make();
     const tplId = store.add('templates', 't', {
       component: comp.id, class: comp.class, name: comp.name,
       file: comp.template_file ?? comp.file, path: comp.template_abs ? relativeTo(feRoot, comp.template_abs) : null,
@@ -266,7 +271,7 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
         nodeId = store.add('template_nodes', 'n', row);
         emitExpr({
           tplId, nodeId, comp, kind: 'interpolation', name: null,
-          norm: normalizeExpr(node.value), src: String(src),
+          norm: inText(node, () => normalizeExpr(node.value)), src: String(src),
         });
       } else if (kind === 'Icu') {
         row.icu_vars = Object.keys(node.vars ?? {});
@@ -292,7 +297,41 @@ export function makeTemplateExtractor({ ng, store, diag, feRoot, matcher, carrie
       if (empty) walk(empty, parentId, depth);
     };
 
-    for (const n of parsed.nodes ?? []) walk(n, null, 0);
+    // A READ'S PLACE: an expression's spans are offsets into the template text, a line start found by halving.
+    const starts = [0];
+    for (let i = 0; i < t.source.length; i++) if (t.source.charCodeAt(i) === 10) starts.push(i + 1);
+    const placeAt = (offset) => {
+      let lo = 0, hi = starts.length - 1;
+      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (starts[mid] <= offset) lo = mid; else hi = mid - 1; }
+      return shift({ line: lo + 1, col: offset - starts[lo] + 1 });
+    };
+    placing(placeAt);
+    inText = (node, make) => {
+      placing(placeInText(node));
+      try { return make(); } finally { placing(placeAt); }
+    };
+    /** AN INTERPOLATION IS PARSED FROM ITS TEXT AFTER THE WHITESPACE IS COLLAPSED (`preserveWhitespaces: false`: a run of two or more
+     *  whitespace characters becomes one space), its spans counted in that text from the node's start - so an offset is walked back
+     *  through the node's own source to the character it stands for. */
+    const placeInText = (node) => {
+      const from = node.sourceSpan?.start?.offset, to = node.sourceSpan?.end?.offset;
+      if (typeof from !== 'number' || typeof to !== 'number') return placeAt;
+      return (offset) => {
+        let at = from, left = offset - from;
+        while (left > 0 && at < to) {
+          let run = 0;
+          while (at + run < to && WHITESPACE.has(t.source[at + run])) run += 1;
+          at += run >= 2 ? run : 1;
+          left -= 1;
+        }
+        return placeAt(at);
+      };
+    };
+    try {
+      for (const n of parsed.nodes ?? []) walk(n, null, 0);
+    } finally {
+      placing(null);
+    }
     return { tplId };
   }
 

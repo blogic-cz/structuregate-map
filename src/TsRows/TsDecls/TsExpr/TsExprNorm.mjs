@@ -15,6 +15,12 @@
 import { isPlainString } from '../../TsNodes.mjs';
 
 export function makeTsExprNormalizer(ts, resolveRead, resolveName = null, resolveLocal = null, resolveParam = null) {
+  /** WHERE A BOUND READ IS (rows 134): its name's `line` and `col`, one-based - the expression's own line is only its start, and a read in a
+   *  long expression sits many lines below it. Only on a node with a `target`: the question is who reads a declaration. */
+  const placeOf = (name) => {
+    const at = name.getSourceFile().getLineAndCharacterOfPosition(name.getStart());
+    return { line: at.line + 1, col: at.character + 1 };
+  };
   /**
    * A BARE NAME AS A READ, bound by what it is: a module's declaration (`target`), a local (`local`) or a parameter (`param`) - one of the three, never
    * two. A SHORTHAND PROPERTY (`{ client }`) is one too: its value is the name, so the object a call is handed names what the call hands it.
@@ -29,7 +35,7 @@ export function makeTsExprNormalizer(ts, resolveRead, resolveName = null, resolv
     const local = !target && resolveLocal ? resolveLocal(node) : null;
     // A PARAMETER names where its `params` item is declared (`param`), as a local does: a name that is neither is a name nothing in the tree declares.
     const param = !target && !local && resolveParam ? resolveParam(node) : null;
-    return { k: 'Read', name: node.text, receiver: { k: 'Implicit' }, ...(target ? { target } : {}),
+    return { k: 'Read', name: node.text, receiver: { k: 'Implicit' }, ...(target ? { target, ...placeOf(node) } : {}),
       ...(local ? { local } : {}), ...(param ? { param } : {}) };
   };
   const norm = (node) => {
@@ -62,7 +68,7 @@ export function makeTsExprNormalizer(ts, resolveRead, resolveName = null, resolv
       const target = resolveRead ? resolveRead(node.name) : null;
       return {
         k: safe ? 'SafeRead' : 'Read', name: node.name.getText(), receiver: norm(node.expression),
-        ...(target ? { target } : {}),
+        ...(target ? { target, ...placeOf(node.name) } : {}),
       };
     }
     if (ts.isElementAccessExpression(node)) {

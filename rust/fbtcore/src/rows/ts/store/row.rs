@@ -148,8 +148,29 @@ impl At<'_> {
             },
             _ => format!("#{}", self.rowid),
         };
-        source.get(&owner).map(null_literal).unwrap_or(Value::Null)
+        source.get(&owner).map(null_literal).map(unplaced).unwrap_or(Value::Null)
     }
+}
+
+/// A READ'S OWN PLACE IS NO PART OF WHAT IT SAYS (rows 134): an expression node (an object with a `k`) carries its name's `line` and
+/// `col` for a consumer asking where a declaration is read, and every pass here compares trees - a binding of the same place on two
+/// elements, a write's place with a read's - so the place is left out of the tree they read. A `target`'s own `line` (no `k`) stays.
+pub fn unplaced(mut value: Value) -> Value {
+    let mut stack = vec![&mut value];
+    while let Some(v) = stack.pop() {
+        match v {
+            Value::Object(o) => {
+                if o.contains_key("k") {
+                    o.remove("line");
+                    o.remove("col");
+                }
+                stack.extend(o.values_mut());
+            }
+            Value::Array(a) => stack.extend(a.iter_mut()),
+            _ => {}
+        }
+    }
+    value
 }
 
 /// A WHOLE CELL THAT IS THE `null` LITERAL is read as the JSON null it stands for. The half writes it

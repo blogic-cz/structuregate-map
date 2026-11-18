@@ -56,6 +56,12 @@ export function makeExprNormalizer(ng) {
    * `params`: the arrow-function parameters in scope. A bare read of one is the parameter, not the component
    * member of that name, and is marked `param` so the summary leaves it out of `reads` (`TsExprSummary.mjs`).
    */
+  /** WHERE A TEMPLATE READ IS (rows 134): the template being read hands `place`, an offset into its text to the file's `{line, col}`; a read,
+   *  safe read and write carry their NAME's place, since the binding's line is only where its expression starts. */
+  let place = null;
+  const placing = (fn) => { place = fn; };
+  const placeOf = (a) => (place !== null && typeof a?.nameSpan?.start === 'number' ? place(a.nameSpan.start) : {});
+
   function normalizeExpr(ast, params = null) {
     if (ast === null || ast === undefined) return null;
     const k = kindOf(ast);
@@ -82,12 +88,12 @@ export function makeExprNormalizer(ng) {
       case 'SafeRead': {
         const receiver = normalizeExpr(a.receiver, params);
         const param = params !== null && receiver?.k === 'Implicit' && params.has(a.name);
-        return { k, name: a.name, receiver, ...(param ? { param: true } : {}) };
+        return { k, name: a.name, receiver, ...(param ? { param: true } : {}), ...placeOf(a) };
       }
       case 'Write':
         return {
           k, name: a.name, receiver: normalizeExpr(a.receiver, params),
-          value: normalizeExpr(a.value, params),
+          value: normalizeExpr(a.value, params), ...placeOf(a),
         };
       case 'This':
       case 'Implicit':
@@ -100,7 +106,7 @@ export function makeExprNormalizer(ng) {
           const value = normalizeExpr(a.right, params);
           const op = a.operation === '=' ? {} : { op: a.operation };
           return a.left instanceof ng.PropertyRead
-            ? { k: 'Write', name: a.left.name, receiver: normalizeExpr(a.left.receiver, params), value, ...op }
+            ? { k: 'Write', name: a.left.name, receiver: normalizeExpr(a.left.receiver, params), value, ...op, ...placeOf(a.left) }
             : {
               k: 'KeyedWrite', receiver: normalizeExpr(a.left.receiver, params),
               key: normalizeExpr(a.left.key, params), value, ...op,
@@ -174,5 +180,5 @@ export function makeExprNormalizer(ng) {
     }
   }
 
-  return { normalizeExpr, kindOf };
+  return { normalizeExpr, kindOf, placing };
 }
