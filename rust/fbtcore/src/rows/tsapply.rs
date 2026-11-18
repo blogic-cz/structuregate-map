@@ -21,7 +21,7 @@
 
 use super::deps;
 use super::digest::Digest;
-use super::half::drop_half_tables;
+use super::half::{self, drop_half_tables};
 use super::pyjson;
 use super::schema;
 use super::store::{self, WriteRequest};
@@ -271,6 +271,8 @@ fn apply_with(db_path: &Path, root: &str, build: &str, mut payload: TsPayload, d
     let node_whole: BTreeSet<String> = payload.whole.iter().cloned().collect();
     let mut kept: Option<(unchanged::Before, BTreeMap<String, i64>)> = None;
     let mut http_before: Option<super::http::inputs::Before> = None;
+    // THE SHARED TABLES' INDEXES A FULL RUN DROPPED, made again once its rows are written (`half::made_again`).
+    let mut indexes_again: Vec<String> = Vec::new();
     if payload.partial {
         let db = Connection::open(db_path)
             .with_context(|| format!("the database could not be opened: {}", db_path.display()))?;
@@ -316,7 +318,7 @@ fn apply_with(db_path: &Path, root: &str, build: &str, mut payload: TsPayload, d
         unchanged::forget(&db, LANG)?;
         tsderive::forget(&db)?;
         super::http::inputs::forget(&db)?;
-        drop_half_tables(&db, LANG)?;
+        indexes_again = drop_half_tables(&db, LANG)?;
         db.execute_batch("COMMIT")?;
         receipt.phases.insert("drop the old rows".to_string(), dropping.elapsed().as_millis() as u64);
     }
@@ -466,6 +468,7 @@ fn apply_with(db_path: &Path, root: &str, build: &str, mut payload: TsPayload, d
     let indexing = std::time::Instant::now();
     let db = Connection::open(db_path)?;
     schema::index_declared(&db, LOOKUP_COLUMNS)?;
+    half::made_again(&db, &indexes_again)?;
     receipt.phases.insert("index the joins".to_string(), indexing.elapsed().as_millis() as u64);
     // WHO DERIVED WHAT IS NOW STORED, and what deriving it again needs that no row holds (`tsderive::rederive`).
     tsderive::remember(&db, build, &base, &payload.declared, receipt.fe.as_deref())?;

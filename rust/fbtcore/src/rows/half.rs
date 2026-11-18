@@ -60,45 +60,66 @@ pub fn drop_half(db: &Connection, half: &str) -> Result<()> {
 /// run about to write every row again: emptied, its indexes stayed and every insert kept them up, so a full run over an
 /// existing map wrote its rows half as slowly again as one into a fresh file, and emptying them was seconds more. The
 /// insert creates the table again as a fresh map's, and the store indexes it after. A table another half's rows share
-/// keeps them (`delete_half_rows`).
-pub fn drop_half_tables(db: &Connection, half: &str) -> Result<()> {
+/// keeps them (`delete_half_rows`), its indexes that are not UNIQUE dropped first and handed back, to be made again by the
+/// caller AFTER the new rows are written (`made_again`): made right after the delete, the index of the largest shared table
+/// was built over the other half's rows and then kept up insert by insert - minutes on a large map, most of this step.
+pub fn drop_half_tables(db: &Connection, half: &str) -> Result<Vec<String>> {
+    let mut again = Vec::new();
     for table in tables_with_half(db)? {
         let escaped = schema::escape(&table);
         let shared = db
             .prepare(&format!("SELECT 1 FROM \"{escaped}\" WHERE \"{HALF_COLUMN}\" IS NOT ?1 LIMIT 1"))?
             .exists([half])?;
         if shared {
-            let mut both: Vec<String> = super::cells::columns_of(db, &table).into_iter().map(|(_, child)| child).collect();
-            both.push(table.clone());
-            without_secondary_indexes(db, &both, || delete_half_rows(db, &table, half))?;
+            // ONLY WHAT KEEPS ROWS loses its indexes: a node table no other half's row owns nodes in is emptied whole below,
+            // its indexes with it, and dropping them first freed millions of index pages for nothing.
+            let mut foreign: Vec<String> = Vec::new();
+            for (_, child) in super::cells::columns_of(db, &table) {
+                if foreign_nodes(db, &table, &child, half)? {
+                    foreign.push(child);
+                }
+            }
+            let mut kept = foreign.clone();
+            kept.push(table.clone());
+            again.extend(drop_secondary_indexes(db, &kept)?);
+            delete_shared(db, &table, half, &foreign)?;
             continue;
         }
         super::cells::drop_children(db, &table)?;
         db.execute_batch(&format!("DROP TABLE \"{escaped}\""))?;
     }
+    Ok(again)
+}
+
+/// The indexes `drop_half_tables` dropped, made again over the rows now written - each only when the store did not make it
+/// itself meanwhile (a node table's value index, a declared join's).
+pub fn made_again(db: &Connection, indexes: &[String]) -> Result<()> {
+    for sql in indexes {
+        let sql = sql.trim_start();
+        let sql = match sql.strip_prefix("CREATE INDEX ") {
+            Some(rest) if !rest.trim_start().to_uppercase().starts_with("IF NOT EXISTS") => format!("CREATE INDEX IF NOT EXISTS {rest}"),
+            _ => sql.to_string(),
+        };
+        db.execute_batch(&sql)?;
+    }
     Ok(())
 }
 
-/// `work` run with every index of `tables` that is not UNIQUE dropped, each made again after it: a delete of most of a
-/// table keeps every index up row by row, and on a large map the nodes of this half's expressions - millions of rows in a
-/// table another half's rows share - took minutes that way and seconds without (the unique `(owner, n)` key the delete
-/// finds them by stays). Only for a run that writes every row again: a partial run's few deletes would rebuild indexes
-/// over the whole table for nothing.
-fn without_secondary_indexes<T>(db: &Connection, tables: &[String], work: impl FnOnce() -> Result<T>) -> Result<T> {
-    let mut made_again = Vec::new();
+/// Every index of `tables` that is not UNIQUE, dropped; their SQL. A delete of most of a table keeps every index up row by row,
+/// and on a large map the nodes of this half's expressions - millions of rows in a table another half's rows share - took minutes
+/// that way and seconds without (the unique `(owner, n)` key the delete finds them by stays). Only for a run that writes every row
+/// again: a partial run's few deletes would rebuild indexes over the whole table for nothing.
+fn drop_secondary_indexes(db: &Connection, tables: &[String]) -> Result<Vec<String>> {
+    let mut dropped = Vec::new();
     for table in tables {
         let mut stmt = db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?1 AND sql IS NOT NULL")?;
         let found: Vec<(String, String)> = stmt.query_map([table], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
         for (name, sql) in found.into_iter().filter(|(_, sql)| !sql.trim_start().to_uppercase().starts_with("CREATE UNIQUE")) {
             db.execute_batch(&format!("DROP INDEX \"{}\"", schema::escape(&name)))?;
-            made_again.push(sql);
+            dropped.push(sql);
         }
     }
-    let out = work()?;
-    for sql in made_again {
-        db.execute_batch(&sql)?;
-    }
-    Ok(out)
+    Ok(dropped)
 }
 
 /// Every row of `table` this half wrote, and their nodes, gone; how many rows went.
@@ -118,21 +139,44 @@ pub fn delete_half_rows(db: &Connection, table: &str, half: &str) -> Result<usiz
         // ONLY THIS HALF'S ROWS OWN NODES IN is emptied whole: another half's rows sharing the table write no nodes to some
         // of its columns (the TypeScript tree of an expression has no C# counterpart), and deleting millions of nodes
         // owner by owner, every index kept up, was most of a large map's whole-replacement time.
-        let owner = super::cells::owner_expr(db, table, "t");
-        let mine = format!("SELECT {owner} FROM \"{escaped}\" t WHERE t.\"{HALF_COLUMN}\" = ?1");
+        let mut foreign = Vec::new();
         for (_, child) in super::cells::columns_of(db, table) {
-            let child = schema::escape(&child);
-            let foreign = db.prepare(&format!("SELECT 1 FROM \"{child}\" WHERE owner NOT IN ({mine} AND {owner} IS NOT NULL) LIMIT 1"))?.exists([half])?;
-            if foreign {
-                db.execute(&format!("DELETE FROM \"{child}\" WHERE owner IN ({mine})"), [half])?;
-            } else {
-                db.execute(&format!("DELETE FROM \"{child}\""), [])?;
+            if foreign_nodes(db, table, &child, half)? {
+                foreign.push(child);
             }
         }
-        return Ok(db.execute(&format!("DELETE FROM \"{escaped}\" WHERE \"{HALF_COLUMN}\" = ?1"), [half])?);
+        return delete_shared(db, table, half, &foreign);
     }
     super::cells::clear_children(db, table)?;
     Ok(db.execute(&format!("DELETE FROM \"{escaped}\""), [])?)
+}
+
+/// This half's rows of a table another half's rows share, and their nodes: through the rows in a node table `foreign` names (another
+/// half's rows own nodes there), every node otherwise.
+fn delete_shared(db: &Connection, table: &str, half: &str, foreign: &[String]) -> Result<usize> {
+    let escaped = schema::escape(table);
+    let owner = super::cells::owner_expr(db, table, "t");
+    let mine = format!("SELECT {owner} FROM \"{escaped}\" t WHERE t.\"{HALF_COLUMN}\" = ?1");
+    for (_, child) in super::cells::columns_of(db, table) {
+        let held = foreign.contains(&child);
+        let child = schema::escape(&child);
+        if held {
+            db.execute(&format!("DELETE FROM \"{child}\" WHERE owner IN ({mine})"), [half])?;
+        } else {
+            db.execute(&format!("DELETE FROM \"{child}\""), [])?;
+        }
+    }
+    Ok(db.execute(&format!("DELETE FROM \"{escaped}\" WHERE \"{HALF_COLUMN}\" = ?1"), [half])?)
+}
+
+/// Whether another half's rows of `table` own nodes in `child`. Found from those rows, each asked of the node table's `(owner, n)`
+/// key - not by scanning every node against this half's owners, which on a large map read millions of nodes to find none.
+fn foreign_nodes(db: &Connection, table: &str, child: &str, half: &str) -> Result<bool> {
+    let owner = super::cells::owner_expr(db, table, "t");
+    let (escaped, child) = (schema::escape(table), schema::escape(child));
+    Ok(db
+        .prepare(&format!("SELECT 1 FROM \"{escaped}\" t WHERE t.\"{HALF_COLUMN}\" IS NOT ?1 AND EXISTS (SELECT 1 FROM \"{child}\" c WHERE c.owner = {owner}) LIMIT 1"))?
+        .exists([half])?)
 }
 
 /// Is this half the ONLY one with rows in this database?
@@ -282,9 +326,11 @@ mod tests {
             stmt.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect()
         };
         let before = indexes(&conn);
-        drop_half_tables(&conn, "typescript").unwrap();
+        let again = drop_half_tables(&conn, "typescript").unwrap();
         assert_eq!(tables(&conn), vec!["bindings", "bindings__tags"]);
-        assert_eq!(indexes(&conn), before, "every index dropped for the delete is made again");
+        assert!(!indexes(&conn).contains(&"ix_bindings_seen".to_string()), "a shared table's index waits for the new rows");
+        made_again(&conn, &again).unwrap();
+        assert_eq!(indexes(&conn), before, "every index dropped for the delete is made again after the write");
         drop(conn);
         assert_eq!(nodes_of(&shared, "csharp"), 4, "a list and its item for each of the two C# rows");
         assert_eq!(nodes_of(&shared, "typescript"), 0);
