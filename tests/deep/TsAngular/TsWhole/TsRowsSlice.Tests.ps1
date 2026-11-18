@@ -2,7 +2,8 @@
     A SLICE OF THE DEEP MAP (#111, `rust/fbtcore/src/slice/`): `--map-slice <base> --slice-files <file|@list> [--slice-hops N]
     --map-sqlite <out>` keeps the listed files and the files whose rows a RESOLVED link points into them, N hops deep, with
     every per-file row of those and every whole-program table whole; `_meta` `partial` and `files.sliced` mark it, a query
-    says so, and no map run writes into it. Its helpers are `TsRows.Helpers.ps1`.
+    says so, and no map run writes into it. A SLIM MAP (`slice/slim.rs`, `--map-slim <base> --slim-config <json> --map-sqlite <out>`)
+    keeps every file and only the tables, rows and derived tables its config picks. Its helpers are `TsRows.Helpers.ps1`.
 #>
 
 . (Join-Path $PSScriptRoot '../../TsRows.Helpers.ps1')
@@ -84,6 +85,37 @@ Test-Case 'tsrows: a slice is marked on every query, refused as a map database, 
     $bad = Invoke-Gate --map-slice $made.Db --slice-files 'apps/shop/src/nope.ts' --map-sqlite (Join-Path $made.Tree 'bad.sqlite')
     Assert-Exit $bad 2
     Assert-Line $bad 'not a file of the base map: apps/shop/src/nope.ts'
+}
+
+# A SLIM MAP KEEPS WHAT ITS CONFIG PICKS: the tables named (node tables, indexes and full text with them), the rows a `where` holds, the
+# derived `ts_reads` - one row per read site naming its declaration - and nothing else; a name the base does not hold is an error.
+Test-Case 'tsrows: a slim map keeps the tables, rows and derived reads its config picks' {
+    $made = New-TsRowsDb (New-TsRowsWorkspace $script:TsSliceFiles) -Shared
+    Assert-Exit $made.Result 0
+    $at = New-Tree @{ 'slim.json' = '{ "tables": ["files", "file_text", "calls", "expressions"], "where": { "calls": "callee = ''total''" }, "derived": ["ts_reads"] }'
+        'bad.json' = '{ "tables": ["files", "no_such_table"] }' }
+    $slim = Join-Path $at 'slim.sqlite'
+    Assert-Exit (Invoke-Gate --map-slim $made.Db --slim-config (Join-Path $at 'slim.json') --map-sqlite $slim) 0
+    $count = { param($db, $sql) ((Invoke-TsRowsQ $db $sql).Lines | Where-Object { $_ -match '^\s*\d+\s*$' } | Select-Object -First 1).Trim() }
+    Assert-Equal (& $count $slim "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'functions'") '0' 'a table not named is left out'
+    Assert-Equal (& $count $slim "SELECT count(*) FROM files") (& $count $made.Db "SELECT count(*) FROM files") 'a table named is whole'
+    Assert-Equal (& $count $slim "SELECT count(*) FROM file_text WHERE file_text MATCH 'loner'") (& $count $made.Db "SELECT count(*) FROM file_text WHERE file_text MATCH 'loner'") 'the full text answers'
+    # THE ROWS A `where` HOLDS, and their node rows alone.
+    $calls = Invoke-TsRowsQ $slim "SELECT 'call=' || callee AS r FROM calls"
+    Assert-Line $calls 'call=total'
+    Assert-NoLine $calls 'call=twice'
+    Assert-Equal (& $count $slim "SELECT count(*) FROM calls__target WHERE owner NOT IN (SELECT id FROM calls)") '0' 'no node row of a row left out'
+    # A READ AND ITS DECLARATION: `total` in caller.ts (declared in total.ts line 1), `this.http` in loner.ts (the constructor parameter, line 3).
+    $reads = Invoke-TsRowsQ $slim ("SELECT 'read=' || r.name || '|' || f.path || ':' || r.line || ':' || r.col || '|' || d.path || ':' || r.decl_line AS r " +
+        "FROM ts_reads r JOIN files f ON f.id = r.file JOIN files d ON d.id = r.decl_file")
+    Assert-Line $reads 'read=total|apps/shop/src/caller.ts:2:42|apps/shop/src/total.ts:1'
+    Assert-Line $reads 'read=http|apps/shop/src/loner.ts:4:22|apps/shop/src/loner.ts:3'
+    Assert-Equal (& $count $slim "SELECT count(*) FROM (SELECT file, line, col, name FROM ts_reads GROUP BY 1, 2, 3, 4 HAVING count(*) > 1)") '0' 'one row per read site'
+    Assert-Line (Invoke-TsRowsQ $slim "SELECT 'meta=' || key || '|' || value AS r FROM _meta WHERE key = 'partial'") 'meta=partial|1'
+    Assert-Line (Invoke-Gate --map-query $slim --sql "SELECT 1") 'slim map of '
+    $bad = Invoke-Gate --map-slim $made.Db --slim-config (Join-Path $at 'bad.json') --map-sqlite (Join-Path $at 'bad.sqlite')
+    Assert-Exit $bad 2
+    Assert-Line $bad 'the base map holds no table no_such_table'
 }
 
 }

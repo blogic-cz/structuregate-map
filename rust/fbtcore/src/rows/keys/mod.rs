@@ -25,7 +25,7 @@ use rusqlite::{params, Connection, Result};
 use std::collections::HashMap;
 use std::path::Path;
 
-mod source;
+pub(crate) mod source;
 pub use source::{source_state, GATE_VERSION};
 
 /// One keyed row before the duplicates are told apart.

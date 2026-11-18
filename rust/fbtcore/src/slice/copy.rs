@@ -12,13 +12,13 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::collections::{BTreeSet, HashSet};
 
-fn columns(db: &Connection, schema: &str, table: &str) -> Result<Vec<String>> {
+pub(super) fn columns(db: &Connection, schema: &str, table: &str) -> Result<Vec<String>> {
     let mut stmt = db.prepare(&format!("SELECT name FROM \"{schema}\".pragma_table_info(?1)"))?;
     let rows = stmt.query_map([table], |r| r.get::<_, String>(0))?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-fn quoted(names: &[String]) -> String {
+pub(super) fn quoted(names: &[String]) -> String {
     names.iter().map(|c| format!("\"{}\"", c.replace('"', "\"\""))).collect::<Vec<_>>().join(", ")
 }
 

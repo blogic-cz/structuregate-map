@@ -81,6 +81,9 @@ pub struct Options {
     pub slice_hops: Option<usize>,
     pub slice_closure: bool,
     pub slice_lean: bool,
+    /// `--map-slim <base>`: copy the tables, rows and derived tables `--slim-config` picks out of a full map (`slice/slim.rs`).
+    pub map_slim: Option<String>,
+    pub slim_config: Option<String>,
     /// `--trace <file>`: what `STRUCTUREGATE_TRACE` names, on the command line; `--trace-detail` asks for every span.
     pub trace: Option<String>,
     pub trace_detail: bool,
@@ -268,6 +271,8 @@ pub fn parse(args: &[String]) -> Result<Parsed, String> {
             "--slice-files" => o.slice_files = Some(next()?),
             "--slice-closure" => o.slice_closure = true,
             "--slice-lean" => o.slice_lean = true,
+            "--map-slim" => o.map_slim = Some(full(&next()?)),
+            "--slim-config" => o.slim_config = Some(full(&next()?)),
             "--slice-hops" => {
                 let n = next()?;
                 o.slice_hops = Some(n.parse().map_err(|_| format!("--slice-hops takes a number of hops, not {n}"))?);

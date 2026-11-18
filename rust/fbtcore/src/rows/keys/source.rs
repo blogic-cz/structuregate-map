@@ -41,7 +41,7 @@ pub fn source_state(conn: &Connection, roots: &[String], build: &str, derived: b
 }
 
 /// The current UTC time as `YYYY-MM-DDTHH:MM:SSZ`, from the system clock (civil date by days since the epoch).
-fn now_utc() -> String {
+pub(crate) fn now_utc() -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
     let (days, rest) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     let (y, m, d) = civil(days);

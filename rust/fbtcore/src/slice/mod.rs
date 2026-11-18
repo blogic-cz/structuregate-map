@@ -18,6 +18,10 @@
 
 mod copy;
 mod links;
+mod slim;
+mod slimreads;
+
+pub use slim::run as slim;
 
 use crate::cli::Out;
 use anyhow::{bail, Context, Result};
@@ -105,6 +109,9 @@ pub fn note(db: &Path) -> Option<String> {
         return None;
     }
     let c = Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    if let Some(said) = slim::note(&c) {
+        return Some(said);
+    }
     let kept: i64 = c.query_row("SELECT count(*) FROM files WHERE sliced = 1", [], |r| r.get(0)).ok()?;
     let of = crate::rows::meta::get(&c, "slice:of").unwrap_or_default();
     let hops = crate::rows::meta::get(&c, "slice:hops").unwrap_or_default();

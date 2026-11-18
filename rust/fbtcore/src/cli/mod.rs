@@ -163,6 +163,14 @@ fn asked(call: &Call, callbacks: Callbacks) -> Value {
         let exit = crate::slice::run(base, files, o.slice_hops.unwrap_or(1), o.slice_closure, o.slice_lean, into, &mut out);
         return answer(out, exit, true);
     }
+    if let Some(base) = &o.map_slim {
+        let (Some(config), Some(into)) = (&o.slim_config, &o.map_sqlite) else {
+            out.error("structuregate: --map-slim <base> takes --slim-config <json> and --map-sqlite <out>".into());
+            return answer(out, 2, true);
+        };
+        let exit = crate::slice::slim(base, config, into, &mut out);
+        return answer(out, exit, true);
+    }
     if let Some(source) = &o.sql_parse {
         let exit = sqlparse::run(source, o.dialect.as_deref().unwrap_or("tsql"), callbacks.deep, callbacks.free, &mut out);
         return answer(out, exit, true);
