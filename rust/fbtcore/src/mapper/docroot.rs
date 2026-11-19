@@ -98,3 +98,32 @@ mod tests {
         assert_eq!(keyed(&doc_root, &roots, &docs, "py/core/notes.md"), "py/core/notes.md");
     }
 }
+
+/// THE DEEP MAP'S DOCS, resolved as the file map resolves them (`halves::markdown`): per root by its prefix, and
+/// under `--doc-root` by `docroot::keyed`, with the code roots and the repository top tried last.
+pub(super) fn deep_docs(input: &super::Run, buckets: &[super::Bucket], docs: Option<&Docs>) -> Vec<crate::mdmap::deep::Docs> {
+    let mut out: Vec<crate::mdmap::deep::Docs> = buckets
+        .iter()
+        .map(|b| crate::mdmap::deep::Docs {
+            root: b.root.clone(),
+            prefix: b.prefix.clone(),
+            files: b.markdown.clone(),
+            tree: b.tree.clone(),
+            doc_root: None,
+            also: Vec::new(),
+        })
+        .collect();
+    if let Some(docs) = docs {
+        let roots: Vec<(String, String)> = input.roots.iter().map(|r| (r.clone(), super::prefix(input, r))).collect();
+        let also = input.roots.iter().map(PathBuf::from).chain(crate::sources::repository(Path::new(&docs.root))).collect();
+        out.push(crate::mdmap::deep::Docs {
+            root: docs.root.clone(),
+            prefix: String::new(),
+            files: docs.markdown.clone(),
+            tree: docs.tree.clone(),
+            doc_root: Some((roots, docs.markdown.iter().map(|(rel, _)| rel.clone()).collect())),
+            also,
+        });
+    }
+    out
+}

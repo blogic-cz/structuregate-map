@@ -232,3 +232,50 @@ Test-Case 'md map: under --doc-root, a git-ignored .md is no doc, and a path fro
     Assert-NoLine $found 'DOC-MISSING .claude/agents/a.md:3: `other/notes.md`'
     Assert-Equal ($found.Map.files.'CLAUDE.md'.language) 'markdown' 'a doc keyed from the doc root, not the repository top'
 }
+
+# THE DEEP ROWS (#158): every doc a `files` row, every heading a section, every name it leads a reader to a link.
+function Get-MdLinks([string]$Db) {
+    return Get-MapQueryRows $Db ("SELECT 'v=' || l.line || '|' || l.text || '|' || coalesce(f.path, '') || '|' || l.target_table || '|' || " +
+        "l.status FROM md_links l LEFT JOIN files f ON f.id = l.target_file ORDER BY l.line, l.id")
+}
+
+function New-MdOrders {
+    return Use-Tree @{
+        'src/Acme/Orders/OrderService.cs' = "namespace Acme.Orders;`npublic class OrderService {`n    public void Submit() {}`n}`n"
+        'src/Acme/Orders/OrderKind.cs'    = "namespace Acme.Orders;`npublic enum OrderKind { Alpha = 1, Beta = 2 }`n"
+        'docs/guide.md' = "# Orders`n`n## Submitting`n`nSee [the service](../src/Acme/Orders/OrderService.cs).`n" +
+            "Entry point is ``Acme.Orders.OrderService.Submit``, called from ``src/Acme/Orders/OrderService.cs:3``.`n" +
+            "The kind is ``OrderKind.Beta``, not ``json.dump``.`n" +
+            "Old helper: [legacy](../src/Acme/Orders/LegacyHelper.cs) and ``src/Acme/Orders/Gone.cs``.`n"
+    }
+}
+
+Test-Case 'md deep: a doc is a files row, its headings sections, and each path or symbol it names a link bound or missing' {
+    $tree = New-MdOrders
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    Assert-Equal (Get-MapQueryValue $db "SELECT 'v=' || lang || '|' || doc FROM files WHERE path = 'docs/guide.md'") 'markdown|Orders' 'the doc is a row'
+    Assert-Equal ((Get-MapQueryRows $db "SELECT 'v=' || path || '@' || line FROM md_sections ORDER BY n") -join ',') 'Orders@1,Orders > Submitting@3' 'its sections'
+    Assert-Equal ((Get-MdLinks $db) -join "`n") (@(
+        '5|../src/Acme/Orders/OrderService.cs|src/Acme/Orders/OrderService.cs||bound'
+        '6|Acme.Orders.OrderService.Submit|src/Acme/Orders/OrderService.cs|functions|bound'
+        '6|src/Acme/Orders/OrderService.cs:3|src/Acme/Orders/OrderService.cs||bound'
+        '7|OrderKind.Beta|src/Acme/Orders/OrderKind.cs|consts|bound'
+        '8|../src/Acme/Orders/LegacyHelper.cs|||missing in code'
+        '8|src/Acme/Orders/Gone.cs|||missing in code') -join "`n") 'every link, and no row for json.dump'
+    Assert-Equal (Get-MapQueryValue $db "SELECT 'v=' || target_line FROM md_links WHERE text LIKE '%.cs:3'") '3' 'the line a location names'
+}
+
+Test-Case 'md deep: a doc that did not change follows the tree - a file added is bound, a member renamed is missing' {
+    $tree = New-MdOrders
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    Set-Content (Join-Path $tree 'src/Acme/Orders/Gone.cs') "namespace Acme.Orders;`npublic class Gone {}`n"
+    $service = Join-Path $tree 'src/Acme/Orders/OrderService.cs'
+    Set-Content $service ((Get-Content $service -Raw).Replace('Submit', 'Send'))
+    Assert-Exit (Invoke-Gate --root $tree --ext .cs --map-sqlite $db) 0
+    $links = Get-MdLinks $db
+    Assert-Equal (@($links | Where-Object { $_.StartsWith('8|src/Acme/Orders/Gone.cs|') }) -join '') '8|src/Acme/Orders/Gone.cs|src/Acme/Orders/Gone.cs||bound' 'the file is there now'
+    Assert-Equal (@($links | Where-Object { $_.StartsWith('6|Acme.Orders.OrderService.Submit|') }) -join '') `
+        '6|Acme.Orders.OrderService.Submit|src/Acme/Orders/OrderService.cs|classes|missing in code' 'the type is, its member is not'
+}

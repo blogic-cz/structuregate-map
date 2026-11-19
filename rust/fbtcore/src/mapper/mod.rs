@@ -10,7 +10,7 @@
 //! console's code page, which is what MSBuild reads.
 
 mod check;
-mod docroot;
+pub(crate) mod docroot;
 pub(crate) mod deep;
 pub(crate) use deep::stored_nothing;
 pub(crate) use restore::{PACKAGES_GONE, UNRESTORED};
@@ -232,6 +232,7 @@ fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
         rust: lists(&buckets, |b| &b.rust),
         go: lists(&buckets, |b| &b.go),
         powershell: lists(&buckets, |b| &b.shell),
+        markdown: docroot::deep_docs(input, &buckets, docs.as_ref()),
     };
     let deep_options = || deep::Deep {
         db: input.map_sqlite.clone().unwrap_or_default(),
@@ -529,3 +530,4 @@ fn rules(input: &Run, out: &mut Vec<(&str, String)>) -> i64 {
     let Some(db) = input.map_sqlite.as_deref() else { return 0 };
     crate::rules::check(db, &crate::rules::read(input.rules_config.as_deref(), &input.base_dir), out)
 }
+

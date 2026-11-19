@@ -93,7 +93,8 @@ Test-Case 'docfacts: a document that moved is checked again on a tree that did n
     [System.IO.File]::WriteAllText($doc, [System.IO.File]::ReadAllText($doc).Replace('250\*\* | Ghost', '102\*\* | Plus'))
     $again = Invoke-DocFactsMap $tree
     Assert-Exit $again 0
-    Assert-Line $again 'the facts config or its snapshots moved'
+    # The snapshot is a `.md` in the tree, so a doc of the markdown half too: its files are named as moved beside it.
+    Assert-Line $again 'the facts config or its snapshots'
     Assert-DocFactsRow $tree $script:DocFactsLinks 'codes|102|102||bound' 'the code the document now lists'
 }
 

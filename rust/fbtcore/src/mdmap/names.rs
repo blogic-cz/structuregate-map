@@ -67,6 +67,32 @@ pub fn claimed(text: &str) -> Option<String> {
     if path.contains('/') || folder || names_a_file(&path) { Some(path) } else { None }
 }
 
+/// THE LINE A LOCATION NAMES: `Map.cs:198`, `Map.cs:198:12` and `x.cs:40-52` are line 198, 198 and 40. `None`
+/// when it names none - a drive's colon (`C:/x`) is followed by a slash, never by digits.
+pub fn line_named(text: &str) -> Option<i64> {
+    let text = text.trim().replace('\\', "/");
+    let text = text.split('#').next().unwrap_or("");
+    let text = text.split("::").next().unwrap_or("");
+    text.split(':').skip(1).find_map(|part| {
+        let first = part.split('-').next().unwrap_or("");
+        let whole = !part.is_empty() && part.chars().all(|c| c.is_ascii_digit() || c == '-');
+        whole.then(|| first.parse::<i64>().ok()).flatten()
+    })
+}
+
+/// THE SYMBOL A CODE SPAN NAMES, as dotted segments: `Acme.Orders.OrderService.Submit`, `OrderKind.Beta`, and
+/// `Submit()` / `crate::x::Y` written as `Submit` / `crate.x.Y`. `None` for anything that is not identifiers
+/// joined by dots - a path, a call with arguments, a generic, a word with a space.
+pub fn symbol_named(text: &str) -> Option<String> {
+    let text = text.trim();
+    let text = text.strip_suffix("()").unwrap_or(text).replace("::", ".");
+    let ident = |part: &str| {
+        part.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    };
+    (!text.is_empty() && text.split('.').all(ident)).then_some(text)
+}
+
 /// A path through a `bin/` or `obj/` folder is a BUILD OUTPUT - `bin\Debug\App.Tests.dll` is there after a
 /// build and nowhere before one, so its absence says nothing about the doc.
 pub fn built(path: &str) -> bool {
@@ -217,6 +243,21 @@ mod tests {
         for not in ["MapGraph.Resolve", "json.dump", "<tree>\\buildmap.json", "--map", "tests\\**\\*.ps1",
                     "0.21", "$G", "/S", "setup(entry_points=...)", "https://x.io/a.md", "@acme/core"] {
             assert_eq!(claimed(not), None, "{not}");
+        }
+    }
+
+    #[test]
+    fn a_location_names_its_line_and_a_dotted_span_names_a_symbol() {
+        assert_eq!(line_named("src/Acme/Orders/OrderService.cs:3"), Some(3));
+        assert_eq!(line_named("Map.cs:198:12"), Some(198));
+        assert_eq!(line_named("x.cs:40-52"), Some(40));
+        assert_eq!(line_named("C:\\x\\y.cs"), None);
+        assert_eq!(line_named("checks.py:run_checks"), None);
+        assert_eq!(symbol_named("Acme.Orders.OrderService.Submit").as_deref(), Some("Acme.Orders.OrderService.Submit"));
+        assert_eq!(symbol_named("Submit()").as_deref(), Some("Submit"));
+        assert_eq!(symbol_named("crate::rows::meta").as_deref(), Some("crate.rows.meta"));
+        for not in ["src/a.cs", "Foo(x)", "List<T>", "a b", "1.5", ".x", "x.", ""] {
+            assert_eq!(symbol_named(not), None, "{not}");
         }
     }
 

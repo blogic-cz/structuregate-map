@@ -85,6 +85,22 @@ pub(super) fn duplicates(into: &mut Collector, db: &str) {
     }
 }
 
+/// WHAT EACH DOC NAMES, bound to a file or a declaration - see `mdmap/links.rs` (#158).
+pub(super) fn doc_links(into: &mut Collector, db: &str) {
+    let written = rusqlite::Connection::open(db).and_then(|mut conn| {
+        let tx = conn.transaction()?;
+        let made = crate::mdmap::links::write(&tx)?;
+        tx.commit()?;
+        Ok(made)
+    });
+    match written {
+        Ok(m) if m.bound + m.missing + m.ambiguous > 0 => into.notes.push(format!(
+            "the docs name {} file(s) or symbol(s) the map holds, {} it does not, {} ambiguously (md_links)", m.bound, m.missing, m.ambiguous)),
+        Ok(_) => {}
+        Err(why) => into.errors.push(format!("MARKDOWN LINKS were not written — {why}")),
+    }
+}
+
 /// A CLASS CHOSEN BY AN ENUM MEMBER'S NAME, under a declared convention - see `rows/dispatch/enumtypes.rs` (#113).
 pub(super) fn enum_types(into: &mut Collector, db: &str, specs: &[crate::rows::dispatch::csconfig::EnumTypes]) {
     let written = rusqlite::Connection::open(db).and_then(|mut conn| {

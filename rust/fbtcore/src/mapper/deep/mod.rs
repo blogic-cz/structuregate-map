@@ -26,14 +26,11 @@ use own::{ps, rust};
 pub(crate) mod sqlconfig;
 mod ts;
 
-use super::halves;
-use super::protocol::Collector;
+use super::{halves, protocol::Collector};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
-use std::sync::Arc;
-use std::time::Instant;
-use passes::{atlas, dispatch, documented, duplicates, entity_keys, enum_types, http, name_types, pass, search, seeds, source_state, tally};
+use std::{path::Path, sync::Arc, time::Instant};
+use passes::{atlas, dispatch, doc_links, documented, duplicates, entity_keys, enum_types, http, name_types, pass, search, seeds, source_state, tally};
 
 /// What the deep halves are launched with - the options that reach them, and the scripts the caller staged.
 pub struct Deep {
@@ -83,6 +80,7 @@ pub struct Files {
     pub go: Vec<(String, String)>,
     /// `.ps1`, `.psm1` and `.psd1`.
     pub powershell: Vec<(String, String)>,
+    pub markdown: Vec<crate::mdmap::deep::Docs>,
 }
 
 impl Deep {
@@ -294,6 +292,8 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
             beside_ms.insert("go", since(timed));
         }
 
+        beside_ms.insert("markdown", crate::mdmap::deep::timed(into, db, root, &files.markdown));
+
         // NO C# IN THE TREE IS NOT NOTHING TO DO: a database holding C# rows holds them for files that have just
         // left, so the half runs once with nothing in it and the store drops them.
         if let Some(hashed) = sharp.take() {
@@ -351,7 +351,7 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
     drop(beside);
     ms.extend(beside_ms);
     // IN THE ORDER THE HALVES WERE ONCE RUN, whichever ran beside which.
-    for half in ["typescript", "plain typescript", "python", "powershell", "rust", "go", "csharp"] {
+    for half in ["typescript", "plain typescript", "python", "powershell", "rust", "go", "markdown", "csharp"] {
         if let Some(&took) = ms.get(half) {
             clock.add(half, took);
         }
@@ -419,6 +419,7 @@ fn steps(into: &mut Collector, deep: &Deep, files: &Files, ask: &mut driven::Ask
     if let Some(facts) = &facts {
         pass("pass: document facts", || documented(into, db, facts));
     }
+    pass("pass: markdown links", || doc_links(into, db));
     pass("pass: entity keys", || entity_keys(into, db, &roots));
     pass("pass: source state", || source_state(into, db, &roots, &deep.build, true));
     // AFTER EVERY HALF: an index over whichever half ran last would answer about a fraction of the map.

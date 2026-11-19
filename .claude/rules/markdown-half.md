@@ -31,5 +31,14 @@ point, `fbt_md_map`, called by `MdMap.Read` from `Map.cs`; frontmatter is read b
 - `DOC-MISSING` is a NOTE and only for a CONTEXT doc (`Docs.IsContextDoc`). A `docs/` page may describe
   another tree on purpose.
 
-NOT YET: deep rows (`--map-sqlite`), and a doc shared into several trees (a junctioned skill) is checked
+THE DEEP ROWS (`--map-sqlite`, #158): `../../rust/fbtcore/src/mdmap/deep.rs` is an in-process half like rust's, `lang = 'markdown'`,
+stored through `rows::apply`: a `files` row per doc, `md_sections` per heading, `md_names` per path or dotted symbol a
+reader would follow. A path is resolved there by `resolve` in `../../rust/fbtcore/src/mdmap/mod.rs` - the SAME function the JSON map's
+mentions come from, so the two never disagree. A doc's sha carries the paths the walk saw (less the map's own
+outputs), so a file added or gone re-reads every doc. `md_links` is a pass over the finished rows
+(`../../rust/fbtcore/src/mdmap/links.rs`): a symbol binds to the ONE `functions`/`consts`/`classes`/`enums` row it ends, by whole
+segments; a member a declared type lacks is `missing in code` only when the map records that type's members.
+**Bump `ROWS_VERSION` in `deep.rs` with every change to what it writes.** Consumer detail: `skills/map-sqlite/docs.md`.
+
+NOT YET: a doc shared into several trees (a junctioned skill) is checked
 in none of them - the gate does not walk a junction. That is the `context-doc-audit` agent's job.

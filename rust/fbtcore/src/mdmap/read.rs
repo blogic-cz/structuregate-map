@@ -18,6 +18,15 @@ pub struct Doc {
     pub name: Option<String>,
     pub description: Option<String>,
     pub named: Vec<Named>,
+    /// Every heading, in order: `Named::section` counts them from 1, 0 being what comes before the first.
+    pub sections: Vec<Section>,
+}
+
+/// One heading: its level (`#` is 1) and its text, code spans included, and the line it is on.
+pub struct Section {
+    pub level: usize,
+    pub heading: String,
+    pub line: usize,
 }
 
 /// One thing a doc names, where it names it, and how.
@@ -28,6 +37,8 @@ pub struct Named {
     pub kind: &'static str,
     /// The folder a `cd` earlier in the same block moved to - where a reader stands when they run it.
     pub cd: Option<String>,
+    /// The heading it stands under (`Doc::sections`, from 1), 0 before the first; a heading's own span is in its section.
+    pub section: usize,
 }
 
 /// The fence infos that are a command a reader runs. NOT an unlabelled block: across the trees it was tried on
@@ -42,7 +53,8 @@ pub fn walk(text: &str) -> Doc {
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_STRIKETHROUGH;
     let mut doc = Doc::default();
-    let mut heading: Option<String> = None;
+    // THE HEADING BEING READ: its level, its line and its text so far.
+    let mut heading: Option<(usize, usize, String)> = None;
     let mut front = false;
     let mut shell = false;
     let mut cd: Option<String> = None;
@@ -53,14 +65,19 @@ pub fn walk(text: &str) -> Doc {
             Event::Start(Tag::MetadataBlock(MetadataBlockKind::YamlStyle)) => front = true,
             Event::End(TagEnd::MetadataBlock(_)) => front = false,
             Event::Text(body) if front => frontmatter(&mut doc, &body),
-            Event::Start(Tag::Heading { .. }) if doc.title.is_empty() => heading = Some(String::new()),
+            Event::Start(Tag::Heading { level, .. }) => heading = Some((level as usize, line, String::new())),
             Event::End(TagEnd::Heading(_)) => {
-                if let Some(title) = heading.take() {
-                    doc.title = title.trim().to_string();
+                if let Some((level, at, text)) = heading.take() {
+                    let text = text.trim().to_string();
+                    if doc.title.is_empty() {
+                        doc.title = text.clone();
+                    }
+                    doc.sections.push(Section { level, heading: text, line: at });
                 }
             }
             Event::Start(Tag::Link { dest_url, .. }) => {
-                doc.named.push(Named { text: dest_url.to_string(), line, kind: "link", cd: None });
+                let section = section(&doc, &heading);
+                doc.named.push(Named { text: dest_url.to_string(), line, kind: "link", cd: None, section });
             }
             Event::Start(Tag::CodeBlock(kind)) => {
                 shell = match kind {
@@ -70,15 +87,19 @@ pub fn walk(text: &str) -> Doc {
                 cd = None;
             }
             Event::End(TagEnd::CodeBlock) => shell = false,
-            Event::Text(body) if shell => commands(&mut doc, &body, line, &mut cd),
+            Event::Text(body) if shell => {
+                let section = doc.sections.len();
+                commands(&mut doc, &body, line, &mut cd, section);
+            }
             Event::Code(span) => {
-                if let Some(title) = heading.as_mut() {
+                let section = section(&doc, &heading);
+                if let Some((_, _, title)) = heading.as_mut() {
                     title.push_str(&span);
                 }
-                doc.named.push(Named { text: span.to_string(), line, kind: "code", cd: None });
+                doc.named.push(Named { text: span.to_string(), line, kind: "code", cd: None, section });
             }
             Event::Text(body) => {
-                if let Some(title) = heading.as_mut() {
+                if let Some((_, _, title)) = heading.as_mut() {
                     title.push_str(&body);
                 }
             }
@@ -86,6 +107,11 @@ pub fn walk(text: &str) -> Doc {
         }
     }
     doc
+}
+
+/// The section a name stands in: the heading being read is its own, still unpushed.
+fn section(doc: &Doc, heading: &Option<(usize, usize, String)>) -> usize {
+    doc.sections.len() + usize::from(heading.is_some())
 }
 
 /// A skill's or an agent's frontmatter: `name` is what the doc is CALLED by whoever loads it.
@@ -99,7 +125,7 @@ fn frontmatter(doc: &mut Doc, body: &str) {
 /// Every word of a shell block, one line at a time. A `#` word ends the line (a comment), and `cd X`
 /// moves where the REST of the block runs - `cd src/app` above `python .claude/hooks/x.py` makes
 /// that path relative to `src/app`, which is how the reader will run it.
-fn commands(doc: &mut Doc, body: &str, first_line: usize, cd: &mut Option<String>) {
+fn commands(doc: &mut Doc, body: &str, first_line: usize, cd: &mut Option<String>, section: usize) {
     for (offset, row) in body.lines().enumerate() {
         let words = words(row);
         let mut at = 0;
@@ -111,12 +137,12 @@ fn commands(doc: &mut Doc, body: &str, first_line: usize, cd: &mut Option<String
             if word == "cd" && at + 1 < words.len() {
                 // THE FOLDER ITSELF IS A CLAIM - `cd src/app` in a tree without one is the first
                 // line a reader runs and the first to fail - resolved from where the block started.
-                doc.named.push(Named { text: words[at + 1].clone(), line: first_line + offset, kind: "command", cd: cd.clone() });
+                doc.named.push(Named { text: words[at + 1].clone(), line: first_line + offset, kind: "command", cd: cd.clone(), section });
                 *cd = Some(words[at + 1].clone());
                 at += 2;
                 continue;
             }
-            doc.named.push(Named { text: word.to_string(), line: first_line + offset, kind: "command", cd: cd.clone() });
+            doc.named.push(Named { text: word.to_string(), line: first_line + offset, kind: "command", cd: cd.clone(), section });
             at += 1;
         }
     }

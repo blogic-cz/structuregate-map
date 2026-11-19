@@ -8,7 +8,12 @@
 //! way a reader would follow it, beside the doc and then at the root. A mention that resolves is an
 //! edge (`mentioned_by` is the "which docs go stale if I move this" query); one that does not is a doc
 //! sending every session that reads it to a file that is not there.
+//!
+//! THE DEEP MAP holds the same names as rows (`deep.rs`), resolved by the same `resolve`, and the pass over the
+//! finished rows binds them to files and declarations (`links.rs`).
 
+pub(crate) mod deep;
+pub(crate) mod links;
 pub(crate) mod names;
 mod read;
 
@@ -26,40 +31,68 @@ pub(crate) fn map_file(root: &Path, rel: &str, abs: &Path, tree: &names::Tree, a
     }
 }
 
+/// WHERE ONE NAME LEADS: the file it reaches, a place a reader will look and not find, or nothing a reader follows.
+pub(crate) enum Found {
+    At(String),
+    Missing,
+    Nothing,
+}
+
+/// Where the doc `rel` is read from and what it may resolve against - shared by the file map and the deep rows,
+/// so both say the same of the same name.
+pub(crate) struct Place<'a> {
+    pub root: &'a Path,
+    pub tree: &'a names::Tree,
+    /// Under `--doc-root`: a path unique in the whole tree resolves to that file (`Tree::unique`).
+    pub anywhere: bool,
+    /// The folders tried last - every code root, and the git top level.
+    pub also: &'a [std::path::PathBuf],
+}
+
+/// The path one name claims, and where it leads from the doc `rel`. `None` when it claims no path.
+pub(crate) fn resolve(at: &Place, rel: &str, named: &read::Named) -> Option<(String, Found)> {
+    let path = names::claimed(&named.text)?;
+    // Up from the doc first, then DOWN into its own subtree - for a path with a folder only: a bare name
+    // has too many candidates under a big folder to say which one it meant.
+    let found = names::locate(at.root, rel, &path, named.cd.as_deref())
+        .or_else(|| path.contains('/').then(|| at.tree.under(rel, &path)).flatten())
+        .or_else(|| at.anywhere.then(|| at.tree.unique(&path)).flatten())
+        .or_else(|| {
+            // ONE FOLDER ONLY: `src/lib.rs` under two code roots names neither - it is not guessed.
+            let mut hits: Vec<String> = at.also.iter().filter_map(|base| names::from(base, &path)).collect();
+            hits.sort();
+            hits.dedup();
+            (hits.len() == 1).then(|| hits.remove(0))
+        });
+    let found = match found {
+        Some(found) => Found::At(found),
+        // A BARE NAME IS NOT A LOCATION. `Map.cs` names a file without saying where it is, so it is an
+        // edge when it lies beside the doc or at the root and nothing when it does not; only a path
+        // WITH a folder claims a place a reader will go looking. A LINK always does: `](notes.md)` is
+        // "beside this doc", and following it is what a link is for. In a CODE SPAN a folder path must
+        // also end in a file name - `api/v1/login` and `/auth/token` are routes, not places on disk;
+        // a word of a shell block is run, so a folder there (`cd src/app`) is a place.
+        // A BUILD OUTPUT (`bin/`, `obj/`) is absent until something is built, so it is never missing.
+        None if !names::built(&path)
+            && (named.kind == "link" || path.contains('/') && (named.kind == "command" || names::names_a_file(&path))) =>
+        {
+            Found::Missing
+        }
+        None => Found::Nothing,
+    };
+    Some((path, found))
+}
+
 fn row(root: &Path, rel: &str, text: &str, tree: &names::Tree, anywhere: bool, also: &[std::path::PathBuf]) -> Value {
     let doc = read::walk(text);
+    let at = Place { root, tree, anywhere, also };
     let mut mentions = Vec::new();
     let mut missing = Vec::new();
     for named in &doc.named {
-        let Some(path) = names::claimed(&named.text) else { continue };
-        // Up from the doc first, then DOWN into its own subtree - for a path with a folder only: a bare name
-        // has too many candidates under a big folder to say which one it meant.
-        let found = names::locate(root, rel, &path, named.cd.as_deref())
-            .or_else(|| path.contains('/').then(|| tree.under(rel, &path)).flatten())
-            .or_else(|| anywhere.then(|| tree.unique(&path)).flatten())
-            .or_else(|| {
-                // ONE FOLDER ONLY: `src/lib.rs` under two code roots names neither - it is not guessed.
-                let mut hits: Vec<String> = also.iter().filter_map(|base| names::from(base, &path)).collect();
-                hits.sort();
-                hits.dedup();
-                (hits.len() == 1).then(|| hits.remove(0))
-            });
-        match found {
-            Some(found) => mentions.push(json!({ "path": found, "line": named.line, "kind": named.kind })),
-            // A BARE NAME IS NOT A LOCATION. `Map.cs` names a file without saying where it is, so it is an
-            // edge when it lies beside the doc or at the root and nothing when it does not; only a path
-            // WITH a folder claims a place a reader will go looking. A LINK always does: `](notes.md)` is
-            // "beside this doc", and following it is what a link is for. In a CODE SPAN a folder path must
-            // also end in a file name - `api/v1/login` and `/auth/token` are routes, not places on disk;
-            // a word of a shell block is run, so a folder there (`cd src/app`) is a place.
-            // A BUILD OUTPUT (`bin/`, `obj/`) is absent until something is built, so it is never missing.
-            None if !names::built(&path)
-                && (named.kind == "link"
-                    || path.contains('/') && (named.kind == "command" || names::names_a_file(&path))) =>
-            {
-                missing.push(json!({ "text": named.text, "line": named.line, "kind": named.kind }));
-            }
-            None => {}
+        match resolve(&at, rel, named) {
+            Some((_, Found::At(found))) => mentions.push(json!({ "path": found, "line": named.line, "kind": named.kind })),
+            Some((_, Found::Missing)) => missing.push(json!({ "text": named.text, "line": named.line, "kind": named.kind })),
+            _ => {}
         }
     }
     // WHAT A READER SEES FIRST: a skill or an agent is known by its frontmatter, every other doc by
