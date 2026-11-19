@@ -24,7 +24,7 @@ row before sending any answered `Out of memory`.
 
 THE STORE IS A CACHE, NEVER A SOURCE (`rust/fbtcore/src/rows/store.rs`): every row belongs to a file whose recorded
 sha matches the tree, rows of a file that is gone are deleted, and `verify` states that as a count - non-zero
-throws the cache away and rebuilds once. A run that would write EVERY row again (the TypeScript extractor changed and nearly every C# file moved, `mapper/deep/fresh.rs`) starts on an empty database: deleting a large map's rows half by half took longer than a first build. `SCHEMA_VERSION` changes what a table means: the next run rebuilds rather
+throws the cache away and rebuilds once. A run that would write EVERY row again (the TypeScript extractor changed and nearly every C# file moved, `../../rust/fbtcore/src/mapper/deep/fresh.rs`) starts on an empty database: deleting a large map's rows half by half took longer than a first build. `SCHEMA_VERSION` changes what a table means: the next run rebuilds rather
 than mix vocabularies. Every half shares the tables, scoped by `files.lang`, and a table is WIDENED
 (`rust/fbtcore/src/rows/schema.rs`), never narrowed, when two halves disagree on columns - whichever wrote first
 would otherwise decide its shape. C# answers in the SAME tables and columns as python so one query reads both:
@@ -48,7 +48,7 @@ became a tenth of the size and minutes. There is NO per-file row budget any more
 the rest was code nobody could ask about. Never widen the rule to a FOLDER name — `Migrations/` holds
 hand-written files, and on a large consumer solution their seed methods (`InsertData` over thousands of lines) are the most
 expensive rows of the map: one data project spends most of a minute binding them, all of it inside Roslyn. A CONSUMER
-keeps them out with `--map-exclude "**/Migrations/*.cs"` (`sources/glob.rs`, the matcher `--skip-file` shares): compiled, listed as
+keeps them out with `--map-exclude "**/Migrations/*.cs"` (`../../rust/fbtcore/src/sources/glob.rs`, the matcher `--skip-file` shares): compiled, listed as
 `excluded`, never walked, and folded into the sha so toggling it re-reads exactly those files. The FILE-LEVEL half applies the same rule one step softer:
 a generated file is still joined (its declares/uses are real edges), it is only not fingerprinted. A generated file's METHOD BODIES ARE NOT BOUND for `diagnostics`
 (`CsRows.Diagnostics`): its syntax and declaration errors stay rows, and binding every statement of an EF model builder
@@ -88,7 +88,7 @@ generator's last `.g.cs` stays and is compiled beside the current one. The build
 error any declaration of such a file takes part in is `diagnostics.kind = 'generated'` (`CsRows.InvolvesGenerated`),
 never guessed further. Never drop by age: the build rewrites only what ran.
 
-A RESTORED, NEVER-BUILT TREE is the common case, and three rules keep it bound (`csproj/project.rs`, `CsProject.Winners`, `fingerprint` in `mapper/deep/driven.rs`):
+A RESTORED, NEVER-BUILT TREE is the common case, and three rules keep it bound (`../../rust/fbtcore/src/csproj/project.rs`, `CsProject.Winners`, `fingerprint` in `../../rust/fbtcore/src/mapper/deep/driven.rs`):
 an assembly name shipped by both a package and the framework goes to the HIGHER assembly version, the framework
 on a tie (a `System.Runtime/4.3.0` facade once shadowed the framework's own - thousands of errors, many calls
 unbound); the global usings a build would write (`ImplicitUsings`, `<Using>` items, `Directory.Build.props`, and a package's
@@ -107,7 +107,7 @@ a `net4x` project against the .NET FRAMEWORK targeting pack - its `<Reference In
 `netstandard2.x` project against `netstandard.dll`, never the runtime (whose `System.Private.CoreLib` then leaked
 into every net472 consumer as CS0012); and every `<Reference HintPath>`.
 
-`.razor` AND `.cshtml` ARE COMPILED AS THE C# THE RAZOR COMPILER GENERATES (`CsInputs/CsRazor.cs`, the engine of
+`.razor` AND `.cshtml` ARE COMPILED AS THE C# THE RAZOR COMPILER GENERATES (`../../src/Map/CsRows/CsInputs/CsRazor.cs`, the engine of
 `Microsoft.AspNetCore.Razor.Language` 6.0 called in process - a source generator cannot load in NativeAOT) and
 WALKED AS THE MARKUP FILE (`CsRowsRazor.cs`): rows take the `#line`-mapped line, a row anchored in `#line hidden`
 code is dropped, the generator's calls (`__builder.*`, `Write`) are no call rows, and an error in hidden code does
@@ -123,13 +123,13 @@ in its member writes it again (assignment, `++`/`--`, `ref`/`out`), a field or p
 get-only and never assigned in its type; and only a STRING `+` is a concatenation. Folding the initializer
 recorded half the sampled values of a large consumer solution wrong - `i + 1` as "01".
 
-A FILE'S CONTENT HASH IS THE TREE MAP'S (`mapper/deep/hashes.rs`): `fbt` keeps a snapshot under `<root>/.fbt/deep.sqlite`,
+A FILE'S CONTENT HASH IS THE TREE MAP'S (`../../rust/fbtcore/src/mapper/deep/hashes.rs`): `fbt` keeps a snapshot under `<root>/.fbt/deep.sqlite`,
 bounded by the map's `--skip`, and re-reads only what the journal or size/mtime says moved - a per-turn hook no longer
 reads thousands of files to find three. A file it does not name is read as before, and one that will not OPEN is dropped either
 way (a sha recorded without rows fails the store's invariant on every run). `.fbt/` ignores itself (`tree::ignored`), and
 the Angular half's own fingerprint skips it, or every gate run would read as a changed workspace.
 
-WHAT THE BUILD COMPILED BEATS WHAT THIS MAP RECONSTRUCTS (`csproj/recorded.rs`): wherever `StructureGate.targets` is
+WHAT THE BUILD COMPILED BEATS WHAT THIS MAP RECONSTRUCTS (`../../rust/fbtcore/src/csproj/recorded.rs`): wherever `StructureGate.targets` is
 imported, `StructureGateRecordInputs` writes `obj/<config>/<tfm>/structuregate.inputs.tsv` after CoreCompile - the
 build's own references, defines (the SDK's `NET10_0_OR_GREATER` & co, which the reconstruction never had), language
 version and Compile items - and a record NEWER than the `.csproj` replaces the reconstruction. Everywhere else the
@@ -147,7 +147,7 @@ answer: that project's slice alone does not reproduce it. Anything parallel here
 the WHOLE of that solution first.
 
 THE PASSES OVER THE FINISHED ROWS (SQL links, seed walk, row search, atlas) ARE NOT RUN AGAIN OVER THE SAME ROWS
-(`mapper/deep/derived.rs`): their key is every `files` row's lang/path/sha, the id counters, the TS setup, the SQL
+(`../../rust/fbtcore/src/mapper/deep/derived.rs`): their key is every `files` row's lang/path/sha, the id counters, the TS setup, the SQL
 config, the optional outputs asked for and the running build; their notes and table counts are replayed from `_meta`
 so a skipped run prints the same. The file list is in the key for a DELETE - dropping rows hands out no new id.
 
@@ -163,13 +163,13 @@ key: rows that moved under the key start the half.
 sha, like PyRows' `ROWS_VERSION`. Without a bump an upgraded gate keeps the old gate's rows wherever the source and
 references did not move: a consumer solution kept its old bound share after the fixes that raise it, until its database was deleted.
 
-`branches.condition` IS THE TEST AS NODE ROWS IN ROSLYN'S SHAPE (`CsBody/CsCondition.cs`, `branches__condition`): syntax kinds, `op`,
+`branches.condition` IS THE TEST AS NODE ROWS IN ROSLYN'S SHAPE (`../../src/Map/CsRows/CsBody/CsCondition.cs`, `branches__condition`): syntax kinds, `op`,
 `left`/`right`/`operand`/`pattern`/`condition`/`then`/`else`/`receiver`/`args`, and on a leaf the bound `symbol` and `CsFolding`'s
 `const`/`const_kind`, so `tier == Tier.Gold` is findable as the enum member and not as text. It is NOT the TypeScript evaluator:
 C# has no `condition_expr` (nothing is decided, the tree IS the column). A dotted member access is a leaf, parentheses are no node,
 no depth cap.
 
-`enums` AND `switch_cases` ARE SHARED WITH THE TYPESCRIPT HALF (`CsBody/CsRowsCases.cs`): same table,
+`enums` AND `switch_cases` ARE SHARED WITH THE TYPESCRIPT HALF (`../../src/Map/CsRows/CsBody/CsRowsCases.cs`): same table,
 its shape, so a backend value joins a frontend one. Each half deletes only its own - C# by `file`, TypeScript by
 `half` (or by its own `owner_file` ids on a partial run) - and **only a FULL TypeScript run proves that**: a partial
 one deletes by ids that are never C#'s, so a case that only edits files passes against a delete that wipes C#'s rows
@@ -182,28 +182,28 @@ files declare, and only among the files that declare it NOW: an unchanged file k
 to moves, so a target is never an edge on its own word. A type `refs` row names the DEFINITION (`Demo.Pipeline<TReq,
 TRes>`, as `classes.symbol` does), and generic and qualified type names are rows too.
 
-A SOURCE GENERATOR CANNOT RUN HERE (NativeAOT loads no analyzer), SO WHAT IT WROTE IS READ (`csproj/project.rs::emitted`):
+A SOURCE GENERATOR CANNOT RUN HERE (NativeAOT loads no analyzer), SO WHAT IT WROTE IS READ (`../../rust/fbtcore/src/csproj/project.rs::emitted`):
 every `.cs` under `<newest tfm>/generated/**` or `<CompilerGeneratedFilesOutputPath>` - there only when the project sets
 `<EmitCompilerGeneratedFiles>` - is compiled and never mapped, on the recorded path too, except the Razor generator's
 folder (`CsRazor` regenerates it; both declare every component twice). A file the walk already brought in is not
 compiled again. The emitted files' sizes and times are in the project fingerprint, so a build that writes them re-reads
 the files they complete. CS8795/CS0762 - a partial with no body - are `kind = 'generator'` and not `files.errors`.
 
-A RE-READ SAYS WHY (`mapper/deep/reasons.rs`): `reasons::salted` is the ONE place a file's sha is folded, and the
+A RE-READ SAYS WHY (`../../rust/fbtcore/src/mapper/deep/reasons.rs`): `reasons::salted` is the ONE place a file's sha is folded, and the
 fingerprint is `Inputs::fingerprint_parts` joined with `+` - change either and every recorded sha moves, so every file
 of every consumer is re-read once. The parts are kept in `_meta` as `fingerprints:csharp` (written only when one moved)
 so a moved file can be folded again with its project's parts THEN and told apart: content, project (and which input),
 new, rows version, `--map-exclude`. `_meta.last_refresh` (`refresh.rs`) is rewritten by every run that did work (re-read, ran the passes, or failed); a run that did nothing leaves it and the last-run trace as they were. No key may read it.
 
 A REFERENCED PROJECT UNDER A `--skip` FOLDER (below a root, never above it) is bound through its build's `bin/**/<Name>.dll`
-when one exists (`CsInputs/CsSkipped.cs`), not compiled from source - that was seconds of a large consumer's refresh for rows nobody asked
+when one exists (`../../src/Map/CsRows/CsInputs/CsSkipped.cs`), not compiled from source - that was seconds of a large consumer's refresh for rows nobody asked
 for. Without a build it is compiled as before, so a skip never costs a mapped file its binding.
 
-THE DEEP-MAP RULES (`rust/fbtcore/src/rules/`, lens `query/rules.rs`) are queries over the bound rows and the columns written for them
+THE DEEP-MAP RULES (`rust/fbtcore/src/rules/`, lens `../../rust/fbtcore/src/query/rules.rs`) are queries over the bound rows and the columns written for them
 (`calls.dropped`, `functions.awaits`/`body`/`inherited`), each OFF until `structuregate.rules.json` names it; a column is asked through
-`pragma_table_info` (`SELECT "x"` of a missing column is the string 'x'). A new rule is a `Rule` in `rules/csharp.rs` plus its column.
+`pragma_table_info` (`SELECT "x"` of a missing column is the string 'x'). A new rule is a `Rule` in `../../rust/fbtcore/src/rules/csharp.rs` plus its column.
 
-WHAT THE CODE DECIDES AT RUN TIME IS DECLARED, NEVER INFERRED FROM ITS SHAPE (#113, `rows/dispatch/csconfig.rs`, `rows/dispatch/enumtypes.rs`): a
+WHAT THE CODE DECIDES AT RUN TIME IS DECLARED, NEVER INFERRED FROM ITS SHAPE (#113, `../../rust/fbtcore/src/rows/dispatch/csconfig.rs`, `../../rust/fbtcore/src/rows/dispatch/enumtypes.rs`): a
 class picked by an enum member's NAME through a reflection dictionary links only under `typesByEnumName` in `structuregate.cs.json`
 (beside the exe, or `--cs-config`), whose stamp keys the passes over the finished rows like the SQL config's. Recognizing the lookup in
 code was rejected: every spelling of it (a `foreach` filling the dictionary, `nameof`, a prefixed override key) would need its own

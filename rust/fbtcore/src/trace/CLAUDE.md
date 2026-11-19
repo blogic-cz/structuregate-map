@@ -87,7 +87,7 @@ table` / `write a carried table` (rust's half of the carry, `rows/partial/carry.
 `metric!(name, item, { body })` in rust, `CsMetrics.Start`/`Stop` in C#, `timed(name, item, fn)` in node - timing only.
 
 A metrics build also COUNTS rust's allocations (`metrics::Counting`, mimalloc underneath) and writes the bytes rust holds twice a
-second to `<trace>.rust-mem.tsv` (`<epoch ns>\t<bytes>`): lined up with the process's own memory (`map-lab/memprof.sh`), a phase
+second to `<trace>.rust-mem.tsv` (`<epoch ns>\t<bytes>`): lined up with the process's own memory (`../../../../.claude/skills/map-lab/memprof.sh`), a phase
 splits into rust's share and the rest - .NET's heap, SQLite's allocations through libc, the runtime.
 
 **Memory by structure** (`metrics.rs`, the ledger): `retained!(name, expr)` charges what a structure KEEPS (held after it was

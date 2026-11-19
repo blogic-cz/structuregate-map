@@ -75,17 +75,17 @@ an unmapped fragment is transparent, and a node no type is (`on`, `target`, `usi
 first token): visit order is not source order. A `sql_refs` row's `statement` is the innermost statement holding its
 token. `sql_nodes` rows carry NO id - its key is `(statement, n)` - through `CsTables.Plain`.
 
-The fingerprint is RUST'S (`rust/fbtcore/src/rows/sqlshape/`), run by `mapper/deep/mod.rs` right after the half
+The fingerprint is RUST'S (`rust/fbtcore/src/rows/sqlshape/`), run by `../../rust/fbtcore/src/mapper/deep/mod.rs` right after the half
 stores: the half writes `fingerprint = ''`, and the pass fills only those - the statements written this run - so a
 partial run is exact by construction (the store drops a re-read file's rows by `file` first). It also replaces the
 store's useless `parent` index on `sql_nodes` with `(statement, parent)`. One implementation over the dialect-free
 kinds, so every dialect's statements hash alike.
 
-The same pass writes `sql_column_refs` for those statements (`sqlshape/columns.rs`: scopes are `query` nodes and the
+The same pass writes `sql_column_refs` for those statements (`../../rust/fbtcore/src/rows/sqlshape/columns.rs`: scopes are `query` nodes and the
 root, a `target` wrapper marks the written table, an UPDATE's alias target is its FROM table, nothing ambiguous is
 attributed) - a table of its own, NOT a widened `sql_refs`, because every `sql_refs` row becomes a `sql_ref` link
 (`SqlLinksEf.cs`). It has a `file` column, so the store's per-file drop covers it; the tally recounts it. The shape
-VIEWS (`sqlshape/views.rs`: `sql_clauses`, `sql_joins`, `sql_functions`, `sql_ctes`) are rewritten only when their
+VIEWS (`../../rust/fbtcore/src/rows/sqlshape/views.rs`: `sql_clauses`, `sql_joins`, `sql_functions`, `sql_ctes`) are rewritten only when their
 text moved. **A test compares a partial run with a fresh map of the edited tree, row by row, ids replaced by what
 they name** (`tests/deep/sql/SqlStatements.Tests.ps1`) - a new per-statement table goes into its content queries.
 
@@ -140,7 +140,7 @@ runs past the literal, so `name` is its prefix). `HasTrigger("T_Items")` with no
 
 ## `sql_seeds` - derived in rust (`rust/fbtcore/src/rows/seeds/`), run by `mapper/deep/` after the SQL half
 
-REWRITTEN WHOLE, but only when a SQL file's rows moved: keyed (`seeds/kept.rs`, #145) by the build, every SQL file's
+REWRITTEN WHOLE, but only when a SQL file's rows moved: keyed (`../../rust/fbtcore/src/rows/seeds/kept.rs`, #145) by the build, every SQL file's
 id, path and sha, and the ids its rows point at - a C# edit made it most of the run on a tree with large seed scripts.
 
 Input is `sql_steps` (`SqlSeedVisitor.cs`: values/set/temp/drop/flow per file, NOTHING resolved there). Variables

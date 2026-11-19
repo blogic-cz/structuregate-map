@@ -17,13 +17,13 @@ closure derives and which restrictions a gate is read for is
 [rust/fbtcore/src/rows/ts/CLAUDE.md](../../rust/fbtcore/src/rows/ts/CLAUDE.md).
 
 A tree with NO Angular workspace is not this half's - unless it OPTS IN: `"semantic": true` in the `structuregate.ts.json` governing its
-shallowest `tsconfig.json` makes that folder a TypeScript-only workspace (`workspace` in `mapper/deep/ts.rs`, `findTypescriptRoot` in
-`TsSetup/TsProjects.mjs`, which must agree), mapped by this half with `typescript` alone (`ng` null, no template pass). Otherwise the
+shallowest `tsconfig.json` makes that folder a TypeScript-only workspace (`workspace` in `../../rust/fbtcore/src/mapper/deep/ts.rs`, `findTypescriptRoot` in
+`../../src/TsRows/TsSetup/TsProjects.mjs`, which must agree), mapped by this half with `typescript` alone (`ng` null, no template pass). Otherwise the
 Angular half (`rust/fbtcore/src/mapper/deep/ts.rs`) says so and the plain half (`src/TsRows/TsPlain/`, `lang = 'ts'`) maps it - and every script file OUTSIDE a workspace
-(`plain_files` in `mapper/deep/mod.rs`; its paths are root-relative, the Angular half's workspace-relative; it borrows
+(`plain_files` in `../../rust/fbtcore/src/mapper/deep/mod.rs`; its paths are root-relative, the Angular half's workspace-relative; it borrows
 `--ts-node-modules`, then the workspace's own `node_modules` - `plain_modules`) - with syntactic, per-file rows - its columns are the
 `map-sqlite` skill's `skills/map-sqlite/typescript.md`. It imports `TsGate.Map.mjs` for the fingerprint, so a change
-there changes both maps' duplicate groups; it bumps its own `ROWS_VERSION` (`TsPlain/TsPlain.mjs`).
+there changes both maps' duplicate groups; it bumps its own `ROWS_VERSION` (`../../src/TsRows/TsPlain/TsPlain.mjs`).
 
 `src/TsRows/` sits at its folder limit, so a new file goes in a subfolder: `TsDecls/` (declarations), `TsTpl/`
 (the template pass), `TsDerive/` (derived passes, ORDER-SENSITIVE), `TsSetup/`, `TsPlain/`. Each subfolder needs
@@ -39,7 +39,7 @@ rows WHOLE, and most of its tables have no `file` column (a binding hangs off a 
 
 **THE RENDER CLOSURE IS IN RUST** (`rust/fbtcore/src/rows/ts/`), derived from every other table and therefore
 LAST. Handing node's rows back to node for a partial run is JSON just under `JSON.parse`'s ceiling (about 537 MB)
-on a large workspace. So `mapper/deep/ts.rs` hands node's rows to `rows::calls::ts_apply`, which WRITES them,
+on a large workspace. So `../../rust/fbtcore/src/mapper/deep/ts.rs` hands node's rows to `rows::calls::ts_apply`, which WRITES them,
 derives the graph from the payload, DROPS it, and only then runs the closure over `Store`
 (`rust/fbtcore/src/rows/ts/store.rs`) reading every row back from SQLITE - full run and partial alike: holding
 both put the exe at many GB. `Store::from_payload` is a test fixture's door only. **A held list or object cell is
@@ -49,7 +49,7 @@ EVERY row's tree reads it with `Row::peek`, which keeps nothing decoded, and che
 asked `get("ast")` of every expression and only then its id (`gate_curried::definition_guards`) held every tree of the
 workspace decoded to the release, nearly half again the closure's peak. The store
 is RELEASED before `key_reach` (`Store::release`): nothing after reads the rows, and holding them was most of the peak.
-**WHAT THE CLOSURE HOLDS IS MEASURED, NOT GUESSED** (a metrics build: `trace/CLAUDE.md`, "Memory by structure"). Measured on a
+**WHAT THE CLOSURE HOLDS IS MEASURED, NOT GUESSED** (a metrics build: `../../rust/fbtcore/src/trace/CLAUDE.md`, "Memory by structure"). Measured on a
 large workspace, the peak was the store, and most of the store was the WIDTH of its cells: so a held cell is 16 bytes, a
 scalar shared down its table (`row::Interned`), a NULL no value; a held row's cells are shared by its clones (a pass that
 groups rows by cloning them copied every decoded tree); a scan of every row's tree PEEKS (`Branches::new`); the resolved
@@ -70,8 +70,8 @@ file's readers, and the readers - and readers' readers - of every file whose sur
 in program order. A FULL run proves the reads against every row it wrote (`reads::unread`: whatever a row names
 must be its owner's read, a scope file, a rebuilt table or `node_modules`); only `reads:typescript = proven`
 lets a partial run stop short, otherwise every hop is read. A partial run refuses to write when a kept row
-would point at an id it replaced (`rows/partial/dangling.rs`, asked BEFORE the replace deletes a row - asked after, the ids were already gone and it found nothing). The graph and the scope set are the tables `ts_deps` (`target`,
-`dependent`, in the graph's order) and `ts_scope`, rewritten by `rows/partial/remember.rs` - whole on a full run,
+would point at an id it replaced (`../../rust/fbtcore/src/rows/partial/dangling.rs`, asked BEFORE the replace deletes a row - asked after, the ids were already gone and it found nothing). The graph and the scope set are the tables `ts_deps` (`target`,
+`dependent`, in the graph's order) and `ts_scope`, rewritten by `../../rust/fbtcore/src/rows/partial/remember.rs` - whole on a full run,
 repaired on a partial one - and handed to node as JSON. **A bounded hop count was built and removed - it kept
 stale rows.** An importer also depends on the file declaring each name and every barrel between
 (`rust/fbtcore/src/rows/partial/deps.rs`).
@@ -85,7 +85,7 @@ decorator or a const a decorator names moves it, and the run reads everything. A
 pass that recomputes a path in it the same (`TsTplFills.mjs`) is no change - spelt absolute in node, it asked every partial run again.
 
 **A CARRIED ROW COMES BACK WITHOUT THE STRUCTURES NO PASS READS** (`src/TsRows/TsSetup/TsCarried.mjs`, handed to
-`rows/partial/uncarried.rs` through the plan): such a cell is its kind alone, a STUB that refuses every look inside;
+`../../rust/fbtcore/src/rows/partial/uncarried.rs` through the plan): such a cell is its kind alone, a STUB that refuses every look inside;
 a table node rebuilds whole sends no rows at all - never an INTERNED one (`files`, `TsStore.mjs::rebuiltTables`):
 measured by where its rows were minted, a workspace with no `templateUrl` made `files` a rollup's table, no partial run
 was handed it, and every file id moved under the kept rows naming them. A pass that reads a stub, replaces one or would send one back marks
@@ -97,8 +97,8 @@ declares a join (both by index), and every cell of the files the stored graph li
 like an id is no reason to retry. A hit on a run that stopped short asks again over every hop; on one that read every hop
 it would ask the same again, so the half READS EVERYTHING instead and says which reference it found (`EVERY_HOP`,
 `_meta.last_refresh` `dangling`): asked of the watchers alone, an id a whole table lost (`files`, v2.6.0) was stored dangling. THE CARRY IS WRITTEN BESIDE THE PARSE
-(`carried_parse`, `mapper/deep/ts.rs`): node builds every program ahead without a checker (`prewarm`,
-`TsSetup/TsProgram.mjs` - each parse given back as it was parsed, or a compiler before 5.3 resolves and notes less)
+(`carried_parse`, `../../rust/fbtcore/src/mapper/deep/ts.rs`): node builds every program ahead without a checker (`prewarm`,
+`../../src/TsRows/TsSetup/TsProgram.mjs` - each parse given back as it was parsed, or a compiler before 5.3 resolves and notes less)
 and then loads the rows as rust writes them (`readCarry`, `--carry-part`: the file read while it grows, whole once renamed).
 
 **A PARTIAL RUN KEEPS THE CLOSURE WHEN NOTHING IT READ MOVED** (`rust/fbtcore/src/rows/derive/unchanged.rs`). Every
@@ -116,7 +116,7 @@ after the walk and again after the refs rollup (`inMintOrder`), before a rollup 
 where a full run numbers it in walk order and every later row of its table one higher - renumbering them would rewrite
 every kept row after it. Everything else, `_meta` `spec:typescript` included, is the full run's. A table read
 whole (no `half`) is never kept; `forget` runs before any row is written. A closure that MOVED is written as what
-changed (`rows/derive/delta.rs`): a stored row is matched to an emitted one by its content as the store holds it (its
+changed (`../../rust/fbtcore/src/rows/derive/delta.rs`): a stored row is matched to an emitted one by its content as the store holds it (its
 cells, then each structure's node rows), and only the rows left over on either side are deleted or inserted.
 
 **BYTES AND ORDER FOLLOW NODE** - each found only by diffing against node on a real workspace: python's `open()`
@@ -132,7 +132,7 @@ extractor's `rows` number in `src/TsRows/TsMap.mjs`, and WHAT PRODUCES ITS ROWS,
 scripts and the rust their payload passes through, `embedded::node_rows::extractor`) against what the database
 recorded. The output database is excluded from that walk, since a consumer may write it inside the tree it maps.
 
-**AN UNCHANGED TREE DOES NOT START NODE** (`mapper/deep/ts.rs`, key built in `mapper/deep/mod.rs`): the key is the
+**AN UNCHANGED TREE DOES NOT START NODE** (`../../rust/fbtcore/src/mapper/deep/ts.rs`, key built in `../../rust/fbtcore/src/mapper/deep/mod.rs`): the key is the
 tree-map entries under the WORKSPACE the last run mapped (`fe`, kept in the record) - so a C# edit beside it does
 not launch node - the files it is given, the embedded scripts, `node --version`, its arguments (what produces its rows
 among them, never the running build), and what it reads
@@ -146,8 +146,8 @@ is LISTED in `rust/fbtcore/build.rs` and hashed into `--build` beside the script
 consumer reads its tree once. What it derives - the closure (`rows/ts/`), the stylesheet tables (`cssmap/`), whether a
 partial run keeps them (`rows/derive/`) - is keyed by the RUNNING BUILD instead, recorded in `_meta`
 `rederive:typescript` after every derivation: when node's rows stand and another build derived them, the half does
-not start node and derives everything again from the stored rows (`mapper/deep/derived.rs::derive_again`,
-`rows/derive/tsderive.rs`), dropping the derived tables as a full run does - the closure's time, not the tree's. A
+not start node and derives everything again from the stored rows (`../../rust/fbtcore/src/mapper/deep/derived.rs::derive_again`,
+`../../rust/fbtcore/src/rows/derive/tsderive.rs`), dropping the derived tables as a full run does - the closure's time, not the tree's. A
 record it cannot derive under forgets the rows' setup, and node reads every file. **A file the list names may only
 call a module it names or `NOT_SHAPING` names with why**: `node_rows::every_module_the_listed_code_names_is_classified`
 resolves every path a listed file names and fails on one that is neither.

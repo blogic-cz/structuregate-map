@@ -124,7 +124,7 @@ An `Fn` tree names its `params` and its `rest` parameter.
   `{$literal: 'undefined', $kind: 'UndefinedKeyword' | 'VoidExpression'}` everywhere; `null` stays JSON null inside a
   list or an object and is `{$literal: 'null', $kind: 'NullKeyword'}` as a WHOLE cell (`evalCell`: every statement and
   declaration `value`, `condition`, `discriminant`), since a NULL cell is `return;`. The rust store reads that root back
-  as `Value::Null` (`store/row.rs::null_literal`, the http pass too), so no gate reads it differently. A name a
+  as `Value::Null` (`../../rust/fbtcore/src/rows/ts/store/row.rs::null_literal`, the http pass too), so no gate reads it differently. A name a
   destructuring binds keeps its `Identifier` value plus `$local`, the `locals` row's place.
 
 - **A namespace's statements are a file's** (`TsTypeRows.mjs::moduleRows`): a class, function or const in `namespace X { .. }` is a row like a top-level one, and every row a namespace declares carries `in_module`; an AMBIENT block (`declare module`, `declare global`, `declare namespace`) yields only its interfaces and aliases.
@@ -135,14 +135,14 @@ An `Fn` tree names its `params` and its `rest` parameter.
   chained on a call keeps the receiver's value (`$receiver_value`, only a string-typed one); a const object of strings read by
   an unknown index keeps `$indexed`, its values - a `const` array's too, rows 42 (`TsValueRefs.mjs`), which `i18n_refs` claims like a ternary's arms.
 
-- **A call or property read through a receiver keeps its declaring class** (rows 43, `TsValueRefs.mjs::ownerTarget`): `$owner` (a name, the file is the call's `$target`) on a `$call`, `$read` `{name, file, owner}` on a `$expr` property access - not on `this.x`. The rust side joins it to `classes` by (file, name) to reach every subtype a `new` builds (`key/fields/key_classes.rs`).
+- **A call or property read through a receiver keeps its declaring class** (rows 43, `TsValueRefs.mjs::ownerTarget`): `$owner` (a name, the file is the call's `$target`) on a `$call`, `$read` `{name, file, owner}` on a `$expr` property access - not on `this.x`. The rust side joins it to `classes` by (file, name) to reach every subtype a `new` builds (`../../rust/fbtcore/src/rows/ts/key/fields/key_classes.rs`).
 
 - **A write to a property of a field names the field** (`assignments.holder`, rows 44: `this.cfg.list = ..` holds `cfg`), and a
   `this.<x>` write a file+name key refuses - two classes of one file declare `x` - takes the writing class's own member, or its
   nearest base's (`TsRefs.mjs::ownMember`).
 
 - **A spread call argument keeps what it spreads** (rows 44, `TsBody.mjs::emitCall`): `list.push(...this.make())` carries `$spread`, the
-  evaluated expression, beside the argument's own text - `key/lists/key_lists.rs` reads the callee's list through it.
+  evaluated expression, beside the argument's own text - `../../rust/fbtcore/src/rows/ts/key/lists/key_lists.rs` reads the callee's list through it.
 
 - **The rows join by id, not by position** (rows 33): a `$fn` call argument, return value, local value, or one an assignment or a member's initializer holds (in place or inside an object, rows 44) names its `functions` row (`$fn_id`,
   `TsWalk.mjs::linkFunctions` - a `const` arrow's row sits at the NAME, its tree at the arrow), and a chained call
@@ -160,8 +160,8 @@ An `Fn` tree names its `params` and its `rest` parameter.
 - **What property names a file reads** (rows 51, `TsDecls/TsPropReads.mjs`): `files.prop_reads` is `{name: count}` of every name a property
   access, a destructuring or a shorthand property spells - by NAME, never resolved, so it only over-counts - and
   `files.this_indexed` is 1 when `this` is anything but the receiver of `this.x`/`this['x']`, a `.bind`/`.call`/`.apply`
-  argument, or `untilDestroyed(this)` of `@ngneat/until-destroy` (rows 124: it reads the destroy method, counted as a read of it). The closure reads them to prove a component field unread (`key/routes/key_unread.rs`, divergence #44) and every read
-  of a private method a call (`key/routes/key_called.rs`, #45).
+  argument, or `untilDestroyed(this)` of `@ngneat/until-destroy` (rows 124: it reads the destroy method, counted as a read of it). The closure reads them to prove a component field unread (`../../rust/fbtcore/src/rows/ts/key/routes/key_unread.rs`, divergence #44) and every read
+  of a private method a call (`../../rust/fbtcore/src/rows/ts/key/routes/key_called.rs`, #45).
 - **`template_shared_by_components`** is a fact about the TREE, read off the `templates` rows whether or not the
   `--ts-html` mirror is asked for. A `@for`'s TRACK expression (`block_track`, `TsTpl/TsTplExtract.mjs`) sits on
   the block's own node and must not overwrite the block's expression.
@@ -179,7 +179,7 @@ carry no `owner_file`.
   emits it (`&` the parent, a parent list multiplies), `subject`, `classes` (required of the element, never one in
   `:not()`), `on_element` (0 for a pseudo-element), `media`, `context` (every other enclosing at-rule, ` > `-joined),
   `property`, `value`, `important`, `hides` (`display: none`, `visibility: hidden|collapse` as written - a
-  `$variable` is not - or the ZERO of a rule that hides as a whole, #89, `cssmap/collapse.rs`: `height`/`max-height: 0`
+  `$variable` is not - or the ZERO of a rule that hides as a whole, #89, `../../rust/fbtcore/src/cssmap/collapse.rs`: `height`/`max-height: 0`
   with `overflow(-y): hidden|clip` and no vertical padding, non-zero `min-height`, `display: inline|contents` in the rule;
   `opacity: 0` with `pointer-events: none`; a `&.x`-nested rule inherits its outer rule's partners), `live` (0 inside a
   `@mixin` and for a `%placeholder`).
