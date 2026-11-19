@@ -348,6 +348,7 @@ fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
     let powershell = || halves::Script { language: "powershell", host: &input.ps_host, script: staged("powershell"), flag: "--ps-host",
         before: powershell_before.clone(), after: Vec::new(), list_flag: "-ListFile", root_flag: "-Root", per_file: true, known_flag: "-KnownFile", whole: None, dependents: None, early: None };
     let mut pending = Vec::new();
+    let roots: Vec<(String, String)> = input.roots.iter().map(|r| (r.clone(), prefix(input, r))).collect();
     for bucket in &buckets {
         for (rel, abs) in &bucket.script {
             let dialect = if [".ts", ".tsx", ".mts", ".cts"].contains(&extension(abs).as_str()) { "typescript" } else { "javascript" };
@@ -376,17 +377,14 @@ fn run(input: &Run, cs: CsMap, deep: Deep, free: Free) -> Value {
         // IN PROCESS, like C#: `syn` and `pulldown-cmark` are linked into this exe.
         halves::rust(&mut into, &bucket.root, &bucket.prefix, &bucket.rust, &mut kept);
         halves::go(&mut into, &bucket.root, &bucket.prefix, &bucket.go, &mut kept);
-        let prefix = bucket.prefix.clone();
-        halves::markdown(&mut into, &bucket.root, &bucket.prefix, &bucket.markdown, &bucket.tree, &|path| format!("{prefix}{path}"), false, &[]);
+        // A PATH FOUND THROUGH ANOTHER ROOT OR THE REPOSITORY TOP is absolute: keyed by the root it lies under.
+        let (prefix, roots) = (bucket.prefix.clone(), &roots);
+        let place = |path: &str| if Path::new(path).is_absolute() || path.as_bytes().get(1) == Some(&b':') { docroot::under_roots(roots, path) } else { format!("{prefix}{path}") };
+        halves::markdown(&mut into, &bucket.root, &bucket.prefix, &bucket.markdown, &bucket.tree, &place, false, &docroot::also(input, &bucket.root));
     }
     if let Some(docs) = &docs {
-        let roots: Vec<(String, String)> = input.roots.iter().map(|r| (r.clone(), prefix(input, r))).collect();
         let mapped: HashSet<&str> = docs.markdown.iter().map(|(rel, _)| rel.as_str()).collect();
-        // WHERE ELSE A DOC WRITES A PATH FROM: a code root (a flat-import tree names its modules so) or the repository top.
-        let also: Vec<PathBuf> = input.roots.iter().map(PathBuf::from)
-            .chain(crate::sources::repository(Path::new(&docs.root)))
-            .collect();
-        halves::markdown(&mut into, &docs.root, "", &docs.markdown, &docs.tree, &|path| docroot::keyed(&docs.root, &roots, &mapped, path), true, &also);
+        halves::markdown(&mut into, &docs.root, "", &docs.markdown, &docs.tree, &|path| docroot::keyed(&docs.root, &roots, &mapped, path), true, &docroot::also(input, &docs.root));
     }
 
     // A DOC UNDER THE DOC ROOT is where that root says, not under the code roots' parent.

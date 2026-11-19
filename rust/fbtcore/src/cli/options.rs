@@ -306,7 +306,7 @@ pub fn parse(args: &[String]) -> Result<Parsed, String> {
         return Err(format!("--root does not exist: {root}"));
     }
     if let Some(root) = &o.doc_root {
-        if !o.map {
+        if !o.map && o.map_sqlite.is_none() {
             return Err("--doc-root belongs to --map: it says where the file map's docs are; the gate measures docs inside its --root".into());
         }
         if !Path::new(root).is_dir() {

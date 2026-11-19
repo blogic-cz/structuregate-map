@@ -215,10 +215,9 @@ pub fn markdown(into: &mut Collector, root: &str, prefix: &str, files: &[(String
         file.summary = row["summary"].as_str().unwrap_or("").into();
         for mention in row["mentions"].as_array().into_iter().flatten() {
             let path = mention["path"].as_str().unwrap_or("");
-            // A path inside the root goes back under the root's prefix; an absolute one names another tree.
-            let rooted = Path::new(path).is_absolute() || path.as_bytes().get(1) == Some(&b':');
-            // UNDER A DOC ROOT an absolute path is a code root's file too (`also`): `place` keys it by that root.
-            file.mentions.insert(if rooted && !anywhere { path.to_string() } else { place(path) });
+            // A path inside the root goes back under the root's prefix; an absolute one - found through another code root or
+            // the repository top (`also`) - is keyed by the root it lies under, and names another tree under none.
+            file.mentions.insert(place(path));
         }
         for gone in row["missing"].as_array().into_iter().flatten() {
             file.missing.push((gone["line"].as_i64().unwrap_or(0), gone["text"].as_str().unwrap_or("").into()));

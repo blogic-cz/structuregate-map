@@ -80,6 +80,13 @@ pub fn line_named(text: &str) -> Option<i64> {
     })
 }
 
+/// A NAME WRITTEN AS A FILE: its last segment ends in a known extension in LOWER case - `OrderService.cs` is a file
+/// wherever it lies, `Settings.Config` a member.
+pub fn file_named(text: &str) -> bool {
+    let text = text.trim();
+    text.rsplit_once('.').is_some_and(|(_, ext)| ext.chars().all(|c| c.is_ascii_lowercase()) && names_a_file(text))
+}
+
 /// THE SYMBOL A CODE SPAN NAMES, as dotted segments: `Acme.Orders.OrderService.Submit`, `OrderKind.Beta`, and
 /// `Submit()` / `crate::x::Y` written as `Submit` / `crate.x.Y`. `None` for anything that is not identifiers
 /// joined by dots - a path, a call with arguments, a generic, a word with a space.
@@ -256,6 +263,7 @@ mod tests {
         assert_eq!(symbol_named("Acme.Orders.OrderService.Submit").as_deref(), Some("Acme.Orders.OrderService.Submit"));
         assert_eq!(symbol_named("Submit()").as_deref(), Some("Submit"));
         assert_eq!(symbol_named("crate::rows::meta").as_deref(), Some("crate.rows.meta"));
+        assert!(file_named("OrderService.cs") && !file_named("Settings.Config") && !file_named("OrderKind.Beta"));
         for not in ["src/a.cs", "Foo(x)", "List<T>", "a b", "1.5", ".x", "x.", ""] {
             assert_eq!(symbol_named(not), None, "{not}");
         }

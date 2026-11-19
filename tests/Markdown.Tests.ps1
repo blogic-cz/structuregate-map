@@ -279,3 +279,28 @@ Test-Case 'md deep: a doc that did not change follows the tree - a file added is
     Assert-Equal (@($links | Where-Object { $_.StartsWith('6|Acme.Orders.OrderService.Submit|') }) -join '') `
         '6|Acme.Orders.OrderService.Submit|src/Acme/Orders/OrderService.cs|classes|missing in code' 'the type is, its member is not'
 }
+
+Test-Case 'md deep: under --doc-root and several code roots, a path from the repo top or with backslashes binds, and a file name is no symbol' {
+    $tree = Use-Tree @{
+        'src/Acme/Orders/OrderService.cs' = "namespace Acme.Orders;`npublic class OrderService {`n    public void Submit() {}`n}`n"
+        'src/Acme/Acme.csproj'            = '<Project Sdk="Microsoft.NET.Sdk"></Project>'
+        'tests/Acme.Tests/T.cs'           = "namespace Acme.Tests;`npublic class T {}`n"
+        'src/Acme/CLAUDE.md'              = "# Acme`n`n``src/Acme/Acme.csproj``, ``tests/Acme.Tests/T.cs``, ``src\Acme\Orders\OrderService.cs``.`n"
+        'tests/Acme.Tests/CLAUDE.md'      = "# T`n`nNot here: ``OrderService.cs``.`n"
+        'docs/guide.md'                   = "# G`n`n[the service](../src/Acme/Orders/OrderService.cs)`n"
+    }
+    $db = Join-Path $tree 'map.sqlite'
+    Assert-Exit (Invoke-Gate --root (Join-Path $tree 'src') --root (Join-Path $tree 'tests') --doc-root $tree --ext .cs --map-sqlite $db) 0
+    $links = Get-MapQueryRows $db ("SELECT 'v=' || d.path || '|' || l.text || '|' || l.target_path || '|' || l.target_table || '|' || l.status " +
+        "FROM md_links l JOIN files d ON d.id = l.file ORDER BY d.path, l.line, l.id")
+    Assert-Equal ($links -join "`n") (@(
+        'docs/guide.md|../src/Acme/Orders/OrderService.cs|src/Acme/Orders/OrderService.cs||bound'
+        'src/Acme/CLAUDE.md|src/Acme/Acme.csproj|src/Acme/Acme.csproj||bound'
+        'src/Acme/CLAUDE.md|tests/Acme.Tests/T.cs|tests/Acme.Tests/T.cs||bound'
+        'src/Acme/CLAUDE.md|src\Acme\Orders\OrderService.cs|src/Acme/Orders/OrderService.cs||bound') -join "`n") 'a doc above the roots is mapped, and no file name is read as a member'
+    Assert-NoLine (Invoke-MapQuery $db --tables) 'the tree moved on'
+    # WITHOUT A DOC ROOT the doc under `src` is the code root's, and still reaches `tests` through the repository top.
+    $own = Join-Path $tree 'own.sqlite'
+    Assert-Exit (Invoke-Gate --root (Join-Path $tree 'src') --root (Join-Path $tree 'tests') --ext .cs --map-sqlite $own) 0
+    Assert-Equal ((Get-MapQueryRows $own "SELECT 'v=' || text || '|' || status FROM md_links WHERE text LIKE 'tests/%'") -join ',') 'tests/Acme.Tests/T.cs|bound' 'a path from the repository top'
+}

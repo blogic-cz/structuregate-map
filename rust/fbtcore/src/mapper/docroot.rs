@@ -65,6 +65,44 @@ pub fn keyed(doc_root: &str, roots: &[(String, String)], docs: &HashSet<&str>, p
     from_doc_root.unwrap_or_else(|| path.to_string())
 }
 
+/// An ABSOLUTE path a doc's name led to through a code root or the repository top, keyed as the map keys a file: by
+/// the code root it lies under, with that root's prefix; any other path as it is.
+pub fn under_roots(roots: &[(String, String)], path: &str) -> String {
+    if !(Path::new(path).is_absolute() || path.as_bytes().get(1) == Some(&b':')) {
+        return path.to_string();
+    }
+    let abs = lexical(Path::new(path));
+    for (root, prefix) in roots {
+        if let Ok(inside) = abs.strip_prefix(lexical(Path::new(root.trim_end_matches(MAIN_SEPARATOR)))) {
+            return format!("{prefix}{}", inside.to_string_lossy().replace('\\', "/"));
+        }
+    }
+    path.to_string()
+}
+
+/// WHERE ELSE A DOC WRITES A PATH FROM, tried last: every code root (a flat-import tree names its modules so) and the
+/// repository's top (`src/App/App.csproj` in `src/App/CLAUDE.md`) - outside git, the folder the code roots share.
+pub(super) fn also(input: &super::Run, root: &str) -> Vec<PathBuf> {
+    let top = sources::repository(Path::new(root)).or_else(|| shared(&input.roots));
+    input.roots.iter().map(PathBuf::from).chain(top).collect()
+}
+
+/// The deepest folder every root lies under, when there are several.
+fn shared(roots: &[String]) -> Option<PathBuf> {
+    let mut all = roots.iter().map(|r| lexical(&std::path::absolute(r).unwrap_or_else(|_| PathBuf::from(r))));
+    let mut top = all.next()?;
+    let mut several = false;
+    for root in all {
+        several = true;
+        while !root.starts_with(&top) {
+            if !top.pop() {
+                return None;
+            }
+        }
+    }
+    several.then_some(top)
+}
+
 fn lexical(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for part in path.components() {
@@ -102,6 +140,7 @@ mod tests {
 /// THE DEEP MAP'S DOCS, resolved as the file map resolves them (`halves::markdown`): per root by its prefix, and
 /// under `--doc-root` by `docroot::keyed`, with the code roots and the repository top tried last.
 pub(super) fn deep_docs(input: &super::Run, buckets: &[super::Bucket], docs: Option<&Docs>) -> Vec<crate::mdmap::deep::Docs> {
+    let roots: Vec<(String, String)> = input.roots.iter().map(|r| (r.clone(), super::prefix(input, r))).collect();
     let mut out: Vec<crate::mdmap::deep::Docs> = buckets
         .iter()
         .map(|b| crate::mdmap::deep::Docs {
@@ -110,19 +149,19 @@ pub(super) fn deep_docs(input: &super::Run, buckets: &[super::Bucket], docs: Opt
             files: b.markdown.clone(),
             tree: b.tree.clone(),
             doc_root: None,
-            also: Vec::new(),
+            roots: roots.clone(),
+            also: also(input, &b.root),
         })
         .collect();
     if let Some(docs) = docs {
-        let roots: Vec<(String, String)> = input.roots.iter().map(|r| (r.clone(), super::prefix(input, r))).collect();
-        let also = input.roots.iter().map(PathBuf::from).chain(crate::sources::repository(Path::new(&docs.root))).collect();
         out.push(crate::mdmap::deep::Docs {
             root: docs.root.clone(),
             prefix: String::new(),
             files: docs.markdown.clone(),
             tree: docs.tree.clone(),
-            doc_root: Some((roots, docs.markdown.iter().map(|(rel, _)| rel.clone()).collect())),
-            also,
+            doc_root: Some((roots.clone(), docs.markdown.iter().map(|(rel, _)| rel.clone()).collect())),
+            roots,
+            also: also(input, &docs.root),
         });
     }
     out

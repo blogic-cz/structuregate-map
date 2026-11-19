@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 const LANG: &str = "markdown";
 /// Part of every doc's sha: changing what a doc's rows hold changes this, and every doc is read again.
-const ROWS_VERSION: &str = "markdown-rows 1";
+const ROWS_VERSION: &str = "markdown-rows 2";
 
 /// The docs of one root - or of the `--doc-root` - with what their names resolve against.
 pub struct Docs {
@@ -33,6 +33,8 @@ pub struct Docs {
     /// Under `--doc-root`: the code roots with their prefixes, and the docs it maps - a found path is keyed by
     /// `docroot::keyed`, exactly as the file map keys it.
     pub doc_root: Option<(Vec<(String, String)>, Vec<String>)>,
+    /// Every code root with its prefix: a path found through one of them is keyed by it (`docroot::under_roots`).
+    pub roots: Vec<(String, String)>,
     /// The folders tried last (`Place::also`).
     pub also: Vec<PathBuf>,
 }
@@ -46,7 +48,7 @@ impl Docs {
             return crate::mapper::docroot::keyed(&self.root, roots, &mapped, path);
         }
         if Path::new(path).is_absolute() || path.as_bytes().get(1) == Some(&b':') {
-            return path.to_string();
+            return crate::mapper::docroot::under_roots(&self.roots, path);
         }
         format!("{}{path}", self.prefix)
     }
@@ -130,6 +132,9 @@ pub fn timed(into: &mut Collector, db: &str, root: &str, all: &[Docs]) -> u64 {
     let stage = crate::trace::stage("deep: markdown");
     stage.set("structuregate.files", all.iter().map(|d| d.files.len()).sum::<usize>() as i64);
     run(into, db, root, all);
+    // WHERE A DOC ROOT'S DOCS ARE KEYED FROM: the stale check (`query/fresh.rs`) finds them there, not under a code root.
+    let doc_root = all.iter().find(|d| d.doc_root.is_some()).map(|d| std::path::absolute(&d.root).unwrap_or_else(|_| PathBuf::from(&d.root)));
+    crate::mapper::deep::refresh::keep(into, db, "doc_root", &doc_root.map(|p| p.to_string_lossy().into_owned()).unwrap_or_default());
     started.elapsed().as_millis() as u64
 }
 
@@ -173,7 +178,7 @@ fn write_doc(tables: &mut BTreeMap<&str, Vec<Value>>, counters: &mut BTreeMap<St
         let resolved = resolve(&at, rel, named);
         // A SYMBOL is a code span's, and only one that claims no place on disk - `config.json` is a file.
         let placed = matches!(resolved, Some((_, Found::At(_) | Found::Missing)));
-        let symbol = (named.kind == "code" && !placed).then(|| names::symbol_named(&named.text)).flatten();
+        let symbol = (named.kind == "code" && !placed && !names::file_named(&named.text)).then(|| names::symbol_named(&named.text)).flatten();
         let (claimed, target, status) = match resolved {
             Some((path, Found::At(found))) => (path, docs.keyed(&found), "bound"),
             Some((path, Found::Missing)) => (path, String::new(), "missing in code"),

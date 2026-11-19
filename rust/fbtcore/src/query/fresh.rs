@@ -51,6 +51,8 @@ pub fn check(db: &Path, budget: Duration) -> Option<Moved> {
         return None;
     }
     let workspace = workspace_of(&conn).map(|fe| roots[0].join(fe));
+    // A DOC MAPPED FROM `--doc-root` is keyed from there (`mdmap/deep.rs` keeps it).
+    let doc_root = crate::rows::meta::get(&conn, "doc_root").filter(|d| !d.is_empty()).map(PathBuf::from);
     // THE RUN'S OWN OUTPUTS are rewritten after the database every time - never a sign the tree moved.
     let outputs: Vec<PathBuf> = crate::rows::meta::get(&conn, "outputs")
         .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
@@ -73,14 +75,18 @@ pub fn check(db: &Path, budget: Duration) -> Option<Moved> {
     };
     // FOLDER BY FOLDER: `abs folder -> (the map's spelling of it, {name on disk -> map path})`.
     let mut folders: BTreeMap<PathBuf, (String, HashMap<String, String>)> = BTreeMap::new();
-    let mut located: HashMap<(String, bool), Option<PathBuf>> = HashMap::new();
+    let mut located: HashMap<(String, bool, bool), Option<PathBuf>> = HashMap::new();
     for (path, lang) in &mapped {
         let (above, name) = path.rsplit_once('/').map_or(("", path.as_str()), |(above, name)| (above, name));
         let angular = lang == "typescript";
         // AN ANGULAR PATH IS RELATIVE TO ITS WORKSPACE, not the root; with none recorded it cannot be placed.
         let folder = located
-            .entry((above.to_string(), angular))
-            .or_insert_with(|| if angular { workspace.as_ref().map(|fe| fe.join(above)) } else { Some(locate(&roots, above)) })
+            .entry((above.to_string(), angular, lang == "markdown"))
+            .or_insert_with(|| match (angular, lang == "markdown", &doc_root) {
+                (true, _, _) => workspace.as_ref().map(|fe| fe.join(above)),
+                (false, true, Some(docs)) => Some(docs.join(above)),
+                _ => Some(locate(&roots, above)),
+            })
             .clone();
         let Some(folder) = folder else { continue };
         let spelled = if above.is_empty() { String::new() } else { format!("{above}/") };

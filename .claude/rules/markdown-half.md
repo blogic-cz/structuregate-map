@@ -38,6 +38,9 @@ mentions come from, so the two never disagree. A doc's sha carries the paths the
 outputs), so a file added or gone re-reads every doc. `md_links` is a pass over the finished rows
 (`../../rust/fbtcore/src/mdmap/links.rs`): a symbol binds to the ONE `functions`/`consts`/`classes`/`enums` row it ends, by whole
 segments; a member a declared type lacks is `missing in code` only when the map records that type's members.
+`--doc-root` works with `--map-sqlite` alone; its folder is `_meta.doc_root`, where the stale check
+(`../../rust/fbtcore/src/query/fresh.rs`) looks a `markdown` row up. Every doc - under a code root too - tries the code roots and the
+repository top last (`docroot::also`), a hit keyed by the root it lies under (`docroot::under_roots`), in both maps.
 **Bump `ROWS_VERSION` in `deep.rs` with every change to what it writes.** Consumer detail: `skills/map-sqlite/docs.md`.
 
 NOT YET: a doc shared into several trees (a junctioned skill) is checked

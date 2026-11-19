@@ -125,7 +125,7 @@ pub fn outputs(into: &mut Collector, db: &str, outputs: &[String]) {
 }
 
 /// One `_meta` key set to `wanted`, WRITTEN ONLY WHEN IT DIFFERS (see `roots`).
-fn keep(into: &mut Collector, db: &str, key: &str, wanted: &str) {
+pub(crate) fn keep(into: &mut Collector, db: &str, key: &str, wanted: &str) {
     if !Path::new(db).is_file() {
         return;
     }
